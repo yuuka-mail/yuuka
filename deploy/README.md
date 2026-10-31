@@ -7,6 +7,7 @@
 | 服务 | 作用 | 网络 | 卷 |
 |---|---|---|---|
 | `caddy` | 仅「自带 Caddy」模式（profile `caddy`）：发布 80/443，自动申请和续期证书 | `edge` | `caddy-data`、`caddy-config` |
+| `migrate` | 一次性的 `yuuka migrate`：以 `yuuka_owner` 应用迁移后退出；`yuuka` 等它成功才启动 | `backend` | 无 |
 | `yuuka` | `yuuka serve`：webhook、reconcile、WebUI、REST、MCP | `edge` + `backend` | `yuuka-data`（本地 raw 副本） |
 | `postgres` | 官方镜像，按 digest 固定；首次初始化时建角色（[`postgres-roles.sh`](postgres-roles.sh)） | `backend` | `postgres-data` |
 | `backup` | 定时 `pg_dump`，见 [`backup.sh`](backup.sh) | `backend` | `backups` |
@@ -37,8 +38,9 @@ cp compose.env.example .env        # 模式、镜像、WebUI origin、Postgres �
 cp yuuka.env.example yuuka.env     # R2、webhook 密钥、Telegram……
 chmod 600 .env yuuka.env
 $EDITOR .env yuuka.env
-docker compose up -d
-docker compose logs -f yuuka       # 看到 listening 即可；迁移在启动时自动执行
+docker compose up -d               # 先跑 migrate 建表，成功后才启动 yuuka
+docker compose logs migrate        # schema version 0 -> N
+docker compose logs -f yuuka       # 看到 listening 即可
 ```
 
 发布版本之前没有现成镜像，在仓库根目录自己构建，并在 `.env` 里写 `YUUKA_IMAGE=yuuka:local`：
@@ -58,12 +60,14 @@ yuuka 不以超级用户连库。[`postgres-roles.sh`](postgres-roles.sh) 在 Po
 | 角色 | 谁用 | 权限 |
 |---|---|---|
 | `postgres` | 只有初始化和人工维护 | 超级用户；没有服务用它连库 |
-| `yuuka_owner` | yuuka 启动时跑迁移（`YUUKA_DATABASE_OWNER_URL`） | 拥有库和 `public` schema；装 `pg_trgm`（trusted 扩展） |
-| `yuuka_app` | yuuka 的其余一切（`YUUKA_DATABASE_URL`） | 表上增删改查、序列 `USAGE`；没有任何 DDL，不能建临时表 |
+| `yuuka_owner` | 只有一次性的 `migrate` 服务（`YUUKA_DATABASE_OWNER_URL`） | 拥有库和 `public` schema；装 `pg_trgm`（trusted 扩展） |
+| `yuuka_app` | `yuuka serve` 和所有管理命令（`YUUKA_DATABASE_URL`） | 表上增删改查、序列 `USAGE`；没有任何 DDL，不能建临时表 |
 | `yuuka_backup` | 备份服务 | `pg_read_all_data`：只读 |
 
 四个密码都在 `.env`，用 `openssl rand -hex 32` 生成（要拼进连接串，所以用十六进制）。
-两个连接串由 `compose.yaml` 拼好传给 yuuka，`yuuka.env` 里不用写。
+连接串由 `compose.yaml` 拼好：owner 的只给 `migrate`，app 的只给 `yuuka`，`yuuka.env` 里不用写。
+常驻的 `yuuka` 进程环境里没有 owner 的凭据（`YUUKA_DATABASE_OWNER_URL` 被强制设为空，`yuuka.env` 里写了也不生效），
+拿到这个进程的人改不了表结构。
 
 脚本可以重复跑，作用是把权限修回应有的样子（恢复之后要跑一次，见下文）：
 
@@ -98,7 +102,8 @@ yuuka 默认不看 `X-Forwarded-For`。在代理后面这意味着所有人看�
 
 ## 管理命令
 
-管理命令在主机上用 `docker compose run` 跑，复用 `yuuka` 服务的环境；能跑它们就是最高权限（§13.7）。
+管理命令在主机上用 `docker compose run` 跑，复用 `yuuka` 服务的环境，即只有 app 角色；能跑它们就是最高权限（§13.7）。
+`run` 会先把依赖拉起来，所以每次也会顺带跑一遍 `migrate`，库已是最新时它只打印 `up to date`。
 
 ```bash
 # 第一个 passkey：打印一次性注册链接和离线恢复码
@@ -155,7 +160,8 @@ docker compose exec postgres sh /docker-entrypoint-initdb.d/10-yuuka-roles.sh
 docker compose up -d
 ```
 
-`--single-transaction` 让恢复要么全部成功、要么什么都不改。恢复后，备份时刻之后到达的邮件仍在 R2 里，
+`--single-transaction` 让恢复要么全部成功、要么什么都不改。dump 来自旧版本时，最后的 `docker compose up -d`
+会先由 `migrate` 把表结构补到当前版本。恢复后，备份时刻之后到达的邮件仍在 R2 里，
 `docker compose run --rm yuuka reconcile --full` 会把它们补回来。**定期演练一次恢复**，没恢复过的备份不算备份。
 
 ## 从单角色部署迁移
@@ -176,10 +182,29 @@ docker compose up -d
 
 ```bash
 docker compose exec backup sh /usr/local/bin/yuuka-backup once   # 先备份
-docker compose pull yuuka && docker compose up -d yuuka
+docker compose pull migrate yuuka      # 或者 docker load 本地构建的镜像
+docker compose up -d                   # migrate 先跑完，yuuka 才以新镜像重启
+docker compose logs migrate            # schema version 4 -> 5，或 up to date
 ```
 
-迁移在启动时以 `yuuka_owner` 执行且只追加，旧版本不认识新表结构；回退版本要连同升级前的备份一起恢复。
+`yuuka serve` 自己不迁移：它只有 app 角色，启动时只核对库的版本。迁移只追加，由 `migrate` 服务以 `yuuka_owner` 执行；
+它失败时 `docker compose up -d` 报 `service "migrate" didn't complete successfully`，
+不会（重新）启动 `yuuka`，原因看 `docker compose logs migrate`。也可以单独手动跑，可重复执行，两个同时跑也安全：
+
+```bash
+docker compose run --rm migrate
+```
+
+绕过 `migrate` 直接用新镜像起 `serve`（例如 `docker compose up -d --no-deps yuuka`）时，它拒绝启动，
+容器按 `restart` 策略反复退出，日志是：
+
+```
+yuuka: database is at version 4, this binary needs 5: run `yuuka migrate` as the schema owner (YUUKA_DATABASE_OWNER_URL), then start again
+```
+
+跑一次 `docker compose run --rm migrate`（或直接 `docker compose up -d`）即可。反过来，库被更新的版本迁移过时
+（回退了镜像），`serve` 和 `migrate` 都拒绝：`database is at version 5, this binary only knows 4`。
+旧版本不认识新表结构，回退版本要连同升级前的备份一起恢复。
 Caddy、Postgres 的镜像 digest 写在 `compose.yaml` 里，随仓库更新。Postgres 跨大版本不能直接换镜像，
 要 `pg_dump` 后恢复到新版本的空卷（或 `pg_upgrade`）。
 

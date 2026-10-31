@@ -14,7 +14,8 @@
 #
 # yuuka and postgres share the internal "backend" network, which has no
 # route outside; yuuka is also on "edge" so a proxy can reach it and it can
-# reach R2 and Telegram.
+# reach R2 and Telegram. The one-shot migrate service runs before yuuka,
+# on "backend" only.
 
 name: yuuka
 
@@ -45,11 +46,31 @@ services:
     networks: [edge]
     depends_on: [yuuka]
 
+  # Applies pending migrations as yuuka_owner and exits; yuuka starts only
+  # once it has succeeded. It is the only yuuka process that holds the
+  # owner's password, and it runs for seconds. `docker compose up -d` after
+  # changing YUUKA_IMAGE thus migrates before the new serve starts; run it
+  # by hand with `docker compose run --rm migrate`.
+  migrate:
+    <<: *hardening
+    image: ${YUUKA_IMAGE:?set YUUKA_IMAGE in .env}
+    command: ["migrate"]
+    restart: "no"
+    read_only: true
+    cap_drop: [ALL]
+    # Only the owner's URL: no yuuka.env, no R2 keys, no webhook secrets.
+    environment:
+      YUUKA_DATABASE_OWNER_URL: postgres://yuuka_owner:${YUUKA_DB_OWNER_PASSWORD:?set YUUKA_DB_OWNER_PASSWORD in .env}@postgres:5432/yuuka?sslmode=disable
+    networks: [backend]
+    depends_on:
+      postgres: { condition: service_healthy }
+
   yuuka:
     <<: *hardening
     image: ${YUUKA_IMAGE:?set YUUKA_IMAGE in .env}
     # The image's default command is serve; `docker compose run --rm yuuka
-    # admin enroll` and friends reuse this service's environment.
+    # admin enroll` and friends reuse this service's environment, and so
+    # also connect as yuuka_app only.
     # No healthcheck: the image is distroless, with no shell or curl to
     # run one. The proxy checks GET /healthz instead (Caddyfile).
     read_only: true
@@ -58,10 +79,14 @@ services:
     # These follow from the shape of this file, so they are set here and
     # override anything in yuuka.env.
     environment:
-      # Everything runs as yuuka_app; only migrations, on start, run as
-      # yuuka_owner (postgres-roles.sh).
+      # Everything runs as yuuka_app, which cannot change the schema
+      # (postgres-roles.sh). No YUUKA_DATABASE_OWNER_URL: the migrate
+      # service above applies migrations, and serve only checks on start
+      # that it finds the version it knows.
       YUUKA_DATABASE_URL: postgres://yuuka_app:${YUUKA_DB_APP_PASSWORD:?set YUUKA_DB_APP_PASSWORD in .env}@postgres:5432/yuuka?sslmode=disable
-      YUUKA_DATABASE_OWNER_URL: postgres://yuuka_owner:${YUUKA_DB_OWNER_PASSWORD:?set YUUKA_DB_OWNER_PASSWORD in .env}@postgres:5432/yuuka?sslmode=disable
+      # An empty value in yuuka.env would do no harm, a real one would
+      # undo the point of the split; force it off either way.
+      YUUKA_DATABASE_OWNER_URL: ""
       YUUKA_WEB_ORIGIN: ${YUUKA_WEB_ORIGIN}
       YUUKA_DATA_DIR: /var/lib/yuuka
       YUUKA_LISTEN: 0.0.0.0:31480
@@ -74,6 +99,7 @@ services:
     networks: [edge, backend]
     depends_on:
       postgres: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
 
   postgres:
     <<: *hardening

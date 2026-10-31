@@ -8,8 +8,9 @@
 #
 # Three login roles, none a superuser (docs/data-model.md, "数据库角色"):
 #
-#   yuuka_owner   owns the database and its public schema; yuuka connects
-#                 as it only to apply migrations (YUUKA_DATABASE_OWNER_URL).
+#   yuuka_owner   owns the database and its public schema; only the
+#                 one-shot migrate service connects as it, to run
+#                 `yuuka migrate` (YUUKA_DATABASE_OWNER_URL).
 #                 pg_trgm is a trusted extension, so owning the database is
 #                 enough to create it.
 #   yuuka_app     everything else yuuka does (YUUKA_DATABASE_URL): rows in
