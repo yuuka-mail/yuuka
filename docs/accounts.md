@@ -34,7 +34,7 @@ accounts(kind, sync_policy, writeback_policy)
 
 ### 9.3 发信：身份绑定传输（这条不照做一定出事）
 
-`identities → transports` 必须是硬绑定：
+identity → 出口必须是硬绑定：
 
 | 身份 | 传输 | 原因 |
 |---|---|---|
@@ -48,6 +48,10 @@ accounts(kind, sync_policy, writeback_policy)
   服务主体无法冒用运维者的地址。
 - outbox 每条带 `identity_id`，路由由 identity 决定，不给调用方选 transport 的机会；
   identity 可配 primary + fallback 传输链，前提是 DNS 已为两者授权（§10.4.4）。
+- 出口按名字定义在进程配置里（主机、端口、caps、凭据文件路径），`identities.transport` 只存名字，
+  不建 `transports` 表（理由见 §4 的迁移说明）。传输链也在配置里按名字定义，identity 照样只引用一个名字。
+- identity 是精确地址或 `*@zone`。精确地址压过同 zone 的通配：给服务的授权应当落在精确地址上，
+  `*@zone` 上的授权碰不到别人单独拥有的地址（表见 [0005](../internal/store/migrations/0005_sending.sql)）。
 - 每个自有域都要单独在 Cloudflare onboard Email Sending + 配 DNS；
   注意域名 30/zone（Routing+Sending 合计）、destination 200/account 的限制。
 
@@ -71,10 +75,13 @@ accounts(kind, sync_policy, writeback_policy)
 OAuth 续期、限速）会掩盖核心链路的问题，不适合早做。
 数据模型的**形状**从一开始就是多账户的：内容 / 投递两层拆分、`deliveries` 带账户维度、
 幂等键是 `(账户, source_key)`，catch-all 只是其中一组账户。
-但 `accounts` / `identities` 两张表在 **M2** 建：M0、M1 只有一个 Cloudflare 账户，
-用进程配置的 `account_key` 代替（迁移里以 `M0:` / `M1:` 注明）；
-M2 发信时要按 identity 选出口、按 `identity_grants` 放行，那时这两张表才有真正的读者，
-建表时把 `account_key` 换成外键。
+但 `accounts` / `identities` 两张表在 **M2** 建（[0005](../internal/store/migrations/0005_sending.sql)）：
+M0、M1 只有一个 Cloudflare 账户，用进程配置的 `account_key` 代替；
+M2 发信时要按 identity 选出口、按 `identity_grants` 放行，这两张表才有了真正的读者。
+0005 把每个 `account_key` 变成一个 `cf_catchall` 账户，`deliveries` 改用外键，幂等键改为 `(account_id, source_key)`。
+`YUUKA_ACCOUNT` 从此是这个账户的名字，ingest 第一次用到时建行（§4）。
+`accounts` 只建了 M2 读的列，kind 只有 `cf_catchall`，M2 的所有 identity 都属于这个账户；
+只发不收的账户和拉取账户，连同 `sync_policy` 等列，随 M3.5 一起加。
 
 ### 9.6 归档卸载：yuuka 作为外部邮箱的容量外置
 

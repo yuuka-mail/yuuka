@@ -223,10 +223,14 @@ func TestBacklogAfterUpgrade(t *testing.T) {
 			t.Fatal(err)
 		}
 		e.raw.Put(m.RawKey, body, nil)
-		_, err := e.in.cfg.DB.CommitIngest(t.Context(), store.Ingest{
+		acct, err := e.in.account(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = e.in.cfg.DB.CommitIngest(t.Context(), store.Ingest{
 			RawID: m.ID, R2Key: m.RawKey, LocalPath: m.RawKey, Size: m.RawSize,
 			ContentHash: contenthash.V1(body), ReceivedAt: m.ReceivedAt, DeliveryID: m.ID,
-			Account: "cf-test", Zone: "example.com", Prefix: "a", EnvelopeTo: "a@example.com",
+			AccountID: acct, Zone: "example.com", Prefix: "a", EnvelopeTo: "a@example.com",
 		})
 		if err != nil {
 			t.Fatal(err)

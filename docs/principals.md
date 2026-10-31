@@ -112,6 +112,9 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 `review` 档的撤回窗口和熔断时间。**表已建**（[`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)），默认值取安全的一端；
 **还没有任何代码读它**：档位、限额、硬上限的执行随发信（M2）落在 API 层。
 
+各项限额的默认值由授权代码决定，不写在库里：库里的空值只表示「这条授权没有自己的数」，
+用什么默认值、按主体类型怎么区分，是 API 层执行授权时的事，改默认值不需要迁移。
+
 于是 `service:monitoring` 只能以 `alerts@example.com` 发，**无法冒用运维者本人的地址**。
 服务凭据泄露的后果因此被限制在一个前缀内——这对 catch-all 尤其要紧，
 因为域级 onboard 意味着"能发信"默认等于"能以任意前缀发信"（§9.3）。
@@ -306,7 +309,8 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 
 - **可见性在一处定义**：`visible_deliveries(principal)` = 该主体有 `can_read` 的账户上的投递；
   一封 message 可见，当且仅当它至少有一条可见投递。**任一可读投递即可读**内容，
-  但该主体看到的 `deliveries` 只含可见的那几条，`raw` / `auth` 也只给可读那一路
+  但该主体看到的 `deliveries` 只含可见的那几条，`raw` / `auth` 也只给可读那一路。
+  我们发出的信没有投递，按发信 identity 所属的账户算：Sent 副本所在 outbox 的 identity 的账户可读，这封信就可读（§4.6）
 - **store 层强制**：每个读查询函数都要求一个 `Viewer` 参数，没有它就调不了。
   过滤靠类型系统保证存在，不靠每个调用点记得加 `WHERE`
 - **所有读路径都过这一道**：
@@ -324,6 +328,13 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 
 测试上用一个「含受限账户」的固定夹具，表驱动地把上表每条读路径跑一遍，断言没有泄漏。
 新增读路径就是往这张表加一行。
+
+**随 M3.5 再定的两件事**（M2 不过滤读路径，所以现在不必定）：
+
+- 草稿和 outbox 的变更事件（`changes` 的 `draft`、`outbox` 两类）对谁可见：
+  按发信身份所属账户、按提交者（`drafts.principal_id`、`outbox.submitted_by`），还是两者之一
+- agent 没有某账户的 `account_access` 时，能不能看到它自己以该账户下的身份发出的信。
+  §4.6 的规则目前只按账户算，答案是不能
 
 #### 存在性是有意披露的
 
@@ -348,11 +359,13 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 | 阶段 | 内容 |
 |---|---|
 | M1 | **`principals` / `credentials` / `identity_grants` / `account_access` / `actions` 建表**，WebUI 内置 passkey 登录、走 session 凭据（M1 只有 JSON 端点，页面在第二阶段）；只读 MCP 与 REST 的 bearer token，由 `yuuka token` 签发 |
-| M2 | SMTP submission 口（跟发信能力一起做）；`accounts` / `identities` 建表（§9.5）后给 `identity_grants`、`account_access` 补外键 |
+| M2 | SMTP submission 口（跟发信能力一起做）；`accounts` / `identities` 建表（§9.5），`identity_grants`、`account_access` 补外键（已落地：[0005](../internal/store/migrations/0005_sending.sql)） |
 | M3.5 | `account_access` 生效：读路径按 §13.8 过滤（跟多账户一起做） |
 
 `identity_grants` 和 `account_access` 在 M1 只建表、不读：外键指向的 `identities`、`accounts`
-还不存在，所以这两列暂时是不带外键的文本，迁移里以 `M1:` 注明。
+当时还不存在，这两列是不带外键的文本。M2 的迁移建了这两张表并补上外键：`account_access` 里原有的账户名
+换成账户 id；`identity_grants` 不可能有合法的行（没有 identity 可指），有行时迁移拒绝执行、
+要人先清掉，而不是静默丢掉一条授权。
 
 主体与凭据的表从 M1 就建，因为主体模型是改起来最贵的部分。
 M0 不需要这一层——那时只有一个人和一个脚本。

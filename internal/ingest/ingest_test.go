@@ -156,8 +156,9 @@ func TestIngestEndToEnd(t *testing.T) {
 		zone, prefix, envFrom, envTo, srcKey, acct string
 	)
 	err = e.pool.QueryRow(t.Context(), `
-		SELECT r.size, r.sha256, r.content_hash, d.zone, d.prefix, d.envelope_from, d.envelope_to, d.source_key, d.account_key
-		FROM raw_objects r JOIN deliveries d ON d.raw_id = r.id WHERE r.id = $1`, m.ID).
+		SELECT r.size, r.sha256, r.content_hash, d.zone, d.prefix, d.envelope_from, d.envelope_to, d.source_key, a.name
+		FROM raw_objects r JOIN deliveries d ON d.raw_id = r.id JOIN accounts a ON a.id = d.account_id
+		WHERE r.id = $1`, m.ID).
 		Scan(&size, &gotSum, &gotCH, &zone, &prefix, &envFrom, &envTo, &srcKey, &acct)
 	if err != nil {
 		t.Fatal(err)

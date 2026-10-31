@@ -122,9 +122,19 @@ func schemaVersion(ctx context.Context, q querier) (exists bool, current int, er
 // callers on one database queue on an advisory lock, so the first
 // applies and the rest find nothing to do.
 func (db *DB) Migrate(ctx context.Context) (from, to int, err error) {
+	return db.migrateTo(ctx, 0)
+}
+
+// migrateTo is Migrate stopping after version target; 0 means the newest.
+// Only tests stop early: they load a database as an older release left
+// it and check what the next migration makes of it.
+func (db *DB) migrateTo(ctx context.Context, target int) (from, to int, err error) {
 	ms, err := loadMigrations()
 	if err != nil {
 		return 0, 0, fmt.Errorf("load migrations: %w", err)
+	}
+	if target > 0 && target < len(ms) {
+		ms = ms[:target]
 	}
 	conn, err := db.pool.Acquire(ctx)
 	if err != nil {

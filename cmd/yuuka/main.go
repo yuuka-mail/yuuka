@@ -43,7 +43,9 @@
 //	YUUKA_WEBHOOK_SECRETS               comma-separated webhook secrets, each >= 32 bytes;
 //	                                    several are accepted during rotation (serve only, required)
 //	YUUKA_LISTEN                        HTTP listen address (default 127.0.0.1:31480)
-//	YUUKA_ACCOUNT                       key of the Cloudflare account in deliveries (default "cloudflare")
+//	YUUKA_ACCOUNT                       name of the Cloudflare account (accounts.name), created on first
+//	                                    ingest (default "cloudflare"). Redelivery dedupe is per account:
+//	                                    renaming it starts a new account rather than renaming the old one
 //	YUUKA_TRUSTED_AUTHSERV_ID           authserv-id of the account's trusted receiver (default "mx.cloudflare.net")
 //	YUUKA_TELEGRAM_BOT_TOKEN            Telegram bot token (optional; set together with the chat id)
 //	YUUKA_TELEGRAM_CHAT_ID              Telegram chat id
@@ -256,7 +258,8 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 		DB:       db,
 		Account:  cfg.Account,
 		Notifier: notifier,
-		// Each process has one account until accounts exist (§10.1.1).
+		// Per account in the design (§10.1.1); process configuration while
+		// the Cloudflare account is the only one that receives.
 		TrustedAuthservID: cfg.TrustedAuthservID,
 		Log:               log,
 	})

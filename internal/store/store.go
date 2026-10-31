@@ -56,8 +56,10 @@ type Ingest struct {
 	ContentHash [32]byte
 	ReceivedAt  time.Time
 
-	DeliveryID   string
-	Account      string
+	DeliveryID string
+	// AccountID is accounts.id of the source; EnsureCloudflareAccount
+	// gives it for the configured Cloudflare account.
+	AccountID    string
 	Zone         string
 	Prefix       string
 	EnvelopeFrom string
@@ -94,10 +96,10 @@ func (db *DB) CommitIngest(ctx context.Context, in Ingest) (Outcome, error) {
 
 		sourceKey := PushSourceKey(in.ContentHash, in.EnvelopeTo)
 		tag, err = tx.Exec(ctx, `
-			INSERT INTO deliveries (id, account_key, source_key, raw_id, zone, prefix, envelope_from, envelope_to, received_at)
+			INSERT INTO deliveries (id, account_id, source_key, raw_id, zone, prefix, envelope_from, envelope_to, received_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-			ON CONFLICT (account_key, source_key) DO NOTHING`,
-			in.DeliveryID, in.Account, sourceKey, in.RawID, in.Zone, in.Prefix, in.EnvelopeFrom, in.EnvelopeTo, in.ReceivedAt)
+			ON CONFLICT (account_id, source_key) DO NOTHING`,
+			in.DeliveryID, in.AccountID, sourceKey, in.RawID, in.Zone, in.Prefix, in.EnvelopeFrom, in.EnvelopeTo, in.ReceivedAt)
 		if err != nil {
 			return fmt.Errorf("insert deliveries: %w", err)
 		}
@@ -110,8 +112,8 @@ func (db *DB) CommitIngest(ctx context.Context, in Ingest) (Outcome, error) {
 		tag, err = tx.Exec(ctx, `
 			UPDATE raw_objects r SET duplicate_of = d.raw_id
 			FROM deliveries d
-			WHERE r.id = $1 AND d.account_key = $2 AND d.source_key = $3`,
-			in.RawID, in.Account, sourceKey)
+			WHERE r.id = $1 AND d.account_id = $2 AND d.source_key = $3`,
+			in.RawID, in.AccountID, sourceKey)
 		if err != nil {
 			return fmt.Errorf("mark duplicate: %w", err)
 		}

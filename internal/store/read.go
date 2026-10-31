@@ -15,9 +15,11 @@ import (
 
 // The read paths of the WebUI and REST API: message list, message,
 // thread and the prefix aggregation. Like Search, each takes the viewer it
-// runs for and refuses a nil one (§13.8). M1 has no accounts, so every
-// viewer sees everything; when account_access lands, its filter goes into
-// visibleMessage and visibleDelivery below and nowhere else.
+// runs for and refuses a nil one (§13.8). account_access is not enforced
+// yet (M3.5), so every viewer sees everything; when it is, its filter goes
+// into visibleMessage and visibleDelivery below and nowhere else.
+// visibleMessage then also admits our own sent mail, which has no
+// delivery, by the account of the identity it was sent as (§4.6).
 
 // errNoViewer is returned by every read called without a viewer.
 var errNoViewer = errors.New("no viewer")
@@ -30,7 +32,7 @@ func needViewer(v *auth.Viewer, op string) error {
 }
 
 // visibleMessage and visibleDelivery are the one place where the viewer
-// narrows what a query sees. M1: always true.
+// narrows what a query sees. Until M3.5: always true.
 func visibleMessage(*auth.Viewer) string  { return "true" }
 func visibleDelivery(*auth.Viewer) string { return "true" }
 

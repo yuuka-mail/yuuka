@@ -12,8 +12,9 @@
 
 | 表 | 类别（§4.2） | 做什么 | 迁移 |
 |---|---|---|---|
-| `raw_objects` | 投递事实 | 原件存储里的每个对象一行，带 `sha256` 和 `content_hash`（§4.1）；发件方重投的那份照样落盘，用 `duplicate_of` 指向第一份，不再生成 delivery | [0001](../internal/store/migrations/0001_ingest.sql) |
-| `deliveries` | 投递事实；只有 `message_id`、`auth` 两列是派生 | 每次投递一行：信封、`(zone, prefix)`、这一路自己的原件（Received / ARC / DKIM 每一路都不同）和认证结果。投递是 ingest 记下的事实，不是从 MIME 派生的：信封、远端定位、卸载状态都不在原件里。`source_key` 是幂等键（§10.1） | [0001](../internal/store/migrations/0001_ingest.sql) |
+| `raw_objects` | 投递事实 | 原件存储里的每个对象一行，带 `sha256` 和 `content_hash`（§4.1）；发件方重投的那份照样落盘，用 `duplicate_of` 指向第一份，不再生成 delivery。yuuka 为外发组装或规范化的字节（Sent 副本，`sent/` 前缀）也是这里的行，发没发出看 outbox（§4.6） | [0001](../internal/store/migrations/0001_ingest.sql) |
+| `accounts` | 配置与授权 | 账户（§9.2）。M2 只有 `cf_catchall` 一种，就是 `YUUKA_ACCOUNT` 命名的那个 | [0005](../internal/store/migrations/0005_sending.sql) |
+| `deliveries` | 投递事实；只有 `message_id`、`auth` 两列是派生 | 每次投递一行：账户、信封、`(zone, prefix)`、这一路自己的原件（Received / ARC / DKIM 每一路都不同）和认证结果。投递是 ingest 记下的事实，不是从 MIME 派生的：信封、远端定位、卸载状态都不在原件里。`(account_id, source_key)` 是幂等键（§10.1） | [0001](../internal/store/migrations/0001_ingest.sql)、[0005](../internal/store/migrations/0005_sending.sql) |
 | `messages` | 派生（id 除外，id 跨 reparse 稳定） | 内容，按 `content_hash` 折叠；隔离状态 `parse_error` 也在这一层（§4.2） | [0002](../internal/store/migrations/0002_content.sql) |
 | `threads` | 派生 | 消息图的连通分量（§4.1）。reparse 整体重建，旧 id 能沿用就沿用，但不像 message id 那样承诺稳定 | [0002](../internal/store/migrations/0002_content.sql) |
 | `message_state` | 决定 | 人对一封信的标注、改判（`class_override`）、钉住（§9.6 卸载跳过）；本地标注层，远端永不覆盖（§9.2） | [0002](../internal/store/migrations/0002_content.sql) |
@@ -21,17 +22,36 @@
 | `prefixes` | 决定；`first_seen` / `last_seen` 是观测值 | `(zone, prefix)` 注册表：我把它给了谁、实际谁在发、claimed / discovered 两态（§3.3、§4.3） | [0002](../internal/store/migrations/0002_content.sql)、[0004](../internal/store/migrations/0004_prefix_claim.sql) |
 | `changes` | 日志 | 全局变更日志：§8.6 的 `since_state`、JMAP `queryChanges`、前端 SSE 共用。M1 建表就开始写 | [0002](../internal/store/migrations/0002_content.sql) |
 | `principals` `credentials` `passkeys` `enrollment_tokens` `recovery_codes` | 配置与授权 | 主体、凭据、WebUI 登录（§13.2、§13.3、§13.7） | [0003](../internal/store/migrations/0003_identity.sql) |
-| `identity_grants` `account_access` | 配置与授权 | 谁能以哪个身份发信、发到哪一步（§13.5）；谁能读哪个账户（§13.8）。M1 只建表 | [0003](../internal/store/migrations/0003_identity.sql) |
+| `identity_grants` `account_access` | 配置与授权 | 谁能以哪个身份发信、发到哪一步（§13.5）；谁能读哪个账户（§13.8）。M1 建表，M2 补外键 | [0003](../internal/store/migrations/0003_identity.sql)、[0005](../internal/store/migrations/0005_sending.sql) |
 | `actions` | 决定 | 审计日志（§8.8） | [0003](../internal/store/migrations/0003_identity.sql) |
+| `identities` | 配置与授权 | 能用来发信的地址（精确地址或 `*@zone`）、所属账户、出口名、归属主体（§9.3、§8.9） | [0005](../internal/store/migrations/0005_sending.sql) |
+| `drafts` | 决定 | 写好了、没发出的信；提交超出授权时停在这里，`hold_reason` 说明原因（§8.9） | [0005](../internal/store/migrations/0005_sending.sql) |
+| `outbox` | 决定 | 决定要发的每封信，和它在 §4.5 状态机里的位置；`raw_id` 指向 Sent 副本 | [0005](../internal/store/migrations/0005_sending.sql) |
+| `send_attempts` `outbox_recipients` | 发送事实 | 每次发送尝试的执行归属、提交点和结果；逐收件人的结果、退信与投诉（§4.5） | [0005](../internal/store/migrations/0005_sending.sql) |
 
 `deliveries.auth` 的结构由 [`internal/authres`](../internal/authres/authres.go) 的 `Auth` 定义，只来自可信接收方（§10.1.1）。
-迁移里与本节设计不同的地方都以 `M0:` / `M1:` 注明，主要是两类：
+迁移里与本节设计不同的地方都以 `M0:` / `M1:` / `M2:` 注明，主要是这几类：
 
-- 还没有 `accounts` 表。`deliveries` 暂用 `account_key`（进程配置的账户名）代替 `account_id → accounts`，
-  幂等约束暂为 `(account_key, source_key)`；`identity_grants.identity_id`、`account_access.account_id`
-  暂不带外键。建 `accounts` / `identities` 的迁移按注释里写好的步骤收口
 - 有几列已建、暂不写：`messages.spam_score`（§4.3 的降级现算）、`messages.body_html_key`、
   `deliveries.spf_recheck`（二次 SPF 判定还没接）、`prefixes.observed_domains`（随泄漏检测，M3）
+- M2 的 `outbox.state` 已经容纳 `held` 和 `withdrawn`、`outbox.review` / `hold_until` 已建，
+  但 M2 只做 `draft` 和 `auto` 两档，不写它们；`review` 档（M3）不必改约束
+- **出口（transport）不是表**。出口按名字定义在进程配置里（主机、端口、caps、凭据文件路径），
+  `identities.transport` 只存名字。出口带着一份密钥和一个进程必须连得上的主机，这两样都是部署事实，
+  和 R2、数据库的配置同类；放进表里只是配置的镜像，还可能和配置不一致。代价是改出口要改配置、重启，
+  而不是一条 CLI；回头的条件是出现了需要在运行时增删出口的场景
+- **没有 `zones` 表**。它的列（所属账户、是否 catch-all、是否已开通发信）在 M2 没有读者：
+  identity 自带 zone 和账户，「这个域开没开通发信」是出口配置的属性。等有东西需要单独问一个域的时候再建
+- `accounts` 只有 M2 读的列，kind 只有 `cf_catchall`：M2 的所有 identity 都属于这个 Cloudflare 账户。
+  只发不收的账户（`smtp_only`）、IMAP 等拉取账户，连同 `sync_policy`、`writeback_policy`、`offload_policy`、`auth_ref`
+  这些列，随 M3.5 一起加
+
+**`YUUKA_ACCOUNT` 与 `accounts`**：0005 把 M0 / M1 的 `deliveries.account_key` 换成了 `account_id`，
+每个出现过的 key（以及 `account_access` 里只出现过的 key）变成一个 `cf_catchall` 账户，`name` 就是原来的 key。
+`YUUKA_ACCOUNT` 现在是这个账户的 `name`：ingest 第一次提交时按名字取它的行，没有就建
+（[`store.EnsureCloudflareAccount`](../internal/store/accounts.go)）——Cloudflare 账户由进程配置声明，
+不另设命令。`yuuka identity add` 在库里恰好只有一个账户时默认用它，否则要显式指定。所以升级后照旧用同一个名字，重投去重接着认升级前的投递；改名字等于开一个新账户
+（幂等键按账户算），而不是给旧账户改名。
 
 **数据库角色**：部署时 yuuka 用两个非超级用户角色连库（建法见 [`deploy/postgres-roles.sh`](../deploy/postgres-roles.sh)，
 接线见 [`cmd/yuuka/db.go`](../cmd/yuuka/db.go)）：owner 拥有库和 schema、只用来跑迁移；
@@ -59,19 +79,14 @@ app 只有表上的增删改查和序列的 `USAGE`（经 `ALTER DEFAULT PRIVILE
 尚未实现的表和列（设计）：
 
 ```sql
--- 账户 / 身份 / 传输（多账户整合的地基，见 §9）
-accounts(id, kind, label, auth_ref, sync_policy, writeback_policy, offload_policy, active)
-  -- kind: cf_catchall | imap | gmail_api | smtp_only
+-- accounts 上还没加的列：拉取账户（M3.5）和归档卸载（§9.6）用
+accounts(auth_ref, sync_policy, writeback_policy, offload_policy, active)
+  -- kind 增加 imap | gmail_api | smtp_only
   -- sync_policy: full(存原件) | metadata(只索引,正文按需) | notify(只通知)
   -- offload_policy: off | after(...)，归档卸载（§9.6），仅 sync_policy=full 可开
-identities(id, address|pattern, zone, display_name, signature, transport_id, is_default,
-           owner_id → principals)   -- 身份归属：决定 agent 外发档位的硬上限（§8.9）
-transports(id, kind, config_ref)   -- cf_smtp | gmail_smtp | m365 | ...
-zones(zone pk, account_id, catchall bool, sending_onboarded bool)
 
--- deliveries 上还没加的列：账户外键，以及拉取与卸载的事实（§9.6、§10.1）
+-- deliveries 上还没加的列：拉取与卸载的事实（§9.6、§10.1）
 deliveries(
-  account_id → accounts,             -- 取代 account_key；幂等约束改为 unique(account_id, source_key)
   delivered_to text[],
   remote_labels text[], remote_flags bitmask,
   remote_state smallint,             -- present | offloaded（远端已按 §9.6 删除，本地是唯一副本）
@@ -79,46 +94,13 @@ deliveries(
 )
   -- message_id 可空的另一个原因：notify 策略只留幂等桩，不建 message（§4.4、§10.1）
 
+-- drafts 上还没加的列
+drafts(attachments jsonb,            -- 要先有上传存储
+       proposal_id)                  -- 提案（M3）
+
 attachments(id ulid pk, message_id, filename, mime, size, sha256, content_id, disposition, blob_key)
 extractions(message_id, kind(otp|link|expiry|amount), value, confidence)  -- 通知区用
 rules(id, priority, match jsonb, actions jsonb, enabled, proposal_id)     -- 分流/标签/推送；actions 封顶在标注层（§8.5）
-drafts(id ulid pk, principal_id → principals, identity_id → identities, thread_id, in_reply_to,
-       to_addrs, subject, body_md, attachments jsonb, proposal_id,
-       cites jsonb,                  -- [{uri, quote}] 引用了哪些入站内容（§8.1 锚点），§8.9 外泄检查的输入
-       hold_reason text,             -- 提交后为什么停在草稿：档位 / 限额 / 审核升级
-       updated_at)
-  -- 提交时按 identity_grants.send_policy 决定去向：留在这里等人，或生成 outbox 记录（§8.9）
-outbox(id ulid pk, state, next_retry_at,
-       -- state: held → queued → sending → sent | partial | unknown | failed(n) → dead
-       --   held 只出现在 review 档；unknown 是「越过提交点后没拿到结论」，不自动重试（§3 原则 6、§4.5）
-       --   failed(n) 的 n 是 send_attempts 的条数，不另存计数
-       identity_id → identities,     -- 路由由 identity 决定（§9.3），调用方选不了 transport
-       submitted_by → principals,    -- 谁起的这封信 / 哪个服务从 submission 口投进来（§13.6）
-       approved_by → principals,     -- 哪个人按了发送；按策略放行时是 system
-       review jsonb, hold_until,     -- §8.9 每项检查的结论；撤回窗口截止时间
-       draft_id → drafts, from_addr, raw_key,   -- raw_key 是我们提交的字节，不含平台加的头（§10.4.1）
-       verp_tag text,                -- Return-Path 本地部分嵌的 id，DSN 回流靠它对账；出口不允许时为空（§10.4.2）
-       error)
-
--- 每一次发送尝试：谁在执行、走到了哪一步。崩溃恢复只看这张表（§4.5）
-send_attempts(id ulid pk, outbox_id → outbox,
-              recipients text[],      -- 这次投给谁；partial 之后的重试只含 4xx 的那几个
-              transport text,         -- 实际走的出口（传输链里的哪一个，§9.3）
-              owner text, lease_until timestamptz,  -- 执行归属：哪个执行者、租约到何时，执行期间续租
-              started_at timestamptz,
-              committed_at timestamptz,  -- 越过不可回头点之前写下并提交；为空 = 可证明对方没收到正文
-              finished_at timestamptz,
-              outcome smallint,       -- accepted | partial | rejected | failed | unknown | abandoned
-              provider_id text,       -- 出口给的投递 id，unknown 对账用
-              message_id text,        -- 出口实际用的 Message-ID；平台生成时每次尝试都可能不同，线程匹配认全部（§10.4.1）
-              error)
-
--- 逐收件人的结果：部分收件人被拒、退信、投诉都落在这一层
-outbox_recipients(outbox_id → outbox, addr, kind(to|cc|bcc),
-                  state,              -- pending | accepted | rejected | deferred | unknown | bounced | complained
-                  last_attempt_id → send_attempts,
-                  smtp_code, detail, updated_at,
-                  primary key(outbox_id, addr))
 notifications(id, message_id, channel, state, sent_at)
 ```
 
@@ -184,10 +166,11 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
 |---|---|---|
 | **派生** | `messages`（除 id 外的列）、`threads`、`attachments`、`extractions`、`deliveries.message_id`、`deliveries.auth` | 从 `deliveries.raw_id → raw_objects` 和账户配置重算 |
 | **投递事实** | `raw_objects`（含 `content_hash`、`duplicate_of`）；`deliveries` 的其余列（`source_key`、信封、远端定位、`remote_state`、`offloaded_at`、`spf_recheck`） | 不碰。它们来自 ingest 当时的 `InboundRef` 和当时的外部状态 |
+| **发送事实** | `send_attempts`、`outbox_recipients`：远端当时怎么回答、什么时候；Sent 副本本身是 `raw_objects` 里的投递事实 | 不碰 |
 | **决定** | `message_state`、`message_aliases`、`prefixes`（label / note / expected_domains / state）、`rules`、`proposals`、`actions`、`drafts`、`outbox`、`notifications` | 不碰 |
-| **配置与授权** | `principals` / `credentials` / `identity_grants` / `account_access`（§13）、`accounts` / `identities` / `transports` / `zones` | 不碰 |
+| **配置与授权** | `principals` / `credentials` / `identity_grants` / `account_access`（§13）、`accounts` / `identities` | 不碰 |
 
-后三类**无法从原件重建**，备份要按正经数据库来（§7）。CF 来源的投递事实能从 R2 对象的
+后四类**无法从原件重建**，备份要按正经数据库来（§7）。CF 来源的投递事实能从 R2 对象的
 metadata 恢复（§2.1），但外部账户的远端定位和卸载状态只在库里，同样要靠备份。
 
 判断一列是派生还是事实，标准是**同样的输入、任何时候重算都得到同样的结果**。
@@ -271,7 +254,7 @@ stateDiagram-v2
   [*] --> held: review 档
   [*] --> queued: auto 档 / 人确认发送
   held --> queued: 审核通过，撤回窗口到期
-  held --> [*]: 撤回 · 升级（回草稿）
+  held --> withdrawn: 撤回 · 升级（回草稿）
   queued --> sending: 领取，写 send_attempts
   sending --> sent: 全部收件人收下
   sending --> partial: 部分收件人被拒
@@ -288,7 +271,17 @@ stateDiagram-v2
   unknown --> dead: 对不上账，人决定放弃
   sent --> [*]
   dead --> [*]
+  withdrawn --> [*]
 ```
+
+`withdrawn` 是离开 outbox、回到草稿的那条路的终点。它要有一个状态而不是删掉这一行：
+`review` 的结论、谁提交的、Sent 副本都还挂在这一行上，删了就回答不了「这封为什么没发出去」。
+
+表上能写成约束的不变量都写成了约束（[0005](../internal/store/migrations/0005_sending.sql)），
+不靠执行器的代码自觉：`next_retry_at` 只在等待发送的状态（`queued`、`failed`、还有收件人要重试的 `partial`）
+上非空，领取时必须清掉；同一封信同时最多一条未结束的 `send_attempts`（部分唯一索引），
+两个执行者即使领取逻辑写错也不会同时发同一封；`accepted` / `partial` / `unknown` 的尝试必须有 `committed_at`，
+`abandoned` 的必须没有——崩溃恢复依赖的正是这一点。
 
 #### 提交点、执行归属与崩溃恢复
 
@@ -321,6 +314,66 @@ stateDiagram-v2
 有 VERP 的出口等 DSN（§10.4.2）；能自定 Message-ID 的出口可以按自己的 id 在出口日志里找。
 崩溃造成的 `unknown` 往往连 `provider_id` 都没拿到，这时交给人：UI 标「可能已发出」，
 人选择「确认已送出」「接受可能重复，重发」或「放弃」，选择记入 `actions`。
+
+### 4.6 发出的信：Sent 副本、消息与可见性
+
+发出的信和收到的信走同一条内容管线：我们交给出口的字节（Sent 副本，§10.2）
+在建 outbox 行之前写进原件存储的 `sent/YYYY/MM/<id>.eml`，同样写一次永不改，
+在 `raw_objects` 里有自己的一行，`outbox.raw_id` 指向它；然后像收信一样解析进 `messages`，
+所以自己的回复出现在线程、搜索里，`reparse` 也能重建它。字节在建 outbox 行时组装（submission 口收进来的是规范化）一次，
+之后每次尝试都提交这同一份：审核（M3）看到的就是发出去的。
+
+**`sent/` 的含义是「yuuka 为外发组装或规范化的每一份字节」，不是「已经发出的字节」。**
+停在草稿的 SMTP 提交（`drafts.raw_id`，确认后原样发出）、最终撤回、作废或从未发出的信都在这里。
+发没发出、发给了谁，看 outbox 的状态和 `outbox_recipients`，不看前缀，也不看原件在不在。
+另一种做法是只在真正发出之后才写 `sent/`，但字节必须在越过提交点之前就落下（§4.5），
+那时还不知道结局；为了让前缀「名副其实」再分出一个前缀或事后搬对象，换来的只是一条不可靠的信号。
+写了原件、建 outbox 行（或草稿行）的事务却失败时，原件成了没有行指向的孤儿：
+调用方收到的是错误，什么都没发出，它不是丢信。对账（§2.1）只扫 `raw/`，不会把它当成漏掉的投递。
+
+**每一份 outbox 原件都解析进 `messages`**，不论状态：`queued`、`dead`、`withdrawn` 的也是，
+UI 在消息旁边显示 outbox 的状态（「排队中」「发送失败」「已撤回」）。按状态决定建不建 message，
+会让 `reparse` 的结果取决于 `outbox.state` 这个会变的决定，状态每变一次派生数据就得跟着改；
+现在 `reparse` 只读 `outbox.raw_id` 这一个写一次不变的事实。停在草稿、还没有 outbox 行的原件不建 message：
+它还只是草稿，草稿在草稿视图里看。
+
+**消息和 outbox 之间不存 id，靠折叠键连接**：一封信的 Sent 副本对应的 message，
+就是 `content_hash` 等于这份原件 `content_hash` 的那一条（§4.1）。
+另一种做法是在 `outbox` 上加一列 `message_id`，但那是派生值，放进一张 `reparse` 不碰的决定表，
+就成了「只能由 ingest 写、`reparse` 修不了」的东西；折叠键是原件上的事实，`reparse` 不会改变折叠结果，
+这条连接因此和折叠一样稳定，不需要任何派生状态。反过来，从 message 找它是不是我们发的，
+要从 `raw_objects.content_hash` 找回原件，读者出现时给它加索引。
+
+**收件人地址原样保存，按折叠后的地址去重**：`outbox_recipients.addr` 是写进 `RCPT TO` 的原文——
+RFC 5321 规定本地部分区分大小写，yuuka 不替发件人改写；`addr_fold` 是它的小写形式
+（和 ingest 折叠前缀用同一个函数），一封信内按它去重、首次联系和新收件人限额按它查。
+`A@example.net` 和 `a@example.net` 实际几乎总是同一个信箱，所以同一封信只发一份，用先给出的那种写法。
+`addr_fold` 由写入方算，不用 `lower()` 生成列：`lower()` 对非 ASCII 的结果取决于数据库的 locale，
+恢复到另一种 locale 的库里会变。
+
+Sent 副本**不是投递**：`deliveries` 记的是「一封信到了某个账户的某个地址」，
+它的列（信封收件人、`(zone, prefix)`、认证结果）和读它的地方（前缀注册表、降级判断、推送）都是按收信设计的；
+把发出的信塞进去，每个读者都要多一个方向判断。拉取账户的「已发送」文件夹（M3.5）里那份才是投递，
+和我们自己的 Sent 副本按 `content_hash` 折叠成同一条 message——前提是出口没有加上或改写会进内容哈希的头（比如 `Message-ID`）；
+否则同一封信显示两次，这是 §4.1 选定的方向。
+
+**可见性**（§13.8）：一封 message 对某个主体可见，当且仅当
+它有一条可见的投递，**或者**它是某条 outbox 的 Sent 副本、而这条 outbox 的 identity 所属账户对该主体可读。
+发出的信没有投递，账户只能从 identity 来；identity 必须属于一个账户（`identities.account_id` 非空）就是为了这条。
+这仍然只在 `visibleMessage` 一处算；M2 所有主体都看得见全部（`account_access` 的过滤随 M3.5），
+所以 M2 不改读路径的可见性，但 §13.8 的 ACL 测试表届时要加「只有 Sent 副本的消息」这一行。
+两件事随 M3.5 一起定、现在不定（§13.8）：草稿和 outbox 的变更事件按什么规则对谁可见；
+agent 没有某账户的 `account_access` 时，能不能看到它自己经该账户的身份发出的信。
+
+M2 落地发信时读路径要改的地方（不是可见性，是「每封信至少有一条投递」这个 M1 的隐含假设）：
+
+- 列表的降级判断在没有投递时得到「降级」，发出的信会被默认视图藏起来；
+  没有投递、只有 Sent 副本的信应当不降级
+- `updateMessage` 的 canonical 原件和 `received_at` 只从投递里取，`ReparseTargets` 只沿投递找原件；
+  两处都要把 Sent 副本算进来
+- 线程匹配：出口自定 Message-ID 时，我们的 id 在 Sent 副本里，进 `messages.message_id`；
+  平台生成时 Sent 副本里没有 Message-ID，回信的 `In-Reply-To` 要对上 `send_attempts.message_id`（§10.4.1），
+  线程构图要读这一列（它是事实，读它不破坏 `reparse` 的确定性）
 
 ---
 

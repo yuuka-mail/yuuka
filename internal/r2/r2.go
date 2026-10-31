@@ -2,7 +2,8 @@
 // contract (§2.2) through the S3 API.
 //
 // The raw bucket holds two kinds of immutable MIME: raw/ (inbound, written
-// by the Worker) and sent/ (the exact bytes yuuka submitted). Go's token for
+// by the Worker) and sent/ (every byte string yuuka composed or normalized
+// for sending; whether it went out is outbox state, §4.6). Go's token for
 // it can write, because of sent/, so immutability is kept here rather than
 // by the token (§2.2): RawBucket has no delete, and its one write, PutSent,
 // refuses any key that is not a sent copy key before a request is made and

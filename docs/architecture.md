@@ -167,12 +167,14 @@ sequenceDiagram
 | bucket | key | 内容 | Worker 的权限 | Go 的权限 |
 |---|---|---|---|---|
 | raw | `raw/YYYY/MM/<id>.eml` | 收到的原始 MIME 字节，写一次永不改 | 写（只在不存在时写） | 读、列 |
-| raw | `sent/YYYY/MM/<id>.eml` | 发出的原始 MIME 字节（Sent 副本，§3.6），写一次永不改 | 不碰 | 读、列、写（只在不存在时写） |
+| raw | `sent/YYYY/MM/<id>.eml` | yuuka 为外发组装或规范化的原始 MIME 字节（Sent 副本，§3.6、§4.6），写一次永不改 | 不碰 | 读、列、写（只在不存在时写） |
 | pending | `pending/<id>` | 投递标记 | 写 | 读、列、删 |
 
 `raw/` 的 `YYYY/MM` 取 `received_at` 的 UTC 年月。`sent/` 不属于 Worker 的契约，列在这里是因为它和 `raw/` 共用一个 bucket、
 一把 Go 侧凭据：`<id>` 是 Go 生成的 ULID，`YYYY/MM` 取提交时间的 UTC 年月，key 函数是 [`r2.SentKey`](../internal/r2/r2.go)。
 Worker 不读、不写、不列 `sent/`，它的行为和 `testdata/contract/v1/` 的向量都不因 `sent/` 改变。
+`sent/` 里的字节在越过发送的提交点之前就写下（§4.5），所以它收的是每一份为外发准备的字节，
+包括停在草稿的 SMTP 提交和最终撤回、作废、从未发出的信：**发没发出看 outbox 的状态，不看前缀**（§4.6）。
 
 分成两个 bucket，是因为 R2 令牌的权限粒度到 bucket 为止，前缀管不住。Go 要例行删除标记，
 pending 单独一个 bucket，删除就用一把碰不到原件的凭据，删错 key 也删不到原件。
@@ -287,8 +289,8 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 ## 3. 八条设计原则
 
 1. **原始 MIME 是邮件内容的唯一事实来源，不可变**
-   `raw/YYYY/MM/<ulid>.eml` 写一次永不改；发出的信同理，交给出口的那份字节就是
-   `sent/YYYY/MM/<ulid>.eml`（Sent 副本，§2.2）。从内容派生的一切（解析结果、线程、附件索引、
+   `raw/YYYY/MM/<ulid>.eml` 写一次永不改；发出的信同理，为外发组装或规范化的那份字节就是
+   `sent/YYYY/MM/<ulid>.eml`（Sent 副本，§2.2），交给出口的正是它。从内容派生的一切（解析结果、线程、附件索引、
    提取值）都能用 `reparse` 一条命令整库重放，解析器出 bug 不等于丢信息。
    但**人和系统做出的决定不是派生物**：标注、改判、前缀登记、规则、授权、
    投递事实与远端卸载状态。它们和派生数据分开存放、`reparse` 不碰、按正经数据库备份（§4.2）。

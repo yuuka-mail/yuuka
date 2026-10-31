@@ -137,6 +137,17 @@ func URLs(t *testing.T) (ownerURL, appURL string) {
 	return as(OwnerRole), as(AppRole)
 }
 
+// Account returns the id of the Cloudflare account "cf", creating it on
+// first use, for tests that commit deliveries.
+func Account(t *testing.T, db *store.DB) string {
+	t.Helper()
+	id, err := db.EnsureCloudflareAccount(t.Context(), "cf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 func ident(s string) string { return pgx.Identifier{s}.Sanitize() }
 
 func literal(s string) string { return "'" + strings.ReplaceAll(s, "'", "''") + "'" }

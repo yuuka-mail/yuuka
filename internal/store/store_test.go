@@ -16,7 +16,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
-func record(n int, contentHash [32]byte, to string) store.Ingest {
+func record(account string, n int, contentHash [32]byte, to string) store.Ingest {
 	at := time.Date(2026, 10, 31, 1, 0, n, 0, time.UTC)
 	id := ulid.New(at)
 	key := fmt.Sprintf("raw/2026/10/%s.eml", id)
@@ -24,7 +24,7 @@ func record(n int, contentHash [32]byte, to string) store.Ingest {
 		RawID: id, R2Key: key, LocalPath: key, Size: 10,
 		SHA256:      sha256.Sum256(fmt.Appendf(nil, "raw-%d", n)),
 		ContentHash: contentHash, ReceivedAt: at,
-		DeliveryID: ulid.New(at), Account: "cf", Zone: "example.com", Prefix: "a",
+		DeliveryID: ulid.New(at), AccountID: account, Zone: "example.com", Prefix: "a",
 		EnvelopeFrom: "s@example.net", EnvelopeTo: to,
 	}
 }
@@ -182,6 +182,7 @@ func TestAppRoleRefusesDDL(t *testing.T) {
 func TestConcurrentRedeliveries(t *testing.T) {
 	t.Parallel()
 	db, pool := storetest.New(t)
+	acct := storetest.Account(t, db)
 	ch := sha256.Sum256([]byte("content"))
 	const n = 8
 	var wg sync.WaitGroup
@@ -189,7 +190,7 @@ func TestConcurrentRedeliveries(t *testing.T) {
 	errs := make([]error, n)
 	for i := range n {
 		wg.Go(func() {
-			outcomes[i], errs[i] = db.CommitIngest(t.Context(), record(i, ch, "a@example.com"))
+			outcomes[i], errs[i] = db.CommitIngest(t.Context(), record(acct, i, ch, "a@example.com"))
 		})
 	}
 	wg.Wait()
@@ -216,7 +217,7 @@ func TestConcurrentRedeliveries(t *testing.T) {
 func TestConcurrentSameRaw(t *testing.T) {
 	t.Parallel()
 	db, _ := storetest.New(t)
-	rec := record(1, sha256.Sum256([]byte("c")), "a@example.com")
+	rec := record(storetest.Account(t, db), 1, sha256.Sum256([]byte("c")), "a@example.com")
 	var wg sync.WaitGroup
 	outcomes := make([]store.Outcome, 4)
 	for i := range outcomes {
@@ -244,7 +245,7 @@ func TestConcurrentSameRaw(t *testing.T) {
 func TestSameIDDifferentBytesFails(t *testing.T) {
 	t.Parallel()
 	db, _ := storetest.New(t)
-	rec := record(1, sha256.Sum256([]byte("c")), "a@example.com")
+	rec := record(storetest.Account(t, db), 1, sha256.Sum256([]byte("c")), "a@example.com")
 	if _, err := db.CommitIngest(t.Context(), rec); err != nil {
 		t.Fatal(err)
 	}

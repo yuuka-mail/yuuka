@@ -47,8 +47,8 @@ type Config struct {
 	Pending MarkerStore
 	Local   localraw.Dir
 	DB      *store.DB
-	// Account is the configured key of the Cloudflare account (M0 has no
-	// accounts table; see the 0001 migration).
+	// Account is the name of the Cloudflare account (YUUKA_ACCOUNT). Its
+	// accounts row is created on first use; see store.EnsureCloudflareAccount.
 	Account string
 	// TrustedAuthservID is the authserv-id of the account's trusted
 	// receiver (§10.1.1); empty means no authentication facts are taken.
@@ -73,6 +73,9 @@ type Ingester struct {
 	cfg       Config
 	notifySem chan struct{}
 	notifyWG  sync.WaitGroup
+
+	accountMu sync.Mutex
+	accountID string // resolved from cfg.Account on first commit
 }
 
 // New returns an Ingester.
@@ -106,6 +109,10 @@ func (in *Ingester) commit(ctx context.Context, m contract.Marker, body []byte) 
 	if err := in.cfg.Local.Put(m.RawKey, body); err != nil {
 		return 0, fmt.Errorf("ingest %s: %w", m.ID, err)
 	}
+	account, err := in.account(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("ingest %s: %w", m.ID, err)
+	}
 	zone, prefix := SplitAddress(m.EnvelopeTo)
 	rec := store.Ingest{
 		RawID:        m.ID,
@@ -116,7 +123,7 @@ func (in *Ingester) commit(ctx context.Context, m contract.Marker, body []byte) 
 		ContentHash:  contenthash.V1(body),
 		ReceivedAt:   m.ReceivedAt,
 		DeliveryID:   ulid.New(in.cfg.Now()),
-		Account:      in.cfg.Account,
+		AccountID:    account,
 		Zone:         zone,
 		Prefix:       prefix,
 		EnvelopeFrom: m.EnvelopeFrom,
@@ -153,6 +160,22 @@ func (in *Ingester) commit(ctx context.Context, m contract.Marker, body []byte) 
 		in.notify(ctx, notify.Summary(zone, prefix, body))
 	}
 	return out, nil
+}
+
+// account returns the id of the configured account. It is resolved
+// lazily, not in New, so that constructing an Ingester stays free of I/O;
+// a failure is retried by the next commit.
+func (in *Ingester) account(ctx context.Context) (string, error) {
+	in.accountMu.Lock()
+	defer in.accountMu.Unlock()
+	if in.accountID == "" {
+		id, err := in.cfg.DB.EnsureCloudflareAccount(ctx, in.cfg.Account)
+		if err != nil {
+			return "", err
+		}
+		in.accountID = id
+	}
+	return in.accountID, nil
 }
 
 // notify runs best effort in the background: it never blocks or fails

@@ -84,7 +84,7 @@ func newEnv(t *testing.T) *env {
 		raws[key] = raw
 		in := store.Ingest{
 			RawID: id, R2Key: key, LocalPath: key, Size: int64(len(raw)), SHA256: sha256.Sum256(raw),
-			ContentHash: contenthash.V1(raw), ReceivedAt: at, DeliveryID: id, Account: "cf",
+			ContentHash: contenthash.V1(raw), ReceivedAt: at, DeliveryID: id, AccountID: storetest.Account(t, db),
 			Zone: "example.com", Prefix: prefix, EnvelopeTo: prefix + "@example.com",
 		}
 		if _, err := db.CommitIngest(t.Context(), in); err != nil {
