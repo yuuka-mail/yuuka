@@ -17,10 +17,16 @@ WebUI 用的是浏览器会话，程序不要模仿它。
 
 - **错误**是 RFC 9457 的 `application/problem+json`。按扩展成员 `code` 分支，它是稳定的机器可读码，取值在 schema 里列全；
   `detail` 是给人读的
-- **超出授权不是错误**：提交草稿（`POST /api/v1/drafts/{id}/submit`）照常返回成功，结果里说明信是进了队列还是停在草稿、为什么
+- **超出授权不是错误**：提交草稿（`POST /api/v1/drafts/{id}/submit`）照常返回成功，`state` 说明信是进了队列（`queued`）、
+  审核通过后扣在撤回窗口里（`held`，到 `hold_until` 发出）还是停在草稿（`draft`，`hold_reason` 说为什么）。
+  被审核拦下的草稿带 `review`：每项检查的结论和触发它的东西；验证码和登录链接只说在哪里找到，不带值
+- **撤回**扣在窗口里的信：`POST /api/v1/outbox/{id}/withdraw`，要 `submission:send`。人能撤回看得见的任何一封，
+  agent 和 service 只能撤回自己提交的（别人的回 `403 forbidden`）。信回到草稿（`hold_reason = withdrawn`），可以改了再提交。
+  已经放行（`queued` 及之后）或已撤回的回 `409 conflict`。人撤回触发了熔断时，响应带 `suspended`。
+  没有让信提前发出或缩短窗口的端点
 - **被更高等级覆盖也不是错误**：标注（`POST /api/v1/messages/{id}/annotations`）对每项返回 `applied`、`unchanged`、
   `overruled`（人改过的值，agent 改不动）或 `labels_full`
-- 对象已不在可改的状态（草稿已提交、发件队列里的行不是 `unknown`、提案已决定）回 `409 conflict`；
+- 对象已不在可改的状态（草稿已提交、要 resolve 的行不是 `unknown`、要撤回的行不是 `held`、提案已决定）回 `409 conflict`；
   `from` 没有对应的发信地址回 `422 no_identity`；直接拒收回 `403 submission_rejected`
 - 规则或提案校验不过回 `400 invalid_rule`，`path` 指向请求体里出错的位置，如 `match.all[1].value`；
   保存成功但有风险的规则（按 `From` 匹配却不要求 `from.verified`）在成功的响应里带 `warnings`

@@ -59,6 +59,9 @@ type Store interface {
 	// ResolveOutbox records a person's decision on an unknown row; the
 	// handler reads the row as the viewer first (OutboxByID).
 	ResolveOutbox(ctx context.Context, id, resolution string, a store.Action, p store.RetryPolicy) (string, error)
+	// WithdrawOutbox recalls held mail as v; who may recall what is the
+	// store's (ErrNotYours).
+	WithdrawOutbox(ctx context.Context, v *auth.Viewer, id string, via map[string]any, at time.Time) (store.Withdrawal, error)
 
 	// Annotations and proposals (§8.5) take the viewer; precedence and
 	// who may decide are the store's too.
@@ -125,12 +128,20 @@ type Guard interface {
 	Require(h http.Handler, scopes ...auth.Scope) http.Handler
 }
 
+// SuspendNotifier tells a person that a recall tripped the circuit
+// breaker of a grant (§8.4, §8.9). It is told after the recall commits;
+// failing to tell is its own to log, and changes nothing.
+type SuspendNotifier interface {
+	Suspended(ctx context.Context, s store.Suspension)
+}
+
 // API is the REST handler.
 type API struct {
-	db     Store
-	raw    RawReader
-	submit Submitter
-	log    *slog.Logger
+	db        Store
+	raw       RawReader
+	submit    Submitter
+	suspended SuspendNotifier
+	log       *slog.Logger
 }
 
 // New returns the API over db, reading raw messages for the structured
@@ -149,6 +160,12 @@ func (a *API) WithSubmitter(s Submitter) *API {
 	return a
 }
 
+// WithSuspendNotifier makes a tell n of grants a recall suspended.
+func (a *API) WithSuspendNotifier(n SuspendNotifier) *API {
+	a.suspended = n
+	return a
+}
+
 var (
 	read   = []auth.Scope{auth.MessageRead}
 	prefix = []auth.Scope{auth.PrefixRead}
@@ -160,6 +177,9 @@ var (
 	outboxRead = []auth.Scope{auth.MessageRead, auth.DeliveryRead}
 	// Resolving resends: a sending decision, and a person's (§4.5).
 	outboxResolve = []auth.Scope{auth.SubmissionSend}
+	// Withdrawing held mail is a sending decision too, the opposite one
+	// (§8.9); it can only stop mail, never send it sooner.
+	outboxWithdraw = []auth.Scope{auth.SubmissionSend}
 	// Annotating, undoing one's annotations, proposing and deciding
 	// proposals (§8.5). Deciding is a person's, checked by kind.
 	annotate = []auth.Scope{auth.MessageAnnotate}
@@ -208,6 +228,10 @@ var routes = []route{
 	jsonRoute(http.MethodGet, "/api/v1/outbox/{id}", "Get one outgoing message's state", outboxRead, (*API).outboxEntry),
 	jsonRoute(http.MethodPost, "/api/v1/outbox/{id}/resolve", "Decide on mail whose delivery is unknown (§4.5); people only",
 		outboxResolve, (*API).resolveOutbox),
+	// Recall only: no route releases held mail or shortens its window.
+	jsonRoute(http.MethodPost, "/api/v1/outbox/{id}/withdraw",
+		"Withdraw held mail during its recall window, back to its draft (§8.9); agents and services only their own",
+		outboxWithdraw, (*API).withdrawOutbox),
 
 	jsonRoute(http.MethodGet, "/api/v1/labels", "List the labels in use, with how many messages carry each", read, (*API).labels),
 	jsonRoute(http.MethodPost, "/api/v1/messages/{id}/annotations",
@@ -376,6 +400,7 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 		{store.ErrInFlight, http.StatusConflict, openapi.CodeConflict, "the draft has gone to the outbox"},
 		{store.ErrRawDraft, http.StatusConflict, openapi.CodeConflict, ""},
 		{store.ErrOutboxState, http.StatusConflict, openapi.CodeConflict, ""},
+		{store.ErrNotYours, http.StatusForbidden, openapi.CodeForbidden, ""},
 		{store.ErrNoIdentity, http.StatusUnprocessableEntity, openapi.CodeNoIdentity, ""},
 		{submit.ErrNoIdentity, http.StatusUnprocessableEntity, openapi.CodeNoIdentity, ""},
 		{submit.ErrRejected, http.StatusForbidden, openapi.CodeSubmissionRejected, ""},

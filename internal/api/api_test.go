@@ -138,6 +138,11 @@ func (s *spy) OutboxByID(ctx context.Context, v *auth.Viewer, id string) (store.
 	return s.DB.OutboxByID(ctx, v, id)
 }
 
+func (s *spy) WithdrawOutbox(ctx context.Context, v *auth.Viewer, id string, via map[string]any, at time.Time) (store.Withdrawal, error) {
+	s.saw("WithdrawOutbox", v)
+	return s.DB.WithdrawOutbox(ctx, v, id, via, at)
+}
+
 func (s *spy) Annotate(ctx context.Context, v *auth.Viewer, id string, ins []store.Annotation, a store.Action) ([]store.AnnotationResult, bool, error) {
 	s.saw("Annotate", v)
 	return s.DB.Annotate(ctx, v, id, ins, a)
@@ -340,7 +345,21 @@ type harness struct {
 	// arrives.
 	agent, human store.Principal
 	sub          *submit.Service
-	h            http.Handler
+	// suspended are the grants recalls suspended, as the serve app's
+	// cards would be told.
+	suspended *suspendedSpy
+	h         http.Handler
+}
+
+type suspendedSpy struct {
+	mu sync.Mutex
+	ss []store.Suspension
+}
+
+func (s *suspendedSpy) Suspended(_ context.Context, sus store.Suspension) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ss = append(s.ss, sus)
 }
 
 // fakeTransport only answers Caps: nothing here is ever sent.
@@ -397,9 +416,10 @@ func newHarness(t *testing.T) *harness {
 	})
 	sub := submit.New(submit.Config{DB: db, Outbox: out, Log: quiet})
 	sp := &spy{DB: db, calls: map[string][]*auth.Viewer{}}
+	sus := &suspendedSpy{}
 	return &harness{
-		t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, human: human, sub: sub,
-		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).Handler(svc),
+		t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, human: human, sub: sub, suspended: sus,
+		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).WithSuspendNotifier(sus).Handler(svc),
 	}
 }
 
@@ -514,6 +534,38 @@ func (h *harness) queued() string {
 	return res.OutboxID
 }
 
+// held is an outbox row arisu submitted under review that passed it:
+// held for its recall window. Its grant is review to any recipient, and
+// bob@example.net is no first contact once the operator queued mail to
+// him.
+func (h *harness) held() string {
+	h.t.Helper()
+	if _, err := h.pool.Exec(h.t.Context(), `
+		INSERT INTO identity_grants (identity_id, principal_id, send_policy, recipient_scope)
+		SELECT id, $1, 'review', 'any' FROM identities WHERE prefix = 'arisu'
+		ON CONFLICT DO NOTHING`, h.agent.ID); err != nil {
+		h.t.Fatal(err)
+	}
+	if n := h.count(`SELECT count(*) FROM outbox_recipients WHERE addr_fold = 'bob@example.net'`); n == 0 {
+		h.queued()
+	}
+	d := h.draft(h.agent, store.Draft{FromAddr: "arisu@example.com", Subject: "Held", BodyMD: "See you at noon."})
+	res, err := h.sub.SubmitDraft(h.t.Context(), viewer(h.agent), d.ID)
+	if err != nil || !res.Held {
+		h.t.Fatalf("submit: %+v, %v", res, err)
+	}
+	return res.OutboxID
+}
+
+func (h *harness) count(query string, args ...any) int {
+	h.t.Helper()
+	var n int
+	if err := h.pool.QueryRow(h.t.Context(), query, args...).Scan(&n); err != nil {
+		h.t.Fatal(err)
+	}
+	return n
+}
+
 // unknown is an outbox row whose fate is unknown (§4.5): queued, then
 // set as an attempt past its commit point would leave it.
 func (h *harness) unknown() string {
@@ -544,7 +596,7 @@ func TestACL(t *testing.T) {
 	att := h.find("Invoice and logo")
 	mine := func() string { return h.draft(h.agent, store.Draft{FromAddr: "arisu@example.com"}).ID }
 	get, upd, del, sub := mine(), mine(), mine(), mine()
-	sent, unknown := h.queued(), h.unknown()
+	sent, unknown, held := h.queued(), h.unknown(), h.held()
 	other := principalNamed(t, h, "agent", "momoi")
 	// arisu's annotation and proposals, and the operator's rules (§8.5).
 	annotated := h.annotation(h.agent, msg.ID, store.SetLabel("acl", true))
@@ -614,6 +666,12 @@ func TestACL(t *testing.T) {
 		"POST /api/v1/outbox/{id}/resolve": {
 			method: http.MethodPost, path: "/api/v1/outbox/" + unknown + "/resolve", body: `{"resolution":"abandon"}`,
 			as: h.human, reads: []string{"OutboxByID"}, people: true,
+		},
+		// arisu recalls its own held mail. The outbox is not private
+		// like a draft: another agent sees the row and is refused (403,
+		// TestWithdraw), not told it is missing.
+		"POST /api/v1/outbox/{id}/withdraw": {
+			method: http.MethodPost, path: "/api/v1/outbox/" + held + "/withdraw", reads: []string{"WithdrawOutbox"},
 		},
 
 		"GET /api/v1/labels": {path: "/api/v1/labels", reads: []string{"Labels"}},

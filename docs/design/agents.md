@@ -400,6 +400,18 @@ M3 的标注工具（[`internal/mcp/annotate.go`](../../internal/mcp/annotate.go
 `get_message` 的结构化结果在视图旁边多一个 `notes`（不在 `facts` 里，也不在 `content` 里），只放调用方自己的；
 文本里作者、目标、时间列在边界外，正文和引文在第二个不可信边界里，提示语是笔记专用的 `NoteNotice`。
 
+M3 的 `review` 档（§8.9）让 `submit_draft` 多了第三种结果，签名里的 `sent | held | drafted` 落成 `state`：
+`queued`、`held`、`draft`。`held` 是审核通过、扣在撤回窗口里，返回文本是「Passed review; goes out at <hold_until> unless recalled」，
+`hold_until` 从 outbox 行读回（数据库时钟定的窗口，不在应用侧重算）；被审核升级的 `draft` 带 `failed_checks`，
+是从 `drafts.review` 里取出的没过的检查名。`list_identities` 在 `review` 档下给出 `hold_seconds`。
+REST 的形状相同（`SubmitResult.state` / `hold_until`，草稿和 outbox 行带完整的 `review` 结论），
+结论里的提取值只记位置不记值，渲染时也没有放值的字段。
+
+**MCP 不给撤回工具**，agent 要撤回自己提交的信走 REST 的 `POST /api/v1/outbox/{id}/withdraw`。
+撤回是给人的按钮：窗口存在是为了让人看一眼，agent 自己的纠错是少数情况，不值得在每个 agent 的工具列表里多一件
+会被误用来「先撤回、改一下、再提交」绕审核循环的工具——那样每一轮都会占一次限额，而审核本来就会再跑一遍。
+需要时再加，它只能停信，加上也不会放宽什么。
+
 ### 8.8 审计与回放
 
 `actions`（表定义见 [`0003_identity.sql`](../../internal/store/migrations/0003_identity.sql)，主体模型见 §13.2）
@@ -613,7 +625,9 @@ SMTP 提交在同一事务里建一个以原件为载体的草稿，每个 `held
   服务停着时信就一直扣着，重启后再发。放行不再检查限额：提交时已经占了名额
 - 撤回 `WithdrawOutbox`：人可以撤回任何看得见的行，agent / service 只能撤回自己提交的；状态必须还是 `held`，
   否则报「已放行」——`queued` 的信随时可能在线上，不再撤。改为 `withdrawn`、记 `withdrawn_by`，草稿原因改为 `withdrawn`，
-  可以再编辑、再提交；记 `outbox.withdraw`，然后检查熔断（见上）
+  可以再编辑、再提交；记 `outbox.withdraw`，然后检查熔断（见上）。入口有三个：Telegram 的 [Recall]（§8.4）、
+  REST 的 `POST /api/v1/outbox/{id}/withdraw`（`submission:send`，审计 `via: rest`；熔断时响应带 `suspended`，
+  配了 Telegram 再推熔断卡片）和 WebUI（走同一个 REST）。没有反方向的端点：放行只有 `PromoteHeld`，窗口不能缩短
 - 两者都先拿内容锁再拿行，必然串行：放行在先，撤回看到 `queued` 干净地失败；撤回在先，放行的 `WHERE state = 'held'` 匹配不到。
   `TestHeldRecallRace` 并行跑 100 次，断言既不会出现「已撤回却有发送尝试」，也不会出现「已排队但草稿标记为撤回」
 - **不做「立即发送」**：那会是第二条 `held → queued` 的路，最多只省 `hold_seconds`

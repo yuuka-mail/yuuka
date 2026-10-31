@@ -385,6 +385,9 @@ func (a *app) rest(log *slog.Logger) *api.API {
 	if a.submit != nil {
 		r.WithSubmitter(a.submit)
 	}
+	if a.cards != nil {
+		r.WithSuspendNotifier(suspendCards{db: a.db, cards: a.cards, log: log})
+	}
 	return r
 }
 

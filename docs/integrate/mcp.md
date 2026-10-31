@@ -58,7 +58,7 @@ agent 不用预先知道这些，`list_identities` 会告诉它。
 | `list_identities` | 你能用哪些地址写信，每个地址提交后是「会发出」还是「停在草稿」，以及原因 |
 | `create_draft` | 起草，不发出。回复时不给 `from` 就用原信进来的那个地址。把草稿依据的段落写进 `cites`，审核的人会核对 |
 | `update_draft` | 整体替换你自己的、还没提交的草稿 |
-| `submit_draft` | 提交草稿。结果是 `queued`（会发出）或停在草稿并给出原因 |
+| `submit_draft` | 提交草稿。结果的 `state` 是 `queued`（会发出）、`held`（审核通过，`hold_until` 时发出，除非有人撤回）或 `draft`（停在草稿，给出原因；被审核拦下时 `failed_checks` 列出没过的检查） |
 | `annotate` | 给一封信（`scope=thread` 时是整个线程）加 / 去标签、分类、归档或取消。每项返回 `applied`、`unchanged`、`overruled` 或 `labels_full`，有改动时附撤销用的 `action_id` |
 | `undo` | 撤销你自己的一次 `annotate`。之后又被改过的项原样留着，计为 `superseded` |
 | `propose` | 提议让人决定：`kind=annotate` 是对一封信或线程的标注，`kind=rule` 是一条以后自动标注的规则。附理由，引用用锚点 |
@@ -78,8 +78,10 @@ agent 不用预先知道这些，`list_identities` 会告诉它。
 
 - `owner`：这是人的地址，agent 永远不能以人的身份直接发出
 - `policy`：凭据没有 `submission:send`，或授权本身就是草稿档
-- `review`：审核把它拦下了（首次联系、引用了收到的验证码或登录链接、别的线程、陌生的链接域、读不了的附件）；
-  或者审核已经通过、信正扣留在撤回窗口里，这时结果带 `outbox_id`，到期自动发出
+- `review`：审核把它拦下了，`failed_checks` 是没过的检查：`first_contact`（首次联系）、`extracted_values`
+  （引用了收到的验证码或登录链接）、`cross_thread`（别的线程）、`link_domains`（陌生的链接域）、`readable`（读不了的附件）。
+  审核全部通过时 `state` 是 `held`，不是草稿：信扣在撤回窗口里，结果带 `outbox_id` 和 `hold_until`，到期自动发出，
+  什么都不用做。`list_identities` 的 `hold_seconds` 是窗口多长
 - `limit`：超出了每小时、每天或新收件人的限额
 - `recipients`：收件人超出了允许的范围
 - `suspended`：运维者暂停了这条授权
@@ -87,6 +89,10 @@ agent 不用预先知道这些，`list_identities` 会告诉它。
 - `withdrawn`：审核期间被撤回
 
 信已经留给人处理了。**不要换一个工具、一个地址或另一条路再发一次**。
+
+MCP 没有撤回工具。扣在窗口里的信，人在 Telegram 或 WebUI 上能撤回；agent 发现自己写错了，
+可以经 REST 撤回自己提交的那封（`POST /api/v1/outbox/{id}/withdraw`，要 `submission:send`），它回到草稿，改完再提交。
+没有让信提前发出的办法。
 
 ### 被人否决是正常结果
 

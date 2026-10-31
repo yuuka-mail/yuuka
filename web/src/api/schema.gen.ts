@@ -1372,6 +1372,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/outbox/{id}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw held mail during its recall window, back to its draft (§8.9); agents and services only their own */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Withdrawal"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/prefixes": {
         parameters: {
             query?: never;
@@ -2846,6 +2893,8 @@ export interface components {
             cursor: string;
             more: boolean;
         };
+        /** @enum {string} */
+        CheckName: "first_contact" | "extracted_values" | "cross_thread" | "link_domains" | "readable";
         Cite: {
             /** @description yuuka://message/<id>, optionally with #part/<section>/para/<n> */
             uri: string;
@@ -2922,6 +2971,7 @@ export interface components {
             cites: components["schemas"]["Cite"][];
             hold_reason?: components["schemas"]["HoldReason"];
             hold_detail?: string;
+            review?: components["schemas"]["Review"];
             outbox?: components["schemas"]["Outgoing"];
             /** Format: date-time */
             created_at: string;
@@ -3186,6 +3236,10 @@ export interface components {
             submitted_by: components["schemas"]["Actor"];
             approved_by?: components["schemas"]["Actor"];
             /** Format: date-time */
+            hold_until?: string;
+            review?: components["schemas"]["Review"];
+            withdrawn_by?: components["schemas"]["Actor"];
+            /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             next_retry_at?: string;
@@ -3411,6 +3465,35 @@ export interface components {
             reverted: number;
             superseded: number;
         };
+        Review: {
+            checks: components["schemas"]["ReviewCheck"][];
+        };
+        ReviewCheck: {
+            name: components["schemas"]["CheckName"];
+            pass: boolean;
+            detail: string;
+            recipients?: string[];
+            extracted?: components["schemas"]["ReviewExtracted"][];
+            refs?: components["schemas"]["ReviewRef"][];
+            links?: components["schemas"]["ReviewLink"][];
+            unreadable?: string[];
+        };
+        ReviewExtracted: {
+            kind: components["schemas"]["ExtractionKind"];
+            message_id: string;
+            source: components["schemas"]["ExtractionSource"];
+            where: string;
+        };
+        ReviewLink: {
+            host: string;
+            where: string;
+            domain?: string;
+        };
+        ReviewRef: {
+            as: string;
+            where: string;
+            message_id?: string;
+        };
         Rule: {
             id: string;
             name: string;
@@ -3551,6 +3634,7 @@ export interface components {
             sends: boolean;
             hold_reason?: components["schemas"]["HoldReason"];
             hold_detail?: string;
+            hold_seconds?: number;
         };
         Sent: {
             outbox_id: string;
@@ -3584,11 +3668,22 @@ export interface components {
             quoted_lines?: number;
         };
         SubmitResult: {
+            state: components["schemas"]["SubmitState"];
             queued: boolean;
             draft_id: string;
             outbox_id?: string;
+            /** Format: date-time */
+            hold_until?: string;
             hold_reason?: components["schemas"]["HoldReason"];
             hold_detail?: string;
+        };
+        /** @enum {string} */
+        SubmitState: "queued" | "held" | "draft";
+        Suspension: {
+            identity_id: string;
+            principal_id: string;
+            recalls: number;
+            withdrawn: string[];
         };
         Thread: {
             id: string;
@@ -3623,6 +3718,11 @@ export interface components {
             level: components["schemas"]["Level"];
             facts: components["schemas"]["Facts"];
             content: components["schemas"]["Content"];
+        };
+        Withdrawal: {
+            outbox_id: string;
+            draft_id: string;
+            suspended?: components["schemas"]["Suspension"];
         };
         /** @enum {string} */
         WriterRank: "rule" | "agent" | "person";

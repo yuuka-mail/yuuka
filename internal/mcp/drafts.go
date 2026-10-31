@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/yuuka-mail/yuuka/internal/agentview"
 	"github.com/yuuka-mail/yuuka/internal/auth"
@@ -39,9 +40,13 @@ type Identity struct {
 	// Sends: a submission goes out without a person, within
 	// RecipientScope and the limits. Otherwise every submission is held
 	// as a draft for a person, and HoldReason says why.
-	Sends          bool   `json:"sends"`
-	HoldReason     string `json:"hold_reason,omitempty"`
-	HoldDetail     string `json:"hold_detail,omitempty"`
+	Sends      bool   `json:"sends"`
+	HoldReason string `json:"hold_reason,omitempty"`
+	HoldDetail string `json:"hold_detail,omitempty"`
+	// HoldSeconds is the recall window under review (hold_reason
+	// review): mail the checks pass is sent this long after submission
+	// unless a person recalls it.
+	HoldSeconds    *int   `json:"hold_seconds,omitempty"`
 	RecipientScope string `json:"recipient_scope"`
 }
 
@@ -65,6 +70,9 @@ func (s *Server) listIdentities(ctx context.Context, v *auth.Viewer, _ Identitie
 			Address: st.Identity.Address(), Own: st.Identity.OwnerID == v.PrincipalID, Tier: string(st.Tier),
 			Sends: st.Hold == "", HoldReason: string(st.Hold), HoldDetail: st.HoldDetail,
 			RecipientScope: string(st.Grant.RecipientScope),
+		}
+		if st.Tier == sendpolicy.Review && st.Hold == sendpolicy.HoldReview {
+			id.HoldSeconds = &st.HoldSeconds
 		}
 		out.Identities = append(out.Identities, id)
 		fmt.Fprintf(&b, "%s · tier %s · recipients %s · %s\n", id.Address, id.Tier, id.RecipientScope, standing(id.Sends, id.HoldReason, id.HoldDetail))
@@ -263,13 +271,22 @@ type SubmitInput struct {
 
 // SubmitOutput is where a submission went.
 type SubmitOutput struct {
-	// Queued: it is in the outbox and will be sent.
+	// State is queued (it will be sent), held (it passed the review and
+	// is sent at hold_until unless a person recalls it first) or draft
+	// (stopped for a person, with hold_reason).
+	State string `json:"state"`
+	// Queued: state queued.
 	Queued   bool   `json:"queued"`
 	DraftID  string `json:"draft_id"`
 	OutboxID string `json:"outbox_id,omitempty"`
-	// HoldReason and HoldDetail say why it was held as a draft instead.
+	// HoldUntil ends the recall window, in state held.
+	HoldUntil *time.Time `json:"hold_until,omitempty"`
+	// HoldReason and HoldDetail say why it was not sent straight away.
 	HoldReason string `json:"hold_reason,omitempty"`
 	HoldDetail string `json:"hold_detail,omitempty"`
+	// FailedChecks are the review checks that escalated it to a person
+	// (hold_reason review, state draft).
+	FailedChecks []string `json:"failed_checks,omitempty"`
 }
 
 func (s *Server) submitDraft(ctx context.Context, v *auth.Viewer, in SubmitInput) (result, error) {
@@ -277,14 +294,63 @@ func (s *Server) submitDraft(ctx context.Context, v *auth.Viewer, in SubmitInput
 	if err != nil {
 		return result{}, draftErr(err)
 	}
-	out := SubmitOutput{Queued: res.Queued, DraftID: in.DraftID, OutboxID: res.OutboxID, HoldReason: res.HoldReason, HoldDetail: res.Detail}
-	text := fmt.Sprintf("Queued for sending as outbox %s. Nothing more to do.\n", out.OutboxID)
-	if !out.Queued {
-		text = fmt.Sprintf("Not sent: held as draft %s (%s): %s\nThis is a normal result, not an error: a person reviews held drafts. "+
-			"Do not try to send it another way.\n", out.DraftID, out.HoldReason, out.HoldDetail)
+	out := SubmitOutput{
+		State: "draft", Queued: res.Queued, DraftID: in.DraftID, OutboxID: res.OutboxID, HoldReason: res.HoldReason, HoldDetail: res.Detail,
 	}
-	audit := map[string]any{"queued": out.Queued, "outbox_id": out.OutboxID, "hold_reason": out.HoldReason}
+	var text string
+	switch {
+	case res.Queued:
+		out.State = "queued"
+		text = fmt.Sprintf("Queued for sending as outbox %s. Nothing more to do.\n", out.OutboxID)
+	case res.Held:
+		out.State = "held"
+		// The window was set by the database's clock: read it back.
+		if e, err := s.db.OutboxByID(ctx, v, res.OutboxID); err == nil {
+			out.HoldUntil = e.HoldUntil
+		} else if !errors.Is(err, store.ErrNotFound) {
+			return result{}, err
+		}
+		when := "the end of its recall window"
+		if out.HoldUntil != nil {
+			when = out.HoldUntil.UTC().Format(time.RFC3339)
+		}
+		text = fmt.Sprintf("Passed review; goes out at %s unless recalled. It waits as outbox %s until then. Nothing more to do.\n",
+			when, out.OutboxID)
+	default:
+		if res.HoldReason == string(sendpolicy.HoldReview) {
+			if out.FailedChecks, err = s.failedChecks(ctx, v, in.DraftID); err != nil {
+				return result{}, err
+			}
+		}
+		var failed string
+		if len(out.FailedChecks) > 0 {
+			failed = "Review checks that did not pass: " + strings.Join(out.FailedChecks, ", ") + ".\n"
+		}
+		text = fmt.Sprintf("Not sent: held as draft %s (%s): %s\n%sThis is a normal result, not an error: a person reviews held drafts. "+
+			"Do not try to send it another way.\n", out.DraftID, out.HoldReason, out.HoldDetail, failed)
+	}
+	audit := map[string]any{"queued": out.Queued, "state": out.State, "outbox_id": out.OutboxID, "hold_reason": out.HoldReason}
 	return result{structured: out, text: text, audit: audit}, nil
+}
+
+// failedChecks names the checks of the verdict stored on draft id that
+// did not pass, in their order.
+func (s *Server) failedChecks(ctx context.Context, v *auth.Viewer, id string) ([]string, error) {
+	d, err := s.db.DraftByID(ctx, v, id)
+	if err != nil {
+		return nil, err
+	}
+	var verdict sendpolicy.Verdict
+	if len(d.Review) == 0 || json.Unmarshal(d.Review, &verdict) != nil {
+		return nil, nil
+	}
+	var out []string
+	for _, c := range verdict.Checks {
+		if !c.Pass {
+			out = append(out, c.Name)
+		}
+	}
+	return out, nil
 }
 
 // draftErr turns the store's and the core's refusals into answers the

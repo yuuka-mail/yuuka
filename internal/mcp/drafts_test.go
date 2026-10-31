@@ -172,6 +172,56 @@ func TestDraftTools(t *testing.T) {
 	}
 }
 
+// Under review, mail the checks pass is held with the end of its recall
+// window in the result; mail they escalate stays a draft, and the result
+// names the checks that failed.
+func TestSubmitDraftReview(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	e.sending()
+	if _, err := e.pool.Exec(t.Context(), `INSERT INTO identity_grants (identity_id, principal_id, send_policy, recipient_scope)
+		SELECT id, $1, 'review', 'any' FROM identities WHERE prefix = 'arisu'`, e.agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	op, err := e.db.PrincipalByName(t.Context(), "human", "operator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opc := e.client(&auth.Viewer{PrincipalID: op.ID, PrincipalKind: "human", PrincipalName: "operator", Scopes: auth.AllScopes})
+	known := structured[mcp.DraftOutput](t, callTool(t, opc, "create_draft", map[string]any{"from": "me@example.com", "to": []string{"bob@example.net"}}))
+	if res := structured[mcp.SubmitOutput](t, callTool(t, opc, "submit_draft", map[string]any{"draft_id": known.DraftID})); res.State != "queued" {
+		t.Fatalf("operator: %+v", res)
+	}
+
+	cs := e.client(e.viewer(auth.MessageRead, auth.DraftCreate, auth.SubmissionSend))
+	for _, i := range structured[mcp.IdentitiesOutput](t, callTool(t, cs, "list_identities", nil)).Identities {
+		if i.Own && (i.HoldSeconds == nil || *i.HoldSeconds != 600) {
+			t.Errorf("own identity: %+v", i)
+		}
+	}
+	submit := func(to string) call {
+		d := structured[mcp.DraftOutput](t, callTool(t, cs, "create_draft", map[string]any{
+			"from": "arisu@example.com", "to": []string{to}, "body_markdown": "See you at noon.",
+		}))
+		return callTool(t, cs, "submit_draft", map[string]any{"draft_id": d.DraftID})
+	}
+
+	r := submit("bob@example.net")
+	res := structured[mcp.SubmitOutput](t, r)
+	if res.State != "held" || res.Queued || res.OutboxID == "" || res.HoldUntil == nil ||
+		!strings.Contains(r.text, "Passed review; goes out at "+res.HoldUntil.UTC().Format(time.RFC3339)+" unless recalled") {
+		t.Errorf("held: %+v\n%s", res, r.text)
+	}
+
+	r = submit("carol@example.org")
+	res = structured[mcp.SubmitOutput](t, r)
+	if res.State != "draft" || res.HoldReason != "review" || res.HoldUntil != nil || len(res.FailedChecks) != 1 ||
+		res.FailedChecks[0] != "first_contact" || !strings.Contains(r.text, "did not pass: first_contact.") ||
+		!strings.Contains(r.text, "not an error") {
+		t.Errorf("escalated: %+v\n%s", res, r.text)
+	}
+}
+
 // The operator's own submission through the same tool is queued.
 func TestSubmitDraftQueued(t *testing.T) {
 	t.Parallel()

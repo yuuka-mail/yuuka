@@ -168,6 +168,36 @@ func draftOut(d store.Draft) Draft {
 		out.State, out.Outbox = "outbox", &Outgoing{OutboxID: d.OutboxID, State: OutboxState(d.OutboxState)}
 	case d.HoldReason != "":
 		out.State, out.HoldReason, out.HoldDetail = "held", HoldReason(d.HoldReason), d.HoldDetail
+		out.Review = reviewOut(d.Review)
+	}
+	return out
+}
+
+// reviewOut is a stored verdict (sendpolicy.Verdict as JSON), nil for
+// none. The verdict holds where a code or link of incoming mail was
+// found, never the value, and Review has no field for one either.
+func reviewOut(raw json.RawMessage) *Review {
+	var v sendpolicy.Verdict
+	if len(raw) == 0 || json.Unmarshal(raw, &v) != nil {
+		return nil
+	}
+	out := &Review{Checks: make([]ReviewCheck, len(v.Checks))}
+	for i, c := range v.Checks {
+		rc := ReviewCheck{
+			Name: CheckName(c.Name), Pass: c.Pass, Detail: c.Detail, Recipients: c.Recipients, Unreadable: c.Unreadable,
+		}
+		for _, x := range c.Extracted {
+			rc.Extracted = append(rc.Extracted, ReviewExtracted{
+				Kind: agentview.ExtractionKind(x.Kind), MessageID: x.MessageID, Source: agentview.ExtractionSource(x.Source), Where: x.Where,
+			})
+		}
+		for _, r := range c.Refs {
+			rc.Refs = append(rc.Refs, ReviewRef{As: r.As, Where: r.Where, MessageID: r.MessageID})
+		}
+		for _, l := range c.Links {
+			rc.Links = append(rc.Links, ReviewLink{Host: l.Host, Where: l.Where, Domain: l.Domain})
+		}
+		out.Checks[i] = rc
 	}
 	return out
 }
@@ -179,10 +209,28 @@ func (a *API) submitDraft(ctx context.Context, v *auth.Viewer, p IDParams) (Subm
 	if err != nil {
 		return SubmitResult{}, err
 	}
-	return SubmitResult{
-		Queued: res.Queued, DraftID: p.ID, OutboxID: res.OutboxID,
+	out := SubmitResult{
+		State: "draft", Queued: res.Queued, DraftID: p.ID, OutboxID: res.OutboxID,
 		HoldReason: HoldReason(res.HoldReason), HoldDetail: res.Detail,
-	}, nil
+	}
+	switch {
+	case res.Queued:
+		out.State = "queued"
+	case res.Held:
+		// The window was set by the database's clock: read it back
+		// rather than add HoldSeconds to this one's. The submission has
+		// committed, so a row the viewer cannot read back (an account it
+		// may not read) leaves hold_until out rather than failing it.
+		out.State = "held"
+		e, err := a.db.OutboxByID(ctx, v, res.OutboxID)
+		switch {
+		case err == nil:
+			out.HoldUntil = e.HoldUntil
+		case !errors.Is(err, store.ErrNotFound):
+			return SubmitResult{}, err
+		}
+	}
+	return out, nil
 }
 
 func (a *API) identities(ctx context.Context, v *auth.Viewer, _ struct{}) (IdentityList, error) {
@@ -225,8 +273,13 @@ func (a *API) replyIdentities(ctx context.Context, v *auth.Viewer, p IDParams) (
 
 func sendingIdentity(s store.Standing) SendingIdentity {
 	i, g := s.Identity, s.Grant
+	var hold *int
+	if s.Tier == sendpolicy.Review && s.Hold == sendpolicy.HoldReview {
+		hold = &s.HoldSeconds
+	}
 	return SendingIdentity{
-		ID: i.ID, Address: i.Address(), DisplayName: i.DisplayName,
+		HoldSeconds: hold,
+		ID:          i.ID, Address: i.Address(), DisplayName: i.DisplayName,
 		Owner: Actor{ID: i.OwnerID, Kind: i.OwnerKind, Name: i.OwnerName},
 		Tier:  Tier(s.Tier), Granted: s.Granted, OwnerCapped: s.Capped,
 		RecipientScope: RecipientScope(g.RecipientScope), Allowlist: nonNil(g.Allowlist),
@@ -296,6 +349,37 @@ func (a *API) resolveOutbox(ctx context.Context, v *auth.Viewer, p ResolveParams
 	return outboxOut(e), nil
 }
 
+// withdrawOutbox recalls held mail during its recall window (§8.9): it
+// will not be sent, and its draft can be edited and submitted again.
+// People may recall any row they can see, agents and services only what
+// they submitted. It is the only thing this API does to held mail:
+// nothing here releases it or shortens its window.
+func (a *API) withdrawOutbox(ctx context.Context, v *auth.Viewer, p IDParams) (Withdrawal, error) {
+	w, err := a.db.WithdrawOutbox(ctx, v, p.ID, map[string]any{"via": "rest"}, time.Now())
+	if errors.Is(err, store.ErrOutboxState) {
+		e, err := a.db.OutboxByID(ctx, v, p.ID)
+		if err != nil {
+			return Withdrawal{}, err
+		}
+		if e.State == store.OutboxWithdrawn {
+			return Withdrawal{}, openapi.Errorf(http.StatusConflict, openapi.CodeConflict, "already withdrawn")
+		}
+		return Withdrawal{}, openapi.Errorf(http.StatusConflict, openapi.CodeConflict,
+			"already released (it is %s): only held mail can be withdrawn", e.State)
+	}
+	if err != nil {
+		return Withdrawal{}, err
+	}
+	out := Withdrawal{OutboxID: w.OutboxID, DraftID: w.DraftID}
+	if s := w.Suspended; s != nil {
+		out.Suspended = &Suspension{IdentityID: s.IdentityID, PrincipalID: s.PrincipalID, Recalls: s.Recalls, Withdrawn: nonNil(s.Withdrawn)}
+		if a.suspended != nil {
+			a.suspended.Suspended(ctx, *s)
+		}
+	}
+	return out, nil
+}
+
 func outboxOut(e store.OutboxEntry) OutboxEntry {
 	out := OutboxEntry{
 		ID: e.ID, State: OutboxState(e.State), Identity: e.Identity, IdentityID: e.IdentityID, From: e.FromAddr,
@@ -308,6 +392,10 @@ func outboxOut(e store.OutboxEntry) OutboxEntry {
 	if e.ApprovedBy.ID != "" {
 		out.ApprovedBy = &Actor{ID: e.ApprovedBy.ID, Kind: e.ApprovedBy.Kind, Name: e.ApprovedBy.Name}
 	}
+	if e.WithdrawnBy.ID != "" {
+		out.WithdrawnBy = &Actor{ID: e.WithdrawnBy.ID, Kind: e.WithdrawnBy.Kind, Name: e.WithdrawnBy.Name}
+	}
+	out.HoldUntil, out.Review = e.HoldUntil, reviewOut(e.Review)
 	for i, r := range e.Recipients {
 		out.Recipients[i] = OutboxRecipient{Addr: r.Addr, Kind: RecipientKind(r.Kind), State: RecipientState(r.State)}
 	}

@@ -426,6 +426,16 @@
         ],
         "additionalProperties": false
       },
+      "CheckName": {
+        "type": "string",
+        "enum": [
+          "first_contact",
+          "extracted_values",
+          "cross_thread",
+          "link_domains",
+          "readable"
+        ]
+      },
       "Cite": {
         "type": "object",
         "properties": {
@@ -726,6 +736,9 @@
           },
           "hold_detail": {
             "type": "string"
+          },
+          "review": {
+            "$ref": "#/components/schemas/Review"
           },
           "outbox": {
             "$ref": "#/components/schemas/Outgoing"
@@ -1757,6 +1770,16 @@
           "approved_by": {
             "$ref": "#/components/schemas/Actor"
           },
+          "hold_until": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "review": {
+            "$ref": "#/components/schemas/Review"
+          },
+          "withdrawn_by": {
+            "$ref": "#/components/schemas/Actor"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -2572,6 +2595,133 @@
         ],
         "additionalProperties": false
       },
+      "Review": {
+        "type": "object",
+        "properties": {
+          "checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewCheck"
+            }
+          }
+        },
+        "required": [
+          "checks"
+        ],
+        "additionalProperties": false
+      },
+      "ReviewCheck": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "$ref": "#/components/schemas/CheckName"
+          },
+          "pass": {
+            "type": "boolean"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "extracted": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewExtracted"
+            }
+          },
+          "refs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewRef"
+            }
+          },
+          "links": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReviewLink"
+            }
+          },
+          "unreadable": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "name",
+          "pass",
+          "detail"
+        ],
+        "additionalProperties": false
+      },
+      "ReviewExtracted": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ExtractionKind"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ExtractionSource"
+          },
+          "where": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "message_id",
+          "source",
+          "where"
+        ],
+        "additionalProperties": false
+      },
+      "ReviewLink": {
+        "type": "object",
+        "properties": {
+          "host": {
+            "type": "string"
+          },
+          "where": {
+            "type": "string"
+          },
+          "domain": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "host",
+          "where"
+        ],
+        "additionalProperties": false
+      },
+      "ReviewRef": {
+        "type": "object",
+        "properties": {
+          "as": {
+            "type": "string"
+          },
+          "where": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "as",
+          "where"
+        ],
+        "additionalProperties": false
+      },
       "Rule": {
         "type": "object",
         "properties": {
@@ -3055,6 +3205,9 @@
           },
           "hold_detail": {
             "type": "string"
+          },
+          "hold_seconds": {
+            "type": "integer"
           }
         },
         "required": [
@@ -3193,6 +3346,9 @@
       "SubmitResult": {
         "type": "object",
         "properties": {
+          "state": {
+            "$ref": "#/components/schemas/SubmitState"
+          },
           "queued": {
             "type": "boolean"
           },
@@ -3202,6 +3358,10 @@
           "outbox_id": {
             "type": "string"
           },
+          "hold_until": {
+            "type": "string",
+            "format": "date-time"
+          },
           "hold_reason": {
             "$ref": "#/components/schemas/HoldReason"
           },
@@ -3210,8 +3370,44 @@
           }
         },
         "required": [
+          "state",
           "queued",
           "draft_id"
+        ],
+        "additionalProperties": false
+      },
+      "SubmitState": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "held",
+          "draft"
+        ]
+      },
+      "Suspension": {
+        "type": "object",
+        "properties": {
+          "identity_id": {
+            "type": "string"
+          },
+          "principal_id": {
+            "type": "string"
+          },
+          "recalls": {
+            "type": "integer"
+          },
+          "withdrawn": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "identity_id",
+          "principal_id",
+          "recalls",
+          "withdrawn"
         ],
         "additionalProperties": false
       },
@@ -3346,6 +3542,25 @@
           "level",
           "facts",
           "content"
+        ],
+        "additionalProperties": false
+      },
+      "Withdrawal": {
+        "type": "object",
+        "properties": {
+          "outbox_id": {
+            "type": "string"
+          },
+          "draft_id": {
+            "type": "string"
+          },
+          "suspended": {
+            "$ref": "#/components/schemas/Suspension"
+          }
+        },
+        "required": [
+          "outbox_id",
+          "draft_id"
         ],
         "additionalProperties": false
       },
@@ -4913,6 +5128,55 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OutboxEntry"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/outbox/{id}/withdraw": {
+      "post": {
+        "summary": "Withdraw held mail during its recall window, back to its draft (§8.9); agents and services only their own",
+        "security": [
+          {
+            "bearer": [
+              "submission:send"
+            ]
+          },
+          {
+            "session": [
+              "submission:send"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Withdrawal"
                 }
               }
             }

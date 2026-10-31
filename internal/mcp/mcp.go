@@ -220,10 +220,11 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 			Name:        "submit_draft",
 			InputSchema: input[SubmitInput](),
 			Description: "Submit a draft for sending. The grant on its From identity decides, not you: the result is " +
-				"either queued (it will be sent) or held as a draft for a person with the reason, for example owner " +
-				"(an agent never sends as a person's address), review, limit or recipients. Held is a normal result, " +
-				"not an error: do not try to send it another way. Needs draft:create; a credential without " +
-				"submission:send has every draft held.",
+				"queued (it will be sent), held (it passed the review and goes out at hold_until unless a person " +
+				"recalls it), or a draft for a person with the reason, for example owner " +
+				"(an agent never sends as a person's address), review (with the checks that failed), limit or recipients. " +
+				"A draft is a normal result, not an error: do not try to send it another way. Needs draft:create; " +
+				"a credential without submission:send has every draft held.",
 			Annotations: &sdk.ToolAnnotations{OpenWorldHint: new(true)},
 		}, tool(s, viewerOf, "submit_draft", auth.DraftCreate, s.submitDraft))
 	}
