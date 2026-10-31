@@ -184,6 +184,10 @@ func ParseOrigin(s string) (origin, host string, err error) {
 // token (kind token) to a Viewer. Errors wrap ErrUnauthenticated unless
 // the database failed.
 func (s *Service) Authenticate(ctx context.Context, kind, text string) (*auth.Viewer, error) {
+	return authenticate(ctx, s.db, s.log, s.now(), kind, text)
+}
+
+func authenticate(ctx context.Context, db *store.DB, log *slog.Logger, now time.Time, kind, text string) (*auth.Viewer, error) {
 	prefix := auth.PrefixToken
 	if kind == auth.KindSession {
 		prefix = auth.PrefixSession
@@ -192,14 +196,13 @@ func (s *Service) Authenticate(ctx context.Context, kind, text string) (*auth.Vi
 	if !ok {
 		return nil, ErrUnauthenticated
 	}
-	c, err := s.db.CredentialForAuth(ctx, id)
+	c, err := db.CredentialForAuth(ctx, id)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, ErrUnauthenticated
 	}
 	if err != nil {
 		return nil, err
 	}
-	now := s.now()
 	// The secret is checked first so that a caller who only knows an id
 	// learns nothing about the credential's state.
 	switch {
@@ -218,8 +221,8 @@ func (s *Service) Authenticate(ctx context.Context, kind, text string) (*auth.Vi
 	if err != nil {
 		return nil, fmt.Errorf("credential %s: %w", c.ID, err)
 	}
-	if err := s.db.TouchCredential(ctx, c.ID, now); err != nil {
-		s.log.Warn("auth: cannot record credential use", "credential", c.ID, "err", err)
+	if err := db.TouchCredential(ctx, c.ID, now); err != nil {
+		log.Warn("auth: cannot record credential use", "credential", c.ID, "err", err)
 	}
 	return &auth.Viewer{
 		PrincipalID:    c.PrincipalID,

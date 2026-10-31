@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -484,6 +485,41 @@ func TestBearerScopes(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.want(h.do(http.MethodGet, "/test/read", nil, bearer), http.StatusUnauthorized)
+}
+
+// Bearer authenticates tokens without a WebUI origin and never accepts a
+// session secret in their place.
+func TestBearer(t *testing.T) {
+	t.Parallel()
+	h, _, session := enrolled(t)
+	agent, err := h.db.EnsurePrincipal(t.Context(), store.Principal{ID: "01M67SX66B38NKRKAYDXR834N4", Kind: "agent", Name: "arisu", DisplayName: "arisu", CreatedAt: h.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := h.svc.IssueToken(t.Context(), TokenRequest{PrincipalID: agent.ID, Scopes: []auth.Scope{auth.MessageRead}, IssuedBy: store.SystemPrincipalID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := NewBearer(h.db, slog.New(slog.NewTextHandler(io.Discard, nil)), func() time.Time { return h.now })
+	v, err := b.Authenticate(t.Context(), tok, "test")
+	if err != nil || v.String() != "agent:arisu" || !v.Has(auth.MessageRead) {
+		t.Fatalf("token: %v %v", v, err)
+	}
+	for _, bad := range []string{"", "nonsense", session.Value} {
+		if _, err := b.Authenticate(t.Context(), bad, "test"); !errors.Is(err, ErrUnauthenticated) {
+			t.Errorf("%q: %v", bad, err)
+		}
+	}
+	id, _, _ := auth.ParseSecret(auth.PrefixToken, tok)
+	if err := h.svc.Revoke(t.Context(), &auth.Viewer{PrincipalID: store.SystemPrincipalID}, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Authenticate(t.Context(), tok, "test"); !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("revoked: %v", err)
+	}
+	if h.count(`SELECT count(*) FROM actions WHERE tool = 'auth.reject' AND credential_id = $1 AND args->>'via' = 'test'`, id) != 1 {
+		t.Error("rejection not recorded")
+	}
 }
 
 func TestSessionAddsPasskey(t *testing.T) {
