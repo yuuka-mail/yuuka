@@ -194,23 +194,22 @@ func managedGrant(g store.Grant) ManagedGrant {
 			Limits:      Limits{MaxPerHour: g.MaxPerHour, MaxPerDay: g.MaxPerDay, MaxNewRecipientsPerDay: g.MaxNewRecipientsPerDay},
 			HoldSeconds: g.HoldSeconds, SuspendedAt: g.SuspendedAt,
 		},
-		Applied:     appliedGrant(g.Applied(), g.Hold()),
-		OwnerCapped: sendpolicy.OwnerCapped(g.PrincipalID, sendpolicy.Identity{OwnerID: g.IdentityOwnerID, OwnerKind: g.IdentityOwnerKind}),
-		// Without the row the column default's recall window applies.
-		Default:       appliedGrant(g.Default(), store.Grant{}.Hold()),
+		Applied:       appliedGrant(g.Applied()),
+		OwnerCapped:   sendpolicy.OwnerCapped(g.PrincipalID, sendpolicy.Identity{OwnerID: g.IdentityOwnerID, OwnerKind: g.IdentityOwnerKind}),
+		Default:       appliedGrant(g.Default()),
 		RemovalWidens: nonNil(g.RemovalWidenings()),
 		CreatedAt:     g.CreatedAt,
 		Host:          grantCommand("set", g),
 	}
 }
 
-func appliedGrant(g sendpolicy.Grant, hold int) AppliedGrant {
+func appliedGrant(g sendpolicy.Grant) AppliedGrant {
 	return AppliedGrant{
 		SendPolicy: Tier(g.Policy), RecipientScope: RecipientScope(g.RecipientScope), Allowlist: nonNil(g.Allowlist),
 		Limits: Limits{
 			MaxPerHour: g.Limits.MaxPerHour, MaxPerDay: g.Limits.MaxPerDay, MaxNewRecipientsPerDay: g.Limits.MaxNewRecipientsPerDay,
 		},
-		HoldSeconds: hold, Suspended: g.Suspended,
+		HoldSeconds: sendpolicy.EffectiveHoldSeconds(g.HoldSeconds), Suspended: g.Suspended,
 	}
 }
 
@@ -219,7 +218,7 @@ func (a *API) tightenGrant(ctx context.Context, v *auth.Viewer, p TightenParams)
 	t := store.GrantTightening{
 		Allowlist:  b.Allowlist,
 		MaxPerHour: b.MaxPerHour, MaxPerDay: b.MaxPerDay, MaxNewRecipientsPerDay: b.MaxNewRecipientsPerDay,
-		Suspended: b.Suspended,
+		HoldSeconds: b.HoldSeconds, Suspended: b.Suspended,
 	}
 	if b.SendPolicy != nil {
 		t.Policy = new(sendpolicy.Tier(*b.SendPolicy))
@@ -282,6 +281,8 @@ func hostFlags(fields []string, b TightenBody) string {
 			limit("--max-per-day", b.MaxPerDay)
 		case sendpolicy.FieldMaxNewRecipientsPerDay:
 			limit("--max-new-recipients-per-day", b.MaxNewRecipientsPerDay)
+		case sendpolicy.FieldHoldSeconds:
+			limit("--hold-seconds", b.HoldSeconds)
 		case sendpolicy.FieldSuspended:
 			out = append(out, "--resume")
 		}

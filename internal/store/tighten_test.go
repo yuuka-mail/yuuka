@@ -62,6 +62,8 @@ func TestTightenGrant(t *testing.T) {
 		{"limit above the default", store.GrantTightening{MaxPerHour: num(11)}, []string{"max_per_hour"}},
 		{"limit above its own", store.GrantTightening{MaxPerDay: num(21)}, []string{"max_per_day"}},
 		{"new recipients above the default", store.GrantTightening{MaxNewRecipientsPerDay: num(6)}, []string{"max_new_recipients_per_day"}},
+		{"a recall window below the default", store.GrantTightening{HoldSeconds: num(599)}, []string{"hold_seconds"}},
+		{"no recall window", store.GrantTightening{HoldSeconds: num(0)}, []string{"hold_seconds"}},
 		{"tighter tier, wider scope", store.GrantTightening{Policy: tier("draft"), RecipientScope: scope("any")}, []string{"recipient_scope"}},
 		{"not suspended, already not", store.GrantTightening{Suspended: no}, nil},
 	} {
@@ -168,6 +170,7 @@ func TestRemoveGrantIfTighter(t *testing.T) {
 		return e.db.RemoveGrantIfTighter(ctx, identity.ID, principal, e.act("grant.remove"))
 	}
 	arisu, monitor := e.arisu.PrincipalID, e.monitor.PrincipalID
+	num := func(n int) *int { return &n }
 
 	for _, tc := range []struct {
 		name     string
@@ -178,7 +181,9 @@ func TestRemoveGrantIfTighter(t *testing.T) {
 	}{
 		// arisu's own identity defaults to review + thread.
 		{"own identity, draft row", e.arisuID, store.Grant{PrincipalID: arisu, Policy: "draft", RecipientScope: "thread"}, []string{"send_policy"}, ""},
-		{"own identity, review row with a recall window", e.arisuID, store.Grant{PrincipalID: arisu, Policy: "review", RecipientScope: "thread", HoldSeconds: 60}, []string{"hold_seconds"}, ""},
+		{"own identity, review row with a longer recall window", e.arisuID, store.Grant{PrincipalID: arisu, Policy: "review", RecipientScope: "thread", HoldSeconds: num(1200)}, []string{"hold_seconds"}, ""},
+		{"own identity, review row with a shorter recall window", e.arisuID, store.Grant{PrincipalID: arisu, Policy: "review", RecipientScope: "thread", HoldSeconds: num(60)}, nil, "review"},
+		{"own identity, auto row with a long window that never acts", e.arisuID, store.Grant{PrincipalID: arisu, Policy: "auto", RecipientScope: "any", HoldSeconds: num(3600)}, nil, "review"},
 		{"own identity, suspended auto row", e.arisuID, store.Grant{PrincipalID: arisu, Policy: "auto", RecipientScope: "any", SuspendedAt: &base}, []string{"suspended"}, ""},
 		{"own identity, auto row", e.arisuID, store.Grant{PrincipalID: arisu, Policy: "auto", RecipientScope: "any"}, nil, "review"},
 		// On the operator's identity arisu defaults to draft.

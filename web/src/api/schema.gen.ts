@@ -3468,7 +3468,7 @@ export interface components {
             recipient_scope: components["schemas"]["RecipientScope"];
             allowlist: string[];
             limits: components["schemas"]["Limits"];
-            hold_seconds: number;
+            hold_seconds?: number;
             /** Format: date-time */
             suspended_at?: string;
         };
@@ -3505,6 +3505,7 @@ export interface components {
             max_per_hour?: number;
             max_per_day?: number;
             max_new_recipients_per_day?: number;
+            hold_seconds?: number;
             suspended?: boolean;
         };
         UndoResult: {

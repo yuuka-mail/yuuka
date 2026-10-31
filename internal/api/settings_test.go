@@ -234,11 +234,18 @@ func TestSettings(t *testing.T) {
 	refused(send(http.MethodPost, grantPath+"/tighten", `{"allowlist":["example.org","b@example.net"]}`), base+" --allow example.org,b@example.net")
 	refused(send(http.MethodPost, grantPath+"/tighten", `{"max_per_hour":4,"max_per_day":21}`), base+" --max-per-hour 4 --max-per-day 21")
 	refused(send(http.MethodPost, grantPath+"/tighten", `{"max_new_recipients_per_day":6}`), base+" --max-new-recipients-per-day 6")
+	// A longer recall window is tighter; a shorter one is the host's.
+	refused(send(http.MethodPost, grantPath+"/tighten", `{"hold_seconds":599}`), base+" --hold-seconds 599")
+	if w := send(http.MethodPost, grantPath+"/tighten", `{"hold_seconds":900}`); w.Code != http.StatusOK ||
+		decode[ManagedGrant](t, w).Applied.HoldSeconds != 900 {
+		t.Errorf("a longer recall window: %d %s", w.Code, w.Body.String())
+	}
+	refused(send(http.MethodPost, grantPath+"/tighten", `{"hold_seconds":600}`), base+" --hold-seconds 600")
 	if w := send(http.MethodPost, grantPath+"/tighten", `{"suspended":true}`); w.Code != http.StatusOK || !decode[ManagedGrant](t, w).Applied.Suspended {
 		t.Errorf("suspend: %d %s", w.Code, w.Body.String())
 	}
 	refused(send(http.MethodPost, grantPath+"/tighten", `{"suspended":false}`), base+" --resume")
-	for _, body := range []string{`{"max_per_hour":-1}`, `{"send_policy":"sometimes"}`, `{"hold_seconds":600}`} {
+	for _, body := range []string{`{"max_per_hour":-1}`, `{"send_policy":"sometimes"}`, `{"hold_seconds":-1}`, `{"suspend":true}`} {
 		if w := send(http.MethodPost, grantPath+"/tighten", body); w.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d %s", body, w.Code, w.Body.String())
 		}

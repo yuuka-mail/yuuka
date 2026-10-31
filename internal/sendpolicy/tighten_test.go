@@ -100,6 +100,10 @@ func TestWidenings(t *testing.T) {
 		{"limit: none", func(g *Grant) { g.Limits.MaxPerDay = nil }, []string{FieldMaxPerDay}},
 		{"limit: new recipients higher", func(g *Grant) { g.Limits.MaxNewRecipientsPerDay = n(6) }, []string{FieldMaxNewRecipientsPerDay}},
 		{"suspended", func(g *Grant) { g.Suspended = true }, nil},
+		{"recall window: the default written out", func(g *Grant) { g.HoldSeconds = n(DefaultHoldSeconds) }, nil},
+		{"recall window: longer", func(g *Grant) { g.HoldSeconds = n(DefaultHoldSeconds + 1) }, nil},
+		{"recall window: shorter", func(g *Grant) { g.HoldSeconds = n(DefaultHoldSeconds - 1) }, []string{FieldHoldSeconds}},
+		{"recall window: none", func(g *Grant) { g.HoldSeconds = n(0) }, []string{FieldHoldSeconds}},
 		{
 			"everything at once",
 			func(g *Grant) {
@@ -184,7 +188,8 @@ func TestRemovalWidenings(t *testing.T) {
 		},
 		// The owner's default is auto + any without limits.
 		{"the owner, row auto any", Input{Submitter: humanP, Identity: operatorID, Grant: grant(Auto, ScopeAny)}, nil},
-		{"the owner, row review", Input{Submitter: humanP, Identity: operatorID, Grant: grant(Review, ScopeAny)}, []string{FieldPolicy}},
+		// auto has no recall window: the default's 0 is shorter than review's.
+		{"the owner, row review", Input{Submitter: humanP, Identity: operatorID, Grant: grant(Review, ScopeAny)}, []string{FieldPolicy, FieldHoldSeconds}},
 		{"the owner, row auto thread", Input{Submitter: humanP, Identity: operatorID, Grant: grant(Auto, ScopeThread)}, []string{FieldRecipientScope}},
 		{
 			"the owner, row with a limit",

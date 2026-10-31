@@ -19,8 +19,8 @@ import (
 // AddIdentity), which writes through the same functions underneath.
 
 // WideningError refuses a tightening that would let more through in
-// Fields (the identity_grants columns, sendpolicy.Field*, and
-// hold_seconds); Current is the grant as it stands.
+// Fields (the identity_grants columns, sendpolicy.Field*); Current is
+// the grant as it stands.
 type WideningError struct {
 	Fields  []string
 	Current Grant
@@ -47,36 +47,23 @@ type GrantTightening struct {
 	MaxPerHour             *int
 	MaxPerDay              *int
 	MaxNewRecipientsPerDay *int
-	Suspended              *bool
+	// HoldSeconds is a recall window of its own, at least the one that
+	// applies now (sendpolicy.EffectiveHoldSeconds).
+	HoldSeconds *int
+	Suspended   *bool
 }
-
-// defaultHoldSeconds is identity_grants.hold_seconds' default (0003): the
-// recall window of a review grant without a row.
-const defaultHoldSeconds = 0
-
-// Hold is the recall window g keeps mail in at the review tier.
-func (g Grant) Hold() int { return g.HoldSeconds }
 
 // RemovalWidenings lists what removing g would let through that g does
 // not, none when removing it is a tightening: what applies without the
-// row (Default) against the row (sendpolicy.RemovalWidenings), and at
-// review on both, a shorter recall window. Nothing sends as a disabled
-// identity, with or without its grants, so removing one never widens.
+// row (Default) against the row (sendpolicy.RemovalWidenings). Nothing
+// sends as a disabled identity, with or without its grants, so removing
+// one never widens.
 func (g Grant) RemovalWidenings() []string {
 	if g.IdentityDisabled {
 		return nil
 	}
-	applied, def := g.Applied(), g.Default()
-	w := sendpolicy.RemovalWidenings(applied, def)
-	if applied.Policy == sendpolicy.Review && def.Policy == sendpolicy.Review && g.Hold() > defaultHoldSeconds {
-		w = append(w, FieldHoldSeconds)
-	}
-	return w
+	return sendpolicy.RemovalWidenings(g.Applied(), g.Default())
 }
-
-// FieldHoldSeconds is the column of the review tier's recall window,
-// named next to sendpolicy's Field*.
-const FieldHoldSeconds = "hold_seconds"
 
 // TightenGrant changes the grant of (identityID, principalID) as t asks,
 // if what results lets nothing more through than the grant does now
@@ -113,7 +100,12 @@ func (db *DB) TightenGrant(ctx context.Context, identityID, principalID string, 
 		for _, l := range []struct {
 			to   **int
 			from *int
-		}{{&next.MaxPerHour, t.MaxPerHour}, {&next.MaxPerDay, t.MaxPerDay}, {&next.MaxNewRecipientsPerDay, t.MaxNewRecipientsPerDay}} {
+		}{
+			{&next.MaxPerHour, t.MaxPerHour},
+			{&next.MaxPerDay, t.MaxPerDay},
+			{&next.MaxNewRecipientsPerDay, t.MaxNewRecipientsPerDay},
+			{&next.HoldSeconds, t.HoldSeconds},
+		} {
 			if l.from != nil {
 				if *l.from < 0 {
 					return fmt.Errorf("a limit of %d: want >= 0", *l.from)
@@ -202,7 +194,7 @@ func lockedGrant(ctx context.Context, tx pgx.Tx, identityID, principalID string)
 func sameGrant(a, b Grant) bool {
 	eq := func(x, y *int) bool { return x == nil && y == nil || x != nil && y != nil && *x == *y }
 	return a.Policy == b.Policy && a.RecipientScope == b.RecipientScope && slices.Equal(a.Allowlist, b.Allowlist) &&
-		eq(a.MaxPerHour, b.MaxPerHour) && eq(a.MaxPerDay, b.MaxPerDay) && eq(a.MaxNewRecipientsPerDay, b.MaxNewRecipientsPerDay) &&
+		eq(a.MaxPerHour, b.MaxPerHour) && eq(a.MaxPerDay, b.MaxPerDay) && eq(a.MaxNewRecipientsPerDay, b.MaxNewRecipientsPerDay) && eq(a.HoldSeconds, b.HoldSeconds) &&
 		(a.SuspendedAt == nil) == (b.SuspendedAt == nil)
 }
 

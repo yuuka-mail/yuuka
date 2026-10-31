@@ -41,6 +41,7 @@ const (
 	FieldMaxPerHour             = "max_per_hour"
 	FieldMaxPerDay              = "max_per_day"
 	FieldMaxNewRecipientsPerDay = "max_new_recipients_per_day"
+	FieldHoldSeconds            = "hold_seconds"
 	FieldSuspended              = "suspended"
 )
 
@@ -58,6 +59,8 @@ const (
 //     whatever the scope, so a later raise of the scope cannot bring
 //     back an entry nobody chose
 //   - each limit: a smaller number; no limit (nil) is above every number
+//   - hold_seconds: a longer recall window (EffectiveHoldSeconds); a
+//     shorter one gives a person less time to recall held mail, 0 none
 //   - suspended: suspended < not suspended
 //
 // Every column is compared, even one that does not act at to's tier: a
@@ -90,6 +93,9 @@ func Widenings(from, to Grant) []string {
 			out = append(out, l.field)
 		}
 	}
+	if EffectiveHoldSeconds(to.HoldSeconds) < EffectiveHoldSeconds(from.HoldSeconds) {
+		out = append(out, FieldHoldSeconds)
+	}
 	if from.Suspended && !to.Suspended {
 		out = append(out, FieldSuspended)
 	}
@@ -100,7 +106,8 @@ func Widenings(from, to Grant) []string {
 // applied, def what applies without it (Applied with no Grant). A
 // default that does not send makes the rest of it moot (Decide stops at
 // the tier), and nothing of it is stored to act later, so only the tier
-// is compared then.
+// is compared then. For the same reason the recall windows compared are
+// the ones that act: a grant's hold at review, none at auto.
 func RemovalWidenings(from, def Grant) []string {
 	if !def.Policy.Sends() {
 		if def.Policy.rank() > from.Policy.rank() {
@@ -108,5 +115,14 @@ func RemovalWidenings(from, def Grant) []string {
 		}
 		return nil
 	}
-	return Widenings(from, def)
+	return Widenings(actingHold(from), actingHold(def))
+}
+
+// actingHold is g with the recall window that acts at its tier: at auto
+// mail goes out at once, whatever hold_seconds says.
+func actingHold(g Grant) Grant {
+	if g.Policy != Review {
+		g.HoldSeconds = ptr(0)
+	}
+	return g
 }

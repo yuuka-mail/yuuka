@@ -142,8 +142,9 @@ type StoredGrant struct {
 	RecipientScope RecipientScope `json:"recipient_scope"`
 	Allowlist      []string       `json:"allowlist"`
 	Limits         Limits         `json:"limits"`
-	HoldSeconds    int            `json:"hold_seconds"`
-	SuspendedAt    *time.Time     `json:"suspended_at,omitempty"`
+	// HoldSeconds is absent where the default recall window applies.
+	HoldSeconds *int       `json:"hold_seconds,omitempty"`
+	SuspendedAt *time.Time `json:"suspended_at,omitempty"`
 }
 
 // AppliedGrant is what a grant lets its principal do: limits resolved
@@ -153,8 +154,9 @@ type AppliedGrant struct {
 	RecipientScope RecipientScope `json:"recipient_scope"`
 	Allowlist      []string       `json:"allowlist"`
 	Limits         Limits         `json:"limits"`
-	HoldSeconds    int            `json:"hold_seconds"`
-	Suspended      bool           `json:"suspended"`
+	// HoldSeconds is the review tier's recall window; 0 is none.
+	HoldSeconds int  `json:"hold_seconds"`
+	Suspended   bool `json:"suspended"`
 }
 
 // ManagedGrant is a grant row as the settings list it.
@@ -199,7 +201,7 @@ type GrantParams struct {
 // send_policy none < draft < review < auto; recipient_scope thread <
 // any and allowlist < any, thread and allowlist not comparable (either
 // into the other widens); allowlist a subset of the current one; a
-// smaller limit; suspended.
+// smaller limit; a longer recall window; suspended.
 type TightenBody struct {
 	SendPolicy     *Tier           `json:"send_policy,omitempty"`
 	RecipientScope *RecipientScope `json:"recipient_scope,omitempty"`
@@ -209,6 +211,10 @@ type TightenBody struct {
 	MaxPerHour             *int     `json:"max_per_hour,omitempty" minimum:"0"`
 	MaxPerDay              *int     `json:"max_per_day,omitempty" minimum:"0"`
 	MaxNewRecipientsPerDay *int     `json:"max_new_recipients_per_day,omitempty" minimum:"0"`
+	// HoldSeconds is the review tier's recall window: only longer than
+	// the one that applies now (a shorter one leaves less time to recall
+	// held mail).
+	HoldSeconds *int `json:"hold_seconds,omitempty" minimum:"0"`
 	// Suspended true suspends the grant: everything under it is held
 	// as a draft. Lifting a suspension is done on the host.
 	Suspended *bool `json:"suspended,omitempty"`
