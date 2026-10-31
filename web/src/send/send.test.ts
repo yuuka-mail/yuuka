@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "@/api/client";
 import type { Message, SendingIdentity, SessionInfo, View } from "@/api/types";
 import { isQuiet, systemFacts } from "@/mail/facts";
+import { m as msg } from "@/paraglide/messages.js";
 
 import { parseDraftFilter } from "./drafts-list";
 import {
@@ -26,6 +27,20 @@ import {
   standing,
   strangerStanding,
 } from "./outgoing";
+import { untilSent } from "./review";
+
+describe("held mail's countdown", () => {
+  it("counts down to when it is sent, never to an expiry", () => {
+    const now = Date.parse("2026-11-01T04:00:00Z");
+    expect(untilSent("2026-11-01T04:56:00Z", now)).toEqual({ unit: "min", n: 56 });
+    expect(untilSent("2026-11-01T04:00:30Z", now)).toEqual({ unit: "s", n: 30 });
+    expect(untilSent("2026-11-01T07:00:00Z", now)).toEqual({ unit: "h", n: 3 });
+    expect(untilSent("2026-11-01T03:59:00Z", now)).toBeUndefined();
+    expect(msg.review_sends_in_min({ n: 56 })).toBe("sends in 56 min");
+    expect(msg.review_sends_in_min({ n: 56 }, { locale: "zh" })).toBe("56 分钟后发出");
+    expect(msg.review_recall_left_min({ n: 56 }, { locale: "zh" })).toBe("还有 56 分钟可撤回");
+  });
+});
 
 const identity = (over: Partial<SendingIdentity>): SendingIdentity => ({
   id: "i",

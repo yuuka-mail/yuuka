@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { fullTime, listTime } from "@/lib/format";
 import { useNow } from "@/lib/now";
 import { cn } from "@/lib/utils";
-import { timeLeft } from "@/mail/extracted";
 import { m } from "@/paraglide/messages.js";
 
 import { ProblemLine } from "./marks";
@@ -23,26 +22,37 @@ import { checkLabel, problem, resumeCommand } from "./outgoing";
 // from the outgoing mail (a cited URI, a host) is shown as text.
 
 /**
- * The checks of a review. Failed checks list what tripped them; passed
- * ones fold into one line. With only="failed" the passed line is left out.
+ * The checks of a review. Gates that failed escalated it and list what
+ * tripped them; advisory checks that failed (cross_thread, link_domains)
+ * held nothing back and are reported for the recall window, under their
+ * own heading so they never read as the reason it stopped. Passed ones
+ * fold into one line. With only="failed" the passed line is left out.
  */
 export function ReviewVerdict({ review, onOpenMessage, only }: { review: Review; onOpenMessage?: (id: string) => void; only?: "failed" }) {
-  const failed = review.checks.filter((c) => !c.pass);
+  const failed = review.checks.filter((c) => !c.pass && !c.advisory);
+  const noted = review.checks.filter((c) => !c.pass && c.advisory);
   const passed = review.checks.filter((c) => c.pass);
+  const list = (cs: ReviewCheck[], label: string) => (
+    <ul aria-label={label} className="flex flex-col gap-1">
+      {cs.map((c) => (
+        <li key={c.name} className="flex flex-col gap-0.5">
+          <span className="flex items-center gap-1.5 font-medium text-warning">
+            <TriangleAlertIcon aria-hidden className="size-3 shrink-0" />
+            {checkLabel(c.name)}
+          </span>
+          <Findings c={c} onOpenMessage={onOpenMessage} />
+        </li>
+      ))}
+    </ul>
+  );
   return (
     <div className="flex flex-col gap-1">
-      {failed.length > 0 && (
-        <ul aria-label={m.review_escalated_label()} className="flex flex-col gap-1">
-          {failed.map((c) => (
-            <li key={c.name} className="flex flex-col gap-0.5">
-              <span className="flex items-center gap-1.5 font-medium text-warning">
-                <TriangleAlertIcon aria-hidden className="size-3 shrink-0" />
-                {checkLabel(c.name)}
-              </span>
-              <Findings c={c} onOpenMessage={onOpenMessage} />
-            </li>
-          ))}
-        </ul>
+      {failed.length > 0 && list(failed, m.review_escalated_label())}
+      {noted.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          <p className="text-muted-foreground">{m.review_advisory()}</p>
+          {list(noted, m.review_advisory())}
+        </div>
       )}
       {passed.length > 0 && only !== "failed" && (
         <p className="flex flex-wrap items-center gap-x-1.5 text-muted-foreground">
@@ -121,14 +131,30 @@ function Findings({ c, onOpenMessage }: { c: ReviewCheck; onOpenMessage?: (id: s
   );
 }
 
-/** "Sends at 04:42 · 58 min left", refreshed as it counts down. */
+/**
+ * How long until held mail goes, in the largest whole unit. Held mail is
+ * sent when its window ends; it does not lapse, so these words are never
+ * the "left"/"expires" of a code's countdown (mail/extracted.ts).
+ */
+export function untilSent(until: string, now: number): { unit: "s" | "min" | "h"; n: number } | undefined {
+  const s = Math.floor((Date.parse(until) - now) / 1000);
+  if (Number.isNaN(s) || s <= 0) return undefined;
+  if (s < 60) return { unit: "s", n: s };
+  const min = Math.ceil(s / 60);
+  return min < 120 ? { unit: "min", n: min } : { unit: "h", n: Math.floor(min / 60) };
+}
+
+const sendsIn = { s: m.review_sends_in_s, min: m.review_sends_in_min, h: m.review_sends_in_h };
+const recallLeft = { s: m.review_recall_left_s, min: m.review_recall_left_min, h: m.review_recall_left_h };
+
+/** "Sends at 04:42 unless recalled · 58 min to recall", refreshed as it counts down. */
 export function HoldUntil({ until }: { until: string }) {
   const now = useNow(15_000);
-  const left = timeLeft(until, now);
+  const left = untilSent(until, now);
   return (
     <span title={fullTime(until)}>
-      <span className="font-medium">{left.expired ? m.review_sends_now() : m.review_sends_at({ time: listTime(until) })}</span>
-      {!left.expired && <span className="text-system-foreground tabular-nums"> · {left.text}</span>}
+      <span className="font-medium">{left ? m.review_sends_at({ time: listTime(until) }) : m.review_sends_now()}</span>
+      {left && <span className="text-system-foreground tabular-nums"> · {recallLeft[left.unit]({ n: left.n })}</span>}
     </span>
   );
 }
@@ -229,9 +255,9 @@ export function Recalled({ w, identity, submitter, onOpenDraft }: { w: Withdrawa
   );
 }
 
-/** The system mark and words for a held row, in a list: "pending · 58 min left". */
+/** When a held row goes, in a list: "sends in 58 min". */
 export function HeldLeft({ until, className }: { until: string; className?: string }) {
   const now = useNow(15_000);
-  const left = timeLeft(until, now);
-  return <span className={cn("shrink-0 text-meta text-system-foreground tabular-nums", className)}>{left.expired ? m.review_sends_now() : left.text}</span>;
+  const left = untilSent(until, now);
+  return <span className={cn("shrink-0 text-meta text-system-foreground tabular-nums", className)}>{left ? sendsIn[left.unit]({ n: left.n }) : m.review_sends_now()}</span>;
 }
