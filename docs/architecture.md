@@ -374,7 +374,8 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 | **拉取**外部邮箱 | `go-imap/v2` client + IDLE，PLAIN 或 OAuth2(XOAUTH2) | M365 已关基础认证，必须 OAuth。Gmail 个人账户开两步验证后**仍可用 app password**，而 OAuth 同意屏在 Testing 模式下 refresh token 7 天过期、转正式又要应用审核——个人项目 Gmail 默认走 app password，OAuth 留给 M365。Gmail 以后可升级到 Gmail API（`history.list` 增量 + Pub/Sub push），增量比 IMAP 可靠 |
 | 以后要真 IMAP（服务端） | `github.com/emersion/go-imap/v2` 的 server 侧 | **因为后端常驻，IMAP 永远是可加的一层，不依赖 CF 的私测功能** |
 | JMAP | 自己实现子集 | 见下 |
-| HTTP | `net/http` + `chi`/标准库 | 不需要重框架 |
+| HTTP | 标准库 `net/http` 的 `ServeMux` | Go 1.22 起自带方法与路径参数匹配，不需要路由库，也不需要框架 |
+| API 契约（§5.1） | OpenAPI 3.1，从 Go 类型生成；schema 推导用 `github.com/google/jsonschema-go` | MCP 的工具 schema 本来就由它从 Go struct 推出（官方 MCP SDK 的依赖，同由 Go 团队维护），REST 用同一个库、同一批类型，两边不会对不上 |
 | DB | `pgx` + 手写 SQL（或 sqlc） | 邮件查询形状怪，ORM 吃亏 |
 | 前端 | 任选，产物 `embed` 进二进制 | 单文件部署 |
 | SPF | `ix64/spf` | 同作者的既有库，直接复用 |
@@ -386,10 +387,105 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 **关于 JMAP 要诚实说一句**：JMAP 客户端生态非常薄（Fastmail 自家客户端、
 ltt.rs 等，Thunderbird / aerc / iOS Mail 都不支持）。所以"JMAP 就行"实际等于
 "我自己写客户端或用 PWA"。建议的落法：
-- 内部 API 自己定（REST，贴着 UI 需求走，不受 JMAP 束缚）
+- 内部 API 自己定（REST，贴着 UI 需求走，不受 JMAP 束缚；契约的形式见 §5.1）
 - 对外暴露 **JMAP 子集**：`Core/echo`、`Mailbox/get`、`Email/query`、`Email/get`、
   `Email/set`、`EmailSubmission/set`、`Email/queryChanges`（增量同步）
 - 真的想用 Thunderbird/iOS Mail 的那天，加 `go-imap` 网关（监听方式同 §13.6：只做 993 隐式 TLS、支持 PROXY protocol），一两周的活，
   后端模型已经就绪
+
+### 5.1 API 契约：OpenAPI 3.1，从 Go 类型生成
+
+> 状态：已定，未实现。M1 的 REST 是手写的：请求参数各自在 handler 里解析，TS 类型由 `tygo` 生成（§12.7）。
+> 迁移在 M2 加写端点之前做；落地后这一节只留理由和不变量，形状以代码为准。
+
+M1 手写的 REST 有四处会悄悄漂移，换任何方案都应该消掉：
+
+- **请求契约只存在于两边的代码里**。参数名、枚举值、上下限一份写在 Go 的 `parse*` 里，
+  一份写在 TS 拼 `URLSearchParams` 的字符串里，改了一边，另一边要到运行时才收到 400
+- **端点和响应类型的配对是人写的**。`getJSON<MessagePage>("/api/v1/messages")` 里的泛型参数写错了，编译器照样放行
+- **同一批 Go 类型由两个工具各自推导**。tygo 推 TS 给 WebUI，`jsonschema-go` 推 JSON Schema 给 MCP，
+  `omitempty`、可空性、枚举这类问题两个工具各有各的答案
+- **用 bearer token 的调用方没有机器可读的接口描述**，只能读源码
+
+store → 线上类型的映射（`summary()` 之类）和领域解析（游标、`prefix@zone`、锚点）不在其中：
+这两样换成什么方案都得手写，只是换个地方写。
+
+#### 选型看的是消费方
+
+| 消费方 | 要的是什么 |
+|---|---|
+| WebUI | 强类型的 TS 客户端，接得上 TanStack Query |
+| MCP agent | JSON Schema。这是协议规定的，没得选 |
+| 用 bearer token 的 agent 和服务 | 机器可读的接口描述，`curl` 能直接调 |
+| 附件、iframe 正文、SSE（§8.6） | HTTP 原生：二进制响应、`Content-Disposition`、`text/event-stream` |
+| JMAP 子集（M4） | RFC 规定的 JSON，无论如何手写 |
+
+OpenAPI 3.1 的 schema 就是 JSON Schema 2020-12，和 MCP 是同一种语言；二进制响应和各种状态码都能写进同一份文档。
+它是标准格式，两边的工具可以各自替换：TS 生成器不满意就换一个，Go 侧也一样。十年尺度上，最可能还在的也是它。
+
+#### 放弃了什么
+
+- **ConnectRPC / protobuf**。如果消费方只有前后端这一对，它是好选择：protobuf-es 和 connect-query 好用，
+  `buf breaking` 能查破坏性变更，流式是一等公民。放在上面那张表里有三处硬伤：
+  - MCP 绕不开 JSON Schema，于是同一个概念（`class`、`downgraded`……）要在 proto 和 JSON Schema 里各定义一遍
+  - agent 读到的 JSON 树（§8.1）要经过 protojson。按 buf lint 的规则，枚举值得带前缀，JSON 里出现的是
+    `"LEVEL_PART"` 而不是 `"part"`；int64 会被编码成字符串，只能刻意避开。等于为了 proto 的规矩，牺牲给 agent 的形状
+  - 附件、iframe、SSE、auth 都在契约之外，Connect 只覆盖一部分接口，协议反而多了一种
+- **先写 YAML，再生成 Go**（ogen、oapi-codegen）。schema 一旦成了来源，Go 类型就是生成物。
+  而 agentview 必须是 MCP SDK 能用 `encoding/json` 序列化的普通 struct，ogen 生成的类型用的却是自己的编码器；
+  oapi-codegen 对 3.1 的支持不完整，生成的类型满是指针。手写 OpenAPI YAML 本身也很冗长。
+  先写 spec 真正的好处是"评审的是契约"，这一点用提交生成物保住（见下文）
+- **huma 这类 code-first 框架**。方向和本节一样，但它是框架：handler 签名、错误模型、中间件都按它的来，
+  想删掉的代价很高，维护也基本靠一个人。它还有自己的 schema 推导，和 MCP 用的不是同一个
+- **只保留 tygo，自己补一层请求类型和配对**。这能消掉前两处漂移，但两个推导器的问题还在，
+  对外仍然没有接口描述
+
+#### 形状
+
+```
+Go 类型 + 路由表（internal/api）
+   │  jsonschema-go：和 MCP 工具 schema 同一个库、同一组 ForOptions
+   ▼
+openapi.json：提交进仓库，check 校验它没有过期
+   │  openapi-typescript（devDependency）
+   ▼
+web/src/api 的生成类型 → openapi-fetch + openapi-react-query
+```
+
+- **路由表仍然是唯一来源**。每一条记方法、路径、scope、请求类型和响应类型；ACL 测试遍历它（§13.8），
+  生成器也遍历它。handler 的形状是 `func(ctx, *auth.Viewer, P) (R, error)`：query 和 path 按 struct tag
+  绑定到 `P`，错误统一映射，`writeError` 和 `fail` 这些样板收进一处。附件、SSE 这类 HTTP 原生的端点
+  仍然写成 `http.Handler`，但同样登记在表里，在文档里照样有描述
+- **约束只声明一次**。枚举的取值、数字的范围跟着 Go 类型声明，同时进 schema 和运行时校验，
+  不再在 handler 里另写一遍。MCP 和 REST 共用的类型（`Class`、`Level`、`Address`……）在 `ForOptions.TypeSchemas` 里登记一次
+- **生成物就是契约，靠评审它来守住契约**。改了接口，diff 里就能看到 `openapi.json` 怎么变；
+  发布之后在 `check` 里加 oasdiff 拦破坏性变更，作用相当于 `buf breaking`
+- **这份文档本身也随二进制提供**，路径是 `/api/v1/openapi.json`，不需要认证：仓库是公开的，
+  契约本来就不是秘密；拿到 token 的 agent 可以直接读它
+- `/auth/*` 的 JSON 端点也写进这份文档（WebAuthn 那部分的形状由库决定，只描述外层）。
+  `/mcp` 和 JMAP 不进：这两个协议各自描述自己
+- 依赖：Go 侧不新增模块，`jsonschema-go` 从间接依赖变成直接依赖，`tygo` 移除；
+  Node 侧加 `openapi-typescript`、`openapi-fetch`、`openapi-react-query`。自己写的部分（绑定、校验、
+  路由表转 paths）预计 300～400 行
+
+#### 趁还没发布一并定下的约定
+
+以下几点发布之后再改就是破坏性变更，所以现在定：
+
+- **错误用 RFC 9457 的 `application/problem+json`**，扩展成员 `code` 是稳定的机器可读码（`not_found`、
+  `invalid_param`、`scope_required`……），`detail` 给人读。§8.9 的"超出授权降级为草稿"不算错误：
+  照常返回成功，结果里说明原因
+- **分页**：新行会从列表头部插入的（消息、线程、搜索、事件），一律用不透明游标，因为 offset 在新信到达时会重复或跳行；
+  搜索现在按时间倒序配 offset，迁移时一并改成游标，`total` 照常单独返回。变化很慢、只给人翻的表
+  （未认领前缀，§12.9）可以用 `limit` / `offset`
+- **多值参数**一律逗号分隔（OpenAPI 里的 `style: form, explode: false`），和现在的 `class` 一致
+- **哪个端点接受哪些值，就用哪个类型**。比如搜索不接受 `downgraded=only`，那它的参数类型里就不该有这个值，
+  不在 handler 里另拒一次
+- JSON 字段名用 snake_case，时间用 RFC 3339 UTC，列表永远是数组、不返回 `null`（现在由 `nonNil` 保证）
+
+#### 什么时候该回头
+
+- 自己写的这层涨过 500 行左右，或者开始实现 OpenAPI 的边角功能：说明在重造 huma，该直接用现成的
+- 出现需要双向流或高吞吐二进制的接口：只给那一部分单独考虑 Connect 或 WebSocket，不必把整套契约都迁过去
 
 ---

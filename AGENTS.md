@@ -19,6 +19,7 @@ WebUI，agent 结构化视图与只读 MCP。下一步是部署和 M2（发信�
 | ingest / Worker / reconcile | §2、§3.5、§10.1 |
 | 数据库、迁移、去重 | §4 |
 | agent 面、MCP、scope | §8、§13 |
+| REST 端点、API 契约 | §5.1、§12.7、§13.8 |
 | 发信、outbox、SMTP | §3.6、§10.2 |
 | 多账户、IMAP、归档卸载 | §9 |
 | 前端 | §12 |

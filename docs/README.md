@@ -6,7 +6,7 @@
 | 节 | 文档 | 内容 |
 |---|---|---|
 | §1 | [prior-art.md](prior-art.md) | 现有 Cloudflare 邮件项目为何不适用本用例 |
-| §2 §3 §5 | [architecture.md](architecture.md) | 总体架构、八条设计原则、Go 侧选型 |
+| §2 §3 §5 | [architecture.md](architecture.md) | 总体架构、八条设计原则、Go 侧选型、API 契约 |
 | §4 §9.1 | [data-model.md](data-model.md) | Postgres 数据模型；内容/投递两层拆分 |
 | §6 §7 | [roadmap.md](roadmap.md) | 分期路线 M0–M5、已知风险与取舍 |
 | §8 §11.1 | [agents.md](agents.md) | Agent 面：锚点、能力分级、提案、审计、外发授权、人格分层 |
