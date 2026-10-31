@@ -2620,6 +2620,9 @@
           "pass": {
             "type": "boolean"
           },
+          "advisory": {
+            "type": "boolean"
+          },
           "detail": {
             "type": "string"
           },

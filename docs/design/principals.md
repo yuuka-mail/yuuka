@@ -143,7 +143,7 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 | service | 30 | 200 | 5 |
 | agent 及其他 | 10 | 50 | 5 |
 
-取舍：数字故意低。限额触发的代价是信变成草稿、人看一眼；限额太高的代价是失控或被注入的 agent
+取舍：数字故意低。限额触发的代价是信变成草稿、人看一眼；限额太高的代价是失控的 agent 或泄露的凭据
 在没人注意时发出一整天的信。人按发送本身就是确认，所以人不设默认限额。需要更多就在授权里写明数字。
 窗口是滚动的（最近 60 分钟、最近 24 小时），不依赖时区；按 outbox 行计数，不论状态，提交过就占一个名额。
 「新收件人」是此前没有任何处于已发出或在途状态（`queued`…`failed`）的 outbox 行发往过的地址，按 `addr_fold` 比较。
@@ -450,7 +450,7 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 | `changes`（[`Changes`](../../internal/store/changes.go)，REST `/changes`、`changes_since`）/ 以后的 SSE、JMAP `queryChanges` | 目标不可见的事件跳过，游标照常前进；可见与否按目标对象自己的规则（§8.6），已消失的对象只给能看到全部的主体 |
 | `actions` / `proposals` | 审计日志只给 human 会话；agent 只看自己发起的 |
 | 提案（`Proposals`、`ProposalByID`，REST `/proposals`、`list_proposals`） | 人看全部，agent / service 只看自己提的；关于某封信的只在那封信可见时可见。理由和引用会引原文，可能是读者看不到的信 |
-| 笔记（`Notes`、`NoteByID`，消息详情的 `notes`、`get_message`，§8.10） | 人看他看得见的信上的全部笔记，其他主体只看自己写的（`noteVisible`，和 `visibleDraft` 同一口径）；线程笔记按锚点那封信可见与否算。`get_message` 再收窄到调用方自己的。删除也走同一个条件：人能删他看得见的任何笔记，其他主体只删自己的。删掉的笔记在 `changes` 里只给人 |
+| 笔记（`Notes`、`NoteByID`，消息详情的 `notes`、`get_message`，§8.10） | 在看得见的信上，人和读得到全部账户的主体看全部笔记，其他主体只看自己写的（`noteVisible`）：笔记的正文和引用可能引到读者看不到的信；线程笔记按锚点那封信可见与否算。`get_message` 给的和 REST 相同。删除另算：人能删他看得见的任何笔记，其他主体只删自己的。删掉的笔记在 `changes` 里只给人 |
 | 标注来源（`MessageAnnotations`，`GET /messages/{id}/annotations`） | 消息可见才可取；它是审计日志的一部分，agent / service 只看自己的 action 写的那几行 |
 | 撤销（`Undo`） | agent / service 只能撤销自己的 action，别人的和不存在一样；看不见的信上的行不动、只计数 |
 | 标签列表（`Labels`）、`label=` / `archived=` 过滤 | 只在可见消息上计数和过滤 |

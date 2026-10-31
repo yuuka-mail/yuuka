@@ -3474,6 +3474,7 @@ export interface components {
         ReviewCheck: {
             name: components["schemas"]["CheckName"];
             pass: boolean;
+            advisory?: boolean;
             detail: string;
             recipients?: string[];
             extracted?: components["schemas"]["ReviewExtracted"][];

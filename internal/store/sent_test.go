@@ -600,8 +600,9 @@ func TestVisibility(t *testing.T) {
 			if got := names(ids); !slices.Equal(got, ownProposals[v]) {
 				t.Errorf("Proposals %q, want %q", got, ownProposals[v])
 			}
-			// Notes: a person reads every note on what they see, an
-			// agent its own on what it sees.
+			// Notes: a person reads every note on what they see; the
+			// restricted agent only its own, as others' could quote
+			// mail it cannot see.
 			for n, id := range msgs {
 				ns, err := db.Notes(ctx, v, id)
 				if slices.Contains(want, n) != (err == nil) || err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -610,7 +611,9 @@ func TestVisibility(t *testing.T) {
 				wantNotes := []string{}
 				switch {
 				case err != nil:
-				case v == everyone:
+				case v == restricted:
+					wantNotes = append(wantNotes, "note by arisu")
+				default:
 					wantNotes = append(wantNotes, "note by operator")
 					if n == "in-closed" {
 						wantNotes = append(wantNotes, "before")
@@ -618,8 +621,6 @@ func TestVisibility(t *testing.T) {
 					if slices.Contains(ownProposals[restricted], n) {
 						wantNotes = append(wantNotes, "note by arisu")
 					}
-				case v == restricted:
-					wantNotes = append(wantNotes, "note by arisu")
 				}
 				got := []string{}
 				for _, x := range ns {

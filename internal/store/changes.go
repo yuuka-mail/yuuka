@@ -175,7 +175,7 @@ func (db *DB) changeVisible(v *auth.Viewer) string {
 		draftGone = `NOT EXISTS (SELECT 1 FROM drafts dr WHERE dr.id = c.target_id)`
 	}
 	noteGone := "false"
-	if seesEveryNote(v) {
+	if managesNotes(v) {
 		noteGone = `NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = c.target_id)`
 	}
 	person := "false"

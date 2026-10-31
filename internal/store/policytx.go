@@ -339,13 +339,10 @@ func DecisionRecord(d sendpolicy.Decision) map[string]any {
 		r["hold_reason"], r["detail"] = d.HoldReason, d.Detail
 	}
 	if d.Review != nil {
-		escalated := []string{}
-		for _, c := range d.Review.Checks {
-			if !c.Pass {
-				escalated = append(escalated, c.Name)
-			}
+		r["review_escalated"] = append([]string{}, sendpolicy.Names(d.Review.Failed())...)
+		if f := d.Review.Flagged(); len(f) > 0 {
+			r["review_flagged"] = sendpolicy.Names(f)
 		}
-		r["review_escalated"] = escalated
 	}
 	if d.AutoSubmitted != "" {
 		r["auto_submitted"] = d.AutoSubmitted

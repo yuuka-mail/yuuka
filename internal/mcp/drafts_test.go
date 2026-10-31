@@ -214,18 +214,27 @@ func TestSubmitDraftReview(t *testing.T) {
 			t.Errorf("own identity: %+v", i)
 		}
 	}
-	submit := func(to string) call {
+	submitBody := func(to, body string) call {
 		d := structured[mcp.DraftOutput](t, callTool(t, cs, "create_draft", map[string]any{
-			"from": "arisu@example.com", "to": []string{to}, "body_markdown": "See you at noon.",
+			"from": "arisu@example.com", "to": []string{to}, "body_markdown": body,
 		}))
 		return callTool(t, cs, "submit_draft", map[string]any{"draft_id": d.DraftID})
 	}
+	submit := func(to string) call { return submitBody(to, "See you at noon.") }
 
 	r := submit("bob@example.net")
 	res := structured[mcp.SubmitOutput](t, r)
-	if res.State != "held" || res.Queued || res.OutboxID == "" || res.HoldUntil == nil ||
+	if res.State != "held" || res.Queued || res.OutboxID == "" || res.HoldUntil == nil || len(res.Flags) != 0 ||
 		!strings.Contains(r.text, "Passed review; goes out at "+res.HoldUntil.UTC().Format(time.RFC3339)+" unless recalled") {
 		t.Errorf("held: %+v\n%s", res, r.text)
+	}
+
+	// An advisory finding holds it all the same, and tells the agent.
+	r = submitBody("bob@example.net", "The agenda: <https://unknown.example/agenda>")
+	res = structured[mcp.SubmitOutput](t, r)
+	if res.State != "held" || len(res.Flags) != 1 || !strings.Contains(res.Flags[0], "never seen") || !strings.HasSuffix(res.Flags[0], ": unknown.example") ||
+		!strings.Contains(r.text, "/api/v1/outbox/"+res.OutboxID+"/withdraw") {
+		t.Errorf("held with a flag: %+v\n%s", res, r.text)
 	}
 
 	r = submit("carol@example.org")

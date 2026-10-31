@@ -183,7 +183,7 @@ func reviewOut(raw json.RawMessage) *Review {
 	out := &Review{Checks: make([]ReviewCheck, len(v.Checks))}
 	for i, c := range v.Checks {
 		rc := ReviewCheck{
-			Name: CheckName(c.Name), Pass: c.Pass, Detail: c.Detail, Recipients: c.Recipients, Unreadable: c.Unreadable,
+			Name: CheckName(c.Name), Pass: c.Pass, Advisory: c.Advisory, Detail: c.Detail, Recipients: c.Recipients, Unreadable: c.Unreadable,
 		}
 		for _, x := range c.Extracted {
 			rc.Extracted = append(rc.Extracted, ReviewExtracted{

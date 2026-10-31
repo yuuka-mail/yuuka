@@ -12,12 +12,11 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/store"
 )
 
-// Notes (§8.10): an agent's own signed text on a message or its thread,
-// one per target, overwritten in place; delete_note takes it back. A
-// note is untrusted and drives nothing. get_message gives the caller its
-// own notes only, inside the untrusted boundary: another agent's note is
-// a second-order injection channel, and the store would not show it to
-// an agent anyway (§13.8).
+// Notes (§8.10): a principal's signed text on a message or its thread,
+// one per author per target, overwritten in place; delete_note takes the
+// caller's back. A note is a reading, not a fact, and drives nothing.
+// get_message gives the notes the store shows the caller on the message
+// or its thread (§13.8), each signed, fenced apart from yuuka's facts.
 
 // NoteInput is the input of note.
 type NoteInput struct {
@@ -38,7 +37,7 @@ type DeleteNoteInput struct {
 	Scope agentview.AnnotateScope `json:"scope,omitempty" jsonschema:"message (default), or thread: your note about the message's thread"`
 }
 
-// Note is a note as its author sees it.
+// Note is a note, signed.
 type Note struct {
 	ID string `json:"id"`
 	// Target is the message it is on; for scope thread, the message it
@@ -132,19 +131,15 @@ func (s *Server) deleteNote(ctx context.Context, v *auth.Viewer, in DeleteNoteIn
 	}, nil
 }
 
-// ownNotes are v's notes on message id and its thread. A person may see
-// others' notes through the store, but get_message hands a model its
-// caller's own only (§8.10).
-func (s *Server) ownNotes(ctx context.Context, v *auth.Viewer, id string) ([]Note, error) {
+// notes are the notes on message id and its thread.
+func (s *Server) notes(ctx context.Context, v *auth.Viewer, id string) ([]Note, error) {
 	ns, err := s.db.Notes(ctx, v, id)
 	if err != nil {
 		return nil, err
 	}
-	var out []Note
-	for _, n := range ns {
-		if n.AuthorID == v.PrincipalID {
-			out = append(out, noteOf(n))
-		}
+	out := make([]Note, len(ns))
+	for i, n := range ns {
+		out[i] = noteOf(n)
 	}
 	return out, nil
 }
@@ -156,7 +151,7 @@ func notesText(uri string, ns []Note) string {
 		return ""
 	}
 	var facts, said strings.Builder
-	fmt.Fprintf(&facts, "\n%d note(s) of yours on this message or its thread (yours, not yuuka's; they drive nothing):\n", len(ns))
+	fmt.Fprintf(&facts, "\n%d note(s) on this message or its thread (each its author's, not yuuka's; they drive nothing):\n", len(ns))
 	for i, n := range ns {
 		fmt.Fprintf(&facts, "%d. note %s · by %s · %s · on %s · updated %s\n",
 			i+1, n.ID, n.Author, n.Scope, n.Target, n.UpdatedAt.Format(time.RFC3339))

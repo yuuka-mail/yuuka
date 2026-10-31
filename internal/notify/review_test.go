@@ -77,12 +77,13 @@ func TestHeldCard(t *testing.T) {
 		Bcc: []string{"x@example.org"}, Submitter: "agent:arisu", ThreadSubject: "Plans\r\nInjected: header",
 		Subject: "Re: Plans", Attachments: []Attachment{{Name: "a.txt", Type: "text/plain", Size: 2048}},
 		Excerpt: "line one\n\n\x07line two\nline three\nline four", Passed: []string{"first_contact", "readable"},
-		SendAt: now.Add(10 * time.Minute), Now: now,
+		Flags: []string{"links to 1 domain(s) never seen\r\nInjected: line"}, SendAt: now.Add(10 * time.Minute), Now: now,
 	}, time.UTC)
 	for _, want := range []string{
 		"yuuka · held for review", "arisu@example.com → bob@example.net; bcc x@example.org", "submitted by agent:arisu",
 		"in reply to: Plans Injected: header", "attachment: a.txt (text/plain, 2 KiB)", "line one\nline two\nline three\n",
-		"passed: first_contact, readable", "goes out at 09:10 (in 10 min) unless recalled",
+		"passed: first_contact, readable", "note: links to 1 domain(s) never seen Injected: line",
+		"goes out at 09:10 (in 10 min) unless recalled",
 	} {
 		if !strings.Contains(text, want) {
 			t.Errorf("card lacks %q:\n%s", want, text)
@@ -122,10 +123,10 @@ func TestCards(t *testing.T) {
 	if kb, _ := json.Marshal(bot.got("sendMessage")[1]["reply_markup"]); strings.Contains(string(kb), "callback_data") {
 		t.Errorf("recall button without a poller: %s", kb)
 	}
-	if err := c.Escalated(ctx, EscalatedCard{DraftID: "D", Reasons: []string{"first contact with carol@example.org"}}); err != nil {
+	if err := c.Escalated(ctx, EscalatedCard{DraftID: "D", Reasons: []string{"first contact with carol@example.org"}, Flags: []string{"cites another thread"}}); err != nil {
 		t.Fatal(err)
 	}
-	if text := bot.got("sendMessage")[2]["text"].(string); !strings.Contains(text, "· first contact with carol@example.org") ||
+	if text := bot.got("sendMessage")[2]["text"].(string); !strings.Contains(text, "· first contact with carol@example.org") || !strings.Contains(text, "note: cites another thread") ||
 		!strings.Contains(text, "Nothing was sent") {
 		t.Errorf("escalated card:\n%s", text)
 	}

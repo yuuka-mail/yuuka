@@ -12,16 +12,20 @@ import (
 // inside the decision, on facts the store gathered from what the
 // submitter can see (ReviewFacts): the review is not an oracle that
 // would answer "is this the code in a message I cannot read". Every
-// check runs, none short-circuits, so a person reading an escalation
-// sees every reason at once. Any check that does not pass escalates the
-// submission to a draft; never to an outbox row, which would spend a
-// slot of the limits and put a copy that went nowhere into the thread.
+// check runs, none short-circuits, so a person reading the verdict sees
+// every finding at once.
 //
-// What these checks cannot see is anything the outgoing text says in
-// other words: a code spelled out or split by letters, a link whose
-// query was reordered, a secret paraphrased. Catching those needs a
-// reader; a model reviewer is deferred (§8.9), and until then the recall
-// window and first-contact escalation stand in for it.
+// Two kinds of check. A gate guards an outcome nobody can take back: a
+// first message to a stranger, a code of incoming mail going out, and
+// the readability that the code check depends on. A gate that does not
+// pass escalates the submission to a draft; never to an outbox row,
+// which would spend a slot of the limits and put a copy that went
+// nowhere into the thread. An advisory check (another thread's mail, a
+// link to a domain never seen) is context, not a guess at intent: its
+// findings go into the verdict, the held card and the submitter's
+// result, and the recall window is where they are acted on. The agent
+// that wrote the mail is trusted to have meant it; what it may not have
+// known is put in front of it and of the person.
 
 // MaxRecallsPerDay is the circuit breaker of a grant (§8.9): when humans
 // have withdrawn this many of its held messages submitted in the last 24
@@ -106,11 +110,14 @@ type Verdict struct {
 }
 
 // Check is the outcome of one check. Findings say what tripped it; a
-// check that passed has none.
+// check that passed has none. An advisory check that did not pass only
+// reports; verdicts stored before a check became advisory lack the flag
+// and read as the gate it was then.
 type Check struct {
-	Name   string `json:"name"`
-	Pass   bool   `json:"pass"`
-	Detail string `json:"detail"`
+	Name     string `json:"name"`
+	Pass     bool   `json:"pass"`
+	Advisory bool   `json:"advisory,omitempty"`
+	Detail   string `json:"detail"`
 	// One of these lists is set, by the check.
 	Recipients []string     `json:"recipients,omitempty"`
 	Extracted  []Extracted  `json:"extracted,omitempty"`
@@ -130,14 +137,41 @@ func (v Verdict) Passed() []string {
 	return out
 }
 
-// escalated is the summary of the checks that did not pass, "" if all
+// Failed lists the gates that did not pass: what escalated it.
+func (v Verdict) Failed() []Check {
+	return v.unpassed(false)
+}
+
+// Flagged lists the advisory checks that found something.
+func (v Verdict) Flagged() []Check {
+	return v.unpassed(true)
+}
+
+func (v Verdict) unpassed(advisory bool) []Check {
+	var out []Check
+	for _, c := range v.Checks {
+		if !c.Pass && c.Advisory == advisory {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// Names are the names of cs.
+func Names(cs []Check) []string {
+	out := make([]string, len(cs))
+	for i, c := range cs {
+		out[i] = c.Name
+	}
+	return out
+}
+
+// escalated is the summary of the gates that did not pass, "" if all
 // did.
 func (v Verdict) escalated() string {
 	var why []string
-	for _, c := range v.Checks {
-		if !c.Pass {
-			why = append(why, c.Detail)
-		}
+	for _, c := range v.Failed() {
+		why = append(why, c.Detail)
 	}
 	return strings.Join(why, "; ")
 }
@@ -171,8 +205,9 @@ func review(g Grant, in Input, rcpts []string) Verdict {
 		fmt.Sprintf("%d code(s) or sign-in link(s) from incoming mail in the message", len(f.Extracted)),
 		"no code or sign-in link from incoming mail")
 
-	// Cited mail must be visible, and mail of another thread may only go
-	// to that thread's correspondents.
+	// Cited mail the submitter cannot see, or mail of another thread
+	// going to someone outside it. Advisory: the agent may well mean to
+	// forward it, and the recipient of a reply is no proof it should.
 	thread := ""
 	if in.Reply != nil {
 		thread = in.Reply.ThreadID
@@ -191,8 +226,9 @@ func review(g Grant, in Input, rcpts []string) Verdict {
 			}
 		}
 	}
-	add(Check{Name: CheckCrossThread, Refs: refs}, len(refs) == 0,
-		fmt.Sprintf("%d cited or attached message(s) unknown, or from another thread whose correspondents are not all the recipients", len(refs)),
+	add(Check{Name: CheckCrossThread, Advisory: true, Refs: refs}, len(refs) == 0,
+		fmt.Sprintf("%d cited or attached message(s) unknown, or from another thread whose correspondents are not all the recipients: %s",
+			len(refs), listed(refs, func(r Ref) string { return r.As })),
 		"cites only this thread, or mail its recipients already had")
 
 	var allowed []string
@@ -209,12 +245,33 @@ func review(g Grant, in Input, rcpts []string) Verdict {
 			links = append(links, l)
 		}
 	}
-	add(Check{Name: CheckLinkDomains, Links: links}, len(links) == 0,
-		fmt.Sprintf("links to %d domain(s) never seen from an authenticated sender, a recipient, or the allowlist", len(links)),
+	// Advisory: a domain nobody authenticated wrote from is unfamiliar,
+	// not wrong.
+	add(Check{Name: CheckLinkDomains, Advisory: true, Links: links}, len(links) == 0,
+		fmt.Sprintf("links to %d domain(s) never seen from an authenticated sender, a recipient, or the allowlist: %s",
+			len(links), listed(links, func(l LinkDomain) string { return l.Host })),
 		"links only to known domains")
 
+	// A gate because the extracted check reads only text: a code inside
+	// a PDF would pass it unseen.
 	add(Check{Name: CheckReadable, Unreadable: f.Unreadable}, len(f.Unreadable) == 0,
 		fmt.Sprintf("cannot read %s", strings.Join(f.Unreadable, ", ")),
 		"every part is text the checks read")
 	return v
+}
+
+// maxListed bounds the findings an advisory detail names: enough to act
+// on, short enough for a card. The verdict keeps them all.
+const maxListed = 5
+
+// listed names the first maxListed of xs, and how many more there are.
+func listed[T any](xs []T, name func(T) string) string {
+	var out []string
+	for _, x := range xs[:min(len(xs), maxListed)] {
+		out = append(out, name(x))
+	}
+	if n := len(xs) - maxListed; n > 0 {
+		out = append(out, fmt.Sprintf("and %d more", n))
+	}
+	return strings.Join(out, ", ")
 }

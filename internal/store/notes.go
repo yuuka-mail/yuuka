@@ -83,24 +83,27 @@ type Note struct {
 	UpdatedAt time.Time
 }
 
-// Who sees which notes (§13.8): a person sees every note on mail they
-// can see; everyone else only the notes it wrote, as visibleDraft. One
-// agent reading another's note is a second-order injection channel, and
-// several agents stay out of each other's way. Widening it later is
-// easy, narrowing it is not. Every note query passes the viewer's
+// Who sees which notes (§13.8): on mail v can see, a person sees every
+// note, and so does an agent or service that reads every account; any
+// other principal sees only its own. Another agent's reading is context
+// for the next one, signed so it reads as a reading, not a fact (§8.10).
+// But a note's text and cites may quote any mail its author can see:
+// shown to a principal that sees less, it would hand over what the
+// account boundary withholds. Every note query passes the viewer's
 // principal id as $1.
 func (db *DB) noteVisible(v *auth.Viewer) string {
-	own := "n.author_id = $1"
-	if seesEveryNote(v) {
-		own = "$1::text IS NOT NULL" // $1 must appear for its type
+	others := db.readsEveryAccount(v)
+	if managesNotes(v) {
+		others = "true"
 	}
-	return `(` + own + ` AND EXISTS (SELECT 1 FROM messages nm WHERE nm.id = n.message_id AND ` +
+	return `((n.author_id = $1 OR ` + others + `) AND EXISTS (SELECT 1 FROM messages nm WHERE nm.id = n.message_id AND ` +
 		db.visibleMessage(v, "nm") + `))`
 }
 
-// seesEveryNote: v sees the notes of others. It alone sees what is left
-// of a deleted note (its change, §8.6).
-func seesEveryNote(v *auth.Viewer) bool { return v.PrincipalKind == sendpolicy.KindHuman }
+// managesNotes: v may delete the notes of others, and alone sees what is
+// left of a deleted note (its change, §8.6), which no longer says whose
+// mail it was on.
+func managesNotes(v *auth.Viewer) bool { return v.PrincipalKind == sendpolicy.KindHuman }
 
 const noteCols = `n.id, n.author_id, p.kind || ':' || p.name, n.message_id, n.scope, n.body, n.cites, n.created_at, n.updated_at`
 
@@ -221,7 +224,7 @@ func (db *DB) DeleteNote(ctx context.Context, v *auth.Viewer, message, scope, au
 	if author == "" {
 		author = v.PrincipalID
 	}
-	if author != v.PrincipalID && !seesEveryNote(v) {
+	if author != v.PrincipalID && !managesNotes(v) {
 		return fmt.Errorf("delete %s's note as %s: %w", author, v, ErrNotPermitted)
 	}
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {

@@ -33,7 +33,7 @@ func noteTexts(ns []store.Note) []string {
 }
 
 // One note per author per target, overwritten in place; a person sees
-// every note on the mail, an agent its own; deleting is the undo.
+// every note on the mail, and so does an agent; deleting is the undo.
 func TestNotes(t *testing.T) {
 	t.Parallel()
 	e := newRuleEnv(t)
@@ -56,21 +56,19 @@ func TestNotes(t *testing.T) {
 	// A thread note anchored on the reply shows on the first message.
 	e.note(momoi, reply, store.ScopeThread, "momoi on thread")
 
-	for v, want := range map[*auth.Viewer][]string{
-		arisu:    {"arisu two"},
-		momoi:    {"momoi on message", "momoi on thread"},
-		operator: {"arisu two", "momoi on message", "momoi on thread"},
-	} {
+	// Whoever sees the message sees every note on it (§8.10).
+	for _, v := range []*auth.Viewer{arisu, momoi, operator} {
+		want := []string{"arisu two", "momoi on message", "momoi on thread"}
 		ns, err := e.db.Notes(ctx, v, m)
 		if err != nil || strings.Join(noteTexts(ns), "|") != strings.Join(want, "|") {
 			t.Errorf("Notes as %s: %q %v, want %q", v.PrincipalName, noteTexts(ns), err, want)
 		}
 	}
 	// The change log carries each note once, with the message it is on
-	// (§8.6); an agent follows only its own.
+	// (§8.6), for every reader of that message.
 	var since int64
 	page, err := e.db.Changes(ctx, arisu, store.ChangeQuery{Since: &since, Kinds: []string{"note"}})
-	if err != nil || len(page.Changes) != 1 || page.Changes[0].ID != first.ID || page.Changes[0].MessageID != m {
+	if err != nil || len(page.Changes) != 3 || page.Changes[0].ID != first.ID || page.Changes[0].MessageID != m {
 		t.Errorf("note changes for arisu: %+v %v", page.Changes, err)
 	}
 

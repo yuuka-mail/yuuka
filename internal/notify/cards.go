@@ -41,8 +41,11 @@ type HeldCard struct {
 	// Excerpt is the start of the body; HeldText keeps 3 lines and 300
 	// characters of it.
 	Excerpt string
-	// Passed names the checks that passed.
+	// Passed names the checks that passed; Flags are what the advisory
+	// checks found, in their words: what a person may want to recall it
+	// for.
 	Passed []string
+	Flags  []string
 	SendAt time.Time
 	Now    time.Time
 }
@@ -56,8 +59,10 @@ type EscalatedCard struct {
 	Bcc       []string
 	Submitter string
 	Subject   string
-	// Reasons are the checks that did not pass, in their words.
+	// Reasons are the gates that did not pass, Flags what the advisory
+	// checks found, both in their words.
 	Reasons []string
+	Flags   []string
 }
 
 // SuspendedCard is a grant the circuit breaker suspended.
@@ -97,6 +102,9 @@ func HeldText(c HeldCard, loc *time.Location) string {
 	if len(c.Passed) > 0 {
 		fmt.Fprintf(&b, "passed: %s\n", strings.Join(c.Passed, ", "))
 	}
+	for _, f := range c.Flags {
+		fmt.Fprintf(&b, "note: %s\n", clean(f))
+	}
 	if loc == nil {
 		loc = time.Local
 	}
@@ -114,6 +122,9 @@ func EscalatedText(c EscalatedCard) string {
 	fmt.Fprintf(&b, "subject: %s\n", clean(c.Subject))
 	for _, r := range c.Reasons {
 		fmt.Fprintf(&b, "· %s\n", clean(r))
+	}
+	for _, f := range c.Flags {
+		fmt.Fprintf(&b, "note: %s\n", clean(f))
 	}
 	b.WriteString("Nothing was sent. It waits as a draft for a person.")
 	return b.String()

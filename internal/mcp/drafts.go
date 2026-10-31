@@ -290,6 +290,10 @@ type SubmitOutput struct {
 	// FailedChecks are the review checks that escalated it to a person
 	// (hold_reason review, state draft).
 	FailedChecks []string `json:"failed_checks,omitempty"`
+	// Flags are what the advisory checks found (§8.9), in states held
+	// and draft: context for deciding whether to withdraw it, not a
+	// refusal.
+	Flags []string `json:"flags,omitempty"`
 }
 
 func (s *Server) submitDraft(ctx context.Context, v *auth.Viewer, in SubmitInput) (result, error) {
@@ -310,6 +314,7 @@ func (s *Server) submitDraft(ctx context.Context, v *auth.Viewer, in SubmitInput
 		// The window was set by the database's clock: read it back.
 		if e, err := s.db.OutboxByID(ctx, v, res.OutboxID); err == nil {
 			out.HoldUntil = e.HoldUntil
+			out.Flags = flags(verdictOf(e.Review))
 		} else if !errors.Is(err, store.ErrNotFound) {
 			return result{}, err
 		}
@@ -317,17 +322,28 @@ func (s *Server) submitDraft(ctx context.Context, v *auth.Viewer, in SubmitInput
 		if out.HoldUntil != nil {
 			when = out.HoldUntil.UTC().Format(time.RFC3339)
 		}
-		text = fmt.Sprintf("Passed review; goes out at %s unless recalled. It waits as outbox %s until then. Nothing more to do.\n",
-			when, out.OutboxID)
+		text = fmt.Sprintf("Passed review; goes out at %s unless recalled. It waits as outbox %s until then.\n", when, out.OutboxID)
+		if len(out.Flags) > 0 {
+			text += "The review noted (context, not a refusal):\n- " + strings.Join(out.Flags, "\n- ") + "\n" +
+				"If that is not what you meant, withdraw it before then: POST /api/v1/outbox/" + out.OutboxID + "/withdraw.\n"
+		} else {
+			text += "Nothing more to do.\n"
+		}
 	default:
 		if res.HoldReason == string(sendpolicy.HoldReview) {
-			if out.FailedChecks, err = s.failedChecks(ctx, v, in.DraftID); err != nil {
+			d, err := s.db.DraftByID(ctx, v, in.DraftID)
+			if err != nil {
 				return result{}, err
 			}
+			verdict := verdictOf(d.Review)
+			out.FailedChecks, out.Flags = sendpolicy.Names(verdict.Failed()), flags(verdict)
 		}
 		var failed string
 		if len(out.FailedChecks) > 0 {
 			failed = "Review checks that did not pass: " + strings.Join(out.FailedChecks, ", ") + ".\n"
+		}
+		if len(out.Flags) > 0 {
+			failed += "The review also noted: " + strings.Join(out.Flags, "; ") + ".\n"
 		}
 		text = fmt.Sprintf("Not sent: held as draft %s (%s): %s\n%sThis is a normal result, not an error: a person reviews held drafts. "+
 			"Do not try to send it another way.\n", out.DraftID, out.HoldReason, out.HoldDetail, failed)
@@ -336,24 +352,22 @@ func (s *Server) submitDraft(ctx context.Context, v *auth.Viewer, in SubmitInput
 	return result{structured: out, text: text, audit: audit}, nil
 }
 
-// failedChecks names the checks of the verdict stored on draft id that
-// did not pass, in their order.
-func (s *Server) failedChecks(ctx context.Context, v *auth.Viewer, id string) ([]string, error) {
-	d, err := s.db.DraftByID(ctx, v, id)
-	if err != nil {
-		return nil, err
+// verdictOf is a stored verdict, empty for none.
+func verdictOf(raw json.RawMessage) sendpolicy.Verdict {
+	var v sendpolicy.Verdict
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &v) // a verdict that does not read lists nothing
 	}
-	var verdict sendpolicy.Verdict
-	if len(d.Review) == 0 || json.Unmarshal(d.Review, &verdict) != nil {
-		return nil, nil
-	}
+	return v
+}
+
+// flags are the advisory findings of v, in their words.
+func flags(v sendpolicy.Verdict) []string {
 	var out []string
-	for _, c := range verdict.Checks {
-		if !c.Pass {
-			out = append(out, c.Name)
-		}
+	for _, c := range v.Flagged() {
+		out = append(out, c.Detail)
 	}
-	return out, nil
+	return out
 }
 
 // draftErr turns the store's and the core's refusals into answers the

@@ -44,6 +44,15 @@ func (s *Service) preview(ctx context.Context, d store.Draft, now time.Time) (*o
 	return readOutgoing(raw, d.Cites), nil
 }
 
+// details are the checks' findings in their words.
+func details(cs []sendpolicy.Check) []string {
+	var out []string
+	for _, c := range cs {
+		out = append(out, c.Detail)
+	}
+	return out
+}
+
 // cardTimeout bounds sending one card.
 const cardTimeout = 30 * time.Second
 
@@ -59,7 +68,7 @@ func (s *Service) afterHeld(p *store.PolicyTx, v *auth.Viewer, d store.Draft, o 
 		SendAt: now.Add(time.Duration(res.HoldSeconds) * time.Second), Now: now,
 	}
 	if r := p.Decision().Review; r != nil {
-		c.Passed = r.Passed()
+		c.Passed, c.Flags = r.Passed(), details(r.Flagged())
 	}
 	p.AfterCommit(func(ctx context.Context) {
 		s.card(ctx, "held", res.OutboxID, func(ctx context.Context) error {
@@ -80,11 +89,7 @@ func (s *Service) afterEscalated(p *store.PolicyTx, v *auth.Viewer, d store.Draf
 		return
 	}
 	c := notify.EscalatedCard{DraftID: d.ID, From: d.FromAddr, To: d.To, Cc: d.Cc, Bcc: d.Bcc, Submitter: v.String(), Subject: d.Subject}
-	for _, ch := range dec.Review.Checks {
-		if !ch.Pass {
-			c.Reasons = append(c.Reasons, ch.Detail)
-		}
-	}
+	c.Reasons, c.Flags = details(dec.Review.Failed()), details(dec.Review.Flagged())
 	p.AfterCommit(func(ctx context.Context) {
 		s.card(ctx, "escalated", d.ID, func(ctx context.Context) error { return s.cfg.Notifier.Escalated(ctx, c) })
 	})

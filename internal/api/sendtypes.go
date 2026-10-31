@@ -147,9 +147,9 @@ func (CheckName) Enum() []string {
 }
 
 // Review is the verdict of the review tier's checks on a submission
-// (§8.9), every check in a fixed order. A check that did not pass
-// escalated the submission to a person; when all passed, it was held
-// for a recall.
+// (§8.9), every check in a fixed order. A gate that did not pass
+// escalated the submission to a person; when every gate passed, it was
+// held for a recall, with what the advisory checks found.
 type Review struct {
 	Checks []ReviewCheck `json:"checks"`
 }
@@ -157,9 +157,12 @@ type Review struct {
 // ReviewCheck is the outcome of one check. A check that did not pass
 // says what tripped it in the one list that fits it.
 type ReviewCheck struct {
-	Name   CheckName `json:"name"`
-	Pass   bool      `json:"pass"`
-	Detail string    `json:"detail"`
+	Name CheckName `json:"name"`
+	Pass bool      `json:"pass"`
+	// Advisory: not passing only reports, for the recall window; it
+	// does not escalate (cross_thread, link_domains).
+	Advisory bool   `json:"advisory,omitempty"`
+	Detail   string `json:"detail"`
 	// Recipients never written to before (first_contact).
 	Recipients []string `json:"recipients,omitempty"`
 	// Extracted are values of incoming mail found in the outgoing

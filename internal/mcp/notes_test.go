@@ -47,7 +47,7 @@ func TestNoteTools(t *testing.T) {
 		t.Errorf("overwrite: %+v\n%s", second, r.text)
 	}
 
-	// Another agent's note on the same message stays out of view.
+	// Another agent's note on the same message comes with it, signed.
 	other, err := e.db.EnsurePrincipal(ctx, store.Principal{ID: ulid.New(time.Now()), Kind: "agent", Name: "momoi", DisplayName: "momoi", CreatedAt: time.Now()})
 	if err != nil {
 		t.Fatal(err)
@@ -66,11 +66,14 @@ func TestNoteTools(t *testing.T) {
 	if err := json.Unmarshal(r.structured, &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Notes) != 1 || got.Notes[0].ID != first.ID || strings.Contains(string(got.Facts), "SECRET-NOTE-TEXT") {
+	if len(got.Notes) != 2 || got.Notes[0].ID != first.ID || got.Notes[1].Author != "agent:momoi" ||
+		strings.Contains(string(got.Facts), "NOTE") {
 		t.Errorf("get_message notes %+v, facts %s", got.Notes, got.Facts)
 	}
-	if strings.Contains(r.text, "MOMOI-NOTE") || strings.Contains(string(r.structured), "MOMOI-NOTE") {
-		t.Errorf("get_message shows another agent's note:\n%s", r.text)
+	momoi := strings.Index(r.text, "MOMOI-NOTE")
+	if momoi < 0 || !strings.Contains(r.text, "by agent:momoi") ||
+		strings.LastIndex(r.text[:max(momoi, 0)], "<untrusted_mail_content") < strings.Index(r.text, "by agent:momoi") {
+		t.Errorf("get_message: another agent's note not signed and fenced:\n%s", r.text)
 	}
 	// The text sits in its own untrusted boundary after the mail's, with
 	// the author named outside it.
@@ -93,7 +96,7 @@ func TestNoteTools(t *testing.T) {
 		t.Errorf("delete_note again: %+v", r)
 	}
 	ns, err := e.db.Notes(ctx, &auth.Viewer{PrincipalID: e.agent.ID, PrincipalKind: "agent", PrincipalName: "arisu"}, id)
-	if err != nil || len(ns) != 1 || ns[0].Scope != store.ScopeThread {
+	if err != nil || len(ns) != 2 || ns[0].Text != "MOMOI-NOTE" || ns[1].Text != "thread SECRET-NOTE-TEXT" {
 		t.Errorf("left: %+v %v", ns, err)
 	}
 

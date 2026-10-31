@@ -57,7 +57,7 @@ func TestNotes(t *testing.T) {
 		bearer string
 		want   []string
 	}{
-		{h.token(auth.MessageRead), []string{"rewritten SECRET-REST-NOTE"}},
+		{h.token(auth.MessageRead), []string{"rewritten SECRET-REST-NOTE", "the operator's note", "momoi's thread note"}},
 		{h.tokenFor(h.human, auth.MessageRead), []string{"rewritten SECRET-REST-NOTE", "the operator's note", "momoi's thread note"}},
 	} {
 		m := decode[Message](t, h.get("/api/v1/messages/"+msg, c.bearer))
