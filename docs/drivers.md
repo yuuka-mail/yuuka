@@ -169,29 +169,62 @@ type Expunger interface {
 
 ### 10.2 发：SMTP 是通用货币，所以只需要两个 driver
 
-```go
-type Transport interface {
-    Name() string
-    Caps() TransportCaps
-    // 入参是我们自己组装好的完整 MIME 字节，已按 Caps 去掉出口不允许调用方设置的头。
-    // commit 必须在越过不可回头点之前调用一次（SMTP：发正文结束符之前；API：发请求之前），
-    // 调用方借它把「已提交」落库；commit 返回错误时 Send 放弃，什么都不发出（§4.5）
-    Send(ctx context.Context, env Envelope, raw []byte, commit func(context.Context) error) (*SendResult, error)
-}
-type SendResult struct {
-    Outcome    Outcome            // Accepted | Partial | Rejected | Unknown（commit 之后断开 / 超时）
-    Recipients []RecipientResult  // 逐收件人的 SMTP 码，落 outbox_recipients
-    ProviderID string
-    MessageID  string             // 出口实际使用的 Message-ID；拿不到时为空，见 §10.4.1
-}
-type TransportCaps struct {
-    CallerMessageID  bool  // 能否自定 Message-ID
-    CallerReturnPath bool  // 能否自定 Return-Path（VERP 的前提，§10.4.2）
-    CallerDKIM       bool  // 能否带自己的 DKIM-Signature（§10.4.4）
-    StatusQuery      bool  // 能否按 ProviderID 查投递状态（unknown 对账用）
-    // ...
-}
-```
+SMTP 出口实现在 [`internal/transport`](../internal/transport/smtp.go)：`SMTP.Send(ctx, Envelope, raw, commit)`
+返回 `SendResult`（`Outcome`、逐收件人结果、`Committed`、最终回复原文、`ProviderID`、`MessageID`），
+出口能力是配置里的 [`Caps`](../internal/transport/transport.go)。目前只有这一个实现，
+所以没有 `Transport` 接口；outbox 在消费方按它用到的方法（`Name`、`Caps`、`Send`）定义一个小接口，
+第二个 driver（API 型出口）出现时形状不变。
+
+**提交点**。`commit` 恰好调用一次，时机是正文全部写完并 flush 到连接之后、正文结束符 `<CRLF>.<CRLF>` 之前；
+调用方在里面写 `committed_at` 并提交事务（§4.5）。`commit` 返回错误时直接关连接、不发结束符——
+服务器只在收到结束符时处理这封信，之前断开就丢弃。这个保证依赖 `net/textproto` 的 `DotWriter`：
+它写进 `bufio.Writer`，结束符只在 `Close` 里写出，所以「写完 + flush」之后线上有全部正文而没有结束符。
+陷阱也在这里：`textproto` 在写**任何**命令之前会先关闭打开着的 `DotWriter`，也就是发出结束符，
+所以放弃时连 `QUIT` 都不能发，只能关连接。`net/smtp` 的 `Data()` 把最终回复的文本吞掉了，
+所以 `MAIL` / `RCPT` / `DATA` 和最终回复直接走 `textproto`；问候、`EHLO`、`AUTH PLAIN` 仍用 `net/smtp`。
+回调之前把正文 flush 出去还有一个好处：连接已断这种失败在提交点之前暴露，仍然是可以安全重试的失败。
+本来没送达、只因 `commit` 之后被取消或超时而判成 `unknown`，是 §4.5 接受的唯一误判方向。
+
+**结果分类**。每个收件人一个结论，`Outcome` 只由逐收件人结论推出，两者不会矛盾：
+
+| 发生了什么 | 收件人结论 | `Outcome` |
+|---|---|---|
+| 本地检查不过：裸 LF / 裸 CR / NUL / 超过 998 字节的行、出口不允许的头、信封地址含 CR/LF/`<>`、超过 `SIZE`、需要 `SMTPUTF8` / `8BITMIME` / `AUTH PLAIN` 而服务器没有 | 全部 rejected，码为 0 | rejected |
+| 提交点之前：连接、TLS、超时、断开 | 未定的全部 deferred，码为 0 | failed |
+| 提交点之前：问候 / `EHLO` / `AUTH` / `MAIL` / `DATA` 回 4xx 或 5xx | 未定的全部按码：4xx deferred，5xx rejected | failed 或 rejected |
+| `RCPT` 逐个回复 | 4xx deferred，5xx rejected，2xx 等最终回复决定 | — |
+| 没有一个 `RCPT` 被接受 | 不发 `DATA`、不调 `commit` | failed（有 4xx）或 rejected |
+| `commit` 返回错误 | 未定的全部 deferred，`Committed=false` | failed |
+| 提交点之后：最终回复 2xx | `RCPT` 接受的全部 accepted | accepted；有被拒的收件人时 partial |
+| 提交点之后：最终回复 4xx / 5xx | `RCPT` 接受的按码 deferred / rejected | failed / rejected |
+| 提交点之后：没等到回复（断开、超时、取消）或回复不成形 | `RCPT` 接受的全部 unknown | unknown |
+
+`failed` 与 `rejected` 都是「确定没送达」，区别是有没有值得重试的收件人；
+`partial` 之后只重试 deferred 的那几个（§4.5）。`Send` 总是返回结果，
+`accepted` / `partial` 时 error 为空，否则 error 说明原因（服务器回复包成 `*textproto.Error`）。
+按码分类意味着 `AUTH` 回 `535` 是 rejected：重发同样的字节不会有不同结果，
+但它其实是出口配置坏了而不是这封信有问题。outbox 若不想让一次凭据失效把队列里的信逐封判死，
+要在出口层面暂停，而不是靠改这里的分类。
+
+**校验而不修复**。`DotWriter` 会把裸 LF 悄悄改成 CRLF，于是出口收到的字节和 outbox 存下的 Sent 副本不一致；
+裸 CR、超长行则在后面某一跳被拒或被改写。这些都是组装方的 bug，所以 transport 在连接之前检查、
+不通过就 rejected，不替组装方修。8-bit 内容同理：头部有非 ASCII 要求服务器支持 `SMTPUTF8`（RFC 6532），
+正文有非 ASCII 要求 `8BITMIME`，只在需要时带上对应参数。
+
+**去掉出口不允许的头**由 [`StripHeaders`](../internal/transport/message.go) 做：
+`Return-Path` 总是去掉（它由最终投递方按信封加），`CallerMessageID=false` 去掉 `Message-ID`，
+`CallerDKIM=false` 去掉 `DKIM-Signature`。它放在 transport 包里，因为规则是出口的；
+放在组装器里不够，submission 口（§13.6）收进来的 raw MIME 不经过组装器。
+调用方在写 Sent 副本**之前**调用它，所以存下的就是出口收到的字节；`Send` 自己只检查，
+带着这些头的信直接 rejected，不悄悄删。
+
+**连接只有隐式 TLS**（RFC 8314，默认 465），不支持 STARTTLS 和明文。证书按系统根校验；
+配置里唯一的口子是换一组根证书（测试用自己的 CA），没有跳过校验的选项。
+上下文没有截止时间时整次尝试最长 10 分钟，对应 RFC 5321 §4.5.3.2 里最长的那个等待（等最终回复）。
+
+**回复原文要留着**。各出口 `250` 的格式还不知道（§10.4.1 的实测项），所以 `SendResult` 原样保存最终回复；
+`ProviderID` 只从毫无歧义的 `queued as <id>`（Postfix）里取，`MessageID` 在实测之前一律留空，
+不去猜——猜错的 Message-ID 会让回信静默地拼不上线程。
 
 **关键决策：MIME 由我们自己组装（[`internal/compose`](../internal/compose/compose.go)），transport 只投递字节。**
 好处是线程头（`In-Reply-To` / `References`）完全可控，Sent 副本就是我们提交的字节。
@@ -201,7 +234,7 @@ type TransportCaps struct {
 由此得出一个让事情简单很多的结论：**优先用 provider 的 SMTP 口，而不是它的
 结构化 REST API**。因为 SMTP 是唯一普遍接受 raw MIME 的接口。于是：
 
-- `smtpTransport` 一个实现覆盖：Cloudflare Email Sending、Resend、SES、
+- `transport.SMTP` 一个实现覆盖：Cloudflare Email Sending、Resend、SES、
   Postmark、Mailgun、Gmail、工作邮箱、任何自建 MTA——差别只是
   `host/port/认证方式(PLAIN vs XOAUTH2)`，是配置不是代码
 - 只有 **API-only** 或 API 明显更好的才单独写 driver（Gmail API 的 `messages.send`
@@ -313,7 +346,7 @@ multipart/mixed                         ← 只在有普通附件时出现
      只有一条新线程的第一封会断开，落到 `class=human` 的 `subject + sender` 兜底匹配（§4.1）
 
    **接入任何新出口的第一个测试：发一封给自己，比对 Sent 副本和收到的字节**，
-   把差异逐项落进 `TransportCaps`。
+   把差异逐项落进 `transport.Caps`。
 
 2. **bounce / DSN 回流路径完全不同**（CF 的 suppression list、SES 的 SNS、
    SMTP 的 DSN 邮件）。统一成一个 `DeliveryEvent{outbox_id, kind, at, detail}`
@@ -328,7 +361,7 @@ multipart/mixed                         ← 只在有普通附件时出现
    Cloudflare 把 `Return-Path` 列为平台控制、指向它自己的退信处理器，所以 **CF 出口没有 VERP**：
    只依赖它的 suppression list 和事件，该出口的 DSN 路径关闭，伪造 DSN 也就无从喂回状态机。
 
-3. **能力不对等会漏到 UI 和 agent 面**。`SourceCaps/TransportCaps` 必须显式，
+3. **能力不对等会漏到 UI 和 agent 面**。`SourceCaps` / `transport.Caps` 必须显式，
    UI 按 caps 灰掉做不到的操作（POP3 账户没有"标记已读回写"、
    `metadata` 策略的账户不能全文搜、Gmail 的 label 不是 folder），
    而不是假装都一样然后运行时报错。**抽象要诚实**。
