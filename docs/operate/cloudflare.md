@@ -76,7 +76,10 @@ yuuka 经 SMTP 把信交给一个出口（transport）。用 Cloudflare 发信�
 
 1. 在 Cloudflare 上为每个要发信的域 onboard Email Sending，按提示配 DNS（SPF、DKIM）。需要 Workers Paid
 2. 在 dashboard 拿到 SMTP 凭据：主机 `smtp.mx.cloudflare.net`，端口 465（隐式 TLS），用户名和密码按控制台给的填
-3. 在 yuuka 的配置里定义一个出口，`CAPS` 写 `cloudflare`（[配置参考](config.md#发信出口)），密码放进文件
+3. 在 yuuka 里建一个出口，`--caps` 写 `cloudflare`，密码从标准输入或文件给（[命令](cli.md#出口与第三方机密)；
+   先要配好 KEK，见[第三方机密](secrets.md)）：
+   `yuuka transport add cloudflare --host smtp.mx.cloudflare.net --username <用户名> --password-file - --caps cloudflare`，
+   再 `yuuka transport test cloudflare` 确认能登录
 4. 用 `yuuka identity add` 建发信地址并指向这个出口（[命令](cli.md#发信地址与授权)）
 
 onboard 是域级的：一个域 onboard 之后，任何前缀都能以它发信。谁能用哪个地址发、能发到哪一步，

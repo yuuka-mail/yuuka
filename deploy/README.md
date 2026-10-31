@@ -56,35 +56,47 @@ Email Worker 的 webhook 地址是 `<YUUKA_WEB_ORIGIN>/ingest/cloudflare`，密�
 ## Cloudflare 侧
 
 R2 的两个 bucket 和令牌、Email Worker、发信出口的凭据怎么配，见
-[Cloudflare 侧的配置](../docs/operate/cloudflare.md)。值都写进 `yuuka.env`。
+[Cloudflare 侧的配置](../docs/operate/cloudflare.md)。R2 和 webhook 的值写进 `yuuka.env`，出口建在库里（见下一节）。
 
 ## 发信
 
-出口（transport）按名字写在 `yuuka.env` 里，变量见[配置参考](../docs/operate/config.md#发信出口)，模板里有 Cloudflare 的例子。
-
-SMTP 密码只放在文件里，变量写的是容器里的路径。用 Compose 的 secret 挂进去，写在
-`compose.override.yaml`（和 `compose.yaml` 放一起，Compose 会自动叠加；用了 `COMPOSE_FILE` 时把它加进列表）：
+出口（transport）存在库里，用 `docker compose run --rm yuuka transport add …` 建
+（[命令](../docs/operate/cli.md#出口与第三方机密)）。出口的密码在库里用 KEK 加密，所以先要生成 KEK、
+作为 Compose secret 挂进去，并在 `yuuka.env` 里设 `YUUKA_KEK_FILE`，写在 `compose.override.yaml`
+（和 `compose.yaml` 放一起，Compose 会自动叠加；用了 `COMPOSE_FILE` 时把它加进列表）：
 
 ```yaml
 services:
   yuuka:
-    secrets: [cloudflare-smtp]
+    secrets: [yuuka-kek]
 secrets:
-  cloudflare-smtp:
-    file: ./secrets/cloudflare-smtp   # secrets/ 和这个文件都在 .gitignore 里
+  yuuka-kek:
+    file: ./secrets/yuuka-kek   # secrets/ 和这个文件都在 .gitignore 里
 ```
 
 文件型 secret 是原样绑定挂载进去的，宿主机上的属主和权限会带进容器；镜像以 `65532:65532`（distroless 的 nonroot）运行，
-所以文件要归它，只给 `chmod 600` 而属主是 root 时，yuuka 启动时读不到密码：
+所以文件要归它，只给 `chmod 600` 而属主是 root 时，yuuka 读不到：
 
 ```bash
 install -d -m 700 secrets
-install -m 400 -o 65532 -g 65532 /path/to/smtp-password secrets/cloudflare-smtp
+(umask 077; openssl rand -base64 32 > secrets/yuuka-kek)
+chown 65532:65532 secrets/yuuka-kek && chmod 400 secrets/yuuka-kek
 ```
 
-容器里的路径是 `/run/secrets/cloudflare-smtp`。文件只在启动时读，换密码后 `docker compose up -d yuuka`。
+KEK 另外离线保存一份，不要和数据库备份放在一起；生成、轮换、丢了怎么办见[第三方机密](../docs/operate/secrets.md)。
+密码从标准输入给，不用挂载密码文件：
+
+```bash
+docker compose run --rm -T yuuka transport add cloudflare --host smtp.mx.cloudflare.net \
+  --username <用户名> --password-file - --caps cloudflare < cloudflare-password
+docker compose run --rm yuuka transport test cloudflare
+```
+
+以前把出口写在 `yuuka.env`（`YUUKA_TRANSPORTS`、`YUUKA_TRANSPORT_<NAME>_*`）并挂载密码文件的部署，
+那些变量已弃用：设好 KEK 后 `serve` 启动时把它们导入库里，然后删掉，步骤见[从环境变量升级](../docs/operate/secrets.md#从环境变量升级)。
+
 凭据失效（`AUTH` 被拒）、连不上出口时，yuuka 暂停这个出口而不是把信判死，信留在队列里，
-出口恢复后（换了密码则在重启后）接着发；在 `docker compose logs yuuka` 里找 `transport paused`。
+出口恢复后接着发；在 `docker compose logs yuuka` 里找 `transport paused`。
 
 队列怎么看、`unknown` 怎么处理见[管理命令](../docs/operate/cli.md#发件队列)。
 
@@ -197,7 +209,7 @@ Postgres 里有无法从原件重建的数据（人做的标记、改判、授�
 
 备份卷和数据在同一块盘上，**不算异地备份**。把它定期复制出这台机器（restic、rsync 等），
 卷在宿主机上的位置：`docker volume inspect yuuka_backups --format '{{.Mountpoint}}'`。
-备份里含凭据哈希和 token 密文，按敏感数据保管。
+备份里含凭据哈希、token 密文和第三方机密（出口密码）的密文，按敏感数据保管；解开后者的 KEK 不在备份里，单独离线保存，也不要和备份放在一起。
 R2 里的原件和 `yuuka-data` 卷里的本地副本是邮件内容本身，另由 R2 保存，不在 `pg_dump` 里。
 
 ```bash

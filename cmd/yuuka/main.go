@@ -27,9 +27,22 @@
 //	                         it again, or give up
 //	yuuka identity add <local>@<zone>|*@<zone> --owner <kind>:<name> --transport NAME
 //	                         [--display-name N] [--signature S] [--plain-strip-markup] [--account A]
+//	yuuka identity set <local>@<zone>|*@<zone> --transports PRIMARY[,FALLBACK...]
 //	yuuka identity ls [--all]
 //	yuuka identity rm <local>@<zone>|*@<zone>
-//	                         addresses to send as (§9.3); rm disables
+//	                         addresses to send as (§9.3); set replaces the
+//	                         transport chain; rm disables
+//	yuuka transport add NAME --host H [--port P] [--auth plain|none] [--username U]
+//	                         [--password-file PATH|-] --caps C
+//	yuuka transport set NAME [--host H] [--port P] [--auth A] [--username U]
+//	                         [--password-file PATH|-] [--caps C]
+//	yuuka transport ls [--all] | rm NAME | test NAME
+//	                         outgoing transports and their sealed passwords (§17);
+//	                         add and set need YUUKA_KEK_FILE; test connects,
+//	                         says EHLO and AUTH, and sends no mail
+//	yuuka secret ls | check | rewrap
+//	                         sealed third-party secrets: list, open each without
+//	                         printing it, rewrap under the current KEK (§17.3)
 //	yuuka grant set --identity A --principal <kind>:<name> [--policy P] [--recipients S] [--allow L]
 //	                         [--max-per-hour N] [--max-per-day N] [--max-new-recipients-per-day N]
 //	                         [--hold-seconds N] [--suspend|--resume]
@@ -94,7 +107,12 @@
 //	                                    e.g. 127.0.0.1/32,::1/128 (default: none; the TCP peer is the
 //	                                    client and the header is ignored). See internal/clientip
 //	YUUKA_MCP_TOKEN                     bearer token `yuuka mcp --stdio` acts as (required there)
-//	YUUKA_TRANSPORTS                    comma-separated names of the outgoing transports, as
+//	YUUKA_KEK_FILE                      file holding the KEK that seals third-party secrets (§17.3);
+//	                                    without it they are locked. Read by serve, transport, secret
+//	YUUKA_KEK_PREVIOUS_FILES            comma-separated KEK files from before a rotation, unwrap only
+//	YUUKA_TRANSPORTS                    deprecated (§17.7): serve imports these transports into the
+//	                                    database when YUUKA_KEK_FILE is set; one release later they go.
+//	                                    Comma-separated names of the outgoing transports, as
 //	                                    identities name them (default: none; serve then sends
 //	                                    nothing). Each name NAME has, with NAME
 //	                                    uppercased and '.' and '-' turned into '_':
@@ -133,6 +151,7 @@
 //
 // `yuuka migrate`, `yuuka prefix`, `yuuka token`, `yuuka outbox`,
 // `yuuka identity`, `yuuka grant` and `yuuka rule` only need the database URLs;
+// `yuuka transport` and `yuuka secret` those and YUUKA_KEK_FILE to seal or open;
 // `yuuka triage status` and `report` those and YUUKA_TRIAGE_*, `rescore`
 // serve's configuration;
 // `yuuka admin` the database URLs and YUUKA_WEB_ORIGIN. All but migrate
@@ -197,7 +216,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka identity add|ls|rm | yuuka grant set|ls|rm | yuuka rule ls|show|add|set|rm|apply|revert | yuuka triage status|rescore|report | yuuka mcp --stdio | yuuka version")
+	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka identity add|set|ls|rm | yuuka transport add|set|ls|rm|test | yuuka secret ls|check|rewrap | yuuka grant set|ls|rm | yuuka rule ls|show|add|set|rm|apply|revert | yuuka triage status|rescore|report | yuuka mcp --stdio | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -273,6 +292,10 @@ func run(args []string, log *slog.Logger) error {
 		return withHost(ctx, func(h *host) error { return h.outboxCmd(ctx, args[1:]) })
 	case "identity":
 		return withHost(ctx, func(h *host) error { return h.identityCmd(ctx, args[1:]) })
+	case "transport":
+		return withHost(ctx, func(h *host) error { return h.transportCmd(ctx, args[1:]) })
+	case "secret":
+		return withHost(ctx, func(h *host) error { return h.secretCmd(ctx, args[1:]) })
 	case "grant":
 		return withHost(ctx, func(h *host) error { return h.grantCmd(ctx, args[1:]) })
 	case "rule":
@@ -544,6 +567,9 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	if err := importEnvTransports(ctx, log, a.db, a.cfg.Outbox.Transports, os.Getenv, os.ReadFile); err != nil {
+		return err
+	}
 	if err := a.openOutbox(ctx, log); err != nil {
 		return err
 	}

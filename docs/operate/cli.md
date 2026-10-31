@@ -57,9 +57,61 @@ DMARC 证实过的发件域和各自的信数（OBSERVED，不在期望里的前
 这对已有的信立刻生效，命令会顺带报出现在有多少
 （[判定规则](../design/architecture.md#3-八条设计原则)）。没写期望的前缀不判定，`ls` 的 OBSERVED 列可以拿来定期望。
 
+## 出口与第三方机密
+
+出口（transport）是 yuuka 把信交出去的 SMTP 服务器：主机、端口、用户名、密码和 caps 都存在库里，
+密码用 KEK 加密（[配置](config.md#第三方机密的加密钥匙)、[为什么](../design/secrets.md#17-第三方机密与渠道进库加密信任根留在主机)）。
+写密码的命令要读到 `YUUKA_KEK_FILE`；`ls` 和 `rm` 不需要。从环境变量里的出口升级上来、换 KEK，见[第三方机密](secrets.md)。
+
+```bash
+yuuka transport add cloudflare --host smtp.mx.cloudflare.net [--port 465] --username <用户名> \
+  --password-file /path/to/password --caps cloudflare
+yuuka transport add relay --host relay.example.com --auth none --caps standard
+yuuka transport set cloudflare [--host H] [--port P] [--auth plain|none] [--username U] [--password-file PATH|-] [--caps C]
+yuuka transport ls [--all]
+yuuka transport test cloudflare
+yuuka transport rm relay
+```
+
+- **密码只从文件或标准输入读**：`--password-file PATH`，或 `--password-file -` 从标准输入读（末尾的一个换行会去掉）。
+  命令拒绝 `--password` 这类把机密写在参数里的写法：参数会留在 shell 历史和 `ps` 里。
+  用 Docker Compose 时用标准输入最省事：`docker compose run --rm -T yuuka transport set cloudflare --password-file - < password`
+- `--caps` 必填，没有默认值：`cloudflare`、`standard`（= `message-id,return-path`）、`none`，
+  或 `message-id`、`return-path`、`dkim`、`status-query` 的组合。写错的后果是信被出口拒收，或者 yuuka 以为能对账而其实不能。
+  不确定就从 `none` 开始；Cloudflare Email Sending 用 `cloudflare`。各个出口能做什么：[能力矩阵](../design/drivers.md#103-能力矩阵)
+- `--auth` 缺省时有 `--username` 就是 `plain`（AUTH PLAIN），没有就是 `none`。只做隐式 TLS
+- `add` 用于新名字、库里只有名字的占位出口，以及 `rm` 过的出口（重新启用，要给出全部参数）；已配置的出口报错，改它用 `set`
+- `set` 只改给出的参数。**换了去向（主机、端口、认证方式、用户名任何一样）就要重新给密码**：
+  密码只会交给当初为它加密的那台服务器，命令会提示。只改 `--caps` 不用给密码；给了 `--password-file` 就换成新密码
+- `add` 和 `set` 先读出口、再按读到的版本写入。两次之间别人改过它时，命令报错、什么都不写，看一眼 `ls` 再跑一次
+- `ls` 的 STATE 是 `configured`、`placeholder`（只有名字，不能发信）或 `disabled`（`ls --all` 才列）；
+  SECRET、SEALED、KEY 是有没有密码、什么时候加密的、用哪把钥匙（`local:<kek_id>`）。从不显示密码本身，也不显示它的哈希
+- `test` 用库里的配置连一次：TLS、`EHLO`、`AUTH`，然后断开，**不发 `MAIL`**，不会投递任何东西。换了密码之后用它确认，
+  失败时报出停在哪一步（`connect`、`greeting`、`EHLO`、`AUTH`）。它要能解开密码，所以也要 `YUUKA_KEK_FILE`
+- `rm` 是停用并抹掉密码。出口这一行留着，发送历史里的名字照样能对上；名字永远不能改，也不能给别的出口用。
+  还把它写在出口链里的发信地址会列出来，用 `identity set` 换掉
+
+每次 `add`、`set` 记一条审计（`transport.add`、`transport.set`），参数是名字、主机、端口、认证方式、用户名、caps，
+以及新密码的 id、audience、包装器和钥匙引用；`rm` 记 `transport.rm`。审计里从不出现密码或它的哈希。
+
+```bash
+yuuka secret ls
+yuuka secret check
+yuuka secret rewrap
+```
+
+- `ls` 列出库里每一条第三方机密：id、类型、属于谁（OWNER，如 `transport cloudflare`）、audience（它只能交给哪个目的地）、
+  包装器、钥匙引用（KEY）、加密时间。不需要 KEK
+- `check` 逐条按「属于谁」重算目的地再解密，只报结果，不打印任何机密。RESULT 是 `ok`、
+  `locked`（解不开它的钥匙没配：没设 `YUUKA_KEK_FILE`，或者旧 KEK 文件拿掉得太早）、
+  `audience mismatch`（出口的去向在加密之后被改过，没经过 `transport set`：重新 `set` 一次密码）、
+  `tampered`（密文对不上：被改过或损坏，当作安全事件查），以及少见的 `wrong kind`、`no owner`（库被绕过 yuuka 改过）。有任何一条不是 `ok` 时命令以非零退出
+- `rewrap` 把每条机密的数据钥匙改用当前的 KEK 重新包装，密文本身不动；已经在当前 KEK 下的跳过。
+  每改一条记一条审计（`secret.rewrap`，带新旧钥匙引用）。换 KEK 的步骤见[第三方机密](secrets.md#换-kek)
+
 ## 发信地址与授权
 
-发一封信要三样东西都齐：一个**出口**（[配置](config.md#发信出口)），一个绑在出口上的**发信地址**（identity），
+发一封信要三样东西都齐：一个**出口**（[上一节](#出口与第三方机密)），一个绑在出口上的**发信地址**（identity），
 以及一条**授权**说明谁能用这个地址发、能发到哪一步。
 
 地址和授权也可以在 WebUI 的设置页里添加和修改，效果和下面的命令一样。签发、添加、调高这类放宽权限的操作，
@@ -70,12 +122,16 @@ DMARC 证实过的发件域和各自的信数（OBSERVED，不在期望里的前
 yuuka identity add alerts@example.com --owner service:monitoring --transport cloudflare \
   [--display-name "Monitoring"] [--signature "..."] [--plain-strip-markup] [--account A]
 yuuka identity add '*@example.com' --owner human:operator --transport cloudflare
+yuuka identity set alerts@example.com --transports cloudflare,relay
 yuuka identity ls [--all]
 yuuka identity rm alerts@example.com
 ```
 
-- `--transport` 是发信的出口，只接受库里已有的出口名：`YUUKA_TRANSPORTS` 里的名字会自动建好（`serve` 启动过，或者运行 `identity add` 的环境里设了它），
-  打错的名字报错而不是凭空建一个出口。`identity ls` 的 TRANSPORT 列是出口链，主出口在前
+- `--transport` 是发信的出口，只接受库里已有的出口名（`transport ls` 里的，占位的也算；
+  还在用环境变量时，`YUUKA_TRANSPORTS` 里的名字会自动建成占位），打错的名字报错而不是凭空建一个出口。
+  `identity ls` 的 TRANSPORT 列是出口链，主出口在前
+- `set --transports 主,备…` 整个替换出口链，最多 8 个，主出口在前；`add --transport NAME` 等于只有一个成员的链。
+  换出口链改变了信的去向，记一条审计（`identity.route`，带新旧两条链）
 - `--owner` 是这个地址属于谁：`human:<name>`（必须已存在）、`agent:<name>` 或 `service:<name>`
 - `*@example.com` 让这个人能以该域的任意前缀发信
 - `--display-name` 是信头 `From` 里的显示名，会覆盖 SMTP 客户端自己写的

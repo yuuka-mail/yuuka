@@ -16,6 +16,7 @@ Compose 自己的 `.env`（镜像、密码、备份策略）见 [deploy/README.m
 | `yuuka reconcile`、`yuuka reparse` | 数据库、R2、`YUUKA_DATA_DIR` |
 | `yuuka admin enroll` | 数据库、`YUUKA_WEB_ORIGIN` |
 | `yuuka prefix` / `token` / `outbox` / `identity` / `grant` | 只要数据库 |
+| `yuuka transport` / `secret` | 数据库；写入或解开密码的（`transport add` / `set` / `test`、`secret check` / `rewrap`）还要 `YUUKA_KEK_FILE`，轮换期间加 `YUUKA_KEK_PREVIOUS_FILES` |
 | `yuuka triage status` / `report` | 数据库、`YUUKA_TRIAGE_*` |
 | `yuuka triage rescore` | 数据库、R2、`YUUKA_DATA_DIR`、`YUUKA_TRIAGE_*` |
 | `yuuka mcp --stdio` | 数据库、R2、`YUUKA_DATA_DIR`、`YUUKA_MCP_TOKEN`；和 `serve` 一样设了 `YUUKA_TRIAGE_*` 才显示评分 |
@@ -96,15 +97,28 @@ KEK 文件是一行 base64，32 个随机字节：`openssl rand -base64 32`。�
 | `YUUKA_KEK_FILE` | 空 | KEK 文件的路径。不设时其余功能照常，需要机密的出口和渠道上锁等待；设了但读不了或格式不对，拒绝启动 |
 | `YUUKA_KEK_PREVIOUS_FILES` | 空 | 轮换后的旧 KEK 文件，逗号分隔，只用来解开还没重新包装的机密。要和 `YUUKA_KEK_FILE` 一起设，不能重复列出当前的那个 |
 
-## 发信出口
+生成、挂载、从环境变量里的出口升级、换 KEK 的步骤：[第三方机密](secrets.md)。
+
+## 发信
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `YUUKA_TRANSPORTS` | 空 | 出口的名字，逗号分隔，就是 `yuuka identity add --transport` 引用的名字。`serve` 启动时和 `identity add` 运行时，库里还没有的名字会各建一行只有名字的出口。不设就什么都不发，信留在队列里 |
 | `YUUKA_OUTBOX_WORKERS` | `2` | 同时进行的发送数，1–32 |
 | `YUUKA_OUTBOX_POLL_INTERVAL` | `30s` | 多久查一次到期的信。`serve` 自己入队的信立即发，不等这个间隔 |
 
-每个出口一组变量，`<NAME>` 是名字转成大写、`.` 和 `-` 换成 `_`（`work-mail` → `WORK_MAIL`）：
+出口本身存在库里，用 [`yuuka transport`](cli.md#出口与第三方机密) 管理，不再写在环境变量里。
+
+## 发信出口
+
+**已弃用**：这一节的变量只在这一个版本里还有效，下一个版本删掉。设了 `YUUKA_KEK_FILE` 时，`serve` 启动时把它们导入库里
+（库里只有占位或没有的出口才导入，已经配置好的以库为准，环境变量被忽略并在日志里报 WARN），之后就该删掉；
+没设 KEK 时它们照旧从内存里工作，日志里报 WARN。步骤见[第三方机密](secrets.md#从环境变量升级)。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `YUUKA_TRANSPORTS` | 空 | 已弃用。出口的名字，逗号分隔，就是 `yuuka identity add --transport` 引用的名字。`serve` 启动时和 `identity add` 运行时，库里还没有的名字会各建一行只有名字的出口 |
+
+每个出口一组变量（同样已弃用），`<NAME>` 是名字转成大写、`.` 和 `-` 换成 `_`（`work-mail` → `WORK_MAIL`）：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|

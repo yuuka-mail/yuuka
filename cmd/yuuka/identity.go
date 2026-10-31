@@ -12,7 +12,8 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
-const identityUsage = "usage: yuuka identity add <local>@<zone>|*@<zone> --owner <kind>:<name> --transport NAME [--display-name N] [--signature S] [--plain-strip-markup] [--account A] | yuuka identity ls [--all] | yuuka identity rm <local>@<zone>|*@<zone>"
+const identityUsage = "usage: yuuka identity add <local>@<zone>|*@<zone> --owner <kind>:<name> --transport NAME [--display-name N] [--signature S] [--plain-strip-markup] [--account A] | yuuka identity set <local>@<zone>|*@<zone> --transports PRIMARY[,FALLBACK...] | " +
+	"yuuka identity ls [--all] | yuuka identity rm <local>@<zone>|*@<zone>"
 
 // identityCmd is `yuuka identity`: the addresses yuuka may send as, the
 // transport each goes out through and who owns it (§9.3, §8.9).
@@ -40,6 +41,21 @@ func (h *host) identityCmd(ctx context.Context, args []string) error {
 		return h.identityAdd(ctx, fs.Arg(0), store.Identity{
 			DisplayName: *display, Signature: *signature, PlainStripMarkup: *strip, Transport: *transport,
 		}, *owner, *account)
+	case "set":
+		fs := flag.NewFlagSet("identity set", flag.ContinueOnError)
+		transports := fs.String("transports", "", "the identity's transport chain, primary first, comma-separated: "+
+			"mail goes out through the first one that can take it (§10.2.2)")
+		if err := parseInterspersed(fs, args[1:]); err != nil {
+			return err
+		}
+		if fs.NArg() != 1 || *transports == "" {
+			return errors.New(identityUsage)
+		}
+		var names []string
+		for n := range strings.SplitSeq(*transports, ",") {
+			names = append(names, strings.TrimSpace(n))
+		}
+		return h.identitySetTransports(ctx, fs.Arg(0), names)
 	case "ls":
 		fs := flag.NewFlagSet("identity ls", flag.ContinueOnError)
 		all := fs.Bool("all", false, "include disabled identities")
@@ -141,7 +157,7 @@ func (h *host) identityAdd(ctx context.Context, addr string, i store.Identity, o
 		return fmt.Errorf("%s is already an identity; `yuuka identity rm` it first", i.Address())
 	}
 	if errors.Is(err, store.ErrNoTransport) {
-		return fmt.Errorf("--transport %q: no such transport; name one in YUUKA_TRANSPORTS, or one `yuuka serve` has seen there", i.Transport)
+		return fmt.Errorf("--transport %q: no such transport; `yuuka transport ls` lists them, `yuuka transport add` makes one", i.Transport)
 	}
 	if err != nil {
 		return err
@@ -170,6 +186,41 @@ func (h *host) ensureTransports(ctx context.Context) error {
 		return err
 	}
 	return h.db.EnsureTransports(ctx, names)
+}
+
+// identitySetTransports is `identity set --transports`: it replaces the
+// identity's chain. Pointing mail at another transport changes where it
+// goes, so it is recorded as identity.route (§17.6).
+func (h *host) identitySetTransports(ctx context.Context, addr string, names []string) error {
+	zone, prefix, err := store.SplitIdentityAddress(addr)
+	if err != nil {
+		return err
+	}
+	for _, n := range names {
+		if !store.ValidName(n) {
+			return fmt.Errorf("--transports: %q is not a transport name ([A-Za-z0-9][A-Za-z0-9._-]*)", n)
+		}
+	}
+	if err := h.ensureTransports(ctx); err != nil {
+		return err
+	}
+	i, err := h.db.IdentityAt(ctx, zone, prefix)
+	if errors.Is(err, store.ErrNotFound) {
+		return fmt.Errorf("%s is not an enabled identity", shown(addr))
+	}
+	if err != nil {
+		return err
+	}
+	err = h.db.SetIdentityTransports(ctx, i.ID, names, h.action("identity.route", map[string]any{
+		"identity_id": i.ID, "address": i.Address(), "transports": names, "was": i.Transports,
+	}))
+	if errors.Is(err, store.ErrNoTransport) {
+		return fmt.Errorf("--transports: %w; `yuuka transport ls` lists them", err)
+	}
+	if err != nil {
+		return err
+	}
+	return h.say("%s now sends through %s", shown(i.Address()), strings.Join(names, ", then "))
 }
 
 func (h *host) identityList(ctx context.Context, all bool) error {

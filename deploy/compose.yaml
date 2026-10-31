@@ -100,6 +100,11 @@ services:
       YUUKA_TRUSTED_PROXIES: ${YUUKA_EDGE_SUBNET:-10.213.77.0/24},${YUUKA_EXTRA_TRUSTED_PROXIES:-}
     volumes:
       - yuuka-data:/var/lib/yuuka
+    # The KEK that seals transport passwords (YUUKA_KEK_FILE) is a Compose
+    # secret, mounted from compose.override.yaml so that this file needs no
+    # local path (README.md, "发信"). It never goes on a volume, least of
+    # all the backups one:
+    #   secrets: [yuuka-kek]
     networks: [edge, backend]
     depends_on:
       postgres: { condition: service_healthy }

@@ -9,6 +9,8 @@
 > 读写在 [`internal/store/transports.go`](../../internal/store/transports.go)。0018（通知渠道）的形状在 §4 的设计块里；
 > WebUI 上的放宽动作依赖 §13.10 的当场再验证（0015）。分期见 §17.9。
 > 发信（P3）之前，出口的主机和密码、Telegram 仍按 §10.2、§8.4 写的现状从环境变量读。
+> P4 已合入：主机上的 `transport`、`identity set`、`secret` 命令和环境变量里出口的导入在 [`cmd/yuuka`](../../cmd/yuuka/transportcmd.go)，
+> 用法在[运维文档](../operate/cli.md#出口与第三方机密)。
 
 M2 把出口当作部署事实：按名字定义在环境变量里，`identities.transport` 只存名字（§4 的原注）；
 Telegram 也是一组环境变量，一个 bot、一个 chat、一个人。当时写下的回头条件是「出现需要在运行时增删出口的场景」。
@@ -174,11 +176,13 @@ KEK 丢了（或 Vault 里的钥匙被删）要重新输入所有第三方机密
 - **agent 排除在外**：没有 MCP 工具；REST 要人的会话，agent 进不来，`TestACL` 断言持有全部 scope 的 token 在每条新路由上都是 403。
   agent 只在提交结果里看到出口的**名字**（§8.9）
 - **审计**：每次放宽写一条 `actions`（`transport.add`、`identity.route`、`channel.bind.confirm`、`secret.rewrap`、`config.import`……），
-  参数含 id、名字、主机、端口、用户名、caps、audience、包装器和钥匙引用，**从不含明文，也不含明文的哈希或指纹**：
-  人选的密码，哈希能被暴力破解。同时推一条 `security` 告警，发给管理员和当事人（§8.4、§13.10）。CLI 照旧记 `system` 加 `host_user`（§13.7）
+  参数含 id、名字、主机、端口、用户名、caps、audience、包装器和钥匙引用（出口的见 [`transportAuditArgs`](../../cmd/yuuka/transportcmd.go)），
+  **从不含明文，也不含明文的哈希或指纹**：
+  人选的密码，哈希能被暴力破解。同时推一条 `security` 告警，发给管理员和当事人（§8.4、§13.10）。CLI 照旧记 `system` 加 `host_user`（§13.7）。
+  告警等 P5 的分发器：P4 的 CLI 只写审计，主机上还没有能推 `security` 的路径
 - **WebUI**：密码框只写不读，留空等于不改，从不回显；机密的状态只显示「已设 / 加密时间 / 正常 / 上锁」
 
-**命令**（名字是单向门，已定；用法随实现写进运维文档）：
+**命令**（名字是单向门，已定；用法见[运维文档](../operate/cli.md#出口与第三方机密)）：
 
 | 命令 | 为什么存在 |
 |---|---|
@@ -190,6 +194,16 @@ KEK 丢了（或 Vault 里的钥匙被删）要重新输入所有第三方机密
 | `yuuka secret ls` / `check` / `rewrap` | 列出每条机密的类型、audience、包装器、钥匙引用、加密时间；`check` 逐条解密并报告结果，不打印任何机密；`rewrap` 重新包装 DEK，用于 KEK 轮换和换包装器 |
 
 机密**永不作为参数值传递**，只能是文件路径或 `-`（标准输入）：参数会出现在 shell 历史和 `ps` 里。
+
+实现时定下的几处细节，理由各一句：
+
+- `transport add` 也接受占位出口和 `rm` 过的出口：占位本来就等着被配置；名字永不复用（§17.4），重新启用只能落在原来那一行。
+  已配置的出口 `add` 报错，免得一次打错的 `add` 悄悄改掉别人的去向
+- `transport set` 只要给了新密码就换一条新 id 的机密，不走 `UpdateSecret` 原地改写：换密码和换去向走同一条路径，少一个分支
+- `transport rm` 是收紧，也记一条 `transport.rm`；`transport test` 只把密码交给它本来就该去的地方，不记审计
+- `secret rewrap` 判断「已经在当前钥匙下」的办法是包装一遍再比较包装器和钥匙引用，而不是问包装器当前是哪把钥匙：
+  Vault / KMS 的钥匙版本只有包装之后才知道，这样不必给 `Wrapper` 加接口
+- `secret check` 有任何一条不是 `ok` 就以非零退出，能放进定时任务；拥有机密的表在一处列出（`secretOwners`），渠道和 M3.5 的来源各加一段
 
 ### 17.7 从环境变量升级：一次导入，一个版本的弃用期
 
@@ -203,11 +217,13 @@ KEK 丢了（或 Vault 里的钥匙被删）要重新输入所有第三方机密
   Telegram 的四个变量变成一个名为 `telegram` 的渠道，给 `YUUKA_TELEGRAM_OPERATOR` 指定的人（没设时给唯一的那个 human）建一条绑定，
   设了用户 id 就带按钮，并订阅今天已有的四类事件。这是唯一不经双向确认就建的绑定：环境变量本身就是主机上的确认
 - 导入以 `system` 记审计（`config.import`，`via: env`），幂等；几个进程同时启动时靠条件 upsert 保证只写一次。
-  库里已经配置好的出口或渠道，环境变量被忽略并报 WARN
+  库里已经配置好的出口或渠道，环境变量被忽略并报 WARN；`rm` 过的出口同样不会被环境变量救回来。
+  出口的导入在 [`cmd/yuuka/import.go`](../../cmd/yuuka/import.go)：条件 upsert 就是按读到的 revision 写（新行是 0），
+  输的一方重读、看到已配置就跳过。某个出口导入失败只记 ERROR、不阻止启动：它照旧从环境变量工作
 - **没设 KEK**：环境变量里的出口和 Telegram 照旧在内存里工作，报 WARN。升级永远不会让发信停摆。
   这期间启动时仍为环境变量里每个出口名 upsert 一行占位（占位不含机密，不需要 KEK），
   这样 `identity add --transport` 引用一个只在环境变量里的出口时有行可指；`identity add` 本身只接受库里已有的出口名，打错的名字不会变成占位
-- 升级的具体步骤（生成 KEK、挂载、核实、删掉旧变量）随实现写进运维文档
+- 升级的具体步骤（生成 KEK、挂载、核实、删掉旧变量）见[运维文档](../operate/secrets.md#从环境变量升级)
 
 ### 17.8 M3.5 的形状
 
