@@ -139,6 +139,14 @@ func DefaultLimits(kind string) Limits {
 	return Limits{MaxPerHour: ptr(10), MaxPerDay: ptr(50), MaxNewRecipientsPerDay: ptr(5)}
 }
 
+// DefaultHoldSeconds is the recall window of the review tier where a
+// grant's hold_seconds is NULL (or there is no grant row): how long mail
+// that passed the review waits in held before it is sent (§8.9). Ten
+// minutes is long enough to read the card on a phone and press recall,
+// short enough that a reply still reads as a reply. Like the limits it
+// lives here, so changing it needs no migration.
+const DefaultHoldSeconds = 600
+
 // MaxAutoPerThreadRecipient bounds automatic mail (approved by system)
 // to one recipient within one thread over the last 24 hours, whoever
 // sent it (§8.9 邮件循环). Two auto-responders that slipped past the

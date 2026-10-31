@@ -88,14 +88,18 @@ func TestThreadCorrespondents(t *testing.T) {
 	if f := foldSent(t, e.db, rawID, reply); !f.NewMessage {
 		t.Fatalf("sent copy folded into an existing message: %+v", f)
 	}
-	if _, err := e.pool.Exec(ctx, `UPDATE outbox SET state = 'withdrawn', next_retry_at = NULL, approved_by = NULL
-		WHERE id = $1`, outboxID); err != nil {
+	dr, err := e.db.CreateDraft(ctx, e.arisu, store.Draft{FromAddr: "arisu@example.com", BodyMD: "x"}, e.at())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE outbox SET state = 'withdrawn', next_retry_at = NULL, approved_by = NULL,
+		withdrawn_by = $2, draft_id = $3 WHERE id = $1`, outboxID, e.op.PrincipalID, dr.ID); err != nil {
 		t.Fatal(err)
 	}
 	if got := correspondents(); !slices.Equal(got, want) {
 		t.Errorf("withdrawn reply: correspondents %q, want %q", got, want)
 	}
-	if _, err := e.pool.Exec(ctx, `UPDATE outbox SET state = 'sent', approved_by = $2 WHERE id = $1`,
+	if _, err := e.pool.Exec(ctx, `UPDATE outbox SET state = 'sent', approved_by = $2, withdrawn_by = NULL WHERE id = $1`,
 		outboxID, store.SystemPrincipalID); err != nil {
 		t.Fatal(err)
 	}

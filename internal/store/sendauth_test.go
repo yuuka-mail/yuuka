@@ -160,17 +160,26 @@ func (e *sendEnv) outbox(o outboxRow) string {
 	if o.state == "queued" || o.state == "failed" {
 		next = o.created
 	}
-	var approved any = o.approvedBy
+	var approved, withdrawnBy any = o.approvedBy, nil
 	if o.state == "withdrawn" {
-		approved = nil
+		// Withdrawn from held: nobody let it go, and it went back to a
+		// draft (0011).
+		approved, withdrawnBy = nil, e.op.PrincipalID
+		if o.draft == "" {
+			o.draft = ulid.New(e.at())
+			if _, err := e.pool.Exec(e.t.Context(), `INSERT INTO drafts (id, principal_id, identity_id, from_addr, body_md, hold_reason)
+				VALUES ($1, $2, $3, 'x@example.com', 'x', 'withdrawn')`, o.draft, o.by, o.identity.ID); err != nil {
+				e.t.Fatal(err)
+			}
+		}
 	}
 	var draft any
 	if o.draft != "" {
 		draft = o.draft
 	}
 	if _, err := e.pool.Exec(e.t.Context(), `INSERT INTO outbox (id, state, next_retry_at, identity_id, from_addr, submitted_by,
-		approved_by, raw_id, draft_id, created_at) VALUES ($1, $2, $3, $4, 'x@example.com', $5, $6, $7, $8, $9)`,
-		id, o.state, next, o.identity.ID, o.by, approved, o.raw, draft, o.created); err != nil {
+		approved_by, raw_id, draft_id, created_at, withdrawn_by) VALUES ($1, $2, $3, $4, 'x@example.com', $5, $6, $7, $8, $9, $10)`,
+		id, o.state, next, o.identity.ID, o.by, approved, o.raw, draft, o.created, withdrawnBy); err != nil {
 		e.t.Fatal(err)
 	}
 	for _, r := range o.to {
@@ -362,7 +371,7 @@ func TestGrants(t *testing.T) {
 	}
 	g := store.Grant{
 		IdentityID: e.arisuID.ID, PrincipalID: e.arisu.PrincipalID, Policy: sendpolicy.Auto,
-		RecipientScope: sendpolicy.ScopeAllowlist, Allowlist: []string{"example.net"}, MaxPerHour: &n, HoldSeconds: 60,
+		RecipientScope: sendpolicy.ScopeAllowlist, Allowlist: []string{"example.net"}, MaxPerHour: &n, HoldSeconds: new(60),
 	}
 	if err := set(g); err != nil {
 		t.Fatal(err)
@@ -375,6 +384,7 @@ func TestGrants(t *testing.T) {
 	}
 	got, err := e.db.GrantFor(ctx, e.arisuID.ID, e.arisu.PrincipalID)
 	if err != nil || got.Policy != sendpolicy.Auto || got.MaxPerHour == nil || *got.MaxPerHour != 5 || got.MaxPerDay != nil ||
+		got.HoldSeconds == nil || *got.HoldSeconds != 60 ||
 		!slices.Equal(got.Allowlist, []string{"example.net"}) || got.IdentityAddress != "arisu@example.com" || got.PrincipalName != "arisu" {
 		t.Errorf("grant = %+v, %v", got, err)
 	}

@@ -27,9 +27,11 @@ type Grant struct {
 	MaxPerHour             *int
 	MaxPerDay              *int
 	MaxNewRecipientsPerDay *int
-	HoldSeconds            int
-	SuspendedAt            *time.Time
-	CreatedAt              time.Time
+	// HoldSeconds is the recall window of the review tier; nil means
+	// sendpolicy.DefaultHoldSeconds, 0 no window.
+	HoldSeconds *int
+	SuspendedAt *time.Time
+	CreatedAt   time.Time
 
 	// Read only, filled by the reads.
 	IdentityAddress string

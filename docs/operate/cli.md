@@ -97,7 +97,7 @@ yuuka grant rm --identity alerts@example.com --principal service:monitoring
 
 限额：`--max-per-hour`、`--max-per-day`、`--max-new-recipients-per-day`，给数字或 `default`。
 默认值按主体类型：人不限；service 每小时 30、每天 200、每天 5 个新收件人；agent 每小时 10、每天 50、每天 5 个新收件人。
-超出档位或限额的信不会被拒绝，而是停在草稿等人看。`--hold-seconds` 是 `review` 档的撤回窗口，自动审核上线后才生效。
+超出档位或限额的信不会被拒绝，而是停在草稿等人看。`--hold-seconds` 是 `review` 档的撤回窗口，给秒数、`0`（不设窗口）或 `default`（600 秒），自动审核上线后才生效。
 
 `--suspend` 立即停用一条授权，之后每次提交都停在草稿；`--resume` 解除。
 

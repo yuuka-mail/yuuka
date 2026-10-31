@@ -16,7 +16,7 @@ import (
 
 const grantUsage = "usage: yuuka grant set --identity <addr>|*@<zone> --principal <kind>:<name> [--policy none|draft|review|auto] " +
 	"[--recipients thread|allowlist|any] [--allow a@x,domain,...] [--max-per-hour N|default] [--max-per-day N|default] " +
-	"[--max-new-recipients-per-day N|default] [--hold-seconds N] [--suspend|--resume] | " +
+	"[--max-new-recipients-per-day N|default] [--hold-seconds N|default] [--suspend|--resume] | " +
 	"yuuka grant ls [--identity A] [--principal P] | yuuka grant rm --identity A --principal P"
 
 // grantCmd is `yuuka grant`: who may send as which identity, and how far
@@ -69,8 +69,8 @@ func (h *host) grantIdentity(ctx context.Context, addr string) (store.Identity, 
 	return i, err
 }
 
-// limitFlag is a nullable limit: a number, or "default" for NULL (the
-// default of sendpolicy.DefaultLimits).
+// limitFlag is a nullable number: a number, or "default" for NULL (the
+// default of sendpolicy.DefaultLimits, or sendpolicy.DefaultHoldSeconds).
 type limitFlag struct{ v **int }
 
 func (f limitFlag) String() string {
@@ -123,7 +123,7 @@ func (h *host) grantSet(ctx context.Context, args []string) error {
 	fs.Var(limitFlag{&g.MaxPerHour}, "max-per-hour", "messages in any 60 minutes, or default")
 	fs.Var(limitFlag{&g.MaxPerDay}, "max-per-day", "messages in any 24 hours, or default")
 	fs.Var(limitFlag{&g.MaxNewRecipientsPerDay}, "max-new-recipients-per-day", "addresses never written to before, in any 24 hours, or default")
-	hold := fs.Int("hold-seconds", 0, "recall window of the review tier (M3)")
+	fs.Var(limitFlag{&g.HoldSeconds}, "hold-seconds", "recall window of the review tier in seconds, 0 for none, or default")
 	suspend := fs.Bool("suspend", false, "suspend the grant: every submission stays a draft until --resume")
 	resume := fs.Bool("resume", false, "lift a suspension")
 	if err := fs.Parse(args); err != nil {
@@ -178,10 +178,7 @@ func (h *host) grantSet(ctx context.Context, args []string) error {
 		cur.MaxNewRecipientsPerDay = g.MaxNewRecipientsPerDay
 	}
 	if given["hold-seconds"] {
-		if *hold < 0 {
-			return fmt.Errorf("--hold-seconds %d: want >= 0", *hold)
-		}
-		cur.HoldSeconds = *hold
+		cur.HoldSeconds = g.HoldSeconds
 	}
 	if *suspend && cur.SuspendedAt == nil {
 		now := h.now()
@@ -234,8 +231,13 @@ func describeGrant(g store.Grant, kind string) string {
 	}
 	s += fmt.Sprintf(", %s/hour, %s/day, %s new recipients/day", limit(g.MaxPerHour, def.MaxPerHour),
 		limit(g.MaxPerDay, def.MaxPerDay), limit(g.MaxNewRecipientsPerDay, def.MaxNewRecipientsPerDay))
-	if g.HoldSeconds > 0 {
-		s += fmt.Sprintf(", hold %ds", g.HoldSeconds)
+	// The window only means something under review; elsewhere it is
+	// shown when the grant has a number of its own.
+	switch {
+	case g.HoldSeconds != nil && (g.Policy == sendpolicy.Review || *g.HoldSeconds > 0):
+		s += fmt.Sprintf(", hold %ds", *g.HoldSeconds)
+	case g.Policy == sendpolicy.Review:
+		s += fmt.Sprintf(", hold %ds (default)", sendpolicy.DefaultHoldSeconds)
 	}
 	if g.SuspendedAt != nil {
 		s += ", SUSPENDED since " + stamp(g.SuspendedAt)

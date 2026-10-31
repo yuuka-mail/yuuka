@@ -107,6 +107,15 @@ func TestIdentityAndGrant(t *testing.T) {
 	if _, _, args := e.lastAction("grant.set"); args["policy"] != "review" || args["identity"] != "arisu@example.com" || args["via"] != "cli" {
 		t.Errorf("grant.set recorded %v", args)
 	}
+	// The recall window: the default until a number is given, 0 for none.
+	for flag, want := range map[string]string{"0": ", hold 0s", "90": ", hold 90s", "default": ", hold 600s (default)"} {
+		if out := e.must("grant", "set", "--identity", "arisu@example.com", "--principal", "agent:arisu", "--hold-seconds", flag); !strings.Contains(out, want) {
+			t.Errorf("--hold-seconds %s: %q", flag, out)
+		}
+	}
+	if _, _, err := e.run("grant", "set", "--identity", "arisu@example.com", "--principal", "agent:arisu", "--hold-seconds", "-1"); err == nil {
+		t.Error("--hold-seconds -1 accepted")
+	}
 	ls = e.must("grant", "ls")
 	if strings.Count(ls, "\n") != 4 {
 		t.Errorf("grant ls:\n%s", ls)
