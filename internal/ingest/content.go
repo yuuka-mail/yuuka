@@ -24,8 +24,9 @@ func (in *Ingester) fold(ctx context.Context, ref store.RawRef, raw []byte) (sto
 	return f, err
 }
 
-// readRaw prefers the local copy and falls back to the raw bucket.
-func (in *Ingester) readRaw(ctx context.Context, ref store.RawRef) ([]byte, error) {
+// ReadRaw returns the raw message of ref, preferring the local copy and
+// falling back to the raw bucket. Readers such as the agent view use it too.
+func (in *Ingester) ReadRaw(ctx context.Context, ref store.RawRef) ([]byte, error) {
 	b, err := in.cfg.Local.Get(ref.LocalPath)
 	if err == nil {
 		return b, nil
@@ -83,7 +84,7 @@ func (in *Ingester) ProcessBacklog(ctx context.Context) (BacklogStats, error) {
 }
 
 func (in *Ingester) processOne(ctx context.Context, ref store.RawRef) error {
-	raw, err := in.readRaw(ctx, ref)
+	raw, err := in.ReadRaw(ctx, ref)
 	if err != nil {
 		return err
 	}
@@ -150,7 +151,7 @@ func (in *Ingester) rebuild(ctx context.Context, t store.ReparseTarget) (bool, e
 	auth := make(map[string]authres.Auth, len(t.Deliveries))
 	var msg mimeparse.Message
 	for i, d := range t.Deliveries {
-		raw, err := in.readRaw(ctx, d)
+		raw, err := in.ReadRaw(ctx, d)
 		if err != nil {
 			return false, err
 		}

@@ -8,6 +8,8 @@
 //	                         at or after T (RFC 3339 or YYYY-MM-DD; default all)
 //	yuuka admin enroll [--name NAME] [--ttl 15m]
 //	                         one-time passkey enrollment link + new recovery codes
+//	yuuka mcp --stdio        read-only MCP server on stdin/stdout, acting as the
+//	                         bearer token in YUUKA_MCP_TOKEN (§8.7)
 //	yuuka version
 //
 // Configuration comes from the environment:
@@ -32,12 +34,14 @@
 //	YUUKA_WEB_ORIGIN                    WebUI origin as the browser sees it, e.g. https://mail.example.com;
 //	                                    enables the WebUI, its login and the REST API (required by admin enroll)
 //	YUUKA_WEBAUTHN_RP_ID                WebAuthn relying party id (default: the origin's host)
+//	YUUKA_MCP_TOKEN                     bearer token `yuuka mcp --stdio` acts as (required there)
 //
 // `yuuka admin` only needs YUUKA_DATABASE_URL and YUUKA_WEB_ORIGIN.
 //
 // The webhook is served at POST /ingest/cloudflare (HMAC, §2.2); the login
 // endpoints under /auth/ (see internal/authn); the REST API under /api/v1/
-// (see internal/api); the WebUI at / (see web). Migrations are applied on
+// (see internal/api); MCP over streamable HTTP at /mcp, bearer token only
+// (see internal/mcp); the WebUI at / (see web). Migrations are applied on
 // start.
 package main
 
@@ -59,6 +63,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/ingest"
 	"github.com/yuuka-mail/yuuka/internal/localraw"
+	"github.com/yuuka-mail/yuuka/internal/mcp"
 	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/r2"
 	"github.com/yuuka-mail/yuuka/internal/store"
@@ -81,7 +86,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka version")
+	return errors.New("usage: yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka mcp --stdio | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -118,6 +123,16 @@ func run(args []string, log *slog.Logger) error {
 			return err
 		}
 		return reparse(ctx, log, t)
+	case "mcp":
+		fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
+		stdio := fs.Bool("stdio", false, "serve MCP on stdin/stdout")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if !*stdio {
+			return errors.New("usage: yuuka mcp --stdio (the HTTP form is served by yuuka serve at /mcp)")
+		}
+		return mcpStdio(ctx, log)
 	case "admin":
 		if len(args) < 2 || args[1] != "enroll" {
 			return usage()
@@ -212,6 +227,27 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 	return &app{cfg: cfg, pool: pool, db: db, in: in, alerter: alerter}, nil
 }
 
+func (a *app) mcp() *mcp.Server {
+	return mcp.New(mcp.Config{DB: a.db, Raw: a.in, Log: slog.Default(), Version: version})
+}
+
+// mcpStdio serves MCP to the client that started this process. The
+// process can reach the database, but that does not make whoever runs it
+// a principal: tool calls act as the bearer token in YUUKA_MCP_TOKEN, with
+// its scopes and in its name in the audit log, exactly as over HTTP.
+func mcpStdio(ctx context.Context, log *slog.Logger) error {
+	token := os.Getenv("YUUKA_MCP_TOKEN")
+	if token == "" {
+		return errors.New("YUUKA_MCP_TOKEN is required: tool calls act as that bearer token's principal")
+	}
+	a, err := setup(ctx, log, false)
+	if err != nil {
+		return err
+	}
+	defer a.close()
+	return a.mcp().ServeStdio(ctx, authn.NewBearer(a.db, log, nil), token)
+}
+
 func (a *app) close() {
 	a.in.Wait()
 	a.pool.Close()
@@ -298,6 +334,9 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	mux := http.NewServeMux()
 	// The webhook authenticates by HMAC (§2.2), never by session.
 	mux.Handle("POST /ingest/cloudflare", &ingest.Handler{Secrets: a.cfg.WebhookSecrets, Ingester: a.in, Log: log})
+	// Agents authenticate by bearer token only, never by the WebUI's
+	// session cookie (§13.7), so this does not depend on YUUKA_WEB_ORIGIN.
+	mux.Handle("/mcp", a.mcp().Handler(authn.NewBearer(a.db, log, nil)))
 	if a.cfg.Web.Origin != "" {
 		svc, err := authn.New(authn.Config{DB: a.db, Origin: a.cfg.Web.Origin, RPID: a.cfg.Web.RPID, Alerter: a.alerter, Log: log})
 		if err != nil {

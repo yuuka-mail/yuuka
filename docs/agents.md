@@ -172,6 +172,34 @@ agent 因此不需要预先知道自己的权限，也没有动机去「换个�
 Resource URI 统一 `yuuka://`，让 agent 能把引用直接递给人。
 工具少、语义贴近意图，模型选错的概率和 token 都更低。
 
+M1 的落法（`internal/mcp`）：
+
+- 只读三件：`search_messages`（`message:read`）、`get_message`（`message:read`）、
+  `list_prefixes`（`prefix:read`）。`get_otp` 等 M3 的 extractions，写类工具随各自里程碑来。
+  `search_messages` 比上面的签名多一个 `include_downgraded`：§4.3 的降级默认把未认领前缀和
+  dmarc=fail 的信藏起来，agent 查某个新前缀时需要显式打开；返回的命中上照样标 `downgraded`
+- 每次调用：取调用方的 Viewer → 查 scope（不足则记 `auth.deny` 并返回工具错误）→
+  经 store 的 Viewer 读函数读 → 记一条 `actions`（`tool = mcp.<名字>`，`args` 是入参，
+  `result` 只记计数和 URI，不记信件内容）。读也记，因为「昨天 agent 看了什么」同样是 §8.8 要回答的问题
+- 结果同时给 `structuredContent`（§8.1 的 JSON 树 / 命中列表）和一段文本（给模型读，
+  发件人写的部分在不可信边界里）。工具不声明 output schema：视图的 schema 很长，
+  会让每个 agent 的工具列表都多出上千 token，而结构化消费者（WebUI）本来就按 Go 类型读
+- `list_prefixes` 里运维者认领的前缀和它的标签、备注是事实；未认领（discovered）的前缀名是
+  发件人随便起的，同样包进不可信边界
+- 传输两种，认证都是 bearer token（§13.7），都不读 cookie：
+  - HTTP：`yuuka serve` 在 `/mcp` 挂 streamable HTTP，**无状态**——每个 POST 单独认证，
+    吊销立即生效，也没有会话要保管。不依赖 `YUUKA_WEB_ORIGIN`（那只是 WebAuthn 要的）。
+    SDK 默认的 localhost DNS rebinding 检查关掉了：它防的是环境凭据，bearer token 不是；
+    而且放在反向代理后面时每个请求都从 localhost 带着公网 Host 进来，会被它误拒
+  - stdio：`yuuka mcp --stdio` 以环境变量 `YUUKA_MCP_TOKEN` 里那把 token 的主体身份运行，
+    启动时验一次、每次调用再验一次（吊销立即生效）。**能启动这个进程不等于是某个主体**：
+    不默认成 human、不默认全部 scope，审计里记的是这把 token。
+    取舍：stdio 进程自己要有数据库和原件的访问配置，所以对能读到这些配置的人来说它不是安全边界——
+    它保证的是 agent 走 API 时的 scope 和审计。不可信的 agent 应该用 HTTP 形态，拿不到数据库凭据
+- MCP 库用官方 Go SDK（`github.com/modelcontextprotocol/go-sdk`）：MCP 组织与 Go 团队共同维护，
+  跟着协议版本走；自己实现要长期追协议协商、streamable HTTP 和 SSE 的变化，不值得
+- 还没有签发 token 的 CLI 或 WebUI 入口（`authn.IssueToken` 只在代码里），这是接上真实 agent 前要补的一步
+
 ### 8.8 审计与回放
 
 `actions(id, actor → principals.id, credential_id → credentials.id, tool, args, result, undo_token, at)`
