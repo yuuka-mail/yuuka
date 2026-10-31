@@ -28,10 +28,12 @@ func TestRecaller(t *testing.T) {
 	}
 	op, arisu := principal("human", "operator"), principal("agent", "arisu")
 	for _, a := range []struct{ prefix, owner string }{{"me", op.PrincipalID}, {"arisu", arisu.PrincipalID}} {
-		if _, err := e.pool.Exec(ctx, `INSERT INTO identities (id, account_id, zone, prefix, transport, owner_id)
-			VALUES ($1, $2, 'example.com', $3, 'cf', $4)`, ulid.New(time.Now()), storetest.Account(t, e.db), a.prefix, a.owner); err != nil {
+		id := ulid.New(time.Now())
+		if _, err := e.pool.Exec(ctx, `INSERT INTO identities (id, account_id, zone, prefix, owner_id)
+			VALUES ($1, $2, 'example.com', $3, $4)`, id, storetest.Account(t, e.db), a.prefix, a.owner); err != nil {
 			t.Fatal(err)
 		}
+		storetest.Route(t, e.pool, id, "cf")
 	}
 	enqueue := func(v *auth.Viewer, from string, s store.Submission, draft *store.Draft) string {
 		t.Helper()

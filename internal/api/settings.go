@@ -251,6 +251,10 @@ func (a *API) adminIdentities(ctx context.Context, _ *auth.Viewer, _ struct{}) (
 	if err != nil {
 		return IdentityAdminList{}, err
 	}
+	trs, err := a.transportNames(ctx)
+	if err != nil {
+		return IdentityAdminList{}, err
+	}
 	var enabled []store.Identity
 	for _, i := range all {
 		if i.DisabledAt == nil {
@@ -258,14 +262,14 @@ func (a *API) adminIdentities(ctx context.Context, _ *auth.Viewer, _ struct{}) (
 		}
 	}
 	out := IdentityAdminList{
-		Identities: make([]ManagedIdentity, len(all)), Transports: nonNil(a.transports), Accounts: make([]string, len(accts)),
+		Identities: make([]ManagedIdentity, len(all)), Transports: trs, Accounts: make([]string, len(accts)),
 	}
 	for k, acct := range accts {
 		out.Accounts[k] = acct.Name
 	}
 	for k, i := range all {
 		m := ManagedIdentity{
-			ID: i.ID, Address: i.Address(), DisplayName: i.DisplayName, Transport: i.Transport,
+			ID: i.ID, Address: i.Address(), DisplayName: i.DisplayName, Transport: i.Transport, Transports: nonNil(i.Transports),
 			Owner:     Actor{ID: i.OwnerID, Kind: i.OwnerKind, Name: i.OwnerName},
 			CreatedAt: i.CreatedAt, DisabledAt: i.DisabledAt, Host: "yuuka identity rm " + shellWord(i.Address()),
 		}
@@ -279,20 +283,38 @@ func (a *API) adminIdentities(ctx context.Context, _ *auth.Viewer, _ struct{}) (
 	return out, nil
 }
 
-// addIdentity adds as `yuuka identity add` does, naming one of this
-// process's transports.
+// transportNames are the names of the enabled transports, what a new
+// identity may name: configured ones and placeholders, which serve makes
+// for every name in YUUKA_TRANSPORTS (§17.7).
+func (a *API) transportNames(ctx context.Context) ([]string, error) {
+	trs, err := a.db.Transports(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, len(trs))
+	for k, t := range trs {
+		names[k] = t.Name
+	}
+	return names, nil
+}
+
+// addIdentity adds as `yuuka identity add` does, naming one transport.
 func (a *API) addIdentity(ctx context.Context, v *auth.Viewer, p IdentityParams) (ManagedIdentity, error) {
 	b := p.Body
 	zone, prefix, err := store.SplitIdentityAddress(b.Address)
 	if err != nil {
 		return ManagedIdentity{}, invalid("%v", err)
 	}
-	if len(a.transports) == 0 {
-		return ManagedIdentity{}, openapi.Errorf(http.StatusConflict, openapi.CodeConflict,
-			"this process sends through no transport (YUUKA_TRANSPORTS), so an identity would have nothing to send with")
+	trs, err := a.transportNames(ctx)
+	if err != nil {
+		return ManagedIdentity{}, err
 	}
-	if !slices.Contains(a.transports, b.Transport) {
-		return ManagedIdentity{}, invalid("transport %q: want one of %s", b.Transport, strings.Join(a.transports, ", "))
+	if len(trs) == 0 {
+		return ManagedIdentity{}, openapi.Errorf(http.StatusConflict, openapi.CodeConflict,
+			"no transport exists (YUUKA_TRANSPORTS), so an identity would have nothing to send with")
+	}
+	if !slices.Contains(trs, b.Transport) {
+		return ManagedIdentity{}, invalid("transport %q: want one of %s", b.Transport, strings.Join(trs, ", "))
 	}
 	accts, err := a.db.Accounts(ctx)
 	if err != nil {
@@ -328,6 +350,10 @@ func (a *API) addIdentity(ctx context.Context, v *auth.Viewer, p IdentityParams)
 	}))
 	if errors.Is(err, store.ErrDuplicate) {
 		return ManagedIdentity{}, openapi.Errorf(http.StatusConflict, openapi.CodeConflict, "%s is already an identity", i.Address())
+	}
+	if errors.Is(err, store.ErrNoTransport) {
+		// Removed between the check above and the insert.
+		return ManagedIdentity{}, invalid("transport %q: %v", b.Transport, err)
 	}
 	if err != nil {
 		return ManagedIdentity{}, err

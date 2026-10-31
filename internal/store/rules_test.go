@@ -486,6 +486,7 @@ func TestRulePrincipalHoldsNothing(t *testing.T) {
 	if !errors.Is(err, store.ErrRulePrincipal) {
 		t.Errorf("token for a rule: %v", err)
 	}
+	storetest.Transports(t, e.db, "cf")
 	ident := store.Identity{ID: ulid.New(at), AccountID: e.acct, Zone: "example.com", Prefix: "rule", Transport: "cf", OwnerID: r.PrincipalID, CreatedAt: at}
 	if err := e.db.AddIdentity(ctx, ident, e.action("identity.add")); !errors.Is(err, store.ErrRulePrincipal) {
 		t.Errorf("identity owned by a rule: %v", err)

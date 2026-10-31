@@ -74,6 +74,7 @@ func (e *sendEnv) identity(addr, owner string) store.Identity {
 		e.t.Fatal(err)
 	}
 	at := e.at()
+	storetest.Transports(e.t, e.db, "cf")
 	i := store.Identity{ID: ulid.New(at), AccountID: e.account, Zone: zone, Prefix: prefix, Transport: "cf", OwnerID: owner, CreatedAt: at}
 	if err := e.db.AddIdentity(e.t.Context(), i, store.Action{ID: ulid.New(at), Actor: store.SystemPrincipalID, Tool: "identity.add", At: at}); err != nil {
 		e.t.Fatalf("add %s: %v", addr, err)

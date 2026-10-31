@@ -52,9 +52,11 @@ identity → 出口必须是硬绑定：
 - 谁能用哪个 identity 发信由 `identity_grants` 决定（§13.5），
   服务主体无法冒用运维者的地址。
 - outbox 每条带 `identity_id`，路由由 identity 决定，不给调用方选 transport 的机会。
-- 现状（M2）：出口按名字定义在进程配置里（主机、端口、caps、凭据文件路径；变量形状见 §10.2），
-  `identities.transport` 只存一个名字，没有备用。
-- **设计（§17，已定，未实现）：出口进库，每个 identity 一条出口链**（`identity_transports`：位置 0 是主出口，后面是备用，最多 8 个）。
+- 现状：出口的主机、端口、caps、凭据文件路径仍在进程配置里（变量形状见 §10.2），执行器按主出口的名字对照它发信。
+  名字和链已经进库（§17.9 的 P2，[0017](../../internal/store/migrations/0017_transports.sql)）：
+  每个 identity 一条出口链，升级时原来的出口成了链上唯一的成员；库里的出口在配置之前是只有名字的占位行。
+- **设计（§17，链已建，按链发信未实现）：出口进库，每个 identity 一条出口链**（`identity_transports`：位置 0 是主出口，后面是备用，最多 8 个，
+  连续性和上限在 [`store.SetIdentityTransports`](../../internal/store/transports.go) 里查）。
   - **链按身份设**，不做命名的链，也不做出口级的「这个出口的备用是那个」。备用合不合法取决于这个身份所在域的 DNS：
     SPF 的 `include` 和 DKIM 要提前给备用出口配好（§10.4.4），一个服务十个域的出口，可能只有其中几个域授权了备用。
     挂在出口上的备用会把没授权的域也一起带过去，信在收件方那里判为伪造

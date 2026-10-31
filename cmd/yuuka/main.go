@@ -95,8 +95,8 @@
 //	                                    client and the header is ignored). See internal/clientip
 //	YUUKA_MCP_TOKEN                     bearer token `yuuka mcp --stdio` acts as (required there)
 //	YUUKA_TRANSPORTS                    comma-separated names of the outgoing transports, as
-//	                                    identities.transport names them (default: none; serve
-//	                                    then sends nothing). Each name NAME has, with NAME
+//	                                    identities name them (default: none; serve then sends
+//	                                    nothing). Each name NAME has, with NAME
 //	                                    uppercased and '.' and '-' turned into '_':
 //	YUUKA_TRANSPORT_<NAME>_HOST         SMTP server; implicit TLS only (required)
 //	YUUKA_TRANSPORT_<NAME>_PORT         default 465
@@ -342,10 +342,18 @@ func (a *app) newMessage(id string) {
 
 // openOutbox builds the outbox from the configured transports, reading
 // their password files, and the submission service in front of it. Only
-// serve sends, so only serve needs them.
-func (a *app) openOutbox(log *slog.Logger) error {
+// serve sends, so only serve needs them. Each configured name gets a
+// placeholder row if it has none, so identities can name it (§17.7).
+func (a *app) openOutbox(ctx context.Context, log *slog.Logger) error {
 	trs, err := openTransports(a.cfg.Outbox.Transports, os.ReadFile)
 	if err != nil {
+		return err
+	}
+	names := make([]string, len(a.cfg.Outbox.Transports))
+	for i, t := range a.cfg.Outbox.Transports {
+		names[i] = t.Name
+	}
+	if err := a.db.EnsureTransports(ctx, names); err != nil {
 		return err
 	}
 	if len(trs) == 0 {
@@ -428,15 +436,6 @@ func (a *app) rest(log *slog.Logger) *api.API {
 	}
 	if a.alerter != nil {
 		r.WithAlerter(a.alerter)
-	}
-	// A new identity in the settings names one of the exits this
-	// process has; without an outbox there are none.
-	if a.submit != nil {
-		names := make([]string, len(a.cfg.Outbox.Transports))
-		for i, t := range a.cfg.Outbox.Transports {
-			names[i] = t.Name
-		}
-		r.WithTransports(names)
 	}
 	// The scores shown are the configured scorer's; without one, none.
 	if a.cfg.Triage.On() {
@@ -545,7 +544,7 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	if err := a.openOutbox(log); err != nil {
+	if err := a.openOutbox(ctx, log); err != nil {
 		return err
 	}
 	defer a.submit.Wait()

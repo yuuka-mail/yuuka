@@ -100,6 +100,7 @@ func (e *env) identity(addr, name, sig string, owner *auth.Viewer) store.Identit
 		e.t.Fatal(err)
 	}
 	at := e.at()
+	storetest.Transports(e.t, e.db, "cf")
 	i := store.Identity{
 		ID: ulid.New(at), AccountID: e.account, Zone: zone, Prefix: prefix, DisplayName: name, Signature: sig,
 		Transport: "cf", OwnerID: owner.PrincipalID, CreatedAt: at,

@@ -12,6 +12,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/sendpolicy"
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
@@ -47,6 +48,7 @@ func (h *harness) identity(addr string, owner store.Principal) store.Identity {
 		h.t.Fatal(err)
 	}
 	at := time.Now()
+	storetest.Transports(h.t, h.db, "cf")
 	i := store.Identity{ID: ulid.New(at), AccountID: account, Zone: zone, Prefix: prefix, Transport: "cf", OwnerID: owner.ID, CreatedAt: at}
 	if err := h.db.AddIdentity(ctx, i, store.Action{ID: ulid.New(at), Actor: store.SystemPrincipalID, Tool: "identity.add", At: at}); err != nil {
 		h.t.Fatal(err)
@@ -402,8 +404,9 @@ func TestWidening(t *testing.T) {
 		status(send(http.MethodPost, "/api/v1/admin/credentials", body), http.StatusBadRequest, body)
 	}
 
-	// Identities name a transport of this process and an owner who
-	// exists, or an agent or service made on first use.
+	// Identities name an enabled transport (here a placeholder, as serve
+	// makes for YUUKA_TRANSPORTS) and an owner who exists, or an agent or
+	// service made on first use.
 	list := decode[IdentityAdminList](t, send(http.MethodGet, "/api/v1/admin/identities", ""))
 	if !slices.Equal(list.Transports, []string{"cf"}) || !slices.Equal(list.Accounts, []string{"devseed"}) {
 		t.Errorf("what a new identity can name: %v %v", list.Transports, list.Accounts)
@@ -411,7 +414,8 @@ func TestWidening(t *testing.T) {
 	w = send(http.MethodPost, "/api/v1/admin/identities", `{"address":"Ops@Example.org","owner":"service:monitoring","transport":"cf","display_name":"Ops"}`)
 	status(w, http.StatusCreated, "add an identity")
 	ops := decode[ManagedIdentity](t, w)
-	if ops.Address != "ops@example.org" || ops.Owner.Name != "monitoring" || ops.DisplayName != "Ops" || ops.Transport != "cf" {
+	if ops.Address != "ops@example.org" || ops.Owner.Name != "monitoring" || ops.DisplayName != "Ops" || ops.Transport != "cf" ||
+		!slices.Equal(ops.Transports, []string{"cf"}) {
 		t.Errorf("added %+v", ops)
 	}
 	if actor, cred, _ := h.audit("identity.add"); actor != h.human.ID || cred != sessionID {

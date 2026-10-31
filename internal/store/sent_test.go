@@ -32,10 +32,11 @@ func identity(t *testing.T, pool *pgxpool.Pool, account, zone string) string {
 	t.Helper()
 	id := ulid.New(time.Now())
 	if _, err := pool.Exec(t.Context(), `
-		INSERT INTO identities (id, account_id, zone, prefix, transport, owner_id)
-		VALUES ($1, $2, $3, 'me', 'cf', $4)`, id, account, zone, systemID); err != nil {
+		INSERT INTO identities (id, account_id, zone, prefix, owner_id)
+		VALUES ($1, $2, $3, 'me', $4)`, id, account, zone, systemID); err != nil {
 		t.Fatal(err)
 	}
+	storetest.Route(t, pool, id, "cf")
 	return id
 }
 

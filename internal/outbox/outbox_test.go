@@ -230,11 +230,12 @@ func (e *env) addIdentity(prefix, transportName string) string {
 	e.t.Helper()
 	id := ulid.New(time.Now())
 	if _, err := e.pool.Exec(e.t.Context(), `
-		INSERT INTO identities (id, account_id, zone, prefix, transport, owner_id)
-		VALUES ($1, $2, 'example.com', $3, $4, $5)`,
-		id, storetest.Account(e.t, e.db), prefix, transportName, e.operator.PrincipalID); err != nil {
+		INSERT INTO identities (id, account_id, zone, prefix, owner_id)
+		VALUES ($1, $2, 'example.com', $3, $4)`,
+		id, storetest.Account(e.t, e.db), prefix, e.operator.PrincipalID); err != nil {
 		e.t.Fatal(err)
 	}
+	storetest.Route(e.t, e.pool, id, transportName)
 	return id
 }
 
@@ -670,7 +671,9 @@ func TestUnconfiguredTransportIsParked(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, nil)
 	q := e.enqueue("a@example.net")
-	if _, err := e.pool.Exec(t.Context(), `UPDATE identities SET transport = 'gone' WHERE id = $1`, e.identity); err != nil {
+	storetest.Transports(t, e.db, "gone")
+	if _, err := e.pool.Exec(t.Context(), `UPDATE identity_transports SET transport_id = (SELECT id FROM transports WHERE name = 'gone')
+		WHERE identity_id = $1`, e.identity); err != nil {
 		t.Fatal(err)
 	}
 	if e.step() {

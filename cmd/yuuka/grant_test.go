@@ -35,6 +35,9 @@ func TestIdentityAndGrant(t *testing.T) {
 	for _, bad := range [][]string{
 		{"add", "*@example.com", "--owner", "human:operator"},
 		{"add", "*@example.com", "--owner", "human:operator", "--transport", "c f"},
+		// Neither in YUUKA_TRANSPORTS nor in the database: a typo does
+		// not become a placeholder.
+		{"add", "*@example.com", "--owner", "human:operator", "--transport", "nope"},
 		{"add", "*@example.com", "--owner", "system:system", "--transport", "cf"},
 		{"add", "example.com", "--owner", "human:operator", "--transport", "cf"},
 		{"add", "*@example.com", "--owner", "human:operator", "--transport", "cf", "--account", "nope"},

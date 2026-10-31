@@ -41,6 +41,7 @@ func (e *env) sending() {
 	if err != nil {
 		e.t.Fatal(err)
 	}
+	storetest.Transports(e.t, e.db, "cf")
 	for _, i := range []struct{ addr, owner string }{{"*@example.com", op.ID}, {"arisu@example.com", e.agent.ID}} {
 		zone, prefix, _ := store.SplitIdentityAddress(i.addr)
 		at := time.Now()

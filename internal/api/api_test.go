@@ -368,6 +368,11 @@ func (s *spy) CreateCredential(ctx context.Context, c store.Credential, a store.
 	return s.DB.CreateCredential(ctx, c, a)
 }
 
+func (s *spy) Transports(ctx context.Context, all bool) ([]store.Transport, error) {
+	s.saw("Transports", configRead)
+	return s.DB.Transports(ctx, all)
+}
+
 func (s *spy) Accounts(ctx context.Context) ([]store.Account, error) {
 	s.saw("Accounts", configRead)
 	return s.DB.Accounts(ctx)
@@ -494,6 +499,7 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	storetest.Transports(t, db, "cf")
 	for _, i := range []struct{ addr, owner string }{{"*@example.com", human.ID}, {"arisu@example.com", agent.ID}} {
 		zone, prefix, _ := store.SplitIdentityAddress(i.addr)
 		at := time.Now()
@@ -516,7 +522,7 @@ func newHarness(t *testing.T) *harness {
 	return &harness{
 		t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, human: human, sub: sub, suspended: sus, local: local, alerts: alerts,
 		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).WithSuspendNotifier(sus).WithTriage(laya).
-			WithAlerter(alerts).WithTransports([]string{"cf"}).Handler(svc),
+			WithAlerter(alerts).Handler(svc),
 	}
 }
 
@@ -901,11 +907,11 @@ func TestACL(t *testing.T) {
 			as: h.human, reads: []string{"Grantee", "Principal", "CreateCredential", "CredentialForAuth"}, people: true, authority: true, widening: true,
 		},
 		"GET /api/v1/admin/identities": {
-			path: "/api/v1/admin/identities", as: h.human, reads: []string{"Identities", "Accounts"}, people: true, authority: true,
+			path: "/api/v1/admin/identities", as: h.human, reads: []string{"Identities", "Accounts", "Transports"}, people: true, authority: true,
 		},
 		"POST /api/v1/admin/identities": {
 			method: http.MethodPost, path: "/api/v1/admin/identities", body: `{"address":"acl@example.org","owner":"agent:arisu","transport":"cf"}`,
-			as: h.human, reads: []string{"Accounts", "Grantee", "AddIdentity", "Identities"}, people: true, authority: true, widening: true,
+			as: h.human, reads: []string{"Transports", "Accounts", "Grantee", "AddIdentity", "Identities"}, people: true, authority: true, widening: true,
 		},
 		"POST /api/v1/admin/identities/{id}/disable": {
 			method: http.MethodPost, path: "/api/v1/admin/identities/" + disable + "/disable",

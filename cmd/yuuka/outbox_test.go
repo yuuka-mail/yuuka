@@ -23,12 +23,14 @@ func (e *hostEnv) unknownOutbox() string {
 	if err := e.db.CreatePrincipal(ctx, op, store.Action{ID: ulid.New(now), Tool: "principal.create", At: now}); err != nil {
 		e.t.Fatal(err)
 	}
+	identity := ulid.New(now)
 	if _, err := e.pool.Exec(ctx, `
-		INSERT INTO identities (id, account_id, zone, prefix, transport, owner_id)
-		VALUES ($1, $2, 'example.com', 'me', 'cf', $3)`,
-		ulid.New(now), storetest.Account(e.t, e.db), op.ID); err != nil {
+		INSERT INTO identities (id, account_id, zone, prefix, owner_id)
+		VALUES ($1, $2, 'example.com', 'me', $3)`,
+		identity, storetest.Account(e.t, e.db), op.ID); err != nil {
 		e.t.Fatal(err)
 	}
+	storetest.Route(e.t, e.pool, identity, "cf")
 	raw := []byte("From: me@example.com\r\nSubject: hi\r\n\r\nhi\r\n")
 	id, rawID := ulid.New(now), ulid.New(now)
 	v := &auth.Viewer{PrincipalID: op.ID, PrincipalKind: op.Kind, PrincipalName: op.Name, Scopes: []auth.Scope{auth.SubmissionSend}}

@@ -127,6 +127,7 @@ type Store interface {
 	CreateCredential(ctx context.Context, c store.Credential, a store.Action) error
 	Accounts(ctx context.Context) ([]store.Account, error)
 	AddIdentity(ctx context.Context, i store.Identity, a store.Action) error
+	Transports(ctx context.Context, all bool) ([]store.Transport, error)
 	DisableIdentity(ctx context.Context, id string, a store.Action) error
 	GrantFor(ctx context.Context, identityID, principalID string) (store.Grant, error)
 	SetGrant(ctx context.Context, g store.Grant, a store.Action) error
@@ -166,9 +167,6 @@ type API struct {
 	submit    Submitter
 	suspended SuspendNotifier
 	alert     authn.Alerter
-	// transports are the names this process sends through, what a new
-	// identity may name.
-	transports []string
 	// triage is the active scorer profile (§15), nil when no scorer is
 	// configured: then no score is shown, filtered by or reported.
 	triage *score.Profile
@@ -202,13 +200,6 @@ func (a *API) WithTriage(p score.Profile) *API {
 // widens who may do what (§13.10), as a new passkey is told.
 func (a *API) WithAlerter(n authn.Alerter) *API {
 	a.alert = n
-	return a
-}
-
-// WithTransports names the transports this process sends through: the
-// ones a new identity may name in the settings.
-func (a *API) WithTransports(names []string) *API {
-	a.transports = names
 	return a
 }
 

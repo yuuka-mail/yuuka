@@ -198,8 +198,12 @@ func TestSendingInvariants(t *testing.T) {
 	// frees the address.
 	idn := func(n int, prefix any) (string, error) {
 		id := ulid.New(now.Add(time.Duration(n) * time.Second))
-		return id, exec(`INSERT INTO identities (id, account_id, zone, prefix, transport, owner_id)
-			VALUES ($1, $2, 'example.com', $3, 'cf', $4)`, id, account, prefix, systemID)
+		if err := exec(`INSERT INTO identities (id, account_id, zone, prefix, owner_id)
+			VALUES ($1, $2, 'example.com', $3, $4)`, id, account, prefix, systemID); err != nil {
+			return id, err
+		}
+		storetest.Route(t, pool, id, "cf")
+		return id, nil
 	}
 	star, err := idn(1, nil)
 	if err != nil {

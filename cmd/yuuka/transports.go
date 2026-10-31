@@ -13,8 +13,11 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/transport"
 )
 
-// Transports are process configuration, not a table (§4, §9.3): a name,
-// as identities.transport stores it, and the exit it stands for. The
+// Transports are configured in the environment for now (§10.2): a name,
+// as the transports table and identities' chains name it, and the exit it
+// stands for. The table holds placeholders for these names (serve and
+// `identity add` make them, EnsureTransports); sending still resolves the
+// name against this configuration (§17.9 P3 moves it to the table). The
 // environment lists the names and gives each its own variables:
 //
 //	YUUKA_TRANSPORTS=cloudflare,work
@@ -28,7 +31,7 @@ import (
 // it is not in `docker inspect`, in /proc/<pid>/environ or in a dump of
 // the process's configuration; it is read once at startup.
 
-// transportName is the shape identities.transport accepts.
+// transportName is the shape transports.name accepts.
 var transportName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 // transportConfig is one exit as configured.
@@ -72,6 +75,26 @@ func loadOutboxConfig(getenv func(string) string) (outboxConfig, error) {
 		c.PollInterval = d
 	}
 
+	names, err := transportNames(getenv)
+	if err != nil {
+		errs = append(errs, err)
+	}
+	for _, name := range names {
+		t, err := loadTransport(getenv, name)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		c.Transports = append(c.Transports, t)
+	}
+	return c, errors.Join(errs...)
+}
+
+// transportNames reads the names in YUUKA_TRANSPORTS, leaving out the
+// ones it reports as errors.
+func transportNames(getenv func(string) string) ([]string, error) {
+	var names []string
+	var errs []error
 	vars := map[string]string{} // variable infix -> name, to catch collisions
 	for _, name := range strings.Split(getenv("YUUKA_TRANSPORTS"), ",") {
 		name = strings.TrimSpace(name)
@@ -88,14 +111,9 @@ func loadOutboxConfig(getenv func(string) string) (outboxConfig, error) {
 			continue
 		}
 		vars[key] = name
-		t, err := loadTransport(getenv, name)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		c.Transports = append(c.Transports, t)
+		names = append(names, name)
 	}
-	return c, errors.Join(errs...)
+	return names, errors.Join(errs...)
 }
 
 func loadTransport(getenv func(string) string, name string) (transportConfig, error) {

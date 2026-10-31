@@ -54,10 +54,11 @@ func TestSubmissionEndToEnd(t *testing.T) {
 	account := storetest.Account(t, db)
 	for addr, owner := range map[string]string{"alerts": monitor.ID, "reports": monitor.ID, "ops": op.ID} {
 		id := ulid.New(time.Now())
-		if _, err := pool.Exec(ctx, `INSERT INTO identities (id, account_id, zone, prefix, display_name, transport, owner_id)
-			VALUES ($1, $2, 'example.com', $3, $4, 'cf', $5)`, id, account, addr, strings.ToUpper(addr[:1])+addr[1:], owner); err != nil {
+		if _, err := pool.Exec(ctx, `INSERT INTO identities (id, account_id, zone, prefix, display_name, owner_id)
+			VALUES ($1, $2, 'example.com', $3, $4, $5)`, id, account, addr, strings.ToUpper(addr[:1])+addr[1:], owner); err != nil {
 			t.Fatal(err)
 		}
+		storetest.Route(t, pool, id, "cf")
 		if addr == "alerts" {
 			if _, err := pool.Exec(ctx, `INSERT INTO identity_grants (identity_id, principal_id, send_policy, recipient_scope)
 				VALUES ($1, $2, 'auto', 'any')`, id, monitor.ID); err != nil {

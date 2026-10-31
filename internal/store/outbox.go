@@ -150,25 +150,6 @@ type outboxRow struct {
 	review      []byte
 }
 
-// IdentityTransport returns the transport name of identity id, which must
-// exist and not be disabled.
-func (db *DB) IdentityTransport(ctx context.Context, id string) (string, error) {
-	var transport string
-	var disabled bool
-	err := db.pool.QueryRow(ctx, `SELECT transport, disabled_at IS NOT NULL FROM identities WHERE id = $1`, id).
-		Scan(&transport, &disabled)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", fmt.Errorf("identity %s: %w", id, ErrNotFound)
-	}
-	if err != nil {
-		return "", fmt.Errorf("identity %s: %w", id, err)
-	}
-	if disabled {
-		return "", fmt.Errorf("identity %s is disabled", id)
-	}
-	return transport, nil
-}
-
 // enqueueOutbox records a sent copy and the outbox row that will send it,
 // in state queued and due now, or held until the end of its window by
 // the database's clock, in tx (§4.6). The bytes must already be stored:
@@ -267,11 +248,13 @@ type Claimed struct {
 	SHA256     []byte
 }
 
-// ClaimOutbox takes the oldest due outbox row whose identity uses one of
-// transports, moves it to sending and opens an attempt owned by owner with
-// a lease of lease, all in one transaction. It returns nil when nothing is
-// due. Concurrent claimers skip each other's rows (SKIP LOCKED), and the
-// unique index on open attempts would refuse a second one anyway.
+// ClaimOutbox takes the oldest due outbox row whose identity's primary
+// transport is one of transports (by name, as the process configures
+// them; the chain's fallbacks are not used yet), moves it to sending and
+// opens an attempt owned by owner with a lease of lease, all in one
+// transaction. It returns nil when nothing is due. Concurrent claimers
+// skip each other's rows (SKIP LOCKED), and the unique index on open
+// attempts would refuse a second one anyway.
 func (db *DB) ClaimOutbox(ctx context.Context, owner string, transports []string, lease time.Duration) (*Claimed, error) {
 	if len(transports) == 0 {
 		return nil, nil
@@ -283,11 +266,12 @@ func (db *DB) ClaimOutbox(ctx context.Context, owner string, transports []string
 		}
 		var cl Claimed
 		err := tx.QueryRow(ctx, `
-			SELECT o.id, o.from_addr, i.transport, r.id, r.r2_key, r.local_path, r.size, r.sha256
+			SELECT o.id, o.from_addr, t.name, r.id, r.r2_key, r.local_path, r.size, r.sha256
 			FROM outbox o
-			JOIN identities i ON i.id = o.identity_id
+			JOIN identity_transports it ON it.identity_id = o.identity_id AND it.position = 0
+			JOIN transports t ON t.id = it.transport_id
 			JOIN raw_objects r ON r.id = o.raw_id
-			WHERE o.next_retry_at <= now() AND i.transport = ANY($1)
+			WHERE o.next_retry_at <= now() AND t.name = ANY($1)
 			ORDER BY o.next_retry_at, o.id
 			LIMIT 1
 			FOR UPDATE OF o SKIP LOCKED`, transports).
@@ -705,8 +689,9 @@ type Parked struct {
 	Transport string
 }
 
-// ParkUnconfigured pushes every due outbox row whose identity names a
-// transport outside configured back by retry, and says so in outbox.error.
+// ParkUnconfigured pushes every due outbox row whose identity's primary
+// transport is outside configured (or which has none) back by retry, and
+// says so in outbox.error.
 // A missing transport is a configuration error, not a verdict on the
 // message: the row keeps its state and is not attempted, so it neither
 // opens an attempt nor counts toward the retry cap.
@@ -721,9 +706,11 @@ func (db *DB) ParkUnconfigured(ctx context.Context, configured []string, retry t
 		}
 		rows, err := tx.Query(ctx, `
 			WITH due AS (
-				SELECT o.id, i.transport, o.error AS old
-				FROM outbox o JOIN identities i ON i.id = o.identity_id
-				WHERE o.next_retry_at <= now() AND NOT (i.transport = ANY($1))
+				SELECT o.id, coalesce(t.name, '') AS transport, o.error AS old
+				FROM outbox o
+				LEFT JOIN identity_transports it ON it.identity_id = o.identity_id AND it.position = 0
+				LEFT JOIN transports t ON t.id = it.transport_id
+				WHERE o.next_retry_at <= now() AND (t.name IS NULL OR NOT (t.name = ANY($1)))
 				FOR UPDATE OF o SKIP LOCKED
 			)
 			UPDATE outbox o SET next_retry_at = now() + $2 * interval '1 millisecond',

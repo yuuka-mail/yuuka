@@ -15,19 +15,21 @@ type hostEnv struct {
 	t    *testing.T
 	db   *store.DB
 	pool *pgxpool.Pool
+	// env is what the commands read as the environment.
+	env map[string]string
 }
 
 func newHostEnv(t *testing.T) *hostEnv {
 	t.Helper()
 	db, pool := storetest.New(t)
-	return &hostEnv{t: t, db: db, pool: pool}
+	return &hostEnv{t: t, db: db, pool: pool, env: map[string]string{"YUUKA_TRANSPORTS": "cf"}}
 }
 
 // run runs one host command line and returns stdout, stderr and the error.
 func (e *hostEnv) run(cmd string, args ...string) (string, string, error) {
 	e.t.Helper()
 	var out, msg bytes.Buffer
-	h := &host{db: e.db, out: &out, msg: &msg, now: time.Now, user: "tester"}
+	h := &host{db: e.db, out: &out, msg: &msg, now: time.Now, user: "tester", getenv: func(k string) string { return e.env[k] }}
 	var err error
 	switch cmd {
 	case "prefix":

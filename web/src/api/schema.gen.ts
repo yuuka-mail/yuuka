@@ -3469,6 +3469,7 @@ export interface components {
             display_name: string;
             owner: components["schemas"]["Actor"];
             transport: string;
+            transports: string[];
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */

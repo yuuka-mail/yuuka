@@ -31,6 +31,8 @@ type host struct {
 	now func() time.Time
 	// user is the OS user name; "" if unknown.
 	user string
+	// getenv reads the process environment; nil reads nothing.
+	getenv func(string) string
 }
 
 // withHost opens the database (openDB) and runs f.
@@ -44,7 +46,7 @@ func withHost(ctx context.Context, f func(*host) error) error {
 		return err
 	}
 	defer pool.Close()
-	return f(&host{db: db, out: os.Stdout, msg: os.Stderr, now: time.Now, user: osUser()})
+	return f(&host{db: db, out: os.Stdout, msg: os.Stderr, now: time.Now, user: osUser(), getenv: os.Getenv})
 }
 
 func osUser() string {

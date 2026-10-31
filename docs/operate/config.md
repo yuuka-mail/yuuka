@@ -90,7 +90,7 @@ Telegram 账号被盗最多能把信撤回。
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `YUUKA_TRANSPORTS` | 空 | 出口的名字，逗号分隔，就是 `yuuka identity add --transport` 引用的名字。不设就什么都不发，信留在队列里 |
+| `YUUKA_TRANSPORTS` | 空 | 出口的名字，逗号分隔，就是 `yuuka identity add --transport` 引用的名字。`serve` 启动时和 `identity add` 运行时，库里还没有的名字会各建一行只有名字的出口。不设就什么都不发，信留在队列里 |
 | `YUUKA_OUTBOX_WORKERS` | `2` | 同时进行的发送数，1–32 |
 | `YUUKA_OUTBOX_POLL_INTERVAL` | `30s` | 多久查一次到期的信。`serve` 自己入队的信立即发，不等这个间隔 |
 

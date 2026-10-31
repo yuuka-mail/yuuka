@@ -149,6 +149,31 @@ func Account(t *testing.T, db *store.DB) string {
 	return id
 }
 
+// Transports makes placeholder transports called names, as serve does for
+// the names in YUUKA_TRANSPORTS, so tests can add identities naming them.
+func Transports(t *testing.T, db *store.DB, names ...string) {
+	t.Helper()
+	if err := db.EnsureTransports(t.Context(), names); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Route gives identity id, inserted by hand, the transport chain [name],
+// making a placeholder transport of that name if there is none: what
+// AddIdentity does with Identity.Transport.
+func Route(t *testing.T, pool *pgxpool.Pool, id, name string) {
+	t.Helper()
+	ctx := t.Context()
+	if _, err := pool.Exec(ctx, `INSERT INTO transports (id, name) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING`,
+		ulid.New(time.Now()), name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO identity_transports (identity_id, position, transport_id)
+		SELECT $1, 0, id FROM transports WHERE name = $2`, id, name); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Query parses q in the search text form (§16) for store.SearchQuery
 // and fails the test if it does not parse. triage: is split at its colon
 // only: the question set is the triage package's, which imports this

@@ -34,12 +34,16 @@ type Identity struct {
 	DisplayName      string
 	Signature        string
 	PlainStripMarkup bool
-	Transport        string
-	OwnerID          string
-	OwnerKind        string
-	OwnerName        string
-	CreatedAt        time.Time
-	DisabledAt       *time.Time
+	// Transport is the primary transport's name: Transports[0] when read.
+	// AddIdentity makes it the chain when Transports is empty.
+	Transport string
+	// Transports is the identity's chain, primary first (§10.2.2).
+	Transports []string
+	OwnerID    string
+	OwnerKind  string
+	OwnerName  string
+	CreatedAt  time.Time
+	DisabledAt *time.Time
 }
 
 // Address is the identity as people write it: local@zone, or *@zone for
@@ -104,23 +108,45 @@ func splitSendAddress(addr string) (zone, prefix string, err error) {
 }
 
 const identityCols = `i.id, i.account_id, i.zone, coalesce(i.prefix, ''), i.display_name, i.signature,
-	i.plain_strip_markup, i.transport, i.owner_id, p.kind, p.name, i.created_at, i.disabled_at`
+	i.plain_strip_markup,
+	ARRAY(SELECT t.name FROM identity_transports it JOIN transports t ON t.id = it.transport_id
+	      WHERE it.identity_id = i.id ORDER BY it.position),
+	i.owner_id, p.kind, p.name, i.created_at, i.disabled_at`
 
 const identityFrom = ` FROM identities i JOIN principals p ON p.id = i.owner_id`
 
+// identityDest is where a row of identityCols scans to; call
+// i.primary() after scanning.
+func identityDest(i *Identity) []any {
+	return []any{
+		&i.ID, &i.AccountID, &i.Zone, &i.Prefix, &i.DisplayName, &i.Signature,
+		&i.PlainStripMarkup, &i.Transports, &i.OwnerID, &i.OwnerKind, &i.OwnerName, &i.CreatedAt, &i.DisabledAt,
+	}
+}
+
+// primary sets Transport from the chain read.
+func (i *Identity) primary() {
+	i.Transport = ""
+	if len(i.Transports) > 0 {
+		i.Transport = i.Transports[0]
+	}
+}
+
 func scanIdentity(row pgx.Row) (Identity, error) {
 	var i Identity
-	err := row.Scan(&i.ID, &i.AccountID, &i.Zone, &i.Prefix, &i.DisplayName, &i.Signature,
-		&i.PlainStripMarkup, &i.Transport, &i.OwnerID, &i.OwnerKind, &i.OwnerName, &i.CreatedAt, &i.DisabledAt)
+	err := row.Scan(identityDest(&i)...)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return i, ErrNotFound
 	}
+	i.primary()
 	return i, err
 }
 
-// AddIdentity inserts i and records a. Zone and Prefix must be lowercase
+// AddIdentity inserts i with its transport chain (i.Transports, or just
+// i.Transport) and records a. Zone and Prefix must be lowercase
 // (SplitIdentityAddress). It returns ErrDuplicate when an enabled
-// identity has the same address.
+// identity has the same address, and ErrNoTransport when a name is not an
+// enabled transport (a placeholder will do).
 func (db *DB) AddIdentity(ctx context.Context, i Identity, a Action) error {
 	if i.Zone == "" || i.Zone != strings.ToLower(i.Zone) || i.Prefix != strings.ToLower(i.Prefix) {
 		return fmt.Errorf("add identity %s: zone and prefix must be lowercase and the zone non-empty", i.Address())
@@ -131,14 +157,21 @@ func (db *DB) AddIdentity(ctx context.Context, i Identity, a Action) error {
 		}
 		_, err := tx.Exec(ctx, `
 			INSERT INTO identities (id, account_id, zone, prefix, display_name, signature, plain_strip_markup,
-			                        transport, owner_id, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+			                        owner_id, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 			i.ID, i.AccountID, i.Zone, nullable(i.Prefix), i.DisplayName, i.Signature, i.PlainStripMarkup,
-			i.Transport, i.OwnerID, i.CreatedAt)
+			i.OwnerID, i.CreatedAt)
 		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "23505" {
 			return ErrDuplicate
 		}
 		if err != nil {
+			return fmt.Errorf("add identity %s: %w", i.Address(), err)
+		}
+		chain := i.Transports
+		if len(chain) == 0 {
+			chain = []string{i.Transport}
+		}
+		if err := setChain(ctx, tx, i.ID, chain); err != nil {
 			return fmt.Errorf("add identity %s: %w", i.Address(), err)
 		}
 		return insertAction(ctx, tx, a)
@@ -303,9 +336,8 @@ func (db *DB) ReplyIdentities(ctx context.Context, v *auth.Viewer, id string) ([
 		out, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (ReplyIdentity, error) {
 			var c ReplyIdentity
 			i := &c.Identity
-			err := r.Scan(&i.ID, &i.AccountID, &i.Zone, &i.Prefix, &i.DisplayName, &i.Signature,
-				&i.PlainStripMarkup, &i.Transport, &i.OwnerID, &i.OwnerKind, &i.OwnerName, &i.CreatedAt, &i.DisabledAt,
-				&c.FromAddr, &c.Via, &c.At)
+			err := r.Scan(append(identityDest(i), &c.FromAddr, &c.Via, &c.At)...)
+			i.primary()
 			return c, err
 		})
 		return err

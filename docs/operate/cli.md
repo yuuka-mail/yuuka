@@ -74,6 +74,8 @@ yuuka identity ls [--all]
 yuuka identity rm alerts@example.com
 ```
 
+- `--transport` 是发信的出口，只接受库里已有的出口名：`YUUKA_TRANSPORTS` 里的名字会自动建好（`serve` 启动过，或者运行 `identity add` 的环境里设了它），
+  打错的名字报错而不是凭空建一个出口。`identity ls` 的 TRANSPORT 列是出口链，主出口在前
 - `--owner` 是这个地址属于谁：`human:<name>`（必须已存在）、`agent:<name>` 或 `service:<name>`
 - `*@example.com` 让这个人能以该域的任意前缀发信
 - `--display-name` 是信头 `From` 里的显示名，会覆盖 SMTP 客户端自己写的

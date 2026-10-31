@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/yuuka-mail/yuuka/internal/store"
@@ -24,7 +25,8 @@ func (h *host) identityCmd(ctx context.Context, args []string) error {
 		fs := flag.NewFlagSet("identity add", flag.ContinueOnError)
 		owner := fs.String("owner", "", "who the address belongs to: human:<name> (who must exist), agent:<name> or service:<name>. "+
 			"Only a human owner can send as a human-owned identity; everyone else stops at a draft (§8.9)")
-		transport := fs.String("transport", "", "name of the transport in the process configuration that carries this identity's mail")
+		transport := fs.String("transport", "", "name of the transport that carries this identity's mail: "+
+			"one in YUUKA_TRANSPORTS, or one already in the database")
 		display := fs.String("display-name", "", "display name in From; it replaces whatever an SMTP client writes")
 		signature := fs.String("signature", "", "Markdown appended to composed mail")
 		strip := fs.Bool("plain-strip-markup", false, "render the text/plain part without Markdown markup")
@@ -102,6 +104,9 @@ func (h *host) identityAdd(ctx context.Context, addr string, i store.Identity, o
 	if !store.ValidName(i.Transport) {
 		return fmt.Errorf("--transport %q: want a name like the ones in the configuration ([A-Za-z0-9][A-Za-z0-9._-]*)", i.Transport)
 	}
+	if err := h.ensureTransports(ctx); err != nil {
+		return err
+	}
 	accts, err := h.db.Accounts(ctx)
 	if err != nil {
 		return err
@@ -135,6 +140,9 @@ func (h *host) identityAdd(ctx context.Context, addr string, i store.Identity, o
 	if errors.Is(err, store.ErrDuplicate) {
 		return fmt.Errorf("%s is already an identity; `yuuka identity rm` it first", i.Address())
 	}
+	if errors.Is(err, store.ErrNoTransport) {
+		return fmt.Errorf("--transport %q: no such transport; name one in YUUKA_TRANSPORTS, or one `yuuka serve` has seen there", i.Transport)
+	}
 	if err != nil {
 		return err
 	}
@@ -147,6 +155,21 @@ func (h *host) identityAdd(ctx context.Context, addr string, i store.Identity, o
 		h.note("Owned by %s:%s; without a grant it holds its own mail for review (`yuuka grant set` to change).", p.Kind, p.Name)
 	}
 	return h.say("added %s (%s)", shown(i.Address()), i.ID)
+}
+
+// ensureTransports makes a placeholder for every transport the
+// environment configures, as serve does when it starts, so that an
+// identity can name a transport before serve has run with it (§17.7).
+// A name that is not there is not made up: a typo stays an error.
+func (h *host) ensureTransports(ctx context.Context) error {
+	if h.getenv == nil {
+		return nil
+	}
+	names, err := transportNames(h.getenv)
+	if err != nil {
+		return err
+	}
+	return h.db.EnsureTransports(ctx, names)
 }
 
 func (h *host) identityList(ctx context.Context, all bool) error {
@@ -162,7 +185,7 @@ func (h *host) identityList(ctx context.Context, all bool) error {
 			name = "-"
 		}
 		_, _ = fmt.Fprintf(tw, "%s\t%s:%s\t%s\t%s\t%s\t%s\n", shown(i.Address()), i.OwnerKind, i.OwnerName,
-			i.Transport, name, i.ID, stamp(i.DisabledAt))
+			strings.Join(i.Transports, ","), name, i.ID, stamp(i.DisabledAt))
 	}
 	return tw.Flush()
 }

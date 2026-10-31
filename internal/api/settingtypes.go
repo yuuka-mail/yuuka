@@ -136,12 +136,15 @@ type IssuedCredential struct {
 type ManagedIdentity struct {
 	ID string `json:"id"`
 	// Address is local@zone, or *@zone for the pattern.
-	Address     string     `json:"address"`
-	DisplayName string     `json:"display_name"`
-	Owner       Actor      `json:"owner"`
-	Transport   string     `json:"transport"`
-	CreatedAt   time.Time  `json:"created_at"`
-	DisabledAt  *time.Time `json:"disabled_at,omitempty"`
+	Address     string `json:"address"`
+	DisplayName string `json:"display_name"`
+	Owner       Actor  `json:"owner"`
+	// Transport is the primary transport: Transports[0].
+	Transport string `json:"transport"`
+	// Transports is the chain, primary first; the rest are fallbacks.
+	Transports []string   `json:"transports"`
+	CreatedAt  time.Time  `json:"created_at"`
+	DisabledAt *time.Time `json:"disabled_at,omitempty"`
 	// TakenOverBy is the enabled *@zone identity that would send this
 	// address once it is disabled, with its own owner and grants.
 	// Disabling it may then let more through, so it takes an elevated
@@ -155,8 +158,8 @@ type ManagedIdentity struct {
 // included, with what a new one can name.
 type IdentityAdminList struct {
 	Identities []ManagedIdentity `json:"identities"`
-	// Transports are the names this process can send through, from its
-	// configuration; empty when it sends nothing.
+	// Transports are the names of the enabled transports a new identity
+	// may name; empty when there are none.
 	Transports []string `json:"transports"`
 	// Accounts are the account names an identity can belong to.
 	Accounts []string `json:"accounts"`

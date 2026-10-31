@@ -644,8 +644,9 @@ CLI 只能记 `system` 加 `host_user`（§13.7）。信任根之外的动作值
   提权本身是 `/auth/passkey/elevate/begin` 和 `finish`，只接受这个会话的人自己的 passkey、要求用户验证
 - **放宽经 CLI 同一组函数**：签发走 [`authn.IssueToken`](../../internal/authn/authn.go)，记成人和会话而不是 `system`；
   主体「agent / service 首次用到时创建，人必须已存在」在 [`store.Grantee`](../../internal/store/identity.go)；
-  白名单的格式在 [`sendpolicy.ParseAllowlist`](../../internal/sendpolicy/sendpolicy.go)。界面加身份时，出口只能选本进程配置了的
-  （`YUUKA_TRANSPORTS`）：CLI 可能在另一台机器上跑，不知道服务进程有哪些出口，所以不查
+  白名单的格式在 [`sendpolicy.ParseAllowlist`](../../internal/sendpolicy/sendpolicy.go)。界面和 CLI 加身份时，出口都只能选库里启用着的
+  （`transports`，§17）：`serve` 启动时、`identity add` 运行时都会为 `YUUKA_TRANSPORTS` 里的每个名字建一行占位，
+  所以只在环境变量里的出口也选得到，打错的名字则不会变成一行
   跟着信走的决定（认领、取消认领、期望域）只看 scope：`prefix:manage` 加 `prefix:read`，
   因为回答里带着前缀现在的统计，也就是 `yuuka prefix expect` 打印的那份「对已收的信意味着什么」
 - **收紧按生效值逐列比较**。两边都是生效值（[`sendpolicy.Applied`](../../internal/sendpolicy/tighten.go)：空限额换成按主体类型的默认数，

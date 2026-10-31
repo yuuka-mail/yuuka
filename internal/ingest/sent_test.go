@@ -9,6 +9,7 @@ import (
 
 	"github.com/yuuka-mail/yuuka/internal/contenthash"
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
@@ -53,10 +54,11 @@ func (e *env) identity(t *testing.T) string {
 	}
 	id := ulid.New(e.now)
 	if _, err := e.pool.Exec(t.Context(), `
-		INSERT INTO identities (id, account_id, zone, prefix, transport, owner_id)
-		VALUES ($1, $2, 'example.com', 'me', 'cf', $3)`, id, acct, store.SystemPrincipalID); err != nil {
+		INSERT INTO identities (id, account_id, zone, prefix, owner_id)
+		VALUES ($1, $2, 'example.com', 'me', $3)`, id, acct, store.SystemPrincipalID); err != nil {
 		t.Fatal(err)
 	}
+	storetest.Route(t, e.pool, id, "cf")
 	return id
 }
 
