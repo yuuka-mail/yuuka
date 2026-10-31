@@ -70,6 +70,10 @@ iframe 里是原信自己的 HTML，我们无法在其中挂稳定 id。所以 a
 `sandbox` 不要加 `allow-scripts`。邮件 HTML 永远是不可信输入（§8.3），
 而 catch-all 意味着任何人都能投递它。
 
+附件是第三条路径，而且不渲染：一律作为下载返回（`Content-Disposition: attachment`、`nosniff`、
+`sandbox` CSP），不做预览。附件里的 HTML、SVG、PDF 都可能带脚本，预览器就是新的攻击面；
+需要预览时再单独设计（M1 的落法见 §12.7）。
+
 ### 12.3 几个必选的单点
 
 | 需求 | 选择 | 理由 |
@@ -118,13 +122,28 @@ iframe 里是原信自己的 HTML，我们无法在其中挂稳定 id。所以 a
 
 M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里没写死、实现时定下的几处：
 
-- **REST 只读、按路由声明 scope**。`/api/v1/` 下六个端点：`messages`（列表，过滤 prefix / class /
+- **REST 只读、按路由声明 scope**。`/api/v1/` 下七个端点：`messages`（列表，过滤 prefix / class /
   降级，`(received_at, id)` 键集游标）、`messages/{id}`、`messages/{id}/view`（§8.1 的结构化视图，
   `level=snippet|sections|part`，默认 `part`；`anchor=part/<section>[/para/<n>]`，不带 `#`）、
-  `threads/{id}`、`prefixes`（聚合计数）、`search`。`prefixes` 要 `prefix:read`，其余要 `message:read`；
+  `messages/{id}/attachments/{part}`（附件下载，见下）、`threads/{id}`、`prefixes`（聚合计数）、`search`。`prefixes` 要 `prefix:read`，其余要 `message:read`；
   `messages/{id}` 里的投递事实（信封、认证结果）另要 `delivery:read`，没有就不给，
   `view` 里的 `facts.delivered_to` 和 `facts.auth` 同理（标 `withheld`，§8.1）。路由和 scope 写在一张表里，
   ACL 测试遍历这张表，漏一条测试就失败。列表用键集而不是 offset，是因为新信到达时 offset 分页会重复或跳行
+- **附件只下载，不渲染**（§8.3、§12.2）。`messages/{id}/attachments/{part}` 的 `{part}` 是结构化视图
+  `content.attachments` 里报的 IMAP section 号；要 `message:read`，经 `MessageByID` 按 Viewer 取信、
+  原件只从可见的投递读（§13.8）。什么算附件只由解析器的 `Attachment` 判定决定，和列表同源：
+  正文、`multipart` 容器、以 Content-ID 内嵌在 HTML 里的图片一律 404。字节只解传输编码（base64 / QP），
+  不做字符集转换——下载的是发件人附上的原样文件；base64 解不开就 422，而不是给一个悄悄变短的文件。
+  响应头固定：`Content-Disposition: attachment`，文件名按 RFC 6266 给两份（ASCII 回退的 `filename=`
+  和 RFC 8187 百分号编码的 `filename*=UTF-8''`），先去掉路径、控制字符和双向格式字符（防 `txt.exe`
+  显示成 `exe.txt`）、开头的点，限 200 字节且保留扩展名；`X-Content-Type-Options: nosniff`、
+  `Content-Security-Policy: default-src 'none'; sandbox`、`Cross-Origin-Resource-Policy: same-origin`、
+  `Cache-Control: no-store`。`Content-Type` 只在声明类型属于 `application/pdf`、`image/png`、
+  `image/jpeg`、`image/gif`、`image/webp` 时照用，其余一律 `application/octet-stream`：
+  反正不会内联显示，类型只影响保存下来的文件被系统认成什么；这几种是最常见、打开时不执行脚本的格式，
+  HTML、SVG、XML、脚本和 `text/*`（声明的字符集可能是错的）都不在内。
+  每次下载记一条 `actions`（`api.attachment.download`：谁、哪封、哪个 part、字节数；不记内容和文件名），
+  记不下来就不给下载。agent 侧还没有对应的 MCP 工具，`get_message` 里附件仍标「此处不可读」
 - **类型由 `tygo` 生成**，覆盖 `internal/api/types.go` 和 `internal/authn/wire.go`
   （`/auth/` 的响应体）以及 `internal/agentview/types.go`（结构化视图），`mise run web:check` 先 `go generate` 再类型检查，Go 侧改了字段 TS 立刻报错
 - **页面壳不需要会话**。`go:embed` 的 `index.html` 对任何非文件路径都返回（`no-store`），

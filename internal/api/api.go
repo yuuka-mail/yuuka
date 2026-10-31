@@ -35,6 +35,8 @@ type Store interface {
 	ThreadByID(ctx context.Context, v *auth.Viewer, id string) (store.ThreadView, error)
 	PrefixStats(ctx context.Context, v *auth.Viewer, q store.PrefixQuery) (store.PrefixSummary, error)
 	Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (store.SearchResult, error)
+	// RecordAction appends to the audit log (attachment downloads).
+	RecordAction(ctx context.Context, a store.Action) error
 }
 
 // RawReader loads the raw message of a delivery (ingest.Ingester).
@@ -76,6 +78,7 @@ var routes = []route{
 	{"GET /api/v1/messages", []auth.Scope{auth.MessageRead}, (*API).listMessages},
 	{"GET /api/v1/messages/{id}", []auth.Scope{auth.MessageRead}, (*API).message},
 	{"GET /api/v1/messages/{id}/view", []auth.Scope{auth.MessageRead}, (*API).messageView},
+	{"GET /api/v1/messages/{id}/attachments/{part}", []auth.Scope{auth.MessageRead}, (*API).attachment},
 	{"GET /api/v1/threads/{id}", []auth.Scope{auth.MessageRead}, (*API).thread},
 	{"GET /api/v1/prefixes", []auth.Scope{auth.PrefixRead}, (*API).prefixes},
 	{"GET /api/v1/search", []auth.Scope{auth.MessageRead}, (*API).search},
