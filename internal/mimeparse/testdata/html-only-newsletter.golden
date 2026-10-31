@@ -13,6 +13,13 @@
   "reply_to": [],
   "snippet": "This week \u0026 next Five things you missed — read on. Item Price Widget $3 Unsubscribe here.",
   "body_text": "This week \u0026 next\nFive things you missed — read on.\n\nItem Price\nWidget $3\n\nUnsubscribe here.",
+  "links": [
+    {
+      "href": "https://example.net/u",
+      "text": "here",
+      "context": "This week \u0026 next Five things you missed — read on. Item Price Widget $3 Unsubscribe"
+    }
+  ],
   "has_attach": false,
   "media_type": "text/html",
   "list_id": "Example Weekly \u003cweekly.news.example.net\u003e",

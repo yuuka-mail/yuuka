@@ -179,6 +179,30 @@ func TestHTMLToText(t *testing.T) {
 	}
 }
 
+func TestHTMLLinks(t *testing.T) {
+	in := `<head><title>t</title></head><p>Click the button below to verify your email.</p>` +
+		`<a class=btn HREF='https://example.net/v?t=1&amp;u=2'><img src="x.png" alt="Verify"></a>` +
+		`<script>var a = "<a href=https://example.org/no>"</script>` +
+		`<p>Or <a href=https://example.net/plain>this link</a>.</p><a name="top">no href</a>` +
+		`<a href="` + strings.Repeat("x", maxHref+1) + `">too long</a><a title="a>b" href = "https://example.net/q">q</a>`
+	got := htmlLinks(in, nil)
+	want := []Link{
+		{Href: "https://example.net/v?t=1&u=2", Text: "Verify", Context: "Click the button below to verify your email."},
+		{Href: "https://example.net/plain", Text: "this link", Context: "Or"},
+		{Href: "https://example.net/q", Text: "q"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("htmlLinks = %#v\nwant %#v", got, want)
+	}
+	for tag, want := range map[string]string{
+		`a href="x"`: "x", `a  data-href="no" href=y`: "y", `a href`: "", `a =x href='z'`: "z", `a`: "",
+	} {
+		if v, _ := attr(tag, "href"); v != want {
+			t.Errorf("attr(%q) = %q, want %q", tag, v, want)
+		}
+	}
+}
+
 func TestSnippet(t *testing.T) {
 	cases := map[string]string{
 		"Hi Bob\n\n-- \nOperator\n":            "Hi Bob",

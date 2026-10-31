@@ -33,7 +33,8 @@ import (
 // same input changes, so rows parsed by an older parser can be found.
 //
 // 2: To, Cc and Reply-To.
-const Version = 2
+// 3: Links of the HTML parts.
+const Version = 3
 
 // Limits keep hostile input from costing unbounded work. Hitting one is a
 // Problem, not a failure: what was read so far is kept.
@@ -75,7 +76,11 @@ type Message struct {
 	AddrsCapped bool   `json:"addrs_capped,omitempty"`
 	Snippet     string `json:"snippet"`
 	BodyText    string `json:"body_text"`
-	HasAttach   bool   `json:"has_attach"`
+	// Links are the <a href> of every HTML part, alternatives included:
+	// BodyText prefers the plain text, which keeps a link's words but
+	// not where it goes. Not stored; the extractor reads them.
+	Links     []Link `json:"links,omitempty"`
+	HasAttach bool   `json:"has_attach"`
 
 	// Header signals for classification (§3 principle 4).
 	MediaType       string `json:"media_type"`
@@ -149,8 +154,21 @@ func ParseTree(raw []byte) (Message, Entity) {
 	}
 	p.m.BodyText = truncate(strings.Join(plain, "\n\n"), MaxBodyText)
 	p.m.Snippet = snippet(p.m.BodyText)
+	p.m.Links = root.links(nil)
 	p.m.Problem = strings.Join(p.problems, "; ")
 	return p.m, root
+}
+
+// links collects the links of every readable HTML part under e, in tree
+// order, up to maxLinks.
+func (e Entity) links(out []Link) []Link {
+	if e.MediaType == "text/html" && !e.Attachment {
+		return htmlLinks(e.Text, out)
+	}
+	for _, c := range e.Children {
+		out = c.links(out)
+	}
+	return out
 }
 
 type parser struct {
