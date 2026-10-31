@@ -1,0 +1,274 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/yuuka-mail/yuuka/internal/auth"
+	"github.com/yuuka-mail/yuuka/internal/authn"
+	"github.com/yuuka-mail/yuuka/internal/devseed"
+	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/store/storetest"
+	"github.com/yuuka-mail/yuuka/internal/ulid"
+)
+
+// spy is the real store, recording which viewer each read ran for.
+type spy struct {
+	*store.DB
+	mu    sync.Mutex
+	calls map[string][]*auth.Viewer
+}
+
+func (s *spy) saw(op string, v *auth.Viewer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls[op] = append(s.calls[op], v)
+}
+
+func (s *spy) take() map[string][]*auth.Viewer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	c := s.calls
+	s.calls = map[string][]*auth.Viewer{}
+	return c
+}
+
+func (s *spy) ListMessages(ctx context.Context, v *auth.Viewer, q store.MessageQuery) ([]store.MessageSummary, error) {
+	s.saw("ListMessages", v)
+	return s.DB.ListMessages(ctx, v, q)
+}
+
+func (s *spy) MessageByID(ctx context.Context, v *auth.Viewer, id string) (store.MessageDetail, error) {
+	s.saw("MessageByID", v)
+	return s.DB.MessageByID(ctx, v, id)
+}
+
+func (s *spy) ThreadByID(ctx context.Context, v *auth.Viewer, id string) (store.ThreadView, error) {
+	s.saw("ThreadByID", v)
+	return s.DB.ThreadByID(ctx, v, id)
+}
+
+func (s *spy) PrefixStats(ctx context.Context, v *auth.Viewer) ([]store.PrefixStat, error) {
+	s.saw("PrefixStats", v)
+	return s.DB.PrefixStats(ctx, v)
+}
+
+func (s *spy) Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (store.SearchResult, error) {
+	s.saw("Search", v)
+	return s.DB.Search(ctx, v, q)
+}
+
+type harness struct {
+	t     *testing.T
+	db    *store.DB
+	spy   *spy
+	svc   *authn.Service
+	agent store.Principal
+	h     http.Handler
+}
+
+func newHarness(t *testing.T) *harness {
+	t.Helper()
+	db, pool := storetest.New(t)
+	if _, err := devseed.Load(t.Context(), db, pool, devseed.Options{Dir: "../../testdata/eml", Variants: 20, Now: time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)}); err != nil {
+		t.Fatal(err)
+	}
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	svc, err := authn.New(authn.Config{DB: db, Origin: "https://mail.example.com", Log: quiet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := db.EnsurePrincipal(t.Context(), store.Principal{ID: ulid.New(time.Now()), Kind: "agent", Name: "arisu", DisplayName: "arisu", CreatedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sp := &spy{DB: db, calls: map[string][]*auth.Viewer{}}
+	return &harness{t: t, db: db, spy: sp, svc: svc, agent: agent, h: New(sp, quiet).Handler(svc)}
+}
+
+// token issues a bearer token for agent:arisu with exactly scopes.
+func (h *harness) token(scopes ...auth.Scope) string {
+	h.t.Helper()
+	tok, err := h.svc.IssueToken(h.t.Context(), authn.TokenRequest{PrincipalID: h.agent.ID, Label: "test", Scopes: scopes, IssuedBy: store.SystemPrincipalID})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return tok
+}
+
+func (h *harness) get(path, bearer string) *httptest.ResponseRecorder {
+	h.t.Helper()
+	r := httptest.NewRequestWithContext(h.t.Context(), http.MethodGet, path, nil)
+	if bearer != "" {
+		r.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	w := httptest.NewRecorder()
+	h.h.ServeHTTP(w, r)
+	return w
+}
+
+func decode[T any](t *testing.T, w *httptest.ResponseRecorder) T {
+	t.Helper()
+	var v T
+	if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil {
+		t.Fatalf("%s: %v", w.Body.String(), err)
+	}
+	return v
+}
+
+// TestACL is the table of every read endpoint (AGENTS.md: visibility is
+// computed in one place, and new read paths join this table). In M1 it
+// checks that an unauthenticated request never reaches the store, that the
+// scope is enforced, and that the authenticated viewer is the one the
+// store reads for. When account_access arrives (M3.5), each row also gets
+// a restricted viewer and asserts nothing leaks.
+func TestACL(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	page := decode[MessagePage](t, h.get("/api/v1/messages?limit=1", h.token(auth.MessageRead)))
+	msg := page.Messages[0]
+	h.spy.take()
+
+	table := []struct {
+		pattern string // as registered in routes
+		path    string
+		scopes  []auth.Scope
+		reads   string // the store method it must call
+	}{
+		{"GET /api/v1/messages", "/api/v1/messages?prefix=github@example.com", []auth.Scope{auth.MessageRead}, "ListMessages"},
+		{"GET /api/v1/messages/{id}", "/api/v1/messages/" + msg.ID, []auth.Scope{auth.MessageRead}, "MessageByID"},
+		{"GET /api/v1/threads/{id}", "/api/v1/threads/" + msg.ThreadID, []auth.Scope{auth.MessageRead}, "ThreadByID"},
+		{"GET /api/v1/prefixes", "/api/v1/prefixes", []auth.Scope{auth.PrefixRead}, "PrefixStats"},
+		{"GET /api/v1/search", "/api/v1/search?q=verification", []auth.Scope{auth.MessageRead}, "Search"},
+	}
+	var covered []string
+	for _, row := range table {
+		covered = append(covered, row.pattern)
+		i := slices.IndexFunc(routes, func(r route) bool { return r.pattern == row.pattern })
+		if i < 0 {
+			t.Errorf("%s: not a route", row.pattern)
+			continue
+		}
+		if !slices.Equal(routes[i].scopes, row.scopes) {
+			t.Errorf("%s: route requires %v, table says %v", row.pattern, routes[i].scopes, row.scopes)
+		}
+
+		if w := h.get(row.path, ""); w.Code != http.StatusUnauthorized {
+			t.Errorf("%s anonymous: %d", row.path, w.Code)
+		}
+		if w := h.get(row.path, "ykt_bogus"); w.Code != http.StatusUnauthorized {
+			t.Errorf("%s bad token: %d", row.path, w.Code)
+		}
+		// Every scope except the required ones is not enough.
+		var others []auth.Scope
+		for _, s := range auth.AllScopes {
+			if !slices.Contains(row.scopes, s) {
+				others = append(others, s)
+			}
+		}
+		if w := h.get(row.path, h.token(others...)); w.Code != http.StatusForbidden {
+			t.Errorf("%s without %v: %d", row.path, row.scopes, w.Code)
+		}
+		if calls := h.spy.take(); len(calls) != 0 {
+			t.Errorf("%s: refused requests reached the store: %v", row.path, calls)
+		}
+
+		w := h.get(row.path, h.token(row.scopes...))
+		if w.Code != http.StatusOK {
+			t.Errorf("%s: %d %s", row.path, w.Code, w.Body.String())
+		}
+		if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
+			t.Errorf("%s: Cache-Control %q", row.path, cc)
+		}
+		calls := h.spy.take()
+		vs := calls[row.reads]
+		if len(calls) != 1 || len(vs) != 1 || vs[0] == nil || vs[0].PrincipalID != h.agent.ID {
+			t.Errorf("%s: store calls %v, want one %s for %s", row.path, calls, row.reads, h.agent.ID)
+		}
+	}
+	for _, r := range routes {
+		if !slices.Contains(covered, r.pattern) {
+			t.Errorf("route %s is missing from the ACL table", r.pattern)
+		}
+	}
+}
+
+func TestDeliveriesNeedDeliveryRead(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	read := h.token(auth.MessageRead)
+	page := decode[MessagePage](t, h.get("/api/v1/messages?limit=1", read))
+	path := "/api/v1/messages/" + page.Messages[0].ID
+	if m := decode[Message](t, h.get(path, read)); m.Deliveries != nil || m.BodyText == "" {
+		t.Errorf("without delivery:read: %+v", m.Deliveries)
+	}
+	if m := decode[Message](t, h.get(path, h.token(auth.MessageRead, auth.DeliveryRead))); len(m.Deliveries) == 0 {
+		t.Error("with delivery:read: no deliveries")
+	}
+}
+
+func TestMessageListPaging(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	tok := h.token(auth.MessageRead)
+	all := decode[MessagePage](t, h.get("/api/v1/messages?downgraded=include&limit=500", tok))
+	if all.NextCursor != "" || len(all.Messages) < 30 {
+		t.Fatalf("all: %d messages, cursor %q", len(all.Messages), all.NextCursor)
+	}
+	var ids []string
+	next := "/api/v1/messages?downgraded=include&limit=7"
+	for next != "" {
+		p := decode[MessagePage](t, h.get(next, tok))
+		for _, m := range p.Messages {
+			ids = append(ids, m.ID)
+		}
+		next = ""
+		if p.NextCursor != "" {
+			next = "/api/v1/messages?downgraded=include&limit=7&cursor=" + p.NextCursor
+		}
+	}
+	if len(ids) != len(all.Messages) || ids[0] != all.Messages[0].ID || ids[len(ids)-1] != all.Messages[len(all.Messages)-1].ID {
+		t.Errorf("paged %d, want %d", len(ids), len(all.Messages))
+	}
+
+	for _, bad := range []string{"prefix=nozone", "class=spam", "downgraded=maybe", "cursor=%21%21", "limit=0", "limit=501"} {
+		if w := h.get("/api/v1/messages?"+bad, tok); w.Code != http.StatusBadRequest {
+			t.Errorf("%s: %d", bad, w.Code)
+		}
+	}
+	if w := h.get("/api/v1/messages/"+ulid.New(time.Now()), tok); w.Code != http.StatusNotFound {
+		t.Errorf("missing message: %d", w.Code)
+	}
+	if w := h.get("/api/v1/nope", tok); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "error") {
+		t.Errorf("unknown endpoint: %d %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPrefixesAndSearch(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	ps := decode[PrefixList](t, h.get("/api/v1/prefixes", h.token(auth.PrefixRead)))
+	byAddr := map[string]Prefix{}
+	for _, p := range ps.Prefixes {
+		byAddr[p.Address] = p
+	}
+	if p := byAddr["github@example.com"]; !p.Claimed || p.Messages == 0 {
+		t.Errorf("github: %+v", p)
+	}
+	if p := byAddr["random456@example.com"]; p.Claimed || p.Downgraded != p.Messages || p.Messages == 0 {
+		t.Errorf("random456: %+v", p)
+	}
+	res := decode[SearchResult](t, h.get("/api/v1/search?q=Lunch", h.token(auth.MessageRead)))
+	if res.Total != 1 || res.Hits[0].Subject != "Re: Lunch on Friday?" || res.Hits[0].Class != ClassHuman {
+		t.Errorf("search: %+v", res)
+	}
+}

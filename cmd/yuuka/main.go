@@ -2,7 +2,7 @@
 //
 // Usage:
 //
-//	yuuka serve              webhook endpoint + periodic reconcile (+ WebUI login)
+//	yuuka serve              webhook endpoint + periodic reconcile (+ WebUI and REST API)
 //	yuuka reconcile [--full] one reconcile pass; --full also scans raw/
 //	yuuka reparse [--since T] rebuild derived content of messages received
 //	                         at or after T (RFC 3339 or YYYY-MM-DD; default all)
@@ -30,14 +30,14 @@
 //	YUUKA_TELEGRAM_CHAT_ID              Telegram chat id
 //	YUUKA_RECONCILE_INTERVAL            pending/ reconcile period for serve (default 5m)
 //	YUUKA_WEB_ORIGIN                    WebUI origin as the browser sees it, e.g. https://mail.example.com;
-//	                                    enables the login endpoints (required by admin enroll)
+//	                                    enables the WebUI, its login and the REST API (required by admin enroll)
 //	YUUKA_WEBAUTHN_RP_ID                WebAuthn relying party id (default: the origin's host)
 //
 // `yuuka admin` only needs YUUKA_DATABASE_URL and YUUKA_WEB_ORIGIN.
 //
 // The webhook is served at POST /ingest/cloudflare (HMAC, §2.2); the login
-// endpoints under /auth/ (see internal/authn). Migrations are applied on
-// start.
+// endpoints under /auth/ (see internal/authn); the REST API under /api/v1/
+// (see internal/api). Migrations are applied on start.
 package main
 
 import (
@@ -54,6 +54,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/yuuka-mail/yuuka/internal/api"
 	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/ingest"
 	"github.com/yuuka-mail/yuuka/internal/localraw"
@@ -301,8 +302,9 @@ func serve(ctx context.Context, log *slog.Logger) error {
 			return err
 		}
 		mux.Handle("/auth/", svc.Handler())
+		mux.Handle("/api/", api.New(a.db, log).Handler(svc))
 	} else {
-		log.Info("YUUKA_WEB_ORIGIN not set; WebUI login endpoints are off")
+		log.Info("YUUKA_WEB_ORIGIN not set; WebUI and REST API are off")
 	}
 	srv := &http.Server{
 		Addr:              a.cfg.Listen,
