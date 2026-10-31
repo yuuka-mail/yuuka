@@ -13,6 +13,7 @@ package devseed
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"mime"
@@ -24,6 +25,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/contenthash"
 	"github.com/yuuka-mail/yuuka/internal/localraw"
@@ -79,6 +81,10 @@ type Options struct {
 	// RawDir, if set, receives every raw message at its local path, as
 	// YUUKA_DATA_DIR does in yuuka serve.
 	RawDir string
+	// Proposals has agent:arisu propose a rule and a label on corpus
+	// mail, pending, so the WebUI's proposal views have cards. Tests that
+	// make their own proposals leave it off.
+	Proposals bool
 }
 
 var (
@@ -134,7 +140,7 @@ func Load(ctx context.Context, db *store.DB, pool *pgxpool.Pool, o Options) (int
 		// Variants of a reply would all join the conversation below.
 		raw = replyLines.ReplaceAll(raw, []byte("X-Seed-Was-$1:"))
 		at := o.Now.Add(-time.Duration(rng.Int64N(int64(90 * 24 * time.Hour))))
-		if err := deliver(ctx, db, account, o.RawDir, raw, variantPrefixes[rng.IntN(len(variantPrefixes))], at); err != nil {
+		if _, err := deliver(ctx, db, account, o.RawDir, raw, variantPrefixes[rng.IntN(len(variantPrefixes))], at); err != nil {
 			return n, err
 		}
 		n++
@@ -158,32 +164,85 @@ func Load(ctx context.Context, db *store.DB, pool *pgxpool.Pool, o Options) (int
 				"Friday works. Noon at the usual place?", "Noon it is. I'll book a table for two."), 0},
 		}
 		for _, t := range turns {
-			if err := deliver(ctx, db, account, o.RawDir, []byte(t.r.Replace(string(reply))), "alice", o.Now.Add(t.at)); err != nil {
+			if _, err := deliver(ctx, db, account, o.RawDir, []byte(t.r.Replace(string(reply))), "alice", o.Now.Add(t.at)); err != nil {
 				return n, err
 			}
 			n++
 		}
 	}
 	// The corpus itself is the newest mail, a minute apart.
+	ids := map[string]string{}
 	for i, raw := range corpus {
 		prefix := "me"
 		if m := toLine.FindSubmatch(raw); m != nil {
 			prefix = strings.ToLower(string(m[1]))
 		}
-		if err := deliver(ctx, db, account, o.RawDir, raw, prefix, o.Now.Add(-time.Duration(len(corpus)-i)*time.Minute)); err != nil {
+		id, err := deliver(ctx, db, account, o.RawDir, raw, prefix, o.Now.Add(-time.Duration(len(corpus)-i)*time.Minute))
+		if err != nil {
 			return n, fmt.Errorf("%s: %w", files[i], err)
 		}
+		ids[filepath.Base(files[i])] = id
 		n++
+	}
+	if o.Proposals {
+		if err := propose(ctx, db, ids, o.Now); err != nil {
+			return n, err
+		}
 	}
 	return n, nil
 }
 
-func deliver(ctx context.Context, db *store.DB, account, rawDir string, raw []byte, prefix string, at time.Time) error {
+// proposals are what agent:arisu proposes, on the corpus file named: one
+// of each kind (§8.5), so both cards and what they open have one.
+var proposals = []struct {
+	file string
+	p    store.NewProposal
+}{
+	{"html-only-newsletter.eml", store.NewProposal{
+		Kind: store.ProposalRule,
+		Payload: []byte(`{"v":1,"match":{"all":[{"field":"list.id","op":"eq","value":"weekly.news.example.net"},` +
+			`{"field":"from.verified","op":"eq","value":true}]},"actions":[{"kind":"label","label":"newsletters"},{"kind":"archive"}]}`),
+		Rationale: "Example Weekly arrives every week and is never answered; label it and keep it out of the inbox.",
+	}},
+	{"plain-quoted-list.eml", store.NewProposal{
+		Kind:      store.ProposalAnnotate,
+		Payload:   []byte(`{"v":1,"scope":"thread","actions":[{"kind":"label","label":"travel"}]}`),
+		Rationale: "This thread plans a trip.",
+	}},
+}
+
+// propose creates agent:arisu and its pending proposals, through the
+// store call the API's propose uses. Only a person decides them.
+func propose(ctx context.Context, db *store.DB, ids map[string]string, now time.Time) error {
+	p, err := db.EnsurePrincipal(ctx, store.Principal{ID: ulid.New(now), Kind: "agent", Name: "arisu", DisplayName: "Arisu", CreatedAt: now})
+	if err != nil {
+		return err
+	}
+	v := &auth.Viewer{PrincipalID: p.ID, PrincipalKind: p.Kind, PrincipalName: p.Name, Scopes: []auth.Scope{auth.MessageRead, auth.MessageAnnotate}}
+	for _, x := range proposals {
+		id := ids[x.file]
+		if id == "" {
+			continue
+		}
+		np := x.p
+		np.MessageID = id
+		np.Cites = []store.Cite{{URI: "yuuka://message/" + id}}
+		a := store.Action{ID: ulid.New(now), Actor: p.ID, Tool: "proposal.create", At: now}
+		if _, _, err := db.CreateProposal(ctx, v, np, a); err != nil && !errors.Is(err, store.ErrDuplicate) {
+			return fmt.Errorf("propose on %s: %w", x.file, err)
+		}
+	}
+	return nil
+}
+
+// deliver commits and folds raw as delivered to prefix and returns the
+// message id, empty when the delivery was a duplicate.
+func deliver(ctx context.Context, db *store.DB, account, rawDir string, raw []byte, prefix string, at time.Time) (string, error) {
 	id := ulid.New(at)
 	key := fmt.Sprintf("raw/%s/%s.eml", at.UTC().Format("2006/01"), id)
 	if rawDir != "" {
 		if err := (localraw.Dir{Root: rawDir}).Put(key, raw); err != nil {
-			return err
+			return "", err
 		}
 	}
 	in := store.Ingest{
@@ -193,14 +252,14 @@ func deliver(ctx context.Context, db *store.DB, account, rawDir string, raw []by
 	}
 	out, err := db.CommitIngest(ctx, in)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if out != store.Delivered {
-		return nil
+		return "", nil
 	}
-	_, err = db.Fold(ctx, store.RawRef{
+	f, err := db.Fold(ctx, store.RawRef{
 		DeliveryID: id, RawID: id, R2Key: key, LocalPath: key, ContentHash: in.ContentHash[:],
 		Zone: Zone, Prefix: prefix, ReceivedAt: at,
 	}, mimeparse.Parse(raw), authres.Extract(raw, "mx.cloudflare.net"))
-	return err
+	return f.MessageID, err
 }

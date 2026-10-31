@@ -48,7 +48,7 @@ func run(dir string, n int, seed uint64, dataDir string) error {
 		return err
 	}
 	start := time.Now()
-	k, err := devseed.Load(ctx, db, pool, devseed.Options{Dir: dir, Variants: n, Seed: seed, RawDir: dataDir})
+	k, err := devseed.Load(ctx, db, pool, devseed.Options{Dir: dir, Variants: n, Seed: seed, RawDir: dataDir, Proposals: true})
 	fmt.Printf("devseed: %d deliveries in %s\n", k, time.Since(start).Round(time.Millisecond))
 	return err
 }
