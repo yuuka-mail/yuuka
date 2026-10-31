@@ -48,6 +48,7 @@ func TestLoadConfigRejects(t *testing.T) {
 		"missing raw id": {"YUUKA_R2_RAW_ACCESS_KEY_ID": ""},
 		"http origin":    {"YUUKA_WEB_ORIGIN": "http://mail.example.com"},
 		"rp id alone":    {"YUUKA_WEBAUTHN_RP_ID": "example.com"},
+		"proxy by name":  {"YUUKA_TRUSTED_PROXIES": "localhost"},
 	} {
 		if _, err := loadConfig(env(over), true); err == nil {
 			t.Errorf("%s: accepted", name)

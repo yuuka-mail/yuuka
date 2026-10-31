@@ -189,7 +189,7 @@ func (s *Service) registerBegin(w http.ResponseWriter, r *http.Request) {
 	}
 	cer := ceremony{register: true, label: req.Label}
 	if req.EnrollmentToken != "" {
-		if !s.enrollLimit.allow(remoteHost(r)) {
+		if !s.enrollLimit.allow(s.remote(r)) {
 			writeError(w, http.StatusTooManyRequests, "too many attempts")
 			return
 		}
@@ -235,7 +235,7 @@ func (s *Service) registerBegin(w http.ResponseWriter, r *http.Request) {
 func (s *Service) checkEnrollmentToken(r *http.Request, text string) (store.EnrollmentToken, bool) {
 	id, hash, ok := auth.ParseSecret(auth.PrefixEnrollment, text)
 	if !ok {
-		s.record(r.Context(), store.Action{Tool: "auth.enroll.reject", Args: map[string]any{"reason": "malformed", "remote": remoteHost(r)}})
+		s.record(r.Context(), store.Action{Tool: "auth.enroll.reject", Args: map[string]any{"reason": "malformed", "remote": s.remote(r)}})
 		return store.EnrollmentToken{}, false
 	}
 	t, err := s.db.EnrollmentTokenByID(r.Context(), id)
@@ -255,7 +255,7 @@ func (s *Service) checkEnrollmentToken(r *http.Request, text string) (store.Enro
 	}
 	if reason != "" {
 		s.record(r.Context(), store.Action{Tool: "auth.enroll.reject", Args: map[string]any{
-			"reason": reason, "enrollment_token_id": id, "remote": remoteHost(r),
+			"reason": reason, "enrollment_token_id": id, "remote": s.remote(r),
 		}})
 		return t, false
 	}
@@ -293,7 +293,7 @@ func (s *Service) registerFinish(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.record(r.Context(), store.Action{
 			Actor: cer.principalID, CredentialID: cer.credentialID, Tool: "auth.passkey.reject",
-			Args: map[string]any{"reason": protocolReason(err), "remote": remoteHost(r)},
+			Args: map[string]any{"reason": protocolReason(err), "remote": s.remote(r)},
 		})
 		writeError(w, http.StatusBadRequest, "registration not verified")
 		return
@@ -317,13 +317,13 @@ func (s *Service) registerFinish(w http.ResponseWriter, r *http.Request) {
 		Passkey: pk, EnrollmentTokenID: cer.tokenID,
 		Action: store.Action{
 			ID: ulid.New(now), Actor: cer.principalID, CredentialID: cer.credentialID, Tool: "auth.passkey.register", At: now,
-			Args: map[string]any{"passkey_id": pk.ID, "via": via, "enrollment_token_id": cer.tokenID, "label": cer.label, "remote": remoteHost(r)},
+			Args: map[string]any{"passkey_id": pk.ID, "via": via, "enrollment_token_id": cer.tokenID, "label": cer.label, "remote": s.remote(r)},
 		},
 	})
 	switch {
 	case errors.Is(err, store.ErrSpent):
 		s.record(r.Context(), store.Action{Tool: "auth.enroll.reject", Args: map[string]any{
-			"reason": "used or expired at finish", "enrollment_token_id": cer.tokenID, "remote": remoteHost(r),
+			"reason": "used or expired at finish", "enrollment_token_id": cer.tokenID, "remote": s.remote(r),
 		}})
 		writeError(w, http.StatusUnauthorized, "enrollment link invalid, used or expired")
 		return
@@ -340,7 +340,7 @@ func (s *Service) registerFinish(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) loginBegin(w http.ResponseWriter, r *http.Request) {
-	if !s.loginLimit.allow(remoteHost(r)) {
+	if !s.loginLimit.allow(s.remote(r)) {
 		writeError(w, http.StatusTooManyRequests, "too many attempts")
 		return
 	}
@@ -359,7 +359,7 @@ func (s *Service) loginBegin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) loginFinish(w http.ResponseWriter, r *http.Request) {
-	if !s.loginLimit.allow(remoteHost(r)) {
+	if !s.loginLimit.allow(s.remote(r)) {
 		writeError(w, http.StatusTooManyRequests, "too many attempts")
 		return
 	}
@@ -397,7 +397,7 @@ func (s *Service) loginFinish(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		s.record(r.Context(), store.Action{Tool: "auth.login.reject", Args: map[string]any{
-			"reason": protocolReason(err), "passkey_id": pk.ID, "remote": remoteHost(r),
+			"reason": protocolReason(err), "passkey_id": pk.ID, "remote": s.remote(r),
 		}})
 		writeError(w, http.StatusUnauthorized, "login not verified")
 		return
@@ -415,7 +415,7 @@ func (s *Service) loginFinish(w http.ResponseWriter, r *http.Request) {
 		},
 		Action: store.Action{
 			ID: ulid.New(now), Actor: u.p.ID, CredentialID: sec.ID, Tool: "auth.login", At: now,
-			Args: map[string]any{"passkey_id": pk.ID, "remote": remoteHost(r)},
+			Args: map[string]any{"passkey_id": pk.ID, "remote": s.remote(r)},
 		},
 	})
 	if err != nil {
@@ -449,7 +449,7 @@ func (s *Service) recover(w http.ResponseWriter, r *http.Request) {
 	}
 	now := s.now()
 	reject := func(reason string) {
-		s.record(r.Context(), store.Action{Tool: "auth.recovery.reject", Args: map[string]any{"reason": reason, "remote": remoteHost(r)}})
+		s.record(r.Context(), store.Action{Tool: "auth.recovery.reject", Args: map[string]any{"reason": reason, "remote": s.remote(r)}})
 		writeError(w, http.StatusUnauthorized, "recovery code invalid or already used")
 	}
 	hash, ok := auth.HashRecoveryCode(req.Code)
@@ -467,7 +467,7 @@ func (s *Service) recover(w http.ResponseWriter, r *http.Request) {
 		Token:    store.EnrollmentToken{ID: tok.ID, SecretHash: tok.Hash[:], Reason: "recovery", ExpiresAt: expires},
 		Action: store.Action{
 			ID: ulid.New(now), Tool: "auth.recovery.use", At: now,
-			Args: map[string]any{"remote": remoteHost(r)},
+			Args: map[string]any{"remote": s.remote(r)},
 		},
 	})
 	if errors.Is(err, store.ErrSpent) {
@@ -480,7 +480,7 @@ func (s *Service) recover(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	left, _ := s.db.UnusedRecoveryCodes(r.Context(), principal)
-	s.alertf(r.Context(), "a recovery code was used from %s; %d left. If this was not you, run `yuuka admin enroll` on the host to rotate them.", remoteHost(r), left)
+	s.alertf(r.Context(), "a recovery code was used from %s; %d left. If this was not you, run `yuuka admin enroll` on the host to rotate them.", s.remote(r), left)
 	writeJSON(w, http.StatusOK, RecoveryGrant{EnrollmentToken: tok.Text, ExpiresAt: expires})
 }
 

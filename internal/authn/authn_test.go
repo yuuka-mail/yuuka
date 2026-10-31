@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
+	"github.com/yuuka-mail/yuuka/internal/clientip"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 )
@@ -404,6 +406,47 @@ func TestRecoveryRateLimit(t *testing.T) {
 	h.want(h.do(http.MethodPost, "/auth/recovery", map[string]string{"code": e.RecoveryCodes[0]}), http.StatusTooManyRequests)
 	h.now = h.now.Add(5 * time.Minute)
 	h.want(h.do(http.MethodPost, "/auth/recovery", map[string]string{"code": e.RecoveryCodes[0]}), http.StatusOK)
+}
+
+// from makes a request arrive from peer, carrying xff if not empty.
+func from(peer, xff string) func(*http.Request) {
+	return func(r *http.Request) {
+		r.RemoteAddr = peer
+		if xff != "" {
+			r.Header.Set("X-Forwarded-For", xff)
+		}
+	}
+}
+
+// Behind a configured proxy each client has its own login bucket, so one
+// client hammering the login cannot lock the operator out, and the audit
+// log names the client rather than the proxy. A peer that is not a
+// configured proxy cannot pick its bucket by writing the header.
+func TestClientAddressBehindTrustedProxy(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	var err error
+	if h.svc.proxies, err = clientip.ParseProxies("127.0.0.1/32, ::1/128"); err != nil {
+		t.Fatal(err)
+	}
+	const proxy, attacker, operator = "127.0.0.1:40000", "203.0.113.66", "198.51.100.1"
+	for range 20 {
+		h.want(h.do(http.MethodPost, "/auth/passkey/login/begin", nil, from(proxy, attacker)), http.StatusOK)
+	}
+	h.want(h.do(http.MethodPost, "/auth/passkey/login/begin", nil, from(proxy, attacker)), http.StatusTooManyRequests)
+	h.want(h.do(http.MethodPost, "/auth/passkey/login/begin", nil, from(proxy, operator)), http.StatusOK)
+	// The client may prepend anything; only what the proxy appended counts.
+	h.want(h.do(http.MethodPost, "/auth/passkey/login/begin", nil, from(proxy, operator+", "+attacker)), http.StatusTooManyRequests)
+
+	for i := range 20 {
+		h.want(h.do(http.MethodPost, "/auth/passkey/login/begin", nil, from("192.0.2.9:1", fmt.Sprintf("192.0.2.%d", 100+i))), http.StatusOK)
+	}
+	h.want(h.do(http.MethodPost, "/auth/passkey/login/begin", nil, from("192.0.2.9:1", operator)), http.StatusTooManyRequests)
+
+	h.want(h.do(http.MethodPost, "/auth/recovery", map[string]string{"code": "0000-0000-0000-0000"}, from("[::1]:40000", "2001:db8::66")), http.StatusUnauthorized)
+	if n := h.count(`SELECT count(*) FROM actions WHERE tool = 'auth.recovery.reject' AND args->>'remote' = '2001:db8::66'`); n != 1 {
+		t.Errorf("audit rows naming the client: %d", n)
+	}
 }
 
 func TestLogoutRevokesSession(t *testing.T) {

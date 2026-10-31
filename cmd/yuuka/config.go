@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/yuuka-mail/yuuka/internal/authn"
+	"github.com/yuuka-mail/yuuka/internal/clientip"
 	"github.com/yuuka-mail/yuuka/internal/r2"
 )
 
@@ -26,6 +27,7 @@ type config struct {
 	TelegramChat      string
 	ReconcileInterval time.Duration
 	Web               webConfig
+	Proxies           clientip.Proxies
 }
 
 // webConfig is the WebUI login, shared by serve and admin. An empty
@@ -130,6 +132,9 @@ func loadConfig(getenv func(string) string, needSecrets bool) (config, error) {
 	c.ReconcileInterval = interval
 	if c.Web, err = loadWebConfig(getenv); err != nil {
 		errs = append(errs, err)
+	}
+	if c.Proxies, err = clientip.ParseProxies(getenv("YUUKA_TRUSTED_PROXIES")); err != nil {
+		errs = append(errs, fmt.Errorf("YUUKA_TRUSTED_PROXIES: %w", err))
 	}
 
 	if needSecrets {

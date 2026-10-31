@@ -2,7 +2,6 @@ package authn
 
 import (
 	"errors"
-	"net"
 	"net/http"
 	"strings"
 
@@ -96,7 +95,7 @@ func (s *Service) resolve(w http.ResponseWriter, r *http.Request, ignoreStaleCoo
 	if rej, isRej := errors.AsType[*rejection](err); isRej && s.rejectLog.allow(rej.credentialID) {
 		s.record(r.Context(), store.Action{
 			CredentialID: rej.credentialID, Tool: "auth.reject",
-			Args: map[string]any{"reason": rej.reason, "method": r.Method, "path": r.URL.Path, "remote": remoteHost(r)},
+			Args: map[string]any{"reason": rej.reason, "method": r.Method, "path": r.URL.Path, "remote": s.remote(r)},
 		})
 	}
 	if !errors.Is(err, ErrUnauthenticated) {
@@ -116,14 +115,10 @@ func (s *Service) resolve(w http.ResponseWriter, r *http.Request, ignoreStaleCoo
 	return nil, false
 }
 
-// remoteHost is the peer address as the socket sees it. Forwarding
-// headers are not trusted: nothing about the proxy in front is assumed.
-func remoteHost(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+// remote is the client's address for rate limits and the audit log: the
+// TCP peer, or what a configured proxy says it saw (Config.Proxies).
+func (s *Service) remote(r *http.Request) string {
+	return s.proxies.Client(r)
 }
 
 func setCookie(w http.ResponseWriter, name, value string, maxAge int) {

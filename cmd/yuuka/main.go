@@ -47,6 +47,10 @@
 //	YUUKA_WEB_ORIGIN                    WebUI origin as the browser sees it, e.g. https://mail.example.com;
 //	                                    enables the WebUI, its login and the REST API (required by admin enroll)
 //	YUUKA_WEBAUTHN_RP_ID                WebAuthn relying party id (default: the origin's host)
+//	YUUKA_TRUSTED_PROXIES               comma-separated CIDRs of reverse proxies whose X-Forwarded-For
+//	                                    names the client for login rate limits and the audit log,
+//	                                    e.g. 127.0.0.1/32,::1/128 (default: none; the TCP peer is the
+//	                                    client and the header is ignored). See internal/clientip
 //	YUUKA_MCP_TOKEN                     bearer token `yuuka mcp --stdio` acts as (required there)
 //
 // `yuuka admin` only needs the database URLs and YUUKA_WEB_ORIGIN;
@@ -417,7 +421,7 @@ func (a *app) routes(log *slog.Logger) ([]route, error) {
 	if a.cfg.Web.Origin == "" {
 		return rs, nil
 	}
-	svc, err := authn.New(authn.Config{DB: a.db, Origin: a.cfg.Web.Origin, RPID: a.cfg.Web.RPID, Alerter: a.alerter, Log: log})
+	svc, err := authn.New(authn.Config{DB: a.db, Origin: a.cfg.Web.Origin, RPID: a.cfg.Web.RPID, Alerter: a.alerter, Proxies: a.cfg.Proxies, Log: log})
 	if err != nil {
 		return nil, err
 	}

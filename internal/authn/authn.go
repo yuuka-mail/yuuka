@@ -20,6 +20,7 @@ import (
 	"github.com/go-webauthn/webauthn/webauthn"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
+	"github.com/yuuka-mail/yuuka/internal/clientip"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
@@ -69,6 +70,10 @@ type Config struct {
 	RPID string
 	// Alerter is optional.
 	Alerter Alerter
+	// Proxies are the reverse proxies whose X-Forwarded-For names the
+	// client for rate limits and the audit log; the zero value trusts
+	// none and uses the TCP peer.
+	Proxies clientip.Proxies
 	Log     *slog.Logger
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
@@ -84,11 +89,12 @@ type Service struct {
 	now        func() time.Time
 	csrf       *http.CrossOriginProtection
 	ceremonies *ceremonies
+	proxies    clientip.Proxies
 
 	// Per-remote limits for login and enrollment; recovery is limited
-	// globally (§13.7 "严格限速"): behind a proxy every caller shares one
-	// address anyway, and a locked recovery door only sends the operator
-	// to the CLI. rejectLog keeps a revoked token that a client keeps
+	// globally (§13.7 "严格限速"): behind a proxy nobody configured as
+	// trusted every caller shares one address anyway, and a locked
+	// recovery door only sends the operator to the CLI. rejectLog keeps a revoked token that a client keeps
 	// retrying from flooding the audit log.
 	loginLimit    *limiter
 	enrollLimit   *limiter
@@ -150,6 +156,7 @@ func New(cfg Config) (*Service, error) {
 		now:           now,
 		csrf:          csrf,
 		ceremonies:    newCeremonies(1000),
+		proxies:       cfg.Proxies,
 		loginLimit:    newLimiter(20, 3*time.Second, now),
 		enrollLimit:   newLimiter(10, 6*time.Second, now),
 		recoveryLimit: newLimiter(3, 5*time.Minute, now),
