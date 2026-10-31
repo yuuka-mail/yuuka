@@ -48,15 +48,17 @@ func TestHeldReleasedThenSent(t *testing.T) {
 		return q
 	}
 
-	q := hold(2)
+	// A window long enough that a loaded test run cannot see it end
+	// before the step below, which would release and claim the row.
+	q := hold(60)
 	if q.DraftID == "" {
 		t.Error("no draft for the held submission")
 	}
 	if e.step() {
 		t.Fatal("claimed a held row")
 	}
-	if w := e.svc.idle(); w > 3*time.Second {
-		t.Errorf("idle %s with a window ending in 2s", w)
+	if w := e.svc.idle(); w > 61*time.Second {
+		t.Errorf("idle %s with a window ending in 60s", w)
 	}
 	if r := e.row(q.OutboxID); r.state != store.OutboxHeld {
 		t.Fatalf("held: %+v", r)
