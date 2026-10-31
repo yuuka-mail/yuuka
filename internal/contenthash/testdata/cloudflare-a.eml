@@ -1,0 +1,24 @@
+Received: from mail.example.net (mail.example.net [192.0.2.10])
+	by cloudflare-email.net (cloudflare) id aaa111 for <github@example.com>;
+	Fri, 31 Oct 2026 01:41:38 +0000
+ARC-Seal: i=1; a=rsa-sha256; d=cloudflare-email.net; cv=none;
+	b=AAAA
+ARC-Message-Signature: i=1; d=cloudflare-email.net; b=BBBB
+ARC-Authentication-Results: i=1; mx.cloudflare.net; dmarc=pass
+Received-SPF: pass (mx.cloudflare.net: domain of alice@example.net designates 192.0.2.10 as permitted sender)
+ receiver=mx.cloudflare.net; client-ip=192.0.2.10; helo=mail.example.net;
+Authentication-Results: mx.cloudflare.net; dmarc=pass header.from=example.net
+X-CF-SpamH-Score: 1
+Return-Path: <alice@example.net>
+DKIM-Signature: v=1; a=rsa-sha256; d=example.net; s=s1;
+	h=from:to:subject; bh=CCCC; b=DDDD
+From: Alice <alice@example.net>
+To: github@example.com
+Subject: Your code is 123456
+Message-ID: <m1@example.net>
+Date: Fri, 31 Oct 2026 01:41:30 +0000
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Your code is 123456.
+Received: this line is body, not a header

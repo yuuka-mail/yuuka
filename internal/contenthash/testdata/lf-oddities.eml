@@ -1,0 +1,10 @@
+Received : obsolete spacing before the colon
+received: lowercase name
+X-Mailer: something
+ReceivedX: not a transport field
+From: bob@example.org
+Subject: LF only,
+ folded subject
+no colon here
+
+body
