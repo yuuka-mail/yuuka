@@ -13,6 +13,8 @@ import { paraglide } from "./scripts/paraglide.mjs";
 // YUUKA_WEB_ORIGIN=http://localhost:<dev port>, so WebAuthn and the
 // cross-origin check see the origin the browser uses.
 const api = process.env.YUUKA_DEV_API ?? "http://127.0.0.1:31480";
+// A second checkout's dev:web sets its own port (mise.toml, [vars]).
+const port = Number(process.env.YUUKA_DEV_PORT ?? 31473);
 
 // dist/ is embedded by web/embed.go, which needs the directory to exist
 // in a fresh clone; it is tracked with only .gitkeep. Vite's emptyOutDir
@@ -37,7 +39,7 @@ export default defineConfig({
   },
   server: {
     host: "localhost",
-    port: 31473,
+    port,
     strictPort: true,
     proxy: {
       "/api": { target: api },

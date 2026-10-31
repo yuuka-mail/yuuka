@@ -46,6 +46,22 @@ mise run dev:reset               # 清空开发库和原件，重新灌合成邮
 passkey 绑定浏览器看到的源，所以开发时一律从 `http://localhost:31473` 进，不要直接开 31480。
 截图、调试 UI 用这套环境，不要另起端口手拼环境变量。
 
+**同时跑第二份 checkout**（比如一个 git worktree）时，两边的端口会撞。在那份 checkout 自己的
+`mise.local.toml` 里改掉 `mise.toml` 的 `[vars]`，三项一起改：
+
+```toml
+[vars]
+dev_web_port = "31475"     # 前端，passkey 绑定这个源
+dev_api_port = "31485"     # 后端
+dev_db = "yuuka_dev_b"     # 开发库
+```
+
+库名也要改：`local/dev/` 每份 checkout 各一份，共用一个库，库里的信就会指向本 checkout 里没有的原件。
+测试 Postgres 容器仍是同一个。端口仍在 31400–31499 里挑；换了源就要在那份 checkout 里重新
+`mise run dev:enroll`。checkout 不在主 checkout 目录下时，mise 读不到那边的 `mise.local.toml`，
+R2 配置也要抄一份过去。mise 提示新配置文件不受信任时，在那份 checkout 里 `mise trust` 一次。
+新库启动时会从 `mise.local.toml` 配的 R2 桶里补回已有的原件，两边读的是同一组测试桶。
+
 - **非标准端口一律在 31400–31499 之间**：测试 Postgres 是 `127.0.0.1:31432`，
   其他需要固定端口的东西（开发服务、本地依赖）也在这个段里挑，不占别的项目常用的端口
 - 本机配置和凭据（如 Cloudflare token）放 gitignore 的 `mise.local.toml`，

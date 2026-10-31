@@ -104,6 +104,9 @@ WebUI，agent 结构化视图与 MCP；发信：outbox 状态机与崩溃恢复�
 - 「系统在说」和「agent 在说」是两套设计 token（§12.5），不能只靠文案区分
 - shadcn 只提供基础件；三栏、列表、线程视图自己写，别硬套组件库
 - 改了 UI 就要**亲眼看**：跑起来截图检查，亮暗两套主题、窄屏都看一遍。没看过不算做完
+- 你多半在 git worktree 里，而维护者的主 checkout 上往往已经跑着一套开发环境。起 `dev:serve` / `dev:web`
+  之前，先在本 checkout 的 `mise.local.toml` 里换掉端口和库名（做法见 [`CONTRIBUTING.md`](CONTRIBUTING.md) 的
+  「本地开发环境」），挑之前用 `ss -ltn` 确认端口空着。端口被占时换一个，不要停掉别人的进程；用完停掉自己起的
 
 **文档**
 
