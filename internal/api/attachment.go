@@ -46,9 +46,8 @@ func (a *API) attachment(w http.ResponseWriter, r *http.Request, v *auth.Viewer)
 		a.fail(w, r, err)
 		return
 	}
-	// MessageByID only returns visible deliveries; the raw comes from one
-	// of them (§13.8).
-	raw, err := a.raw.ReadRaw(r.Context(), d.Deliveries[0].Raw)
+	// d.Raw is a visible delivery's raw, or a visible sent copy's (§13.8).
+	raw, err := a.raw.ReadRaw(r.Context(), d.Raw)
 	if err != nil {
 		a.fail(w, r, err)
 		return

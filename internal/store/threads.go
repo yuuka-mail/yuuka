@@ -16,10 +16,14 @@ import (
 )
 
 // Threads are the connected components of a graph over messages (§9.1,
-// threads belong to no account). Two messages are linked when
+// threads belong to no account). A message is known by its Message-ID
+// and, for our own sent mail, by the ids its send attempts recorded
+// (send_attempts.message_id and provider_id, §10.4.1: a platform that
+// assigns Message-IDs writes none into the sent copy). Two messages are
+// linked when
 //
-//   - one's In-Reply-To or References names the other's Message-ID, or
-//     both carry the same Message-ID (content that did not fold, §4.1);
+//   - one's In-Reply-To or References names an id the other is known by,
+//     or both are known by the same id (content that did not fold, §4.1);
 //   - or, only for class=human mail without any reply headers, they share
 //     sender and normalized subject within fallbackWindow (§4.1: machine
 //     mail would collapse every "Your verification code" into one thread).
@@ -55,20 +59,32 @@ func fallbackEligible(msg mimeparse.Message, class classify.Class) bool {
 }
 
 // placeThread picks the thread for a new message: the one it links to,
-// merging several if it bridges them, or a fresh one.
-func (w *writer) placeThread(ctx context.Context, id string, at time.Time, msg mimeparse.Message, class classify.Class) (string, error) {
-	ids := slices.Clone(msg.References)
-	if msg.InReplyTo != "" {
-		ids = append(ids, msg.InReplyTo)
+// merging several if it bridges them, or a fresh one. h is its content
+// hash, by which its sent copies and their attempts are found.
+func (w *writer) placeThread(ctx context.Context, id string, at time.Time, h []byte, msg mimeparse.Message, class classify.Class) (string, error) {
+	own, err := w.sentIDs(ctx, h)
+	if err != nil {
+		return "", err
 	}
 	if msg.MessageID != "" {
-		ids = append(ids, msg.MessageID)
+		own = append(own, msg.MessageID)
 	}
+	names := slices.Clone(msg.References)
+	if msg.InReplyTo != "" {
+		names = append(names, msg.InReplyTo)
+	}
+	names = append(names, own...)
+	// The other message m is known by m.message_id or by its sent copies'
+	// attempt ids; the last clause finds m by the attempts that name it.
 	rows, err := w.tx.Query(ctx, `
-		SELECT DISTINCT thread_id FROM messages
-		WHERE id <> $1 AND (message_id = ANY($2::text[])
-			OR ($3::text IS NOT NULL AND (in_reply_to = $3 OR refs @> ARRAY[$3::text])))
-		ORDER BY thread_id`, id, ids, nullIfEmpty(msg.MessageID))
+		SELECT DISTINCT thread_id FROM messages m
+		WHERE m.id <> $1 AND (m.message_id = ANY($2::text[])
+			OR m.in_reply_to = ANY($3::text[]) OR m.refs && $3::text[]
+			OR m.content_hash IN (
+				SELECT sr.content_hash FROM send_attempts a
+				JOIN outbox o ON o.id = a.outbox_id JOIN raw_objects sr ON sr.id = o.raw_id
+				WHERE a.message_id = ANY($2::text[]) OR a.provider_id = ANY($2::text[])))
+		ORDER BY thread_id`, id, names, own)
 	if err != nil {
 		return "", fmt.Errorf("thread links: %w", err)
 	}
@@ -199,6 +215,7 @@ func (w *writer) writeThread(ctx context.Context, id string, a threadAgg) error 
 type threadMsg struct {
 	id, messageID, inReplyTo string
 	refs                     []string
+	sentIDs                  []string // its send attempts' ids, as sentIDs
 	subject, from, threadID  string
 	class                    int16
 	at                       time.Time
@@ -266,6 +283,32 @@ func (db *DB) Rethread(ctx context.Context) (RethreadStats, error) {
 		})
 		if err != nil {
 			return fmt.Errorf("load messages: %w", err)
+		}
+		// The attempt ids of every message with sent copies, the same
+		// ids placeThread reads through sentIDs.
+		rows, err = tx.Query(ctx, `
+			SELECT DISTINCT m.id, x
+			FROM send_attempts a JOIN outbox o ON o.id = a.outbox_id
+			JOIN raw_objects sr ON sr.id = o.raw_id
+			JOIN messages m ON m.content_hash = sr.content_hash,
+			unnest(ARRAY[a.message_id, a.provider_id]) x
+			WHERE x IS NOT NULL AND x <> ''
+			ORDER BY m.id, x`)
+		if err != nil {
+			return fmt.Errorf("load sent ids: %w", err)
+		}
+		index := make(map[string]int, len(ms))
+		for i, m := range ms {
+			index[m.id] = i
+		}
+		var mid, x string
+		_, err = pgx.ForEachRow(rows, []any{&mid, &x}, func() error {
+			i := index[mid]
+			ms[i].sentIDs = append(ms[i].sentIDs, x)
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("load sent ids: %w", err)
 		}
 		comps := components(ms)
 		w := writer{tx: tx}
@@ -353,13 +396,15 @@ func components(ms []threadMsg) [][]int {
 
 	byMsgID := map[string]int{}
 	for i, m := range ms {
-		if m.messageID == "" {
-			continue
-		}
-		if j, ok := byMsgID[m.messageID]; ok {
-			union(i, j)
-		} else {
-			byMsgID[m.messageID] = i
+		for _, id := range append([]string{m.messageID}, m.sentIDs...) {
+			if id == "" {
+				continue
+			}
+			if j, ok := byMsgID[id]; ok {
+				union(i, j)
+			} else {
+				byMsgID[id] = i
+			}
 		}
 	}
 	type key struct{ from, subject string }

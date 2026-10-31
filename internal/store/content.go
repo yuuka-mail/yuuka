@@ -36,7 +36,8 @@ const (
 // claiming a prefix takes effect without a reparse.
 const notDowngraded = `(p.state = 1 AND coalesce(d.auth->>'dmarc', '') <> 'fail')`
 
-// RawRef locates one delivery and its raw.
+// RawRef locates one delivery and its raw, or a sent copy (§4.6), which
+// has no delivery: then DeliveryID, Zone and Prefix are empty.
 type RawRef struct {
 	DeliveryID  string
 	RawID       string
@@ -239,10 +240,15 @@ func (w *writer) registerPrefix(ctx context.Context, zone, prefix string, at tim
 	return nil
 }
 
-// insertMessage creates a message for ref and puts it in a thread. The
-// columns that depend on all deliveries are filled by updateMessage.
+// insertMessage creates a message for ref (a delivery or a sent copy) and
+// puts it in a thread. The columns that depend on all its sources are
+// filled by updateMessage.
 func (w *writer) insertMessage(ctx context.Context, id string, ref RawRef, msg mimeparse.Message) error {
-	threadID, err := w.placeThread(ctx, id, ref.ReceivedAt, msg, classify.Of(msg, []string{ref.Prefix}))
+	var prefixes []string
+	if ref.Prefix != "" {
+		prefixes = []string{ref.Prefix}
+	}
+	threadID, err := w.placeThread(ctx, id, ref.ReceivedAt, ref.ContentHash, msg, classify.Of(msg, prefixes))
 	if err != nil {
 		return err
 	}
@@ -258,8 +264,13 @@ func (w *writer) insertMessage(ctx context.Context, id string, ref RawRef, msg m
 }
 
 // updateMessage writes the derived columns of message id from msg and
-// its deliveries, logging a change only if something differs. It returns
+// its sources, logging a change only if something differs. It returns
 // nothing about threads; callers re-thread as needed.
+//
+// The canonical raw and received_at come from the earliest source: its
+// deliveries and its sent copies (§4.6), whose time is when the bytes
+// were stored, i.e. submission. On a tie a delivery wins, then the lower
+// id; ReparseTarget.Canonical picks the same one.
 func (w *writer) updateMessage(ctx context.Context, id string, msg mimeparse.Message) error {
 	var prefixes []string
 	rows, err := w.tx.Query(ctx, `SELECT DISTINCT prefix FROM deliveries WHERE message_id = $1 ORDER BY prefix`, id)
@@ -283,8 +294,13 @@ func (w *writer) updateMessage(ctx context.Context, id string, msg mimeparse.Mes
 			message_id = $2, in_reply_to = $3, refs = $4, date_header = $5,
 			subject = $6, snippet = $7, from_addr = $8, from_name = $9, class = $10,
 			has_attach = $11, body_text = $12, parser_version = $13, parse_error = $14
-		FROM (SELECT raw_id, received_at FROM deliveries WHERE message_id = $1
-		      ORDER BY received_at, id LIMIT 1) first
+		FROM (SELECT raw_id, received_at FROM (
+		          SELECT raw_id, received_at, 0 AS src, id FROM deliveries WHERE message_id = $1
+		          UNION ALL
+		          SELECT sr.id, sr.received_at, 1, sr.id
+		          FROM messages mm JOIN raw_objects sr ON sr.content_hash = mm.content_hash
+		          WHERE mm.id = $1 AND `+isSentCopy+`
+		      ) src ORDER BY received_at, src, id LIMIT 1) first
 		WHERE m.id = $1 AND (m.canonical_raw_id, m.received_at, m.message_id, m.in_reply_to, m.refs,
 			m.date_header, m.subject, m.snippet, m.from_addr, m.from_name, m.class, m.has_attach,
 			m.body_text, m.parser_version, m.parse_error)

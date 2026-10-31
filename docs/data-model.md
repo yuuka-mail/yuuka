@@ -12,7 +12,7 @@
 
 | 表 | 类别（§4.2） | 做什么 | 迁移 |
 |---|---|---|---|
-| `raw_objects` | 投递事实 | 原件存储里的每个对象一行，带 `sha256` 和 `content_hash`（§4.1）；发件方重投的那份照样落盘，用 `duplicate_of` 指向第一份，不再生成 delivery。yuuka 为外发组装或规范化的字节（Sent 副本，`sent/` 前缀）也是这里的行，发没发出看 outbox（§4.6） | [0001](../internal/store/migrations/0001_ingest.sql) |
+| `raw_objects` | 投递事实 | 原件存储里的每个对象一行，带 `sha256` 和 `content_hash`（§4.1）；发件方重投的那份照样落盘，用 `duplicate_of` 指向第一份，不再生成 delivery。yuuka 为外发组装或规范化的字节（Sent 副本，`sent/` 前缀）也是这里的行，发没发出看 outbox（§4.6） | [0001](../internal/store/migrations/0001_ingest.sql)、[0006](../internal/store/migrations/0006_sent_copies.sql) |
 | `accounts` | 配置与授权 | 账户（§9.2）。M2 只有 `cf_catchall` 一种，就是 `YUUKA_ACCOUNT` 命名的那个 | [0005](../internal/store/migrations/0005_sending.sql) |
 | `deliveries` | 投递事实；只有 `message_id`、`auth` 两列是派生 | 每次投递一行：账户、信封、`(zone, prefix)`、这一路自己的原件（Received / ARC / DKIM 每一路都不同）和认证结果。投递是 ingest 记下的事实，不是从 MIME 派生的：信封、远端定位、卸载状态都不在原件里。`(account_id, source_key)` 是幂等键（§10.1） | [0001](../internal/store/migrations/0001_ingest.sql)、[0005](../internal/store/migrations/0005_sending.sql) |
 | `messages` | 派生（id 除外，id 跨 reparse 稳定） | 内容，按 `content_hash` 折叠；隔离状态 `parse_error` 也在这一层（§4.2） | [0002](../internal/store/migrations/0002_content.sql) |
@@ -27,7 +27,7 @@
 | `identities` | 配置与授权 | 能用来发信的地址（精确地址或 `*@zone`）、所属账户、出口名、归属主体（§9.3、§8.9） | [0005](../internal/store/migrations/0005_sending.sql) |
 | `drafts` | 决定 | 写好了、没发出的信；提交超出授权时停在这里，`hold_reason` 说明原因（§8.9） | [0005](../internal/store/migrations/0005_sending.sql) |
 | `outbox` | 决定 | 决定要发的每封信，和它在 §4.5 状态机里的位置；`raw_id` 指向 Sent 副本 | [0005](../internal/store/migrations/0005_sending.sql) |
-| `send_attempts` `outbox_recipients` | 发送事实 | 每次发送尝试的执行归属、提交点和结果；逐收件人的结果、退信与投诉（§4.5） | [0005](../internal/store/migrations/0005_sending.sql) |
+| `send_attempts` `outbox_recipients` | 发送事实 | 每次发送尝试的执行归属、提交点和结果；逐收件人的结果、退信与投诉（§4.5） | [0005](../internal/store/migrations/0005_sending.sql)、[0006](../internal/store/migrations/0006_sent_copies.sql) |
 
 `deliveries.auth` 的结构由 [`internal/authres`](../internal/authres/authres.go) 的 `Auth` 定义，只来自可信接收方（§10.1.1）。
 迁移里与本节设计不同的地方都以 `M0:` / `M1:` / `M2:` 注明，主要是这几类：
@@ -150,11 +150,18 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
   机器邮件里同一发件人的所有「Your verification code」会被它归成一条巨型线程。
   M1 只在新信是 human、自己没有 `In-Reply-To` / `References` 时才找，而且限一个时间窗口，
   具体规则见 [`internal/store/threads.go`](../internal/store/threads.go)。
-  「sender」目前只是发件人本人：入库的只有收信，线程参与者只有发件人。
-  M2 发出的信进 `messages` 后，要把它放宽成「线程的通信对方」，§10.4.1 断开的第一封才接得上
-- 线程是消息图的连通分量：Message-ID / In-Reply-To / References 互相指到的、Message-ID 相同的
-  （内容没折叠的同一封信），加上面的兜底边。ingest 逐封并入（一封信连通两条线程时合并成较早的那条），
-  reparse 整体重算，两者规则相同，所以内容不变时 reparse 不移动任何线程
+  「sender」目前只是发件人本人。发出的信已经进了 `messages`（§4.6），但兜底规则还没放宽成
+  「线程的通信对方」：§10.4.1 拿不到平台 id 时断开的第一封，要等这条放宽才接得上
+- 线程是消息图的连通分量：In-Reply-To / References 指到对方的某个 id、或者两封有相同 id
+  （内容没折叠的同一封信）就连一条边，加上面的兜底边。一封信的 id 是它的 `Message-ID`；
+  我们发出的信还有每次尝试记下的 `send_attempts.message_id` 和 `provider_id`（§10.4.1）——
+  平台自定 Message-ID 时 Sent 副本里没有这个头，回信只能对上平台给的 id。
+  `provider_id` 只是「极可能就是」投递出去的 Message-ID，没验证过，也一样算：
+  认错的代价是两条无关的线程被连起来，而它的形状是我们自己域下的 msg-id，别人的信不会碰巧引用它。
+  这些是发送事实，所以读它们不破坏 reparse 的确定性。
+  ingest 逐封并入（一封信连通两条线程时合并成较早的那条），reparse 整体重算，两者规则相同
+  （[`threads.go`](../internal/store/threads.go)），所以内容不变时 reparse 不移动任何线程。
+  一个缺口：平台 id 在尝试结束时才写进库，在那之前（毫秒级）到达的回信会落进新线程，下一次 reparse 才并回去
 
 ### 4.2 重建边界：reparse 重建什么、不碰什么
 
@@ -164,7 +171,7 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
 
 | | 表 | reparse |
 |---|---|---|
-| **派生** | `messages`（除 id 外的列）、`threads`、`attachments`、`extractions`、`deliveries.message_id`、`deliveries.auth` | 从 `deliveries.raw_id → raw_objects` 和账户配置重算 |
+| **派生** | `messages`（除 id 外的列）、`threads`、`attachments`、`extractions`、`deliveries.message_id`、`deliveries.auth` | 从 `deliveries.raw_id → raw_objects`、`outbox.raw_id → raw_objects`（Sent 副本，§4.6）、`send_attempts` 记下的 id（线程）和账户配置重算 |
 | **投递事实** | `raw_objects`（含 `content_hash`、`duplicate_of`）；`deliveries` 的其余列（`source_key`、信封、远端定位、`remote_state`、`offloaded_at`、`spf_recheck`） | 不碰。它们来自 ingest 当时的 `InboundRef` 和当时的外部状态 |
 | **发送事实** | `send_attempts`、`outbox_recipients`：远端当时怎么回答、什么时候；Sent 副本本身是 `raw_objects` 里的投递事实 | 不碰 |
 | **决定** | `message_state`、`message_aliases`、`prefixes`（label / note / expected_domains / state）、`rules`、`proposals`、`actions`、`drafts`、`outbox`、`notifications` | 不碰 |
@@ -188,7 +195,7 @@ metadata 恢复（§2.1），但外部账户的远端定位和卸载状态只在
   所以 `cites` 同时存锚点和一小段原文摘录，锚点对不上时按摘录重新定位
 - 生效的分类是 `coalesce(message_state.class_override, messages.class)`：
   人的改判永远压过重算结果，规则重跑也不会把它改回去
-- `yuuka reparse [--since T]` 先补跑没有 message 的投递（M0 入库的、或解析步骤失败的），
+- `yuuka reparse [--since T]` 先补跑没有 message 的投递（M0 入库的、或解析步骤失败的）和 Sent 副本，
   再按 id 原地重写 `received_at ≥ T` 的消息和它们每条投递的 `auth`，最后全库重建线程——
   改了 Message-ID 或 References 的信可能挪到任何一条线程里，只重建局部会留下错的连通分量。
   它不写 `message_state`、`message_aliases`、前缀的认领与标注；`prefixes` 只会补上缺的行、放宽观测区间。
@@ -342,7 +349,10 @@ UI 在消息旁边显示 outbox 的状态（「排队中」「发送失败」「
 另一种做法是在 `outbox` 上加一列 `message_id`，但那是派生值，放进一张 `reparse` 不碰的决定表，
 就成了「只能由 ingest 写、`reparse` 修不了」的东西；折叠键是原件上的事实，`reparse` 不会改变折叠结果，
 这条连接因此和折叠一样稳定，不需要任何派生状态。反过来，从 message 找它是不是我们发的，
-要从 `raw_objects.content_hash` 找回原件，读者出现时给它加索引。
+要从 `raw_objects.content_hash` 找回原件，列表的每一行都要找一次，所以
+[0006](../internal/store/migrations/0006_sent_copies.sql) 给它加了索引。
+这要求写 Sent 副本的一方照收信的规矩填 `raw_objects`：`content_hash` 必须有（`contenthash.V1`），
+没有就既找不到 message、也建不了：`FoldSent` 拒绝它，补跑每一轮都把它报出来。
 
 **收件人地址原样保存，按折叠后的地址去重**：`outbox_recipients.addr` 是写进 `RCPT TO` 的原文——
 RFC 5321 规定本地部分区分大小写，yuuka 不替发件人改写；`addr_fold` 是它的小写形式
@@ -360,20 +370,29 @@ Sent 副本**不是投递**：`deliveries` 记的是「一封信到了某个账�
 **可见性**（§13.8）：一封 message 对某个主体可见，当且仅当
 它有一条可见的投递，**或者**它是某条 outbox 的 Sent 副本、而这条 outbox 的 identity 所属账户对该主体可读。
 发出的信没有投递，账户只能从 identity 来；identity 必须属于一个账户（`identities.account_id` 非空）就是为了这条。
-这仍然只在 `visibleMessage` 一处算；M2 所有主体都看得见全部（`account_access` 的过滤随 M3.5），
-所以 M2 不改读路径的可见性，但 §13.8 的 ACL 测试表届时要加「只有 Sent 副本的消息」这一行。
+规则只在 [`read.go`](../internal/store/read.go) 的 `visibleMessage` 一处算。M2 不按 `account_access` 过滤（随 M3.5），
+所有主体都看得见全部；但测试已经打开过滤、用受限主体跑每条读路径（§13.8）。
 两件事随 M3.5 一起定、现在不定（§13.8）：草稿和 outbox 的变更事件按什么规则对谁可见；
 agent 没有某账户的 `account_access` 时，能不能看到它自己经该账户的身份发出的信。
 
-M2 落地发信时读路径要改的地方（不是可见性，是「每封信至少有一条投递」这个 M1 的隐含假设）：
+**建 message 的入口**是 [`ingest.IndexSent`](../internal/ingest/content.go)：outbox 的入队方在建 outbox 行的事务提交之后调用它，
+解析 Sent 副本、按 `content_hash` 折叠、放进线程，和收信同一把锁、同一套写法，只是没有投递、前缀和认证结果——
+字节是我们自己的，认证头只会是我们写的，不取。这一步失败或进程在提交和调用之间退出，信不会丢：
+`ProcessBacklog`（启动时和 `reparse` 都会跑）把有 outbox 行、却还没有 message 的 Sent 副本补上。
 
-- 列表的降级判断在没有投递时得到「降级」，发出的信会被默认视图藏起来；
-  没有投递、只有 Sent 副本的信应当不降级
-- `updateMessage` 的 canonical 原件和 `received_at` 只从投递里取，`ReparseTargets` 只沿投递找原件；
-  两处都要把 Sent 副本算进来
-- 线程匹配：出口自定 Message-ID 时，我们的 id 在 Sent 副本里，进 `messages.message_id`；
-  平台生成时 Sent 副本里没有 Message-ID，回信的 `In-Reply-To` 要对上 `send_attempts.message_id`（§10.4.1），
-  线程构图要读这一列（它是事实，读它不破坏 `reparse` 的确定性）
+「每封信至少有一条投递」是 M1 的隐含假设，M2 拆掉了它，几处规则因此定下来：
+
+- **canonical 原件和 `received_at`** 在投递和 Sent 副本里取最早的一份；Sent 副本的时间是
+  `raw_objects.received_at`，即写下字节、建 outbox 行之前的提交时刻。只有 Sent 副本的信，列表按提交时刻排序。
+  同一时刻投递优先：收到的那份带着认证结果，渲染时和它对得上
+- **不降级**：§4.3 的降级判断的是一封信怎么到达的，Sent 副本不是到达。有一份可见的 Sent 副本就不降级，
+  哪怕同一内容也投递到了一个未认领的前缀（比如抄送给自己的 catch-all）
+- **读模型**：列表、线程、搜索的每一行带 `Outgoing`（outbox id 和状态，取可见的最新一条 outbox 行），
+  状态现读、不存，所以发送进度不需要任何派生数据跟着改。详情的 `Raw` 是渲染用的原件：
+  有可见投递时是最早那条的，否则是 Sent 副本；读者不能再假设 `Deliveries` 非空
+- **前缀视图不算发出的信**：它统计的是投递，Sent 副本不进任何前缀
+- **分类**照常按内容算（[`classify`](../internal/classify/classify.go)），没有专门的「我发的」类别：
+  自己写的第一封通常是 unknown，回信是 human，服务经 submission 口发的告警可能是 machine
 
 ---
 

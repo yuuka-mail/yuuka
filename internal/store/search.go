@@ -47,6 +47,8 @@ type SearchHit struct {
 	Class       classify.Class
 	Downgraded  bool
 	Quarantined bool
+	// Outgoing is set for our own mail (§4.6), as in MessageSummary.
+	Outgoing *Outgoing
 }
 
 // SearchResult is a page of hits, newest first, and the total number of
@@ -63,10 +65,9 @@ const searchDoc = `(m.subject || ' ' || m.from_name || ' ' || m.from_addr || ' '
 // Search runs q for v. Total and hits are computed over the same set in
 // one snapshot, so they agree.
 //
-// Every read function of the store takes the viewer it runs for (§13.8), so
-// the account-level filter has exactly one place to land. M1 has no
-// accounts yet, so every viewer sees every message; the filter arrives with
-// account_access (M3.5). A nil viewer is refused rather than treated as
+// Every read function of the store takes the viewer it runs for (§13.8):
+// the hits, the total and the downgrade are computed over what v may see
+// (visibleMessage). A nil viewer is refused rather than treated as
 // "everyone", so a forgotten viewer fails loudly.
 func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (SearchResult, error) {
 	if v == nil {
@@ -88,7 +89,8 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 	if q.Prefix != "" || q.Zone != "" {
 		args = append(args, q.Prefix, q.Zone)
 		where = append(where, fmt.Sprintf(`EXISTS (SELECT 1 FROM deliveries d WHERE d.message_id = m.id
-			AND ($%d = '' OR d.prefix = $%[1]d) AND ($%d = '' OR d.zone = $%[2]d))`, len(args)-1, len(args)))
+			AND ($%d = '' OR d.prefix = $%[1]d) AND ($%d = '' OR d.zone = $%[2]d) AND %s)`,
+			len(args)-1, len(args), db.visibleDelivery(v, "d")))
 	}
 	if q.Class != nil {
 		args = append(args, *q.Class)
@@ -101,18 +103,16 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 	if !q.IncludeDowngraded {
 		where = append(where, `NOT downgraded`)
 	}
-	filter := "true"
-	if len(where) > 0 {
-		filter = strings.Join(where, " AND ")
-	}
+	where = append([]string{db.visibleMessage(v, "m")}, where...)
 	// downgraded is a lateral column so the filter can use it by name.
+	// As in the list, our own mail is never downgraded.
 	from := `
 		FROM messages m
-		LEFT JOIN message_state s ON s.message_id = m.id
-		CROSS JOIN LATERAL (SELECT NOT EXISTS (
+		LEFT JOIN message_state s ON s.message_id = m.id` + db.outgoingJoin(v) + `
+		CROSS JOIN LATERAL (SELECT ob.id IS NULL AND NOT EXISTS (
 			SELECT 1 FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
-			WHERE d.message_id = m.id AND ` + notDowngraded + `) AS downgraded) g
-		WHERE ` + filter
+			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + ` AND ` + notDowngraded + `) AS downgraded) g
+		WHERE ` + strings.Join(where, " AND ")
 
 	var res SearchResult
 	err := pgx.BeginTxFunc(ctx, db.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
@@ -122,7 +122,7 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		pageArgs := append(args, limit, offset)
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 			SELECT m.id, m.thread_id, m.received_at, m.subject, m.from_addr, m.from_name, m.snippet,
-				coalesce(s.class_override, m.class), downgraded, m.parse_error IS NOT NULL
+				coalesce(s.class_override, m.class), downgraded, m.parse_error IS NOT NULL, ob.id, ob.state
 			%s
 			ORDER BY m.received_at DESC, m.id DESC
 			LIMIT $%d OFFSET $%d`, from, len(args)+1, len(args)+2), pageArgs...)
@@ -131,8 +131,10 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		}
 		res.Hits, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (SearchHit, error) {
 			var h SearchHit
+			var obID, obState *string
 			err := r.Scan(&h.ID, &h.ThreadID, &h.ReceivedAt, &h.Subject, &h.FromAddr, &h.FromName,
-				&h.Snippet, &h.Class, &h.Downgraded, &h.Quarantined)
+				&h.Snippet, &h.Class, &h.Downgraded, &h.Quarantined, &obID, &obState)
+			h.Outgoing = outgoing(obID, obState)
 			return h, err
 		})
 		return err

@@ -8,8 +8,9 @@ import (
 )
 
 // InputOf is the Input for message m as the store returned it to viewer
-// v, with raw the message of m.Deliveries[0], its earliest visible
-// delivery (§13.8: raw and auth come from a path v may read). Every
+// v, with raw the message of m.Raw: its earliest visible delivery, or
+// for mail we only sent, its sent copy, which has no auth facts (§13.8:
+// raw and auth come from a path v may read). Every
 // shell builds views through here, so the MCP tools and the REST API
 // withhold the same delivery facts from a viewer without delivery:read.
 func InputOf(v *auth.Viewer, m store.MessageDetail, raw []byte) Input {

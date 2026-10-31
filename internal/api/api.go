@@ -310,7 +310,7 @@ func (a *API) messageView(w http.ResponseWriter, r *http.Request, v *auth.Viewer
 		a.fail(w, r, err)
 		return
 	}
-	raw, err := a.raw.ReadRaw(r.Context(), d.Deliveries[0].Raw)
+	raw, err := a.raw.ReadRaw(r.Context(), d.Raw)
 	if err != nil {
 		a.fail(w, r, err)
 		return

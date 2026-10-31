@@ -25,7 +25,8 @@ func (in *Ingester) fold(ctx context.Context, ref store.RawRef, raw []byte) (sto
 }
 
 // ReadRaw returns the raw message of ref, preferring the local copy and
-// falling back to the raw bucket. Readers such as the agent view use it too.
+// falling back to the raw bucket. Readers such as the agent view use it
+// too. It reads sent copies (sent/) as well as received raws.
 func (in *Ingester) ReadRaw(ctx context.Context, ref store.RawRef) ([]byte, error) {
 	b, err := in.cfg.Local.Get(ref.LocalPath)
 	if err == nil {
@@ -41,6 +42,36 @@ func (in *Ingester) ReadRaw(ctx context.Context, ref store.RawRef) ([]byte, erro
 	return obj.Body, nil
 }
 
+// IndexSent runs the content step for the sent copy rawID (§4.6): it
+// parses the raw an outbox row points at and folds it into messages like
+// inbound mail, so our own mail threads and is searchable. There are no
+// auth facts to extract: the bytes are our own. The outbox enqueuer calls
+// it after the commit that created the row; if that fails or never runs,
+// ProcessBacklog picks the sent copy up. It is idempotent and never
+// notifies.
+func (in *Ingester) IndexSent(ctx context.Context, rawID string) error {
+	ref, err := in.cfg.DB.SentCopy(ctx, rawID)
+	if err != nil {
+		return err
+	}
+	return in.foldSent(ctx, ref)
+}
+
+func (in *Ingester) foldSent(ctx context.Context, ref store.RawRef) error {
+	raw, err := in.ReadRaw(ctx, ref)
+	if err != nil {
+		return err
+	}
+	msg := mimeparse.Parse(raw)
+	f, err := in.cfg.DB.FoldSent(ctx, ref, msg)
+	if err == nil && f.NewMessage && msg.Problem != "" {
+		// Our own composer should never produce this; an SMTP
+		// submission (§13.6) might.
+		in.cfg.Log.Warn("quarantined: sent copy could not be parsed cleanly", "raw", ref.RawID, "message", f.MessageID)
+	}
+	return err
+}
+
 // backlogBatch bounds one query of the backlog pass.
 const backlogBatch = 200
 
@@ -52,35 +83,48 @@ type BacklogStats struct {
 
 // ProcessBacklog runs the content step for deliveries that have no
 // message: everything M0 committed before parsing existed, and deliveries
-// whose content step failed after the commit point. It never notifies:
-// the mail is not new to anyone by now, and an upgrade must not replay the
-// whole M0 history into the IM channel.
+// whose content step failed after the commit point. It then does the same
+// for sent copies that have no message (IndexSent failed or never ran).
+// It never notifies: the mail is not new to anyone by now, and an upgrade
+// must not replay the whole M0 history into the IM channel.
 func (in *Ingester) ProcessBacklog(ctx context.Context) (BacklogStats, error) {
 	var st BacklogStats
-	failed := map[string]bool{}
-	for {
-		refs, err := in.cfg.DB.Unprocessed(ctx, backlogBatch+len(failed))
-		if err != nil {
-			return st, err
-		}
-		progress := false
-		for _, ref := range refs {
-			if failed[ref.DeliveryID] {
-				continue
+	passes := []struct {
+		name    string // the log key of key(ref)
+		list    func(context.Context, int) ([]store.RawRef, error)
+		key     func(store.RawRef) string
+		process func(context.Context, store.RawRef) error
+	}{
+		{"delivery", in.cfg.DB.Unprocessed, func(r store.RawRef) string { return r.DeliveryID }, in.processOne},
+		{"raw", in.cfg.DB.UnindexedSent, func(r store.RawRef) string { return r.RawID }, in.foldSent},
+	}
+	for _, p := range passes {
+		failed := map[string]bool{}
+		for {
+			refs, err := p.list(ctx, backlogBatch+len(failed))
+			if err != nil {
+				return st, err
 			}
-			if err := in.processOne(ctx, ref); err != nil {
-				in.cfg.Log.Error("backlog: content step", "delivery", ref.DeliveryID, "err", err)
-				failed[ref.DeliveryID] = true
-				st.Failed++
-				continue
+			progress := false
+			for _, ref := range refs {
+				if failed[p.key(ref)] {
+					continue
+				}
+				if err := p.process(ctx, ref); err != nil {
+					in.cfg.Log.Error("backlog: content step", p.name, p.key(ref), "err", err)
+					failed[p.key(ref)] = true
+					st.Failed++
+					continue
+				}
+				st.Processed++
+				progress = true
 			}
-			st.Processed++
-			progress = true
-		}
-		if !progress || len(refs) < backlogBatch+len(failed) {
-			return st, nil
+			if !progress || len(refs) < backlogBatch+len(failed) {
+				break
+			}
 		}
 	}
+	return st, nil
 }
 
 func (in *Ingester) processOne(ctx context.Context, ref store.RawRef) error {
@@ -105,16 +149,17 @@ type ReparseStats struct {
 const reparseBatch = 200
 
 // Reparse rebuilds the derived state of every message received at or
-// after since (§4.2): it re-reads each delivery's raw, re-parses, and
-// rewrites the messages columns and deliveries.auth in place, keeping
-// message ids. Threads are then rebuilt globally, because a changed
+// after since (§4.2): it re-reads each delivery's raw (and, for our own
+// mail, the sent copy outbox.raw_id names), re-parses, and rewrites the
+// messages columns and deliveries.auth in place, keeping message ids. Threads are then rebuilt globally, because a changed
 // Message-ID or References can move messages anywhere. Decisions
 // (message_state, prefix claims, ...) and delivery facts are never
 // written.
 func (in *Ingester) Reparse(ctx context.Context, since time.Time) (ReparseStats, error) {
 	var st ReparseStats
 	var err error
-	// Deliveries without a message first, so every delivery is covered.
+	// Deliveries and sent copies without a message first, so every one
+	// is covered.
 	if st.Backlog, err = in.ProcessBacklog(ctx); err != nil {
 		return st, err
 	}
@@ -149,18 +194,30 @@ func (in *Ingester) Reparse(ctx context.Context, since time.Time) (ReparseStats,
 
 func (in *Ingester) rebuild(ctx context.Context, t store.ReparseTarget) (bool, error) {
 	auth := make(map[string]authres.Auth, len(t.Deliveries))
+	canonical := t.Canonical()
 	var msg mimeparse.Message
-	for i, d := range t.Deliveries {
+	parse := func(ref store.RawRef, raw []byte) {
+		// The content of the other sources is the same by the fold key.
+		if ref.RawID == canonical.RawID {
+			msg = mimeparse.Parse(raw)
+		}
+	}
+	for _, d := range t.Deliveries {
 		raw, err := in.ReadRaw(ctx, d)
 		if err != nil {
 			return false, err
 		}
-		if i == 0 {
-			// The earliest delivery's raw is the canonical one; the
-			// content of the others is the same by the fold key.
-			msg = mimeparse.Parse(raw)
-		}
+		parse(d, raw)
 		auth[d.DeliveryID] = authres.Extract(raw, in.cfg.TrustedAuthservID)
+	}
+	if canonical.DeliveryID == "" {
+		// Sent copies carry no auth facts, so only the canonical one is
+		// read.
+		raw, err := in.ReadRaw(ctx, canonical)
+		if err != nil {
+			return false, err
+		}
+		parse(canonical, raw)
 	}
 	return in.cfg.DB.Rebuild(ctx, t, msg, auth)
 }

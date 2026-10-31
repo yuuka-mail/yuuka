@@ -339,7 +339,7 @@ multipart/mixed                         ← 只在有普通附件时出现
    API 下调用方带了这类头整封请求会被拒（`E_HEADER_NOT_ALLOWED`），SMTP 下不拒，但把它换掉（见下方实测）。所以：
    - `CallerMessageID=false` 的出口，组装时**不写** `Message-ID`，发出后把出口实际用的那个
      回填到 `send_attempts.message_id`。平台每次发送都重新生成，`partial` 之后的重试会拿到另一个，
-     所以回填按尝试记、线程匹配认全部。否则对方回信的 `In-Reply-To` 对不上本地任何一条
+     所以回填按尝试记、线程匹配认全部（`message_id` 和 `provider_id` 都认，§4.1）。否则对方回信的 `In-Reply-To` 对不上本地任何一条
    - 回填从哪里拿：Cloudflare 的 SMTP 最终回复就带着它（`SendResult.MessageID`），不需要事件订阅、
      Activity log 或 Worker send binding。别的出口接入时照样实测；SMTP 给不了时才轮到那几样，
      其中 binding 返回的 `messageId` 是否等于头仍未测

@@ -170,7 +170,7 @@ func (s *Server) getMessage(ctx context.Context, v *auth.Viewer, in GetInput) (r
 	if err != nil {
 		return result{}, err
 	}
-	raw, err := s.raw.ReadRaw(ctx, m.Deliveries[0].Raw)
+	raw, err := s.raw.ReadRaw(ctx, m.Raw)
 	if err != nil {
 		return result{}, err
 	}

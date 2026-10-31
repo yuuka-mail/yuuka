@@ -11,15 +11,12 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/classify"
+	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
 // The read paths of the WebUI and REST API: message list, message,
 // thread and the prefix aggregation. Like Search, each takes the viewer it
-// runs for and refuses a nil one (§13.8). account_access is not enforced
-// yet (M3.5), so every viewer sees everything; when it is, its filter goes
-// into visibleMessage and visibleDelivery below and nowhere else.
-// visibleMessage then also admits our own sent mail, which has no
-// delivery, by the account of the identity it was sent as (§4.6).
+// runs for and refuses a nil one (§13.8).
 
 // errNoViewer is returned by every read called without a viewer.
 var errNoViewer = errors.New("no viewer")
@@ -31,10 +28,80 @@ func needViewer(v *auth.Viewer, op string) error {
 	return nil
 }
 
-// visibleMessage and visibleDelivery are the one place where the viewer
-// narrows what a query sees. Until M3.5: always true.
-func visibleMessage(*auth.Viewer) string  { return "true" }
-func visibleDelivery(*auth.Viewer) string { return "true" }
+// Visibility (§13.8) is decided here and nowhere else. Everything follows
+// from one rule, which accounts a viewer may read:
+//
+//   - a delivery is visible when its account is readable;
+//   - an outbox row, and with it its sent copy, when the account of the
+//     identity it is sent as is readable (§4.6: sent mail has no
+//     delivery, so the account comes from the identity);
+//   - a message when it has a visible delivery or is the sent copy of a
+//     visible outbox row.
+//
+// account_access is not enforced yet (M3.5): until then every account is
+// readable to every viewer, so the conditions reduce to "has a delivery
+// or a sent copy". The tests enforce it already (export_test.go), so the
+// rule and every read path built on it are checked against restricted
+// viewers before M3.5 switches it on.
+
+// readableAccount is the condition "v may read the account in col".
+func (db *DB) readableAccount(v *auth.Viewer, col string) string {
+	if !db.enforceAccountAccess {
+		return "true"
+	}
+	// The id is inlined, so only a well-formed one is: it is a ULID
+	// (principals.id has that CHECK), and anything else reads nothing.
+	if !ulid.Valid(v.PrincipalID) {
+		return "false"
+	}
+	return `EXISTS (SELECT 1 FROM account_access aa WHERE aa.account_id = ` + col +
+		` AND aa.principal_id = '` + v.PrincipalID + `' AND aa.can_read)`
+}
+
+// visibleDelivery is the condition on a delivery aliased d.
+func (db *DB) visibleDelivery(v *auth.Viewer, d string) string {
+	return db.readableAccount(v, d+".account_id")
+}
+
+// visibleOutbox is the FROM and WHERE of the outbox rows (so) whose sent
+// copy (sr) is the message aliased m and that v may see.
+func (db *DB) visibleOutbox(v *auth.Viewer, m string) string {
+	return `FROM outbox so JOIN raw_objects sr ON sr.id = so.raw_id JOIN identities si ON si.id = so.identity_id
+		WHERE sr.content_hash = ` + m + `.content_hash AND ` + db.readableAccount(v, "si.account_id")
+}
+
+// visibleMessage is the condition on a message aliased m.
+func (db *DB) visibleMessage(v *auth.Viewer, m string) string {
+	return `(EXISTS (SELECT 1 FROM deliveries vd WHERE vd.message_id = ` + m + `.id AND ` + db.visibleDelivery(v, "vd") + `)
+		OR EXISTS (SELECT 1 ` + db.visibleOutbox(v, m) + `))`
+}
+
+// outgoingJoin adds ob, the latest visible outbox row whose sent copy is
+// message m, if any (several when an identical message was queued twice,
+// or a recalled one queued again).
+func (db *DB) outgoingJoin(v *auth.Viewer) string {
+	return `
+		LEFT JOIN LATERAL (SELECT so.id, so.state ` + db.visibleOutbox(v, "m") + `
+			ORDER BY so.created_at DESC, so.id DESC LIMIT 1) ob ON true`
+}
+
+// Outgoing marks a message as our own (§4.6): it is the sent copy of an
+// outbox row. Messages that only have deliveries have none.
+type Outgoing struct {
+	OutboxID string
+	// State is outbox.state (§4.5): queued, sending, sent, partial,
+	// unknown, failed, dead, held or withdrawn. Whether it reached anyone
+	// is this, not that the message exists: every outbox row's sent copy
+	// is a message, whatever its fate.
+	State string
+}
+
+func outgoing(id, state *string) *Outgoing {
+	if id == nil {
+		return nil
+	}
+	return &Outgoing{OutboxID: *id, State: *state}
+}
 
 // Downgrade selects messages by the §4.3 minimal downgrade.
 type Downgrade int
@@ -89,32 +156,40 @@ type MessageSummary struct {
 	Downgraded  bool
 	Quarantined bool
 	HasAttach   bool
-	// Recipients are the prefix@zone of the visible deliveries, sorted.
+	// Recipients are the prefix@zone of the visible deliveries, sorted;
+	// empty for mail we only sent.
 	Recipients []string
+	// Outgoing is set for our own mail, from the latest visible outbox
+	// row that sent it.
+	Outgoing *Outgoing
 }
 
 // summaryCols and summaryFrom are shared by the list and the thread; the
-// lateral subquery computes downgrade and recipients over the visible
-// deliveries only.
+// lateral subqueries compute the outgoing state, downgrade and recipients
+// over what the viewer may see only. Our own mail is never downgraded:
+// the §4.3 downgrade judges how mail arrived, and a sent copy did not.
 const summaryCols = `m.id, m.thread_id, m.received_at, m.subject, m.from_addr, m.from_name, m.snippet,
-	coalesce(s.class_override, m.class), g.downgraded, m.parse_error IS NOT NULL, m.has_attach, g.recipients`
+	coalesce(s.class_override, m.class), g.downgraded, m.parse_error IS NOT NULL, m.has_attach, g.recipients,
+	ob.id, ob.state`
 
-func summaryFrom(v *auth.Viewer) string {
+func (db *DB) summaryFrom(v *auth.Viewer) string {
 	return `
 		FROM messages m
-		LEFT JOIN message_state s ON s.message_id = m.id
+		LEFT JOIN message_state s ON s.message_id = m.id` + db.outgoingJoin(v) + `
 		CROSS JOIN LATERAL (
-			SELECT NOT coalesce(bool_or(` + notDowngraded + `), false) AS downgraded,
+			SELECT ob.id IS NULL AND NOT coalesce(bool_or(` + notDowngraded + `), false) AS downgraded,
 				coalesce(array_agg(DISTINCT d.prefix || '@' || d.zone ORDER BY d.prefix || '@' || d.zone), '{}') AS recipients
 			FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
-			WHERE d.message_id = m.id AND ` + visibleDelivery(v) + `) g
-		WHERE ` + visibleMessage(v)
+			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + `) g
+		WHERE ` + db.visibleMessage(v, "m")
 }
 
 func scanSummary(r pgx.CollectableRow) (MessageSummary, error) {
 	var m MessageSummary
+	var obID, obState *string
 	err := r.Scan(&m.ID, &m.ThreadID, &m.ReceivedAt, &m.Subject, &m.FromAddr, &m.FromName, &m.Snippet,
-		&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients)
+		&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState)
+	m.Outgoing = outgoing(obID, obState)
 	return m, err
 }
 
@@ -140,7 +215,7 @@ func (db *DB) ListMessages(ctx context.Context, v *auth.Viewer, q MessageQuery) 
 	}
 	if q.Zone != "" {
 		where = append(where, `EXISTS (SELECT 1 FROM deliveries d WHERE d.message_id = m.id AND d.zone = `+
-			arg(q.Zone)+` AND d.prefix = `+arg(q.Prefix)+` AND `+visibleDelivery(v)+`)`)
+			arg(q.Zone)+` AND d.prefix = `+arg(q.Prefix)+` AND `+db.visibleDelivery(v, "d")+`)`)
 	}
 	if len(q.Classes) > 0 {
 		cs := make([]int16, len(q.Classes))
@@ -158,7 +233,7 @@ func (db *DB) ListMessages(ctx context.Context, v *auth.Viewer, q MessageQuery) 
 	if q.Before != nil {
 		where = append(where, `(m.received_at, m.id) < (`+arg(q.Before.ReceivedAt)+`, `+arg(q.Before.ID)+`)`)
 	}
-	sql := `SELECT ` + summaryCols + summaryFrom(v)
+	sql := `SELECT ` + summaryCols + db.summaryFrom(v)
 	for _, w := range where {
 		sql += "\n\t\tAND " + w
 	}
@@ -201,14 +276,18 @@ type MessageDetail struct {
 	BodyText   string
 	ParseError string // why it is quarantined; "" if parsed cleanly
 	Deliveries []DeliveryFact
+	// Raw is the raw to render the message from: that of the earliest
+	// visible delivery, or for mail we only sent, the earliest visible
+	// sent copy (DeliveryID empty). The content is the same in all of
+	// them (§4.1); readers must not assume a delivery exists.
+	Raw RawRef
 }
 
 // MessageByID returns message id as v sees it. An id merged away by a
 // content-hash change resolves to its survivor (§4.2), whose id the
-// result carries. ErrNotFound if it does not exist or is not visible,
-// including when none of its deliveries is: a message is readable through
-// a visible delivery or not at all (§13.8). Deliveries come earliest
-// first.
+// result carries. ErrNotFound if it does not exist or is not visible: a
+// message is readable through a visible delivery or a visible sent copy,
+// or not at all (§13.8). Deliveries come earliest first.
 func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (MessageDetail, error) {
 	if err := needViewer(v, "message"); err != nil {
 		return MessageDetail{}, err
@@ -217,7 +296,7 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 	err := pgx.BeginTxFunc(ctx, db.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+summaryCols+`,
 				coalesce(m.message_id, ''), coalesce(m.in_reply_to, ''), m.refs, m.date_header, m.body_text, coalesce(m.parse_error, '')
-			`+summaryFrom(v)+`
+			`+db.summaryFrom(v)+`
 			AND m.id = coalesce((SELECT new_id FROM message_aliases WHERE old_id = $1), $1)`, id)
 		if err != nil {
 			return err
@@ -225,9 +304,11 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 		d, err = pgx.CollectExactlyOneRow(rows, func(r pgx.CollectableRow) (MessageDetail, error) {
 			var d MessageDetail
 			m := &d.MessageSummary
+			var obID, obState *string
 			err := r.Scan(&m.ID, &m.ThreadID, &m.ReceivedAt, &m.Subject, &m.FromAddr, &m.FromName, &m.Snippet,
-				&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients,
+				&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState,
 				&d.MessageID, &d.InReplyTo, &d.References, &d.Date, &d.BodyText, &d.ParseError)
+			m.Outgoing = outgoing(obID, obState)
 			return d, err
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -241,7 +322,7 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 				`+rawRefCols+`
 			FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
 			JOIN raw_objects r ON r.id = d.raw_id
-			WHERE d.message_id = $1 AND `+visibleDelivery(v)+`
+			WHERE d.message_id = $1 AND `+db.visibleDelivery(v, "d")+`
 			ORDER BY d.received_at, d.id`, d.ID)
 		if err != nil {
 			return err
@@ -256,10 +337,19 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 		if err != nil {
 			return err
 		}
-		if len(d.Deliveries) == 0 {
+		if len(d.Deliveries) > 0 {
+			d.Raw = d.Deliveries[0].Raw
+			return nil
+		}
+		d.Raw, err = scanRawRef(tx.QueryRow(ctx, `
+			SELECT `+sentRawCols+`
+			FROM messages m CROSS JOIN LATERAL (SELECT sr.* `+db.visibleOutbox(v, "m")+`) sr
+			WHERE m.id = $1
+			ORDER BY sr.received_at, sr.id LIMIT 1`, d.ID))
+		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
-		return nil
+		return err
 	})
 	if err != nil {
 		return MessageDetail{}, fmt.Errorf("message %s: %w", id, err)
@@ -284,7 +374,7 @@ func (db *DB) ThreadByID(ctx context.Context, v *auth.Viewer, id string) (Thread
 	if err := needViewer(v, "thread"); err != nil {
 		return ThreadView{}, err
 	}
-	rows, err := db.pool.Query(ctx, `SELECT `+summaryCols+summaryFrom(v)+`
+	rows, err := db.pool.Query(ctx, `SELECT `+summaryCols+db.summaryFrom(v)+`
 		AND m.thread_id = $1
 		ORDER BY m.received_at, m.id`, id)
 	if err != nil {
@@ -379,7 +469,7 @@ func (db *DB) PrefixStats(ctx context.Context, v *auth.Viewer, q PrefixQuery) (P
 	md := `WITH md AS (
 			SELECT d.message_id, NOT bool_or(` + notDowngraded + `) AS downgraded
 			FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
-			WHERE d.message_id IS NOT NULL AND ` + visibleDelivery(v) + `
+			WHERE d.message_id IS NOT NULL AND ` + db.visibleDelivery(v, "d") + `
 			GROUP BY d.message_id
 		)`
 	// The filters are nullable parameters so that both statements share
@@ -409,7 +499,7 @@ func (db *DB) PrefixStats(ctx context.Context, v *auth.Viewer, q PrefixQuery) (P
 				p.first_seen, p.last_seen, p.leak_suspect, p.active, count(d.id),
 				count(DISTINCT md.message_id), count(DISTINCT md.message_id) FILTER (WHERE md.downgraded)
 			FROM prefixes p
-			LEFT JOIN deliveries d ON d.zone = p.zone AND d.prefix = p.prefix AND `+visibleDelivery(v)+`
+			LEFT JOIN deliveries d ON d.zone = p.zone AND d.prefix = p.prefix AND `+db.visibleDelivery(v, "d")+`
 			LEFT JOIN md ON md.message_id = d.message_id
 			`+where+`
 			GROUP BY p.zone, p.prefix
