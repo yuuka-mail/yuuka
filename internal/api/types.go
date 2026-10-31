@@ -6,6 +6,10 @@ import (
 	"strings"
 	"time"
 
+	// The zone database in the binary: tz must not depend on whether
+	// the host or image ships one.
+	_ "time/tzdata"
+
 	"github.com/yuuka-mail/yuuka/internal/agentview"
 	"github.com/yuuka-mail/yuuka/internal/store"
 )
@@ -111,15 +115,30 @@ type PrefixState string
 
 func (PrefixState) Enum() []string { return []string{"claimed", "discovered"} }
 
-// SearchParams are the parameters of GET /api/v1/search.
+// SearchParams are the parameters of GET /api/v1/search. Everything
+// that narrows the search is written in q (§16); the response echoes how
+// it was read.
 type SearchParams struct {
-	Q          string           `query:"q" jsonschema:"words that must all occur in subject, sender or body; empty matches everything"`
+	Q string `query:"q" jsonschema:"the query (§16): words and \"phrases\" that must all occur in subject, sender or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything"`
+	// include adds downgraded mail; so does is:downgraded anywhere in q.
 	Downgraded SearchDowngraded `query:"downgraded" default:"hide"`
-	Label      string           `query:"label" jsonschema:"only mail carrying this label (exact, case-sensitive)"`
-	Archived   *bool            `query:"archived" jsonschema:"only archived (true) or unarchived (false) mail; absent is both"`
-	Triage     *TriageFilter    `query:"triage" pattern:"^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$" jsonschema:"only mail whose latest score gives this option of this question the highest probability, as <question>:<option> such as phishing:yes; no threshold, and a model that abstained matches nothing"`
+	TZ         *TimeZone        `query:"tz" jsonschema:"IANA time zone in which a date in q (after:2026-10-01) starts its day; UTC when absent"`
 	Cursor     *Cursor          `query:"cursor" jsonschema:"next_cursor of the previous page"`
 	Limit      int              `query:"limit" minimum:"1" maximum:"500" default:"50"`
+}
+
+// TimeZone is an IANA time zone name, such as Asia/Shanghai.
+type TimeZone struct{ *time.Location }
+
+func (z *TimeZone) UnmarshalText(b []byte) error {
+	// Local would be the server's zone, which means nothing to a client.
+	if s := string(b); s != "" && s != "Local" {
+		if loc, err := time.LoadLocation(s); err == nil {
+			z.Location = loc
+			return nil
+		}
+	}
+	return errors.New("want an IANA time zone name, such as Asia/Shanghai")
 }
 
 // MessageSummary is a message as lists show it.
@@ -377,8 +396,21 @@ type PrefixList struct {
 // SearchResult is GET /api/v1/search: a page of hits, newest first, and
 // how many match in all.
 type SearchResult struct {
+	// Query is q as yuuka read it, normalized (relative times resolved):
+	// worth showing when it differs from what was typed.
+	Query string `json:"query"`
+	// Hints name items of q that were searched as text although they
+	// look like a misspelt operator.
+	Hints []SearchHint     `json:"hints"`
 	Total int              `json:"total"`
 	Hits  []MessageSummary `json:"hits"`
 	// NextCursor continues the hits; absent on the last page.
 	NextCursor string `json:"next_cursor,omitempty"`
+}
+
+// SearchHint is an item of q that was searched as text, and the operator
+// it probably meant: form:alice and from:.
+type SearchHint struct {
+	Term    string `json:"term"`
+	Suggest string `json:"suggest"`
 }

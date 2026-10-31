@@ -4,11 +4,12 @@
 
 ## 16. 检索
 
-> 状态：设计稿，未实现。现状是 [`store.SearchQuery`](../../internal/store/search.go)：
-> 自由文本按空白切词，每个词在「主题 + 发件人 + 正文」的拼接上做子串匹配，其余条件是并列的结构化字段。
+> 状态：16.7 的第 1 步已实现。文本写法的解析、规范化回显和改写提示在 [`internal/search`](../../internal/search/)，
+> 编译成 SQL 在 [`internal/store/filter.go`](../../internal/store/filter.go)，REST 的 `GET /api/v1/search` 和 MCP 的
+> `search_messages` 只收 `q`。第 2 步（收件人显示名、新的检索文本和索引、`text` 的 Bcc 分支）和第 3 步（WebUI）未做。
 > 存储和索引的取舍（trigram、不用外置引擎、暂不做向量）在 §4 的「全文检索」，本节不重复。
 
-现状有三个问题：
+改之前有三个问题（第 3 条等第 3 步）：
 
 - **能找的东西说不出来**。store 已经能按前缀、分类、时间、标签、归档、评分倾向过滤，
   但 WebUI 的搜索框只传 `q`，REST 和 MCP 又各自暴露了不同的子集（REST 没有前缀和时间，MCP 没有归档和翻页）。
@@ -50,23 +51,30 @@ JMAP Filter JSON（M4）──解码──┘
 ```
 
 - **Filter 是唯一的内部表示**。节点是 `AND` / `OR` / `NOT`（JMAP 的 `FilterOperator`，`NOT` 的意思是「其中没有一个成立」），
-  叶子是一个条件。它是不碰数据库的纯数据：解析和规范化输出放在一个独立的包里，编译成 SQL 在 store
-  （和规则的分工一样，§8.5）
+  叶子是一个条件。它是不碰数据库的纯数据：解析和规范化输出放在一个独立的包里（[`search.Filter`](../../internal/search/filter.go)），
+  编译成 SQL 在 store（和规则的分工一样，§8.5）。每个叶子只测一件事：JMAP 里一个条件带几个属性、
+  一个字符串值切出几项，解码时都拆成单属性、单项条件的 `AND`，所以编译器只有一种叶子要处理。
+  布尔条件只有「为真」一种叶子，JMAP 的 `hasAttachment: false` 解码成它的 `NOT`
 - **搜索只有 `q` 一个入口**。REST 的 `GET /api/v1/search` 只留 `q`、`downgraded`、`tz`、`cursor`、`limit`；
-  MCP 的 `search_messages` 只留 `q`、`include_downgraded`、`limit`。现在 REST 上的 `label` / `archived` / `triage`、
-  MCP 上的 `prefix` / `class` / `since` / `label` / `triage` 都去掉，改写进 `q`。
-  同一件事只有一种说法，工具描述也短。内部 REST 的形状本来就是可逆的；MCP 侧的变更写进接入文档
-- **响应回显规范化后的查询**（`query` 字段，MCP 返回的文本里也有一行），让人和 agent 都看到 yuuka 是怎么理解这句话的。
-  不认得的运算符被当成了文本、而它的名字和某个运算符只差一两个字母时，回显里附一句提示：
-  `form:alice` 是按文本搜的，是不是想写 `from:`？agent 读到就能自己改正
+  MCP 的 `search_messages` 只留 `q`、`include_downgraded`、`limit`。原来 REST 上的 `label` / `archived` / `triage`、
+  MCP 上的 `prefix` / `class` / `since` / `label` / `triage` 都去掉了，改写进 `q`。
+  同一件事只有一种说法，工具描述也短。去掉的参数再传进来会被拒绝，而不是被忽略：MCP 的输入 schema 本来就不收多余的属性；
+  REST 为此让所有端点都拒绝未声明的查询参数（[`bind`](../../internal/api/route.go)），否则还在传 `label=` 的调用方会以为过滤生效了
+- **响应回显规范化后的查询**（REST 的 `query`、`hints`，MCP 的 `query`、`hints` 和文本里的 `Query as read:` 一行），
+  让人和 agent 都看到 yuuka 是怎么理解这句话的。回显再解析一遍得到同一棵树（模糊测试守着这一点），
+  相对时间回显成算出来的时间点。不认得的运算符被当成了文本、而它的名字像某个运算符时，附一条提示：
+  `form:alice` 是按文本搜的，是不是想写 `from:`？agent 读到就能自己改正。「像」是：别的客户端和 yuuka 旧参数的叫法
+  （`since`、`prefix`、`tag`、`hasattachment`……），或者和运算符差一处编辑（3–4 个字母的名字）、两处（5 个字母以上）。
+  一两个字母的名字不提示：`Re:`、`AW:`、`TR:` 是主题前缀，和 `to:`、`cc:` 又总是只差一两个字母
 - **消息列表端点不变**。WebUI 的侧栏视图仍然用结构化参数取列表，不在前端拼查询串。
-  store 里列表和搜索共用同一组叶子谓词（现在的 `annotationFilter` 就是这样共用的）
+  store 里列表和搜索共用同一组叶子谓词（`deliveredTo`、`hasLabel`、`classIn`、`AnswerFilter`）
 - **不提前收 JSON**。M4 之前没有发 JSON 过滤树的调用方：WebUI 和 agent 都用文本。JMAP 网关来了，JSON 自然就有了入口
 
 #### 文本写法
 
 - 空白分隔的项默认取 AND。`OR` 必须大写，连接相邻的两项，优先级高于隐式 AND（`a b OR c` 是 `a AND (b OR c)`）；
-  小写的 `or` 是普通的词。括号分组，`-` 前缀是 NOT
+  小写的 `or` 是普通的词。括号分组，`-` 前缀是 NOT（紧贴着下一项；后面是空白时 `-` 是普通的词，双重否定互相抵消）。
+  `)` 只在括号里结束一个词，`(` 只在一项开头才是分组，所以括号外的 `a)b`、`foo(bar)` 照字面搜
 - 一项写成 `名字:值`、而且名字在 16.3 的表里（不区分大小写），才算运算符；否则整项都是普通文本。
   `Re:hello`、`10:30`、`https://example.com` 都按字面搜，不报错。这类词在邮件里很常见，为它们报错只会烦人，
   打错名字的情况靠回显和提示兜住
@@ -74,9 +82,12 @@ JMAP Filter JSON（M4）──解码──┘
   JMAP 把单引号也当成短语的界定符，文本写法不这样做，免得 `don't`、`l'été` 被拆坏。JMAP 网关进来的值仍然按 RFC 处理
 - **认得的运算符写了不合法的值，就报错并给出位置**（`after:2026-13-01`、`class:foo`）。名字认得，说明意图是明确的，
   静默当成文本只会让人以为过滤生效了。JMAP 定义了、但这一版不支持的条件同样报错（对应 JMAP 的 `unsupportedFilter`），
-  它们的名字从第一版起就保留。这样以后加上支持时，已有的查询不会悄悄改变含义
-- 上限：`q` 最多 1024 字节、32 个条件、嵌套 8 层，超出报错。查询可能来自被邮件内容诱导过的 agent，所以要有界。
-  搜索不提供正则，也就不需要规则那样的正则预算（§8.5）
+  它们的名字从第一版起就保留。这样以后加上支持时，已有的查询不会悄悄改变含义。
+  位置是从 1 数的字符序号，REST 回 `400 invalid_param`，保留条件回 `400 unsupported_filter`
+  （保留的有 `minsize:`、`maxsize:`、`header:`、`keyword:` 和 `is:unread`）
+- 上限：`q` 最多 1024 字节、32 个条件、括号和否定合起来嵌套 8 层，超出报错；不是 UTF-8 或含 NUL 的也报错。
+  查询可能来自被邮件内容诱导过的 agent，所以要有界。搜索不提供正则，也就不需要规则那样的正则预算（§8.5）。
+  查询里的文字只作为参数进 SQL，从不拼进语句
 
 ### 16.3 条件
 
@@ -127,8 +138,11 @@ RFC 8621 对字符串条件有一套规则，同一套用于 `text` 和每个字
   代价是短词的噪声大。这一点和现状一样
 
 JMAP 的 `subject: "foo bar"`（值里不带引号）意思是两个词都要出现在主题里，而不是短语。
-文本写法里 `subject:foo` 只带一项，要写短语就用 `subject:"foo bar"`。两条入口最后产出同一种「项」的列表，
-匹配只有一处实现。
+文本写法里 `subject:foo` 只带一项，要写短语就用 `subject:"foo bar"`。两条入口最后产出同一种「项」：
+每个叶子一项，JMAP 的多项值解码成多个叶子的 `AND`，匹配只有一处实现（`ILIKE '%项%'`，`%`、`_`、`\` 转义成字面）。
+
+第 1 步里 `to:`、`cc:` 只匹配 0007 的折叠地址，`text` 还是 0002 的检索文本（主题、发件人、正文）；
+第 2 步补上下面的名字和 Bcc 分支后自动扩大，查询的写法不变。
 
 #### 收件人的名字和 Bcc
 
@@ -139,7 +153,8 @@ JMAP 的 `subject: "foo bar"`（值里不带引号）意思是两个词都要出
   这两列为 NULL 表示「还没读」，存量信由 backlog（`ingest.ProcessBacklog`）回填，和 0007、0010 的做法一样，
   升级时只需要 `yuuka migrate`。还没回填的信，暂时只能按地址匹配
 - **Bcc**。收到的信本来就没有 Bcc。自己发出的信，Sent 副本里也没有 Bcc 头（§10.2.1），所以按 RFC 的字面意思，
-  `bcc` 永远不会匹配。yuuka 改用 outbox 里的信封密送地址 `bcc_addrs`，比 RFC 多给了一步。
+  `bcc` 永远不会匹配。yuuka 改用 outbox 的信封密送地址（`outbox_recipients` 里 `kind = 'bcc'` 的 `addr_fold`），比 RFC 多给了一步。
+  显式的 `bcc:` 第 1 步已经这样做，按地址或草稿上的名字匹配（[`filter.go`](../../internal/store/filter.go)）。
   outbox 是决定表，不是派生内容，所以 Bcc 不能放进 `messages` 的派生列，也就进不了 trigram 索引。
   `text` 因此多一条分支：`m.id = ANY(ARRAY(子查询))`，子查询找出密送地址命中、而且调用者看得见的 outbox 行对应的信。
   Postgres 把它当作只算一次的 initplan，再和 trigram 索引做 BitmapOr，所以不会让每次搜索都退化成顺序扫描。
@@ -153,9 +168,11 @@ JMAP 的 `subject: "foo bar"`（值里不带引号）意思是两个词都要出
 
 - 值可以是 `YYYY-MM-DD`、RFC 3339 时间戳，或者相对现在的 `after:-7d`，单位只有 `h`、`d`、`w`。
   不提供月和年：`m` 在不同客户端里分别表示分钟或月，有歧义，长跨度直接写日期就行。
-  相对时间仍然是 JMAP 的 `after` / `before`，只是值换了一种写法，规范化回显里是算出来的时间点
+  相对时间仍然是 JMAP 的 `after` / `before`，只是值换了一种写法，规范化回显里是算出来的时间点（取整到秒，
+  按 `tz` 写出偏移，所以回显再解析一遍时间不变）。相对时间最多往前约一千年，年份限在 1 到 9998：
+  再远的值 Postgres 存不下，或者换个时区就写不成四位年份的 RFC 3339
 - 只写日期时，按请求的 `tz` 参数（IANA 时区名）取当天零点，没给就按 UTC。WebUI 带上浏览器的时区，
-  MCP 不带，和现在 `since` 的解释一致
+  MCP 不带，和原来 `since` 的解释一致。时区库编进了二进制（`time/tzdata`），`tz` 不依赖主机或镜像里有没有 zoneinfo
 - 开闭按 JMAP：`after:2026-10-01 before:2026-11-01` 正好是十月
 
 #### 降级的信默认不出现
@@ -169,12 +186,16 @@ JMAP 的 `subject: "foo bar"`（值里不带引号）意思是两个词都要出
 - **可见性只在一处算**（§13.8）。每个条件只用调用者本来就看得到的事实：`deliveredto:` 只看可见投递，
   `bcc:`、`is:sent` 和 `text` 的 Bcc 分支只看可见的 outbox 行。**否定也只在可见事实上求值**：`-deliveredto:x` 的意思是
   「没有一条可见投递到 x」，所以结果不会因为一条看不见的投递而改变，也就泄露不了它的存在。
-  新条件逐个进 ACL 测试表，命中数和 `total` 都要测
+  新条件逐个进 ACL 测试表，命中数和 `total` 都要测（store 的 `TestVisibility`）。
+  缺的事实一律算假：没有 `message_state` 行、收件人或 List-Id 还没回填时，条件不成立，它的否定成立。
+  SQL 里 `NOT` 编译成 `NOT coalesce(…, false)`，`AND` / `OR` 本来就把 NULL 当假，叶子可以照列表的写法保留索引能用的形状
 - **条件不能绕过 scope**。Bcc 是信封收件人，outbox 的明细本来就要 `delivery:read`（§13.4）。
   没有这个 scope 时，显式的 `bcc:` 报错，而不是返回空：返回空会让 `-bcc:x` 变成「全部」，调用方也分不清是没有命中还是没有权限。
-  `text` 是隐式的，没有这个 scope 时就不带 Bcc 分支。`deliveredto:` 只要 `message:read`，和列表里的 `recipients` 一样
+  `text` 是隐式的，没有这个 scope 时就不带 Bcc 分支。`deliveredto:` 只要 `message:read`，和列表里的 `recipients` 一样。
+  scope 在编译器里查（它拿着 Viewer），REST 回 `403 scope_required`；同样，没配评分器时 `triage:` 报错而不是返回空
 - **索引能用就要用上**。`text` 由 trigram 表达式索引支撑（§4）。字段条件在 SQL 里额外带上一个对整份检索文本的同样的 `ILIKE`：
-  字段是检索文本的子串，所以结果不变，而顶层 AND 里的 `subject:`、`from:`、`to:` 也能走索引。
+  字段是检索文本的子串，所以结果不变，而顶层 AND 里的 `subject:`、`from:`、`body:`（第 2 步起还有 `to:`）也能走索引
+  （`TestSearchUsesTrigramIndex`）。
   `OR` 和否定可能用不上索引，个人量级下顺序扫描可以接受，条件数的上限保证它有界
 - **检索文本的定义只有一处**。新的检索文本由一个声明为 `IMMUTABLE` 的 SQL 函数拼出：主题、发件人名和地址、
   To / Cc 的地址和名字、正文（`array_to_string` 本身不是 immutable，不能直接写进索引表达式）。
@@ -215,7 +236,8 @@ JMAP 的 `subject: "foo bar"`（值里不带引号）意思是两个词都要出
 
 ### 16.7 分期
 
-1. 解析器、规范化回显和改写提示、Filter 编译；REST 和 MCP 的搜索改用它，去掉旧参数，同步改接入文档
+1. （已完成）解析器、规范化回显和改写提示、Filter 编译；REST 和 MCP 的搜索改用它，去掉旧参数，同步改接入文档。
+   WebUI 的搜索框原样作为 `q` 发出，倾向视图里的搜索在前面加一项 `triage:问题:选项`，并带上浏览器的 `tz`
 2. 补齐 JMAP：`to_names` / `cc_names` 两个派生列和回填，新的检索文本函数和索引，`text` 的 Bcc 分支
 3. WebUI：按视图预填、运算符说明、值补全、回显提示
 4. 以后再做：`is:unread`（等已读状态接上）、`has:` 按提取值过滤（验证码、链接，§12.9）、`minsize:` / `maxsize:`、

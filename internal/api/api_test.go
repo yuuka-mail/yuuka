@@ -511,7 +511,7 @@ func (h *harness) token(scopes ...auth.Scope) string {
 // find returns the id of the message with exactly this subject.
 func (h *harness) find(subject string) string {
 	h.t.Helper()
-	res := decode[SearchResult](h.t, h.get("/api/v1/search?downgraded=include&limit=500&q="+url.QueryEscape(subject), h.token(auth.MessageRead)))
+	res := decode[SearchResult](h.t, h.get("/api/v1/search?downgraded=include&limit=500&q="+url.QueryEscape(`subject:"`+strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(subject)+`"`), h.token(auth.MessageRead)))
 	for _, m := range res.Hits {
 		if m.Subject == subject {
 			return m.ID
@@ -1380,6 +1380,47 @@ func TestPrefixesAndSearch(t *testing.T) {
 	// Search has no review list: only is not one of its values.
 	if w := h.get("/api/v1/search?downgraded=only", read); w.Code != http.StatusBadRequest {
 		t.Errorf("search downgraded=only: %d", w.Code)
+	}
+	// The query is echoed as read, with a hint for what looks misspelt.
+	echo := decode[SearchResult](t, h.get("/api/v1/search?q="+url.QueryEscape(`FROM:bob  form:alice ("lunch on")`), read))
+	if echo.Query != `from:bob form:alice "lunch on"` || !slices.Equal(echo.Hints, []SearchHint{{Term: "form:alice", Suggest: "from:"}}) {
+		t.Errorf("echo %q, hints %+v", echo.Query, echo.Hints)
+	}
+	if e := decode[SearchResult](t, h.get("/api/v1/search", read)); e.Query != "" || e.Hints == nil {
+		t.Errorf("empty query: %q %v", e.Query, e.Hints)
+	}
+	// A date starts its day in tz; the echo keeps the day.
+	for tz, want := range map[string]int{"": 0, "&tz=America/Los_Angeles": 0, "&tz=Asia/Tokyo": 0} {
+		got := decode[SearchResult](t, h.get("/api/v1/search?downgraded=include&q=before:1970-01-02"+tz, read))
+		if got.Total != want || got.Query != "before:1970-01-02" {
+			t.Errorf("tz %q: %d %q", tz, got.Total, got.Query)
+		}
+	}
+	// What cannot run says where, and why: a bad value, a reserved JMAP
+	// condition, a scope the condition needs, a zone that does not exist.
+	for q, want := range map[string]struct {
+		status int
+		code   openapi.Code
+		detail string
+	}{
+		"q=" + url.QueryEscape("会议 after:2026-13-01"): {http.StatusBadRequest, openapi.CodeInvalidParam, "q: at character 4: after:"},
+		"q=is:unread":                    {http.StatusBadRequest, openapi.CodeUnsupportedFilter, "q: at character 1: is:unread"},
+		"q=header:x-foo":                 {http.StatusBadRequest, openapi.CodeUnsupportedFilter, "header:"},
+		"q=bcc:someone":                  {http.StatusForbidden, openapi.CodeScopeRequired, "delivery:read"},
+		"q=a+(b":                         {http.StatusBadRequest, openapi.CodeInvalidParam, "at character 3: ( is not closed"},
+		"tz=Mars/Olympus":                {http.StatusBadRequest, openapi.CodeInvalidParam, "tz:"},
+		"tz=Local":                       {http.StatusBadRequest, openapi.CodeInvalidParam, "tz:"},
+		"label=x":                        {http.StatusBadRequest, openapi.CodeInvalidParam, "label"},
+		"q=" + url.QueryEscape("a \xff"): {http.StatusBadRequest, openapi.CodeInvalidParam, "UTF-8"},
+	} {
+		w := h.get("/api/v1/search?"+q, read)
+		if p := problemOf(t, w); w.Code != want.status || p.Code != want.code || !strings.Contains(p.Detail, want.detail) {
+			t.Errorf("%s: %d %+v", q, w.Code, p)
+		}
+	}
+	// With delivery:read, bcc: is a condition like any other.
+	if w := h.get("/api/v1/search?q=bcc:someone", h.token(auth.MessageRead, auth.DeliveryRead)); w.Code != http.StatusOK {
+		t.Errorf("bcc: with delivery:read: %d %s", w.Code, w.Body.String())
 	}
 	// Generated variants may reuse the body under another subject.
 	res := decode[SearchResult](t, h.get("/api/v1/search?q=usual+place", read))

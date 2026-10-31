@@ -326,7 +326,7 @@ agent 没有任何管理规则的工具，`propose` 是它影响规则的唯一�
 MCP server 暴露的不是 REST 的全量投影，而是一把语义化的窄工具：
 
 ```
-search_messages(q, prefix?, class?, since?, limit)   -- 返回锚点 + snippet
+search_messages(q, limit)                            -- 返回锚点 + snippet；条件都写在 q 里（§16）
 get_message(uri, level=snippet|sections|part)        -- 分层，省 token
 get_otp(prefix|thread)                               -- 高频意图直接成 tool
 list_prefixes(leak_suspect?)                         -- 前缀视角
@@ -408,7 +408,7 @@ M3 的标注工具（[`internal/mcp/annotate.go`](../../internal/mcp/annotate.go
 
 三件写工具的审计由 store 自己记（那一行 `actions` 就是撤销的把手），工具层不再重复记；没改动任何值的 `annotate`
 和被拒的调用照常由工具层记一行。`propose` 的审计只记形状和引用个数，不记理由和引文。
-`search_messages` 多了 `label` 过滤，命中带 `labels` 和 `archived`：它们是标注，不是信的内容。
+`search_messages` 能按 `label:` 找信（§16），命中带 `labels` 和 `archived`：它们是标注，不是信的内容。
 工具描述里写明：只能标注、永不外发；提案由人决定；`overruled` 和被拒绝都是正常结果。
 
 笔记的两件工具（[`internal/mcp/notes.go`](../../internal/mcp/notes.go)，§8.10）都要 `message:annotate`：
@@ -417,7 +417,7 @@ M3 的标注工具（[`internal/mcp/annotate.go`](../../internal/mcp/annotate.go
 文本里作者、目标、时间列在边界外，正文和引文在第二个边界里，提示语是笔记专用的 `NoteNotice`。
 
 §15 的评分（只观测）在读工具里三处出现，都只认当前评分器：`get_message` 的 `facts.triage`（§8.1）；
-`search_messages` 多一个 `triage=<问题>:<选项>` 过滤，命中带 `triage`（每个问题概率最高的选项，文本里写成「model leans to …」）；
+`search_messages` 的 `q` 里能写 `triage:<问题>:<选项>`，命中带 `triage`（每个问题概率最高的选项，文本里写成「model leans to …」）；
 `changes_since` 的 `triage` 变更带消息 URI，长期在跑的 agent 由此看到新评分。过滤按概率最高的选项而不是阈值，
 所以描述里让 agent 去读概率；没配评分器时带 `triage` 的搜索报错，而不是返回空、被读成「模型一封都没找到」。
 

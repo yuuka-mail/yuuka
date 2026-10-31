@@ -59,13 +59,13 @@ func TestTriage(t *testing.T) {
 	}
 
 	// search_messages finds by what the latest score leans to.
-	r = callTool(t, cs, "search_messages", map[string]any{"triage": "phishing:yes", "include_downgraded": true})
+	r = callTool(t, cs, "search_messages", map[string]any{"q": "triage:phishing:yes", "include_downgraded": true})
 	res := structured[mcp.SearchOutput](t, r)
 	if res.Total != 1 || res.Hits[0].URI != agentview.MessageURI(phish) || res.Hits[0].Triage["phishing"] != "yes" ||
 		!strings.Contains(r.text, "model leans to kind notification, phishing yes") {
 		t.Errorf("triage=phishing:yes: %+v\n%s", res, r.text)
 	}
-	if res := structured[mcp.SearchOutput](t, callTool(t, cs, "search_messages", map[string]any{"triage": "phishing:no"})); res.Total != 1 ||
+	if res := structured[mcp.SearchOutput](t, callTool(t, cs, "search_messages", map[string]any{"q": "triage:phishing:no"})); res.Total != 1 ||
 		res.Hits[0].URI != agentview.MessageURI(otp) {
 		t.Errorf("triage=phishing:no: %+v", res)
 	}
@@ -73,9 +73,9 @@ func TestTriage(t *testing.T) {
 		got  call
 		want string
 	}{
-		{callTool(t, cs, "search_messages", map[string]any{"triage": "phishing:maybe"}), "no option"},
-		{callTool(t, cs, "search_messages", map[string]any{"triage": "injected"}), "<question>:<option>"},
-		{callTool(t, off, "search_messages", map[string]any{"triage": "phishing:yes"}), "no decision model"},
+		{callTool(t, cs, "search_messages", map[string]any{"q": "triage:phishing:maybe"}), "no option"},
+		{callTool(t, cs, "search_messages", map[string]any{"q": "triage:injected"}), "<question>:<option>"},
+		{callTool(t, off, "search_messages", map[string]any{"q": "triage:phishing:yes"}), "no decision model"},
 	} {
 		if !c.got.isError || !strings.Contains(c.got.text, c.want) {
 			t.Errorf("want an error with %q: %+v", c.want, c.got)

@@ -13,35 +13,28 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/classify"
+	"github.com/yuuka-mail/yuuka/internal/search"
+	"github.com/yuuka-mail/yuuka/internal/triage/score"
 )
 
-// SearchQuery is a substring search over subject, sender and body.
+// SearchQuery is one page of a search (§16).
 type SearchQuery struct {
-	// Text is split on whitespace; every term must occur (case-insensitive
-	// substring, which also works for Chinese without segmentation).
-	// Empty matches everything.
-	Text  string
-	Limit int // default 50, at most 500
+	// Filter is the parsed query (search.Parse); nil matches everything.
+	Filter *search.Filter
+	Limit  int // default 50, at most 500
 	// Before returns hits strictly after this position in the order
 	// (received_at, id), both descending; nil starts at the newest. As in
 	// the message list, keyset paging keeps pages stable while mail
 	// arrives, which an offset would not. Total ignores it.
 	Before *MessageCursor
 	// IncludeDowngraded also returns mail the §4.3 minimal downgrade
-	// hides from aggregate views (discovered prefixes, dmarc=fail).
+	// hides from aggregate views (discovered prefixes, dmarc=fail). A
+	// filter that names is:downgraded anywhere includes it as well:
+	// hiding it would make that condition find nothing.
 	IncludeDowngraded bool
-	// Prefix and Zone, when set, keep messages with a delivery to that
-	// local part (and domain).
-	Prefix string
-	Zone   string
-	// Class, when set, keeps messages of that effective class.
-	Class *classify.Class
-	// Since, when set, keeps messages received at or after it.
-	Since time.Time
-	// Label, Archived and Answer narrow as in MessageFilter.
-	Label    string
-	Archived *bool
-	Answer   *AnswerFilter
+	// Triage is the active scorer's profile, which triage: conditions
+	// read (§15); nil when none is configured.
+	Triage *score.Profile
 }
 
 // SearchHit is one message in a search result.
@@ -74,10 +67,6 @@ type SearchResult struct {
 	Hits  []SearchHit
 }
 
-// searchDoc must stay identical to the expression of the messages_search
-// trigram index, or the index is not used.
-const searchDoc = `(m.subject || ' ' || m.from_name || ' ' || m.from_addr || ' ' || m.body_text)`
-
 // Search runs q for v. Total and hits are computed over the same set in
 // one snapshot, so they agree.
 //
@@ -95,41 +84,19 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 	}
 	limit = min(limit, 500)
 
-	var where []string
-	args := []any{}
-	for term := range strings.FieldsSeq(q.Text) {
-		args = append(args, "%"+likeEscape(term)+"%")
-		where = append(where, fmt.Sprintf("%s ILIKE $%d", searchDoc, len(args)))
-	}
-	if q.Prefix != "" || q.Zone != "" {
-		args = append(args, q.Prefix, q.Zone)
-		where = append(where, fmt.Sprintf(`EXISTS (SELECT 1 FROM deliveries d WHERE d.message_id = m.id
-			AND ($%d = '' OR d.prefix = $%[1]d) AND ($%d = '' OR d.zone = $%[2]d) AND %s)`,
-			len(args)-1, len(args), db.visibleDelivery(v, "d")))
-	}
-	if q.Class != nil {
-		args = append(args, *q.Class)
-		where = append(where, fmt.Sprintf(`coalesce(s.class_override, m.class) = $%d`, len(args)))
-	}
-	if !q.Since.IsZero() {
-		args = append(args, q.Since)
-		where = append(where, fmt.Sprintf(`m.received_at >= $%d`, len(args)))
-	}
-	arg := func(a any) string {
-		args = append(args, a)
-		return fmt.Sprintf("$%d", len(args))
-	}
-	where = append(where, annotationFilter(q.Label, q.Archived, arg)...)
-	if q.Answer != nil {
-		if err := q.Answer.valid(); err != nil {
+	c := &compiler{db: db, v: v, triage: q.Triage}
+	where := []string{db.visibleMessage(v, "m")}
+	if q.Filter != nil {
+		w, err := c.filter(q.Filter)
+		if err != nil {
 			return SearchResult{}, fmt.Errorf("search: %w", err)
 		}
-		where = append(where, q.Answer.condition(arg))
+		where = append(where, w)
 	}
-	if !q.IncludeDowngraded {
-		where = append(where, `NOT downgraded`)
+	if !q.IncludeDowngraded && !q.Filter.Uses(search.Downgraded) {
+		where = append(where, `NOT g.downgraded`)
 	}
-	where = append([]string{db.visibleMessage(v, "m")}, where...)
+	args := c.args
 	// downgraded is a lateral column so the filter can use it by name.
 	// As in the list, our own mail is never downgraded.
 	joins := `
@@ -139,7 +106,7 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 			SELECT 1 FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
 			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + ` AND ` + notDowngraded + `) AS downgraded) g`
 	filter := `
-		WHERE ` + strings.Join(where, " AND ")
+		WHERE ` + strings.Join(where, "\n\t\tAND ")
 
 	var res SearchResult
 	err := pgx.BeginTxFunc(ctx, db.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
@@ -155,7 +122,7 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		pageArgs = append(pageArgs, limit)
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 			SELECT m.id, m.thread_id, m.received_at, m.subject, m.from_addr, m.from_name, m.snippet,
-				coalesce(s.class_override, m.class), downgraded, m.parse_error IS NOT NULL, ob.id, ob.state, ob.from_addr,
+				coalesce(s.class_override, m.class), g.downgraded, m.parse_error IS NOT NULL, ob.id, ob.state, ob.from_addr,
 				hx.items, hx.auths, coalesce(s.labels, '{}'), coalesce(s.archived, false)
 			%s
 			ORDER BY m.received_at DESC, m.id DESC
@@ -189,10 +156,4 @@ func hitExtras(db *DB, v *auth.Viewer) string {
 	return bestExtractions + `
 		CROSS JOIN LATERAL (SELECT ex.items, (SELECT jsonb_agg(d.auth ORDER BY d.received_at, d.id) FROM deliveries d
 			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + `) AS auths) hx`
-}
-
-// likeEscape makes a search term literal inside an ILIKE pattern, whose
-// default escape character is the backslash.
-func likeEscape(s string) string {
-	return strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(s)
 }

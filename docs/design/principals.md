@@ -449,7 +449,7 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 
 | 读路径 | 受限主体看到的 |
 |---|---|
-| 搜索 / `search_messages` | 结果和**计数、分面**都只在可见消息上算 |
+| 搜索 / `search_messages` | 结果和**计数、分面**都只在可见消息上算；条件（含否定）只读可见的投递和 outbox 行（§16.4） |
 | `get_message` / 附件 / 结构化视图 / 消息详情的 To、Cc、Reply-To | 消息可见才可取；附件随消息；收件人头部从可读那一路的原件解析，只经 Sent 副本可见的信给的是 Sent 副本的头 |
 | `extractions` / `get_otp` | 只来自可见消息 |
 | 线程 | `n`、`participants`、`first_at` / `last_at`、`snippet` 都按可见消息**现算**；`threads` 表里存的聚合值只服务不受限的视图 |

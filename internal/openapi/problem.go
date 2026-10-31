@@ -48,7 +48,10 @@ const (
 	// more than now; that is done on the host, which the detail names
 	// (§13.10).
 	CodeWideningRequiresCLI Code = "widening_requires_cli"
-	CodeInternal            Code = "internal"
+	// CodeUnsupportedFilter: a search query names a condition JMAP
+	// defines that yuuka reserves but does not support yet (§16.2).
+	CodeUnsupportedFilter Code = "unsupported_filter"
+	CodeInternal          Code = "internal"
 )
 
 // Enum lists every code: the schema says which codes exist.
@@ -57,7 +60,7 @@ func (Code) Enum() []string {
 		"invalid_param", "invalid_body", "unsupported_type", "body_too_large", "not_found",
 		"unauthenticated", "scope_required", "forbidden", "conflict", "not_verified", "ceremony_expired", "rate_limited",
 		"undecodable", "unavailable", "no_identity", "submission_rejected", "invalid_rule", "cursor_expired",
-		"widening_requires_cli", "internal",
+		"widening_requires_cli", "unsupported_filter", "internal",
 	}
 }
 

@@ -227,15 +227,15 @@ func TestSearchAndRead(t *testing.T) {
 	}
 
 	// Filters reach the store.
-	r = callTool(t, cs, "search_messages", map[string]any{"prefix": "promo-x@example.com", "include_downgraded": true})
+	r = callTool(t, cs, "search_messages", map[string]any{"q": "deliveredto:promo-x@example.com", "include_downgraded": true})
 	if err := json.Unmarshal(r.structured, &out); err != nil || out.Total != 1 || !out.Hits[0].Downgraded {
 		t.Errorf("prefix filter: %+v %s", out, r.text)
 	}
-	r = callTool(t, cs, "search_messages", map[string]any{"prefix": "promo-x"})
+	r = callTool(t, cs, "search_messages", map[string]any{"q": "deliveredto:promo-x"})
 	if err := json.Unmarshal(r.structured, &out); err != nil || out.Total != 0 {
 		t.Errorf("downgraded mail returned by default: %+v", out)
 	}
-	r = callTool(t, cs, "search_messages", map[string]any{"class": "human", "since": "2026-10-31"})
+	r = callTool(t, cs, "search_messages", map[string]any{"q": "class:human after:2026-10-31"})
 	if err := json.Unmarshal(r.structured, &out); err != nil || out.Total == 0 {
 		t.Errorf("class filter: %+v %s", out, r.text)
 	}
@@ -243,6 +243,13 @@ func TestSearchAndRead(t *testing.T) {
 		if h.Class != "human" {
 			t.Errorf("class filter returned %s", h.Class)
 		}
+	}
+	// The query comes back as read, with a hint for a likely typo.
+	r = callTool(t, cs, "search_messages", map[string]any{"q": `Form:noreply  "verification CODE"`})
+	if err := json.Unmarshal(r.structured, &out); err != nil || out.Query != `Form:noreply "verification CODE"` ||
+		len(out.Hints) != 1 || !strings.Contains(r.text, "Query as read: Form:noreply \"verification CODE\"\n") ||
+		!strings.Contains(r.text, "Hint: Form:noreply was searched as text; did you mean from:?") {
+		t.Errorf("echo: %+v\n%s", out, r.text)
 	}
 }
 
@@ -373,9 +380,22 @@ func TestBadInput(t *testing.T) {
 			t.Errorf("%s: %+v, want %q", args, r, want)
 		}
 	}
-	r := callTool(t, cs, "search_messages", map[string]any{"class": "robot"})
-	if !r.isError || !strings.Contains(r.text, "[unknown machine human]") {
-		t.Errorf("bad class: %+v", r)
+	// A query that cannot run says where and why; a parameter that moved
+	// into q is refused, not ignored.
+	for args, want := range map[string]string{
+		`{"q": "invoice class:robot"}`:   "q: at character 9: class: takes machine, human or unknown",
+		`{"q": "is:unread"}`:             "unsupported filter in q: at character 1: is:unread",
+		`{"q": "bcc:someone"}`:           "bcc: needs the delivery:read scope",
+		`{"q": "(a"}`:                    "( is not closed",
+		`{"q": "x", "label": "invoice"}`: `unexpected additional properties ["label"]`,
+	} {
+		var a map[string]any
+		if err := json.Unmarshal([]byte(args), &a); err != nil {
+			t.Fatal(err)
+		}
+		if r := callTool(t, cs, "search_messages", a); !r.isError || !strings.Contains(r.text, want) {
+			t.Errorf("%s: %+v, want %q", args, r, want)
+		}
 	}
 }
 

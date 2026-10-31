@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/yuuka-mail/yuuka/internal/search"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
@@ -146,6 +147,23 @@ func Account(t *testing.T, db *store.DB) string {
 		t.Fatal(err)
 	}
 	return id
+}
+
+// Query parses q in the search text form (§16) for store.SearchQuery
+// and fails the test if it does not parse. triage: is split at its colon
+// only: the question set is the triage package's, which imports this
+// one's tests, and the store checks the shape again.
+func Query(t *testing.T, q string) *search.Filter {
+	t.Helper()
+	split := func(s string) (string, string, error) {
+		q, o, _ := strings.Cut(s, ":")
+		return q, o, nil
+	}
+	p, err := search.Parse(q, search.Env{Triage: split})
+	if err != nil {
+		t.Fatalf("query %q: %v", q, err)
+	}
+	return p.Filter
 }
 
 func ident(s string) string { return pgx.Identifier{s}.Sanitize() }

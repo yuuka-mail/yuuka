@@ -9,6 +9,7 @@ import (
 	"mime"
 	"net/http"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -91,10 +92,18 @@ func (rt route) submitting() route {
 // the field tagged body:"json" from the JSON body. An absent or empty
 // parameter takes its default tag, if any. Several values of a slice
 // parameter are comma separated. Every value is checked against its
-// type's Enum and its field's constraint tags (openapi.Check).
+// type's Enum and its field's constraint tags (openapi.Check). A query
+// parameter the operation does not have is refused: ignoring it would
+// let a caller believe it filtered by it, as by search's label= before
+// §16 moved it into q.
 func bind(r *http.Request, p any) error {
 	v := reflect.ValueOf(p).Elem()
 	query := r.URL.Query()
+	for name := range query {
+		if !slices.ContainsFunc(reflect.VisibleFields(v.Type()), func(f reflect.StructField) bool { return f.Tag.Get("query") == name }) {
+			return openapi.Errorf(http.StatusBadRequest, openapi.CodeInvalidParam, "%s: no such parameter", name)
+		}
+	}
 	for _, f := range reflect.VisibleFields(v.Type()) {
 		var name, s string
 		switch {

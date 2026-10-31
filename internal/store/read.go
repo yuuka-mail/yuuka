@@ -277,17 +277,17 @@ func (db *DB) ListMessages(ctx context.Context, v *auth.Viewer, q MessageQuery) 
 		return fmt.Sprintf("$%d", len(args))
 	}
 	if q.Zone != "" {
-		where = append(where, `EXISTS (SELECT 1 FROM deliveries d WHERE d.message_id = m.id AND d.zone = `+
-			arg(q.Zone)+` AND d.prefix = `+arg(q.Prefix)+` AND `+db.visibleDelivery(v, "d")+`)`)
+		where = append(where, db.deliveredTo(v, q.Prefix, q.Zone, arg))
 	}
 	if len(q.Classes) > 0 {
-		cs := make([]int16, len(q.Classes))
-		for i, c := range q.Classes {
-			cs[i] = int16(c)
-		}
-		where = append(where, `coalesce(s.class_override, m.class) = ANY(`+arg(cs)+`)`)
+		where = append(where, classIn(q.Classes, arg))
 	}
-	where = append(where, annotationFilter(q.Label, q.Archived, arg)...)
+	if q.Label != "" {
+		where = append(where, hasLabel(q.Label, arg))
+	}
+	if q.Archived != nil {
+		where = append(where, isArchived+` = `+arg(*q.Archived))
+	}
 	if q.Answer != nil {
 		if err := q.Answer.valid(); err != nil {
 			return nil, fmt.Errorf("list messages: %w", err)
@@ -646,18 +646,4 @@ func (db *DB) prefixStats(ctx context.Context, tx pgx.Tx, v *auth.Viewer, q Pref
 		}
 	}
 	return out, nil
-}
-
-// annotationFilter is the label and archived conditions on message_state
-// s shared by the list and search. labels <> '{}' is implied by the
-// containment; it is spelled out so the partial GIN index applies.
-func annotationFilter(label string, archived *bool, arg func(any) string) []string {
-	var where []string
-	if label != "" {
-		where = append(where, `s.labels <> '{}' AND s.labels @> ARRAY[`+arg(label)+`]::text[]`)
-	}
-	if archived != nil {
-		where = append(where, `coalesce(s.archived, false) = `+arg(*archived))
-	}
-	return where
 }

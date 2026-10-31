@@ -106,8 +106,11 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 	sdk.AddTool(srv, &sdk.Tool{
 		Name:        "search_messages",
 		InputSchema: input[SearchInput](),
-		Description: "Search mail by words in subject, sender or body, or by what a decision model leaned to " +
-			"(triage, e.g. phishing:yes). Returns yuuka:// URIs with a snippet, newest first. Needs message:read.",
+		Description: `Search mail. q: words and "phrases" that must all occur in subject, sender or body; -x, a OR b, (groups); ` +
+			`from: to: cc: bcc: subject: body: list: label: class:machine|human|unknown is:archived|sent|downgraded ` +
+			`has:attachment after:/before: (YYYY-MM-DD, RFC 3339, -7d) triage:phishing:yes (a model's leaning, not a verdict). ` +
+			`to: is what the sender wrote; deliveredto:shop@example.com is where yuuka received it. ` +
+			`The result says how q was read. Returns yuuka:// URIs with a snippet, newest first. Needs message:read; bcc: needs delivery:read.`,
 		Annotations: readOnly,
 	}, tool(s, viewerOf, "search_messages", auth.MessageRead, s.searchMessages))
 	sdk.AddTool(srv, &sdk.Tool{

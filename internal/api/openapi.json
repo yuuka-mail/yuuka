@@ -484,6 +484,7 @@
           "invalid_rule",
           "cursor_expired",
           "widening_requires_cli",
+          "unsupported_filter",
           "internal"
         ]
       },
@@ -3255,9 +3256,34 @@
           "admin"
         ]
       },
+      "SearchHint": {
+        "type": "object",
+        "properties": {
+          "term": {
+            "type": "string"
+          },
+          "suggest": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "term",
+          "suggest"
+        ],
+        "additionalProperties": false
+      },
       "SearchResult": {
         "type": "object",
         "properties": {
+          "query": {
+            "type": "string"
+          },
+          "hints": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SearchHint"
+            }
+          },
           "total": {
             "type": "integer"
           },
@@ -3272,6 +3298,8 @@
           }
         },
         "required": [
+          "query",
+          "hints",
           "total",
           "hits"
         ],
@@ -6787,7 +6815,7 @@
           {
             "name": "q",
             "in": "query",
-            "description": "words that must all occur in subject, sender or body; empty matches everything",
+            "description": "the query (§16): words and \"phrases\" that must all occur in subject, sender or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything",
             "schema": {
               "type": "string"
             }
@@ -6805,28 +6833,11 @@
             }
           },
           {
-            "name": "label",
+            "name": "tz",
             "in": "query",
-            "description": "only mail carrying this label (exact, case-sensitive)",
+            "description": "IANA time zone in which a date in q (after:2026-10-01) starts its day; UTC when absent",
             "schema": {
               "type": "string"
-            }
-          },
-          {
-            "name": "archived",
-            "in": "query",
-            "description": "only archived (true) or unarchived (false) mail; absent is both",
-            "schema": {
-              "type": "boolean"
-            }
-          },
-          {
-            "name": "triage",
-            "in": "query",
-            "description": "only mail whose latest score gives this option of this question the highest probability, as \u003cquestion\u003e:\u003coption\u003e such as phishing:yes; no threshold, and a model that abstained matches nothing",
-            "schema": {
-              "type": "string",
-              "pattern": "^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$"
             }
           },
           {

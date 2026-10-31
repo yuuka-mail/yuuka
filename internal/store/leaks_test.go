@@ -227,7 +227,7 @@ func TestSenderVerifiedIsFromVerified(t *testing.T) {
 		if d.SenderVerified == nil || *d.SenderVerified != c.want || fs[0].FromVerified != c.want {
 			t.Errorf("%s: sender verified %v, from.verified %v, want %v", c.name, d.SenderVerified, fs[0].FromVerified, c.want)
 		}
-		res, err := db.Search(ctx, v, store.SearchQuery{Text: d.Subject, IncludeDowngraded: true, Since: at})
+		res, err := db.Search(ctx, v, store.SearchQuery{Filter: storetest.Query(t, `subject:"`+d.Subject+`" after:`+at.Format(time.RFC3339)), IncludeDowngraded: true})
 		if err != nil || len(res.Hits) != 1 || res.Hits[0].SenderVerified == nil || *res.Hits[0].SenderVerified != c.want {
 			t.Errorf("%s: search hit %+v %v", c.name, res.Hits, err)
 		}

@@ -186,7 +186,7 @@ func TestScoreCounts(t *testing.T) {
 		if !slices.Equal(got, want) {
 			t.Errorf("ListMessages %s:%s by %s: %q, want %q", f.Question, f.Option, f.Scorer, got, want)
 		}
-		res, err := db.Search(ctx, everyone, store.SearchQuery{IncludeDowngraded: true, Answer: &f})
+		res, err := db.Search(ctx, everyone, store.SearchQuery{IncludeDowngraded: true, Triage: &f.Profile, Filter: storetest.Query(t, "triage:"+f.Question+":"+f.Option)})
 		if err != nil || res.Total != len(want) || len(res.Hits) != len(want) {
 			t.Errorf("Search %s:%s by %s: %+v, %v; want %d", f.Question, f.Option, f.Scorer, res, err, len(want))
 		}

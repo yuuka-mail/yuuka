@@ -51,7 +51,7 @@ func TestAnnotateTools(t *testing.T) {
 		strings.Join(toStrings(outcomes(out)), ",") != "applied,applied" || !strings.Contains(r.text, out.ActionID) {
 		t.Fatalf("annotate: %+v\n%s", out, r.text)
 	}
-	r = callTool(t, cs, "search_messages", map[string]any{"label": "otp"})
+	r = callTool(t, cs, "search_messages", map[string]any{"q": "label:otp"})
 	if hits := structured[mcp.SearchOutput](t, r); len(hits.Hits) != 1 || hits.Hits[0].URI != uri ||
 		len(hits.Hits[0].Labels) != 1 || !hits.Hits[0].Archived || !strings.Contains(r.text, `label "otp"`) {
 		t.Errorf("search by label: %+v\n%s", hits, r.text)

@@ -167,7 +167,7 @@ func TestSentCopyIsAMessage(t *testing.T) {
 		list[0].Outgoing == nil || *list[0].Outgoing != *want {
 		t.Fatalf("default list %+v", list)
 	}
-	res, err := db.Search(t.Context(), operator, store.SearchQuery{Text: "noon"})
+	res, err := db.Search(t.Context(), operator, store.SearchQuery{Filter: storetest.Query(t, "noon")})
 	if err != nil || res.Total != 1 || res.Hits[0].Downgraded || res.Hits[0].Outgoing == nil || *res.Hits[0].Outgoing != *want {
 		t.Fatalf("search %+v %v", res, err)
 	}
@@ -407,6 +407,24 @@ func TestVisibility(t *testing.T) {
 		SELECT so.id, 'hidden@example.org', 'hidden@example.org', 'to'
 		FROM outbox so JOIN raw_objects r ON r.id = so.raw_id JOIN messages m ON m.content_hash = r.content_hash
 		WHERE m.id = $1`, msgs["sent-closed"]); err != nil {
+		t.Fatal(err)
+	}
+	// A blind copy of each of the two sent messages, in no header.
+	for n, addr := range map[string]string{"sent-closed": "blind@example.org", "sent-open": "blind@example.net"} {
+		if _, err := pool.Exec(ctx, `INSERT INTO outbox_recipients (outbox_id, addr, addr_fold, kind)
+			SELECT so.id, $2, $2, 'bcc'
+			FROM outbox so JOIN raw_objects r ON r.id = so.raw_id JOIN messages m ON m.content_hash = r.content_hash
+			WHERE m.id = $1`, msgs[n], addr); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// sent-open was composed: its blind copy's name is on the draft.
+	if _, err := pool.Exec(ctx, `WITH d AS (
+			INSERT INTO drafts (id, principal_id, identity_id, from_addr, body_md, bcc_addrs, bcc_names)
+			VALUES ($2, $3, $4, 'me@example.com', 'sent-open body', '{blind@example.net}', '{Blind Reader}') RETURNING id)
+		UPDATE outbox so SET draft_id = (SELECT id FROM d)
+		FROM raw_objects r JOIN messages m ON m.content_hash = r.content_hash
+		WHERE r.id = so.raw_id AND m.id = $1`, msgs["sent-open"], ulid.New(tick()), systemID, mine); err != nil {
 		t.Fatal(err)
 	}
 
@@ -690,7 +708,7 @@ func TestVisibility(t *testing.T) {
 			if got := names(ids); !slices.Equal(got, want) {
 				t.Errorf("ListMessages triage=kind:spam %q, want %q", got, want)
 			}
-			if res, err := db.Search(ctx, v, store.SearchQuery{IncludeDowngraded: true, Answer: spam}); err != nil || res.Total != len(want) {
+			if res, err := db.Search(ctx, v, store.SearchQuery{IncludeDowngraded: true, Triage: &laya, Filter: storetest.Query(t, "triage:kind:spam")}); err != nil || res.Total != len(want) {
 				t.Errorf("Search triage=kind:spam: %d, %v; want %d", res.Total, err, len(want))
 			}
 
@@ -745,7 +763,7 @@ func TestVisibility(t *testing.T) {
 				t.Errorf("PreviewRule matched %d, samples %q, want %q", pv.Matched, got, wantMatched)
 			}
 
-			res, err := db.Search(ctx, v, store.SearchQuery{Text: "body", IncludeDowngraded: true})
+			res, err := db.Search(ctx, v, store.SearchQuery{Filter: storetest.Query(t, "body"), IncludeDowngraded: true})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -757,8 +775,52 @@ func TestVisibility(t *testing.T) {
 			if got := names(ids); !slices.Equal(got, wantBodies) || res.Total != len(wantBodies) {
 				t.Errorf("Search %q (total %d), want %q", got, res.Total, wantBodies)
 			}
-			if res, err := db.Search(ctx, v, store.SearchQuery{Text: "body", IncludeDowngraded: true, Label: "seen"}); err != nil || res.Total != len(wantBodies) {
+			if res, err := db.Search(ctx, v, store.SearchQuery{Filter: storetest.Query(t, "body label:seen"), IncludeDowngraded: true}); err != nil || res.Total != len(wantBodies) {
 				t.Errorf("Search label=seen: total %d, %v, want %d", res.Total, err, len(wantBodies))
+			}
+			// Every search condition on facts besides the message's
+			// own reads only the visible ones, negated or not (§16.4):
+			// both is visible through its sent copy, so to a viewer of
+			// the open account it was delivered nowhere.
+			hidden := func(names ...string) []string {
+				return slices.DeleteFunc(slices.Clone(want), func(n string) bool { return !slices.Contains(names, n) })
+			}
+			except := func(names ...string) []string {
+				return slices.DeleteFunc(slices.Clone(want), func(n string) bool { return slices.Contains(names, n) })
+			}
+			toB := hidden("both", "in-closed")
+			if v == restricted {
+				toB = []string{} // it sees both only as a sent copy
+			}
+			withDelivery := *v
+			withDelivery.Scopes = []auth.Scope{auth.DeliveryRead}
+			for q, wantQ := range map[string][]string{
+				"deliveredto:b":              toB,
+				"-deliveredto:b":             except(toB...),
+				"deliveredto:a@example.com":  hidden("in-open", "leak-closed"),
+				"-deliveredto:a@example.com": except("in-open", "leak-closed"),
+				"is:sent":                    hidden("both", "sent-closed", "sent-open"),
+				"-is:sent":                   except("both", "sent-closed", "sent-open"),
+				"bcc:blind":                  hidden("sent-closed", "sent-open"),
+				"-bcc:blind":                 except("sent-closed", "sent-open"),
+				"bcc:blind@example.org":      hidden("sent-closed"),
+				`bcc:"blind reader"`:         hidden("sent-open"),
+				"cc:copied":                  hidden("in-open", "sent-closed"),
+				"label:mine":                 hidden("both", "in-open", "sent-open"),
+				"-label:seen":                {},
+				"triage:kind:spam":           want,
+			} {
+				res, err := db.Search(ctx, &withDelivery, store.SearchQuery{Filter: storetest.Query(t, q), IncludeDowngraded: true, Triage: &laya})
+				if err != nil {
+					t.Fatalf("Search %s: %v", q, err)
+				}
+				ids = ids[:0]
+				for _, h := range res.Hits {
+					ids = append(ids, h.ID)
+				}
+				if got := names(ids); !slices.Equal(got, wantQ) || res.Total != len(wantQ) {
+					t.Errorf("Search %s: %q (total %d), want %q", q, got, res.Total, wantQ)
+				}
 			}
 
 			for n, id := range msgs {
@@ -782,7 +844,7 @@ func TestVisibility(t *testing.T) {
 					codes[x.Value] = true
 				}
 			}
-			coded, err := db.Search(ctx, v, store.SearchQuery{Text: "verification", IncludeDowngraded: true})
+			coded, err := db.Search(ctx, v, store.SearchQuery{Filter: storetest.Query(t, "verification"), IncludeDowngraded: true})
 			if err != nil {
 				t.Fatal(err)
 			}

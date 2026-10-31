@@ -2397,15 +2397,11 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description words that must all occur in subject, sender or body; empty matches everything */
+                    /** @description the query (§16): words and "phrases" that must all occur in subject, sender or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything */
                     q?: string;
                     downgraded?: "hide" | "include";
-                    /** @description only mail carrying this label (exact, case-sensitive) */
-                    label?: string;
-                    /** @description only archived (true) or unarchived (false) mail; absent is both */
-                    archived?: boolean;
-                    /** @description only mail whose latest score gives this option of this question the highest probability, as <question>:<option> such as phishing:yes; no threshold, and a model that abstained matches nothing */
-                    triage?: string;
+                    /** @description IANA time zone in which a date in q (after:2026-10-01) starts its day; UTC when absent */
+                    tz?: string;
                     /** @description next_cursor of the previous page */
                     cursor?: string;
                     limit?: number;
@@ -3005,7 +3001,7 @@ export interface components {
         /** @enum {string} */
         Class: "unknown" | "machine" | "human";
         /** @enum {string} */
-        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "invalid_rule" | "cursor_expired" | "widening_requires_cli" | "internal";
+        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "invalid_rule" | "cursor_expired" | "widening_requires_cli" | "unsupported_filter" | "internal";
         Content: {
             notice: string;
             from: components["schemas"]["Address"];
@@ -3747,7 +3743,13 @@ export interface components {
         };
         /** @enum {string} */
         Scope: "message:read" | "delivery:read" | "prefix:read" | "message:annotate" | "draft:create" | "submission:send" | "prefix:manage" | "account:manage" | "rule:manage" | "admin";
+        SearchHint: {
+            term: string;
+            suggest: string;
+        };
         SearchResult: {
+            query: string;
+            hints: components["schemas"]["SearchHint"][];
             total: number;
             hits: components["schemas"]["MessageSummary"][];
             next_cursor?: string;

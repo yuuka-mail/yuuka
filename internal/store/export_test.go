@@ -1,10 +1,19 @@
 package store
 
-import "context"
+import (
+	"context"
 
-// SearchDoc exposes the search expression to the external tests, which
-// check that it still matches the trigram index.
-const SearchDoc = searchDoc
+	"github.com/yuuka-mail/yuuka/internal/auth"
+	"github.com/yuuka-mail/yuuka/internal/search"
+)
+
+// CompileSearch exposes the filter compiler to the external tests, which
+// check that its text conditions still match the trigram index.
+func (db *DB) CompileSearch(v *auth.Viewer, f *search.Filter) (where string, args []any, err error) {
+	c := &compiler{db: db, v: v}
+	where, err = c.filter(f)
+	return where, c.args, err
+}
 
 // EnforceAccountAccess makes db filter every read by account_access, as
 // M3.5 will, so the visibility tests can use restricted viewers now.

@@ -143,9 +143,13 @@ export function useSearchList(
     {
       params: {
         query: {
-          q: text,
+          // Everything that narrows a search is written in q (§16). A
+          // leading item cannot change how the text groups: OR binds
+          // tighter than the AND between items.
+          q: triage ? `triage:${triage} ${text}` : text,
           downgraded: includeDowngraded ? "include" : "hide",
-          triage,
+          // Dates in q (after:2026-10-01) start their day here.
+          tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
           limit: pageSize,
         },
       },

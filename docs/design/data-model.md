@@ -113,7 +113,7 @@ notifications(id, message_id, channel, state, sent_at)
 全文检索：Postgres 原生 FTS 对中文很弱。先用 `pg_trgm` 够个人用量，
 中文体验不行再换 Postgres 里的做法（Go 侧切词写 `tsvector`、pg_bigm、PGroonga），这是可替换的一层，不影响模型。
 M1 做的是子串匹配：一个 trigram GIN 表达式索引（迁移 0002 的 `messages_search`），
-查询按空白切词、每个词都要命中（[`internal/store/search.go`](../../internal/store/search.go)）。
+查询的项都要命中（条件怎么编译成 SQL 见 [`internal/store/filter.go`](../../internal/store/filter.go)，查询的写法见 §16）。
 子串匹配不需要分词，中文天然可用；少于三个字符的词用不上 trigram 索引，退化为顺序扫描，
 结果仍然正确，个人量级可以接受。`body_text` 有长度上限：它只服务检索和摘要，原件才是正文的来源。
 查询怎么表示、条件有哪些、和 JMAP 怎么对齐，见 [§16](search.md)。

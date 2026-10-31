@@ -16,6 +16,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/contract"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 )
 
 func eml(t *testing.T, name string) []byte {
@@ -207,7 +208,7 @@ func TestQuarantineKeepsMail(t *testing.T) {
 	if problem == nil || subject != "You have won" {
 		t.Fatalf("subject %q problem %v: want quarantined with what could be read", subject, problem)
 	}
-	res, err := e.in.cfg.DB.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{Text: "prize", IncludeDowngraded: true})
+	res, err := e.in.cfg.DB.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{Filter: storetest.Query(t, "prize"), IncludeDowngraded: true})
 	if err != nil || res.Total != 1 || !res.Hits[0].Quarantined {
 		t.Fatalf("search %+v %v", res, err)
 	}
@@ -260,7 +261,7 @@ func TestBacklogAfterUpgrade(t *testing.T) {
 	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE message_id IS NULL`); n != 0 {
 		t.Fatalf("%d deliveries left without a message", n)
 	}
-	res, err := e.in.cfg.DB.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{Text: "验证码"})
+	res, err := e.in.cfg.DB.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{Filter: storetest.Query(t, "验证码")})
 	if err != nil || res.Total != 1 || res.Hits[0].Subject != "【示例】验证码通知" {
 		t.Fatalf("search %+v %v", res, err)
 	}

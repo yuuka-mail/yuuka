@@ -2,9 +2,11 @@ package store_test
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/classify"
 	"github.com/yuuka-mail/yuuka/internal/contenthash"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
+	"github.com/yuuka-mail/yuuka/internal/search"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
@@ -57,38 +60,274 @@ func load(t *testing.T) (*store.DB, *pgxpool.Pool) {
 	return db, pool
 }
 
+// hitSubjects runs q and returns the subjects of the hits, newest first,
+// checking that the total agrees.
+func hitSubjects(t *testing.T, db *store.DB, v *auth.Viewer, q string, downgraded bool) []string {
+	t.Helper()
+	res, err := db.Search(t.Context(), v, store.SearchQuery{Filter: storetest.Query(t, q), IncludeDowngraded: downgraded, Limit: 500})
+	if err != nil {
+		t.Fatalf("%q: %v", q, err)
+	}
+	got := []string{}
+	for _, h := range res.Hits {
+		got = append(got, h.Subject)
+	}
+	if res.Total != len(got) {
+		t.Errorf("%q: total %d, %d hits", q, res.Total, len(got))
+	}
+	return got
+}
+
 func TestSearch(t *testing.T) {
 	t.Parallel()
 	db, _ := load(t)
 	v := &auth.Viewer{PrincipalKind: "human", PrincipalName: "operator"}
+	lunch, weekly, otp := "Re: Lunch on Friday?", "This week at Example", "【示例】验证码通知"
 	cases := []struct {
-		text      string
+		q         string
 		downgrade bool
 		want      []string // subjects, newest first
 	}{
-		{"验证码", false, []string{"【示例】验证码通知"}},       // GB2312 subject and body
+		{"验证码", false, []string{otp}},               // GB2312 subject and body
 		{"堃", false, []string{"关于会议时间调整（堃、喆）"}},     // single GBK-only character, raw 8-bit header
 		{"会议 三点", false, []string{"关于会议时间调整（堃、喆）"}}, // all terms must match, one in the body
-		{"FRIDAY", false, []string{"Re: Lunch on Friday?"}},
-		{"bob@example", false, []string{"Re: Lunch on Friday?"}},    // sender address
-		{"Example Weekly", false, []string{"This week at Example"}}, // sender name
-		{"missed", false, []string{"This week at Example"}},         // HTML-only body
-		{"100%", false, nil},  // % is literal
-		{"prize", false, nil}, // dmarc=fail: downgraded
+		{"FRIDAY", false, []string{lunch}},
+		{"bob@example", false, []string{lunch}},     // sender address
+		{"Example Weekly", false, []string{weekly}}, // sender name
+		{"missed", false, []string{weekly}},         // HTML-only body
+		{"100%", false, []string{}},                 // % is literal
+		{"prize", false, []string{}},                // dmarc=fail: downgraded
 		{"prize", true, []string{"You have won"}},
 		{"verify", true, []string{"Verify your account"}},
+		// A phrase must occur as written; its words alone are two terms.
+		{`"lunch on"`, false, []string{lunch}},
+		{`"on lunch"`, false, []string{}},
+		{`on lunch`, false, []string{lunch}},
+		// OR, negation, grouping.
+		{"friday OR missed", false, []string{weekly, lunch}},
+		{"(friday OR missed) -lunch", false, []string{weekly}},
+		{"-(friday OR missed) 堃", false, []string{"关于会议时间调整（堃、喆）"}},
+		// Not operators: searched as written.
+		{"Re:Lunch", false, []string{}},
+		{"Re: Lunch", false, []string{lunch}},
+		// Fields.
+		{"from:bob", false, []string{lunch}},
+		{`from:"example weekly"`, false, []string{weekly}},
+		{"subject:friday", false, []string{lunch}},
+		{"subject:missed", false, []string{}},
+		{"body:missed", false, []string{weekly}},
+		{"to:news@", false, []string{weekly}},
+		{"to:svc-shop@example.com", false, []string{otp}},
+		{"to:Alice friday", false, []string{lunch}}, // addresses only until §16.7 step 2
+		{"list:weekly.news", false, []string{weekly}},
+		{"list:WEEKLY", false, []string{weekly}},
+		{"class:human friday", false, []string{lunch}},
+		{"class:machine friday", false, []string{}},
+		{"deliveredto:a@example.net", false, []string{}},
+		{"deliveredto:b", false, []string{}},
+		{"is:archived", false, []string{}},
+		{"is:sent", false, []string{}},
+		// is:downgraded lifts the default hiding, wherever it is.
+		{"is:downgraded", false, []string{"Urgent: confirm your account", "You have won", "Verify your account"}},
+		{"prize is:downgraded", false, []string{"You have won"}},
+		{"prize -is:downgraded", false, []string{}},
+		// Untrusted text is a value, never SQL.
+		{`"'; DROP TABLE messages; --"`, false, []string{}},
+		{`a_b \ $1`, false, []string{}},
 	}
 	for _, c := range cases {
-		res, err := db.Search(t.Context(), v, store.SearchQuery{Text: c.text, IncludeDowngraded: c.downgrade})
+		if got := hitSubjects(t, db, v, c.q, c.downgrade); !slices.Equal(got, c.want) {
+			t.Errorf("%q: %q, want %q", c.q, got, c.want)
+		}
+	}
+	// Everything not downgraded was delivered to a@example.com.
+	all := hitSubjects(t, db, v, "", false)
+	for _, q := range []string{"deliveredto:a", "deliveredto:a@example.com", "-is:archived", "-is:sent"} {
+		if got := hitSubjects(t, db, v, q, false); !slices.Equal(got, all) {
+			t.Errorf("%q: %q, want all", q, got)
+		}
+	}
+}
+
+// Each condition and its negation split the visible mail: NOT is "none
+// of", and a fact that is missing (no message_state row, recipients or
+// List-Id not read yet) reads as false, not as unknown.
+func TestSearchNegation(t *testing.T) {
+	t.Parallel()
+	db, pool := load(t)
+	v := &auth.Viewer{PrincipalID: store.SystemPrincipalID, PrincipalKind: "human", PrincipalName: "operator", Scopes: []auth.Scope{auth.DeliveryRead}}
+	ctx := t.Context()
+	var ids []string
+	if err := pool.QueryRow(ctx, `SELECT array_agg(id ORDER BY received_at) FROM messages`).Scan(&ids); err != nil {
+		t.Fatal(err)
+	}
+	// One message not read by the 0007 and 0010 backlog yet, one copied
+	// to someone, one labelled, archived and reclassified.
+	if _, err := pool.Exec(ctx, `UPDATE messages SET to_addrs = NULL, cc_addrs = NULL, reply_to_addrs = NULL, list_id = NULL
+		WHERE id = $1`, ids[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE messages SET cc_addrs = '{copied@example.net}' WHERE id = $1`, ids[1]); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, _, err := db.Annotate(ctx, v, ids[2], []store.Annotation{store.SetLabel("带 空格", true), store.SetArchived(true), store.SetClass(classify.Human)},
+		store.Action{ID: ulid.New(now), Actor: store.SystemPrincipalID, Tool: "test", At: now}); err != nil {
+		t.Fatal(err)
+	}
+	all := hitSubjects(t, db, v, "", true)
+	for _, q := range []string{
+		"verification", `"lunch on"`, "from:example.org", "to:alice", "cc:copied", "bcc:anyone", "subject:re", "body:the",
+		"list:example", "after:2026-10-31T00:00:05Z", "before:2026-10-31T00:00:05Z", "has:attachment",
+		"deliveredto:a", "deliveredto:a@example.com", `label:"带 空格"`, "label:other", "is:archived", "is:downgraded",
+		"is:sent", "class:human", "class:machine", "class:unknown", "friday OR missed", "from:example.org verification",
+	} {
+		in := hitSubjects(t, db, v, q, true)
+		out := hitSubjects(t, db, v, "-("+q+")", true)
+		if len(in)+len(out) != len(all) {
+			t.Errorf("%q: %d, negated %d, of %d", q, len(in), len(out), len(all))
+		}
+		for _, s := range in {
+			if slices.Contains(out, s) {
+				t.Errorf("%q: %q both matches and does not", q, s)
+			}
+		}
+	}
+	for q, want := range map[string]int{"cc:copied@": 1, `label:"带 空格"`: 1, "label:带": 0, "is:archived": 1} {
+		if got := len(hitSubjects(t, db, v, q, true)); got != want {
+			t.Errorf("%q: %d hits, want %d", q, got, want)
+		}
+	}
+}
+
+// Dates start their day in the query's zone; after is inclusive and
+// before exclusive (JMAP), so after:d before:d+1 is exactly day d.
+func TestSearchTime(t *testing.T) {
+	t.Parallel()
+	db, pool := load(t)
+	v := &auth.Viewer{PrincipalKind: "human", PrincipalName: "operator"}
+	ctx := t.Context()
+	// The corpus arrived on 2026-10-31 UTC; move one to midnight after.
+	var first string
+	if err := pool.QueryRow(ctx, `SELECT min(id) FROM messages`).Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE messages SET received_at = '2026-11-01T00:00:00Z' WHERE id = $1`, first); err != nil {
+		t.Fatal(err)
+	}
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := func(q string, loc *time.Location) int {
+		t.Helper()
+		p, err := search.Parse(q, search.Env{Loc: loc, Now: time.Date(2026, 11, 2, 0, 0, 0, 0, time.UTC)})
 		if err != nil {
 			t.Fatal(err)
 		}
-		var got []string
-		for _, h := range res.Hits {
-			got = append(got, h.Subject)
+		res, err := db.Search(ctx, v, store.SearchQuery{Filter: p.Filter, IncludeDowngraded: true})
+		if err != nil {
+			t.Fatal(err)
 		}
-		if strings.Join(got, "|") != strings.Join(c.want, "|") || res.Total != len(c.want) {
-			t.Errorf("%q: total %d %q, want %q", c.text, res.Total, got, c.want)
+		return res.Total
+	}
+	n := count("", nil)
+	for _, c := range []struct {
+		q    string
+		loc  *time.Location
+		want int
+	}{
+		{"after:2026-10-31 before:2026-11-01", nil, n - 1},
+		{"after:2026-11-01", nil, 1},
+		{"before:2026-11-01T00:00:00Z", nil, n - 1},
+		{"after:2026-11-01T08:00:00+08:00", nil, 1},
+		// 2026-11-01T00:00Z is still 10-31 in Los Angeles, the rest 10-30.
+		{"after:2026-11-01", la, 0},
+		{"after:2026-10-31 before:2026-11-01", la, 1},
+		{"before:2026-10-31", la, n - 1},
+		{"before:-1h", nil, n},
+		{"after:-1h", nil, 0},
+		{"after:-25h", nil, 1},
+		{"after:-2d", nil, n},
+		{"after:-1w", nil, n},
+	} {
+		if got := count(c.q, c.loc); got != c.want {
+			t.Errorf("%q in %v: %d, want %d", c.q, c.loc, got, c.want)
+		}
+	}
+}
+
+// The extensions keep the semantics the list gives them: a visible
+// delivery to the prefix, the effective class, the triage leaning of the
+// active profile.
+func TestSearchExtensions(t *testing.T) {
+	t.Parallel()
+	db, pool := load(t)
+	v := &auth.Viewer{PrincipalKind: "agent", PrincipalName: "arisu"}
+	ctx := t.Context()
+	all, err := db.Search(ctx, v, store.SearchQuery{IncludeDowngraded: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Move the newest message to another prefix, and score it.
+	newest := all.Hits[0]
+	for _, q := range []string{
+		`INSERT INTO prefixes (zone, prefix, first_seen, last_seen, state) VALUES ('example.com', 'b', now(), now(), 1)`,
+		`UPDATE deliveries SET prefix = 'b' WHERE message_id = '` + newest.ID + `'`,
+	} {
+		if _, err := pool.Exec(ctx, q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.InsertScore(ctx, newScore(newest.ID, laya, time.Now(), 0.9)); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		q    string
+		want func(store.SearchHit) bool
+	}{
+		{"deliveredto:b", func(h store.SearchHit) bool { return h.ID == newest.ID }},
+		{"deliveredto:B@Example.com", func(h store.SearchHit) bool { return h.ID == newest.ID }},
+		{"deliveredto:b@example.net", func(store.SearchHit) bool { return false }},
+		{"-deliveredto:b", func(h store.SearchHit) bool { return h.ID != newest.ID && !h.Downgraded }},
+		{"class:human", func(h store.SearchHit) bool { return h.Class == classify.Human && !h.Downgraded }},
+		{"after:" + newest.ReceivedAt.Format(time.RFC3339Nano), func(h store.SearchHit) bool {
+			return !h.ReceivedAt.Before(newest.ReceivedAt) && !h.Downgraded
+		}},
+		{"triage:phishing:yes", func(h store.SearchHit) bool { return h.ID == newest.ID }},
+		{"triage:phishing:no", func(store.SearchHit) bool { return false }},
+		{"-triage:phishing:yes is:downgraded", func(h store.SearchHit) bool { return h.Downgraded }},
+	}
+	for _, c := range cases {
+		res, err := db.Search(ctx, v, store.SearchQuery{Filter: storetest.Query(t, c.q), Triage: &laya})
+		if err != nil {
+			t.Fatalf("%s: %v", c.q, err)
+		}
+		want := 0
+		for _, h := range all.Hits {
+			if c.want(h) {
+				want++
+			}
+		}
+		if res.Total != want || len(res.Hits) != want {
+			t.Errorf("%s: total %d hits %d, want %d", c.q, res.Total, len(res.Hits), want)
+		}
+		for _, h := range res.Hits {
+			if !c.want(h) {
+				t.Errorf("%s: unexpected hit %s %q", c.q, h.ID, h.Subject)
+			}
+		}
+	}
+	// What the filter cannot do for this caller is refused, never
+	// answered with nothing: no scorer, Bcc without delivery:read.
+	for q, want := range map[string]search.Error{
+		"triage:phishing:yes": {At: 1},
+		"bcc:x":               {At: 1, Scope: auth.DeliveryRead},
+		"a -bcc:x":            {At: 4, Scope: auth.DeliveryRead},
+	} {
+		_, err := db.Search(ctx, v, store.SearchQuery{Filter: storetest.Query(t, q)})
+		if e, ok := errors.AsType[*search.Error](err); !ok || e.At != want.At || e.Scope != want.Scope {
+			t.Errorf("%s: %v, want a search error at %d", q, err, want.At)
 		}
 	}
 }
@@ -124,11 +363,12 @@ func TestSearchPaging(t *testing.T) {
 	}
 }
 
-// The search predicate must be the indexed expression, or every search
-// is a sequential scan of all bodies.
+// The text predicate must be the indexed expression, and a field
+// condition must carry it too, or every search is a sequential scan of
+// all bodies.
 func TestSearchUsesTrigramIndex(t *testing.T) {
 	t.Parallel()
-	_, pool := load(t)
+	db, pool := load(t)
 	tx, err := pool.Begin(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -137,20 +377,26 @@ func TestSearchUsesTrigramIndex(t *testing.T) {
 	if _, err := tx.Exec(t.Context(), `SET LOCAL enable_seqscan = off`); err != nil {
 		t.Fatal(err)
 	}
-	rows, err := tx.Query(t.Context(), `EXPLAIN SELECT m.id FROM messages m WHERE `+store.SearchDoc+` ILIKE '%verification%'`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var plan strings.Builder
-	for rows.Next() {
-		var line string
-		if err := rows.Scan(&line); err != nil {
+	for _, q := range []string{"verification", "subject:verification", "from:example", "body:code"} {
+		where, args, err := db.CompileSearch(&auth.Viewer{}, storetest.Query(t, q))
+		if err != nil {
 			t.Fatal(err)
 		}
-		plan.WriteString(line + "\n")
-	}
-	if !strings.Contains(plan.String(), "messages_search") {
-		t.Fatalf("plan does not use messages_search:\n%s", plan.String())
+		rows, err := tx.Query(t.Context(), `EXPLAIN SELECT m.id FROM messages m WHERE `+where, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var plan strings.Builder
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				t.Fatal(err)
+			}
+			plan.WriteString(line + "\n")
+		}
+		if !strings.Contains(plan.String(), "messages_search") {
+			t.Errorf("%q: plan does not use messages_search:\n%s", q, plan.String())
+		}
 	}
 }
 
@@ -160,59 +406,5 @@ func TestSearchRefusesNilViewer(t *testing.T) {
 	db, _ := storetest.New(t)
 	if _, err := db.Search(t.Context(), nil, store.SearchQuery{}); err == nil {
 		t.Fatal("search with a nil viewer succeeded")
-	}
-}
-
-func TestSearchFilters(t *testing.T) {
-	t.Parallel()
-	db, pool := load(t)
-	v := &auth.Viewer{PrincipalKind: "agent", PrincipalName: "arisu"}
-	all, err := db.Search(t.Context(), v, store.SearchQuery{IncludeDowngraded: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Move the newest message to another prefix.
-	newest := all.Hits[0]
-	for _, q := range []string{
-		`INSERT INTO prefixes (zone, prefix, first_seen, last_seen, state) VALUES ('example.com', 'b', now(), now(), 1)`,
-		`UPDATE deliveries SET prefix = 'b' WHERE message_id = '` + newest.ID + `'`,
-	} {
-		if _, err := pool.Exec(t.Context(), q); err != nil {
-			t.Fatal(err)
-		}
-	}
-	human := classify.Human
-	cases := []struct {
-		name string
-		q    store.SearchQuery
-		want func(store.SearchHit) bool
-	}{
-		{"prefix", store.SearchQuery{Prefix: "b"}, func(h store.SearchHit) bool { return h.ID == newest.ID }},
-		{"prefix and zone", store.SearchQuery{Prefix: "b", Zone: "example.com"}, func(h store.SearchHit) bool { return h.ID == newest.ID }},
-		{"other zone", store.SearchQuery{Prefix: "b", Zone: "example.net"}, func(store.SearchHit) bool { return false }},
-		{"class", store.SearchQuery{Class: &human}, func(h store.SearchHit) bool { return h.Class == classify.Human && !h.Downgraded }},
-		{"since", store.SearchQuery{Since: newest.ReceivedAt, IncludeDowngraded: true}, func(h store.SearchHit) bool { return !h.ReceivedAt.Before(newest.ReceivedAt) }},
-	}
-	for _, c := range cases {
-		res, err := db.Search(t.Context(), v, c.q)
-		if err != nil {
-			t.Fatalf("%s: %v", c.name, err)
-		}
-		want := 0
-		for _, h := range all.Hits {
-			if c.q.IncludeDowngraded || !h.Downgraded {
-				if c.want(h) {
-					want++
-				}
-			}
-		}
-		if res.Total != want || len(res.Hits) != want {
-			t.Errorf("%s: total %d hits %d, want %d", c.name, res.Total, len(res.Hits), want)
-		}
-		for _, h := range res.Hits {
-			if !c.want(h) {
-				t.Errorf("%s: unexpected hit %s %q", c.name, h.ID, h.Subject)
-			}
-		}
 	}
 }

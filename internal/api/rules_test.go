@@ -106,7 +106,7 @@ func TestAnnotations(t *testing.T) {
 	if !listed("label=news&archived=true") || listed("label=news&archived=false") || listed("label=News") {
 		t.Error("label and archived filters of the list")
 	}
-	hits := decode[SearchResult](t, h.get("/api/v1/search?downgraded=include&label=news&q="+url.QueryEscape("This week at Example"), agent))
+	hits := decode[SearchResult](t, h.get("/api/v1/search?downgraded=include&q="+url.QueryEscape(`label:news "This week at Example"`), agent))
 	if len(hits.Hits) != 1 || !slices.Equal(hits.Hits[0].Labels, []string{"news"}) || !hits.Hits[0].Archived {
 		t.Errorf("search with label: %+v", hits)
 	}

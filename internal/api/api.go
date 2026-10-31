@@ -29,9 +29,11 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/rules"
+	"github.com/yuuka-mail/yuuka/internal/search"
 	"github.com/yuuka-mail/yuuka/internal/sendpolicy"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/submit"
+	"github.com/yuuka-mail/yuuka/internal/triage"
 	"github.com/yuuka-mail/yuuka/internal/triage/score"
 )
 
@@ -412,6 +414,17 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 		openapi.Write(w, p)
 		return
 	}
+	if e, ok := errors.AsType[*search.Error](err); ok {
+		p := openapi.Errorf(http.StatusBadRequest, openapi.CodeInvalidParam, "q: %s", e)
+		switch {
+		case e.Scope != "":
+			p = openapi.Errorf(http.StatusForbidden, openapi.CodeScopeRequired, "q: %s", e)
+		case e.Unsupported:
+			p = openapi.Errorf(http.StatusBadRequest, openapi.CodeUnsupportedFilter, "q: %s", e)
+		}
+		openapi.Write(w, p)
+		return
+	}
 	if e, ok := errors.AsType[*rules.InvalidError](err); ok {
 		p := openapi.Errorf(http.StatusBadRequest, openapi.CodeInvalidRule, "%s", e.Reason)
 		p.Path = e.Path
@@ -728,13 +741,20 @@ func prefixOut(p store.PrefixStat) Prefix {
 }
 
 func (a *API) search(ctx context.Context, v *auth.Viewer, p SearchParams) (SearchResult, error) {
-	answer, err := a.answerFilter(p.Triage)
+	env := search.Env{Now: time.Now()}
+	if p.TZ != nil {
+		env.Loc = p.TZ.Location
+	}
+	if a.triage != nil {
+		env.Triage = triage.ParseFilter
+	}
+	q, err := search.Parse(p.Q, env)
 	if err != nil {
 		return SearchResult{}, err
 	}
 	res, err := a.db.Search(ctx, v, store.SearchQuery{
-		Text: p.Q, Limit: p.Limit, Before: (*store.MessageCursor)(p.Cursor), IncludeDowngraded: p.Downgraded == "include",
-		Label: p.Label, Archived: p.Archived, Answer: answer,
+		Filter: q.Filter, Limit: p.Limit, Before: (*store.MessageCursor)(p.Cursor),
+		IncludeDowngraded: p.Downgraded == "include", Triage: a.triage,
 	})
 	if err != nil {
 		return SearchResult{}, err
@@ -747,7 +767,10 @@ func (a *API) search(ctx context.Context, v *auth.Viewer, p SearchParams) (Searc
 	if err != nil {
 		return SearchResult{}, err
 	}
-	out := SearchResult{Total: res.Total, Hits: make([]MessageSummary, len(res.Hits))}
+	out := SearchResult{Query: q.Normalized, Hints: make([]SearchHint, len(q.Hints)), Total: res.Total, Hits: make([]MessageSummary, len(res.Hits))}
+	for i, h := range q.Hints {
+		out.Hints[i] = SearchHint{Term: h.Term, Suggest: h.Suggest}
+	}
 	for i, h := range res.Hits {
 		out.Hits[i] = MessageSummary{
 			ID: h.ID, ThreadID: h.ThreadID, ReceivedAt: h.ReceivedAt, Subject: h.Subject,

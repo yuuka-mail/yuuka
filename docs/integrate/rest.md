@@ -58,7 +58,7 @@ WebUI 用的是浏览器会话，程序不要模仿它。
   消息详情的 `triage_score` 是最新一次评分（各问题的概率或弃权、评分器、模型、时刻、`notice`），
   `input`（评分器看到的事实、字数、哈希、是否发给了第三方）只给有 `delivery:read`、看得到这封信全部投递的人。
   列表、线程和搜索命中带紧凑的 `triage`：每个问题概率最高的选项，弃权的问题不出现。
-  `triage=<问题>:<选项>`（如 `phishing:yes`）按同一个定义过滤消息列表和搜索，不设阈值；问题或选项不在问题集里、
+  消息列表的 `triage=<问题>:<选项>`（如 `phishing:yes`）和搜索 `q` 里的 `triage:phishing:yes` 按同一个定义过滤，不设阈值；问题或选项不在问题集里、
   或者没配评分器时回 `400 invalid_param`。`GET /api/v1/triage/report` 是 `yuuka triage report` 的同一份计数，只给人。
   这些都是模型的估计，展示时和系统事实分开
 - `/api/v1/admin/` 下的端点（凭据、身份、授权）只认人在 WebUI 里的会话：bearer token 即使带着 `admin` 和其他全部 scope
@@ -69,7 +69,16 @@ WebUI 用的是浏览器会话，程序不要模仿它。
 - 创建回 `201` 和新对象，删除回 `204`。修改是 `PUT` 整体替换，没有 `PATCH`；只改一部分、且有方向限制的改动是一个动作，
   如 `POST /api/v1/admin/grants/{identity}/{principal}/tighten`
 - 会有新行插到头部的列表（消息、搜索、草稿、发件队列、提案）和变更（见下）用不透明游标分页；变化很慢的列表用 `limit` / `offset`
-- 多值参数逗号分隔，如 `class=human,unknown`
+- 多值参数逗号分隔，如 `class=human,unknown`。端点没有的查询参数回 `400 invalid_param`，不会被悄悄忽略
+- **搜索**（`GET /api/v1/search`）的条件全写在 `q` 里，写法见 [§16](../design/search.md)：空白分隔的项都要成立，
+  `"短语"`、`-否定`、`a OR b`、括号分组；运算符有 `from:` `to:` `cc:` `bcc:` `subject:` `body:` `list:` `label:`
+  `deliveredto:` `class:` `is:archived|downgraded|sent` `has:attachment` `after:` `before:` `triage:`。
+  `to:` 是发件人写的收件人，`deliveredto:` 是 yuuka 实际收信的前缀。日期按 `tz`（IANA 时区名，默认 UTC）取当天零点，
+  也可以写 RFC 3339 或 `-7d`、`-12h`、`-2w`。响应的 `query` 是规范化后的查询，`hints` 列出被当成文本、
+  但像是拼错了运算符的项（如 `form:alice` → `from:`）。写错的值回 `400 invalid_param`，`detail` 带字符位置；
+  JMAP 定义了、yuuka 还不支持的条件（`is:unread`、`header:`、`keyword:`、`minsize:`、`maxsize:`）回 `400 unsupported_filter`；
+  `bcc:` 要 `delivery:read`，没有回 `403 scope_required`。原来的 `label`、`archived`、`triage` 参数已经去掉，
+  分别写成 `label:x`、`is:archived`（`-is:archived`）、`triage:phishing:yes`
 - **侧栏计数**：`GET /api/v1/counts` 一次给出待决的提案、在写和停着的草稿，有 `delivery:read` 时再给发件队列里
   扣在撤回窗口的（`held`）、投递未知的（`unknown`）和要人看一眼的（`attention`：`unknown`、`failed`、`partial`）。
   每个数都是对应列表会给你看的行数

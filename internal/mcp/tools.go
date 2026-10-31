@@ -11,20 +11,17 @@ import (
 
 	"github.com/yuuka-mail/yuuka/internal/agentview"
 	"github.com/yuuka-mail/yuuka/internal/auth"
-	"github.com/yuuka-mail/yuuka/internal/classify"
+	"github.com/yuuka-mail/yuuka/internal/search"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/triage"
 )
 
 // SearchInput is the input of search_messages.
 type SearchInput struct {
-	Q      string          `json:"q,omitempty" jsonschema:"words that must all occur in subject, sender or body (case-insensitive substrings); empty matches everything"`
-	Prefix string          `json:"prefix,omitempty" jsonschema:"only mail delivered to this local part, or to local@domain"`
-	Class  agentview.Class `json:"class,omitempty" jsonschema:"only mail of this class"`
-	Since  string          `json:"since,omitempty" jsonschema:"only mail received at or after this time, RFC 3339 or YYYY-MM-DD"`
-	Label  string          `json:"label,omitempty" jsonschema:"only mail carrying this label (exact, case-sensitive)"`
-	Triage string          `json:"triage,omitempty" jsonschema:"only mail whose latest decision-model score gives this option the highest probability, as <question>:<option> such as phishing:yes or kind:spam; no threshold, so read the probabilities with get_message"`
-	Limit  int             `json:"limit,omitempty" jsonschema:"at most this many hits, default 20, at most 100"`
+	// The operators are in the tool description; this stays short, as
+	// every agent pays for its tool list (§8.7).
+	Q     string `json:"q,omitempty" jsonschema:"the query; empty matches everything"`
+	Limit int    `json:"limit,omitempty" jsonschema:"at most this many hits, default 20, at most 100"`
 	// The §4.3 downgrade hides spam-like mail from default views; an
 	// agent looking into a specific prefix may need it.
 	IncludeDowngraded bool `json:"include_downgraded,omitempty" jsonschema:"also return downgraded mail (unclaimed prefix or dmarc=fail), which is excluded by default"`
@@ -32,9 +29,13 @@ type SearchInput struct {
 
 // SearchOutput is the structured result of search_messages.
 type SearchOutput struct {
-	Total  int    `json:"total"`
-	Notice string `json:"notice"` // applies to every hit's content
-	Hits   []Hit  `json:"hits"`
+	// Query is q as yuuka read it, normalized; Hints name items searched
+	// as text that look like a misspelt operator, with the likely one.
+	Query  string   `json:"query"`
+	Hints  []string `json:"hints,omitempty"`
+	Total  int      `json:"total"`
+	Notice string   `json:"notice"` // applies to every hit's content
+	Hits   []Hit    `json:"hits"`
 }
 
 // Hit is one message found. Content is what the sender wrote.
@@ -67,38 +68,22 @@ const (
 )
 
 func (s *Server) searchMessages(ctx context.Context, v *auth.Viewer, in SearchInput) (result, error) {
-	q := store.SearchQuery{Text: in.Q, IncludeDowngraded: in.IncludeDowngraded, Limit: defaultHits, Label: in.Label}
+	// No time zone: a date in q starts its day in UTC.
+	env := search.Env{Now: s.now()}
+	if s.triage != nil {
+		env.Triage = triage.ParseFilter
+	}
+	sq, err := search.Parse(in.Q, env)
+	if err != nil {
+		return result{}, queryError(err)
+	}
+	q := store.SearchQuery{Filter: sq.Filter, IncludeDowngraded: in.IncludeDowngraded, Limit: defaultHits, Triage: s.triage}
 	if in.Limit > 0 {
 		q.Limit = min(in.Limit, maxHits)
 	}
-	if in.Prefix != "" {
-		local, zone, _ := strings.Cut(strings.ToLower(strings.TrimSpace(in.Prefix)), "@")
-		q.Prefix, q.Zone = local, zone
-	}
-	if in.Class != "" {
-		// The input schema lists the classes; the SDK refuses others.
-		c := map[agentview.Class]classify.Class{
-			agentview.ClassMachine: classify.Machine, agentview.ClassHuman: classify.Human, agentview.ClassUnknown: classify.Unknown,
-		}[in.Class]
-		q.Class = &c
-	}
-	if in.Since != "" {
-		t, err := parseSince(in.Since)
-		if err != nil {
-			return result{}, err
-		}
-		q.Since = t
-	}
-	if in.Triage != "" {
-		f, err := s.answerFilter(in.Triage)
-		if err != nil {
-			return result{}, err
-		}
-		q.Answer = f
-	}
 	res, err := s.db.Search(ctx, v, q)
 	if err != nil {
-		return result{}, err
+		return result{}, queryError(err)
 	}
 	var tops map[string]map[string]string
 	if s.triage != nil && len(res.Hits) > 0 {
@@ -110,7 +95,10 @@ func (s *Server) searchMessages(ctx context.Context, v *auth.Viewer, in SearchIn
 			return result{}, err
 		}
 	}
-	out := SearchOutput{Total: res.Total, Notice: agentview.Notice, Hits: make([]Hit, len(res.Hits))}
+	out := SearchOutput{Query: sq.Normalized, Total: res.Total, Notice: agentview.Notice, Hits: make([]Hit, len(res.Hits))}
+	for _, h := range sq.Hints {
+		out.Hints = append(out.Hints, h.String())
+	}
 	for i, h := range res.Hits {
 		out.Hits[i] = Hit{
 			URI: agentview.MessageURI(h.ID), ReceivedAt: h.ReceivedAt.UTC(), Class: agentview.Class(h.Class.String()),
@@ -125,28 +113,18 @@ func (s *Server) searchMessages(ctx context.Context, v *auth.Viewer, in SearchIn
 	}, nil
 }
 
-// answerFilter is the store filter of a triage input. Without a scorer
-// it is refused: finding nothing would read as "the model found none".
-func (s *Server) answerFilter(in string) (*store.AnswerFilter, error) {
-	if s.triage == nil {
-		return nil, refuse("triage: no decision model is configured here, so no mail is scored")
+// queryError makes a query that cannot run a refusal the agent can act
+// on: it says where the query is wrong, or that a condition is reserved
+// or needs a scope.
+func queryError(err error) error {
+	e, ok := errors.AsType[*search.Error](err)
+	switch {
+	case !ok:
+		return err
+	case e.Unsupported:
+		return refuse("unsupported filter in q: %s", e)
 	}
-	q, o, err := triage.ParseFilter(in)
-	if err != nil {
-		return nil, refuse("triage: %v", err)
-	}
-	return &store.AnswerFilter{Profile: *s.triage, Question: q, Option: o}, nil
-}
-
-func parseSince(s string) (time.Time, error) {
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t, nil
-	}
-	t, err := time.Parse(time.DateOnly, s)
-	if err != nil {
-		return time.Time{}, refuse("since must be RFC 3339 or YYYY-MM-DD")
-	}
-	return t, nil
+	return refuse("q: %s", e)
 }
 
 // searchText lists yuuka's facts per hit, then all sender-written fields
@@ -158,6 +136,14 @@ func searchText(out SearchOutput, downgraded bool) string {
 		b.WriteString(" (downgraded mail excluded; set include_downgraded to see it)")
 	}
 	b.WriteString("\n")
+	if out.Query == "" {
+		b.WriteString("Query as read: (all mail)\n")
+	} else {
+		fmt.Fprintf(&b, "Query as read: %s\n", out.Query)
+	}
+	for _, h := range out.Hints {
+		fmt.Fprintf(&b, "Hint: %s\n", h)
+	}
 	if len(out.Hits) == 0 {
 		return b.String()
 	}

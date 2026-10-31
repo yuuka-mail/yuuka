@@ -120,14 +120,16 @@ func TestTriage(t *testing.T) {
 	if got := ids(decode[MessagePage](t, h.get("/api/v1/messages?downgraded=include&triage=phishing:yes", person)).Messages); !slices.Equal(got, []string{phish}) {
 		t.Errorf("list triage=phishing:yes: %q, want %s", got, phish)
 	}
-	res := decode[SearchResult](t, h.get("/api/v1/search?downgraded=include&triage=phishing:no", person))
+	res := decode[SearchResult](t, h.get("/api/v1/search?downgraded=include&q=triage:phishing:no", person))
 	if got := ids(res.Hits); res.Total != 1 || !slices.Equal(got, []string{plain}) {
 		t.Errorf("search triage=phishing:no: %d %q, want %s", res.Total, got, plain)
 	}
 	for _, bad := range []string{"phishing", "phish:yes", "phishing:maybe", ":yes", "injection:yes"} {
-		w := h.get("/api/v1/messages?triage="+bad, person)
-		if w.Code != http.StatusBadRequest || problemOf(t, w).Code != openapi.CodeInvalidParam {
-			t.Errorf("triage=%s: %d %s", bad, w.Code, w.Body.String())
+		for _, path := range []string{"/api/v1/messages?triage=" + bad, "/api/v1/search?q=triage:" + bad} {
+			w := h.get(path, person)
+			if w.Code != http.StatusBadRequest || problemOf(t, w).Code != openapi.CodeInvalidParam {
+				t.Errorf("%s: %d %s", path, w.Code, w.Body.String())
+			}
 		}
 	}
 
@@ -149,8 +151,10 @@ func TestTriage(t *testing.T) {
 	// saying so beats an empty list that reads as "the model found none".
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
 	off := &harness{t: t, h: New(h.spy, nil, quiet).Handler(h.svc)}
-	if w := off.get("/api/v1/messages?triage=phishing:yes", person); w.Code != http.StatusBadRequest {
-		t.Errorf("filter without a scorer: %d %s", w.Code, w.Body.String())
+	for _, path := range []string{"/api/v1/messages?triage=phishing:yes", "/api/v1/search?q=triage:phishing:yes"} {
+		if w := off.get(path, person); w.Code != http.StatusBadRequest {
+			t.Errorf("%s without a scorer: %d %s", path, w.Code, w.Body.String())
+		}
 	}
 	if w := off.get("/api/v1/triage/report", person); w.Code != http.StatusNotFound {
 		t.Errorf("report without a scorer: %d %s", w.Code, w.Body.String())
