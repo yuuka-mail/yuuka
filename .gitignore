@@ -21,6 +21,9 @@ node_modules/
 # 私有部署笔记与快照
 /local/
 
+# deploy/ 的真实配置（模板是 *.example；deploy/.env 已被上面的 .env 覆盖）
+/deploy/yuuka.env
+
 # mise 本机配置（凭据等）
 mise.local.toml
 .mise.local.toml

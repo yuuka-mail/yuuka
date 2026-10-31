@@ -1,0 +1,34 @@
+# Caddy in front of yuuka (deploy/compose.yaml).
+#
+# The site address is YUUKA_WEB_ORIGIN from .env, e.g.
+# https://mail.example.com, so the WebUI origin yuuka checks passkeys and
+# cross-origin requests against is the one Caddy serves; they cannot drift
+# apart. Caddy obtains and renews the certificate itself.
+#
+# Everything goes to yuuka, which authenticates every endpoint on its own
+# (§13.7); nothing here is a security boundary. In particular:
+#   - POST /ingest/cloudflare must stay reachable from Cloudflare's Email
+#     Worker. It is HMAC-signed (§2.2); do not put it behind an IP allow
+#     list, basic auth or an identity proxy.
+#   - /mcp and /api/v1/ take bearer tokens from agents, which carry no
+#     browser cookie; do not put them behind a browser-only login either.
+{
+	# Uncomment to get ACME expiry notices.
+	# email ops@example.com
+}
+
+{$YUUKA_WEB_ORIGIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		-Server
+	}
+
+	# yuuka sets the Content-Security-Policy and X-Frame-Options of the
+	# WebUI itself (web/embed.go), next to the code they constrain.
+	reverse_proxy yuuka:31480
+}

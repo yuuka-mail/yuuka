@@ -1,0 +1,14 @@
+# For trying the stack on a workstation, not for a server:
+#
+#   docker build -t yuuka:local ..
+#   docker compose -f compose.yaml -f compose.local.yaml up -d
+#
+# with YUUKA_IMAGE=yuuka:local and YUUKA_WEB_ORIGIN=https://localhost:31443
+# in .env. Caddy then serves localhost with its own internal CA (browsers
+# warn until it is trusted) on loopback ports in the project's 31400-31499
+# range instead of 80/443.
+services:
+  caddy:
+    ports: !override
+      - "127.0.0.1:31443:31443"
+      - "127.0.0.1:31408:80"
