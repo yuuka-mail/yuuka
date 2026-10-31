@@ -16,6 +16,7 @@ import (
 	"io"
 	"mime"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -70,6 +71,34 @@ type Message struct {
 
 // Parse parses raw.
 func Parse(raw []byte) Message {
+	m, _ := ParseTree(raw)
+	return m
+}
+
+// Entity is one node of the MIME tree as far as the parser reads it: the
+// structure that views of the body need (the agent view of §8.1), not the
+// whole MIME model. Parts beyond the limits, and the insides of attached
+// messages, are not in it.
+type Entity struct {
+	// Section is the IMAP section number (RFC 3501 §6.4.5): "1" for the
+	// body of a single-part message, "1", "2", "2.1" ... for the parts of
+	// multiparts, "" for a top-level multipart. It follows from the MIME
+	// structure alone, so the same raw always numbers the same way; the
+	// yuuka:// anchors of §8.1 are built on it.
+	Section   string `json:"section"`
+	MediaType string `json:"media_type"`
+	Filename  string `json:"filename,omitempty"`
+	// Attachment is the has_attach decision for this part (isAttachment).
+	Attachment bool `json:"attachment,omitempty"`
+	// Text is the decoded body of a text/plain or text/html part, as valid
+	// UTF-8. A multipart whose parts cannot be read becomes a text/plain
+	// entity holding its undecoded body, so its words are not lost.
+	Text     string   `json:"-"`
+	Children []Entity `json:"children,omitempty"`
+}
+
+// ParseTree parses raw like Parse and also returns its MIME tree.
+func ParseTree(raw []byte) (Message, Entity) {
 	var p parser
 	e, err := message.Read(bytes.NewReader(raw))
 	if err != nil && e == nil {
@@ -87,9 +116,9 @@ func Parse(raw []byte) Message {
 	// go-message hands back the undecoded body.
 	p.charset = e.Header.Get("Content-Type")
 	p.headers(mail.Header{Header: e.Header})
-	texts := p.walk(e, 0)
+	root, _ := p.walk(e, 0, "")
 	var plain []string
-	for _, t := range texts {
+	for _, t := range root.texts() {
 		s := t.text
 		if t.html {
 			s = htmlToText(s)
@@ -101,7 +130,7 @@ func Parse(raw []byte) Message {
 	p.m.BodyText = truncate(strings.Join(plain, "\n\n"), MaxBodyText)
 	p.m.Snippet = snippet(p.m.BodyText)
 	p.m.Problem = strings.Join(p.problems, "; ")
-	return p.m
+	return p.m, root
 }
 
 type parser struct {
@@ -216,19 +245,19 @@ type textPart struct {
 	html bool
 }
 
-// walk collects the readable text of e. For multipart/alternative it
-// picks one representation (plain over HTML); for every other multipart
-// it concatenates the children in order.
-func (p *parser) walk(e *message.Entity, depth int) []textPart {
+// walk reads e into an Entity numbered sec; "" only for the top level,
+// where a single part is numbered "1". ok is false for a part beyond the
+// limits, which is left out of the tree.
+func (p *parser) walk(e *message.Entity, depth int, sec string) (ent Entity, ok bool) {
 	if depth > maxDepth {
 		p.problem("nesting deeper than %d", maxDepth)
-		return nil
+		return ent, false
 	}
 	if p.parts++; p.parts > maxParts {
 		if p.parts == maxParts+1 {
 			p.problem("more than %d parts", maxParts)
 		}
-		return nil
+		return ent, false
 	}
 	mt, params, err := e.Header.ContentType()
 	if err != nil {
@@ -237,16 +266,21 @@ func (p *parser) walk(e *message.Entity, depth int) []textPart {
 	}
 	mt = strings.ToLower(mt)
 	if mr := e.MultipartReader(); mr != nil {
-		return p.multipart(e, mr, mt, depth)
+		return p.multipart(e, mr, mt, depth, sec), true
 	}
 	disp, dparams, _ := e.Header.ContentDisposition()
 	disp = strings.ToLower(disp)
+	ent = Entity{Section: leafSection(sec), MediaType: mt, Filename: clean(dparams["filename"])}
+	if ent.Filename == "" {
+		ent.Filename = clean(params["name"])
+	}
 	if isAttachment(mt, disp, params["name"] != "" || dparams["filename"] != "", e.Header.Has("Content-Id")) {
 		p.m.HasAttach = true
-		return nil
+		ent.Attachment = true
+		return ent, true
 	}
 	if mt != "text/plain" && mt != "text/html" {
-		return nil
+		return ent, true
 	}
 	body, err := io.ReadAll(io.LimitReader(e.Body, 4*MaxBodyText))
 	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
@@ -255,20 +289,21 @@ func (p *parser) walk(e *message.Entity, depth int) []textPart {
 		// worth a look.
 		p.problem("%s body: %v", mt, err)
 	}
-	return []textPart{{text: strings.ToValidUTF8(string(body), "�"), html: mt == "text/html"}}
+	ent.Text = strings.ToValidUTF8(string(body), "�")
+	return ent, true
 }
 
-func (p *parser) multipart(e *message.Entity, mr message.MultipartReader, mt string, depth int) []textPart {
-	var children [][]textPart
-	for {
+func (p *parser) multipart(e *message.Entity, mr message.MultipartReader, mt string, depth int, sec string) Entity {
+	ent := Entity{Section: sec, MediaType: mt}
+	for i := 1; ; i++ {
 		part, err := mr.NextPart()
 		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil && part == nil {
-			if len(children) == 0 {
+			if i == 1 {
 				p.problem("%s: %v", mt, err)
-				return []textPart{{text: rawText(e)}}
+				return Entity{Section: leafSection(sec), MediaType: "text/plain", Text: rawText(e)}
 			}
 			// The parts before the error are kept; a body that just
 			// stops without a closing boundary lands here.
@@ -279,22 +314,55 @@ func (p *parser) multipart(e *message.Entity, mr message.MultipartReader, mt str
 		}
 		// err with a part: unknown charset or encoding of that part,
 		// which is still readable.
-		children = append(children, p.walk(part, depth+1))
+		if c, ok := p.walk(part, depth+1, childSection(sec, i)); ok {
+			ent.Children = append(ent.Children, c)
+		}
 	}
-	if mt != "multipart/alternative" {
+	return ent
+}
+
+// leafSection numbers a non-multipart entity: the body of a single-part
+// message is "1".
+func leafSection(sec string) string {
+	if sec == "" {
+		return "1"
+	}
+	return sec
+}
+
+// childSection numbers the i-th (1-based) part of the multipart sec.
+func childSection(sec string, i int) string {
+	if sec == "" {
+		return strconv.Itoa(i)
+	}
+	return sec + "." + strconv.Itoa(i)
+}
+
+// texts collects the readable text of e for search and snippets. For
+// multipart/alternative it picks one representation (plain over HTML);
+// for every other multipart it concatenates the parts in order.
+func (e Entity) texts() []textPart {
+	if !strings.HasPrefix(e.MediaType, "multipart/") {
+		if e.Attachment || e.MediaType != "text/plain" && e.MediaType != "text/html" {
+			return nil
+		}
+		return []textPart{{text: e.Text, html: e.MediaType == "text/html"}}
+	}
+	if e.MediaType != "multipart/alternative" {
 		var out []textPart
-		for _, c := range children {
-			out = append(out, c...)
+		for _, c := range e.Children {
+			out = append(out, c.texts()...)
 		}
 		return out
 	}
 	var html []textPart
-	for _, c := range children {
-		if len(c) > 0 && !c[0].html {
-			return c
+	for _, c := range e.Children {
+		t := c.texts()
+		if len(t) > 0 && !t[0].html {
+			return t
 		}
-		if html == nil && len(c) > 0 {
-			html = c
+		if html == nil && len(t) > 0 {
+			html = t
 		}
 	}
 	return html
@@ -379,12 +447,12 @@ func validField(line []byte) bool {
 
 // fallback is the result when not even a cleaned header can be read: the
 // whole raw message becomes the body so it is at least searchable.
-func (p *parser) fallback(raw []byte) Message {
+func (p *parser) fallback(raw []byte) (Message, Entity) {
 	p.m.References = []string{}
 	p.m.BodyText = truncate(strings.TrimSpace(strings.ToValidUTF8(string(raw), "�")), MaxBodyText)
 	p.m.Snippet = snippet(p.m.BodyText)
 	p.m.Problem = strings.Join(p.problems, "; ")
-	return p.m
+	return p.m, Entity{Section: "1", MediaType: "text/plain", Text: p.m.BodyText}
 }
 
 // clean makes a header value safe to store and show: valid UTF-8, control
