@@ -36,6 +36,14 @@
 //	yuuka grant ls [--identity A] [--principal <kind>:<name>]
 //	yuuka grant rm --identity A --principal <kind>:<name>
 //	                         who may send as an identity, and how far (§13.5, §8.9)
+//	yuuka rule ls [--all] | show <id> | rm <id>
+//	yuuka rule add --spec <file>|-|<json> [--name N] [--priority P] [--disabled]
+//	yuuka rule set <id> [--spec S] [--name N] [--priority P] [--enable|--disable]
+//	yuuka rule apply <id> [--since T] [--dry-run]
+//	yuuka rule revert <id> [--since T]
+//	                         rules that label, classify, archive and set the
+//	                         notification of arriving mail (§8.5); apply and
+//	                         revert run one over past mail
 //	yuuka mcp --stdio       read-only MCP server on stdin/stdout, acting as the
 //	                         bearer token in YUUKA_MCP_TOKEN (§8.7)
 //	yuuka version
@@ -103,7 +111,7 @@
 //	                                    the TLS certificate, else the WebUI's host)
 //
 // `yuuka migrate`, `yuuka prefix`, `yuuka token`, `yuuka outbox`,
-// `yuuka identity` and `yuuka grant` only need the database URLs;
+// `yuuka identity`, `yuuka grant` and `yuuka rule` only need the database URLs;
 // `yuuka admin` the database URLs and YUUKA_WEB_ORIGIN. All but migrate
 // run on the host without a login; host.go says how their actions are
 // recorded.
@@ -165,7 +173,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka identity add|ls|rm | yuuka grant set|ls|rm | yuuka mcp --stdio | yuuka version")
+	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka identity add|ls|rm | yuuka grant set|ls|rm | yuuka rule ls|show|add|set|rm|apply|revert | yuuka mcp --stdio | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -243,6 +251,8 @@ func run(args []string, log *slog.Logger) error {
 		return withHost(ctx, func(h *host) error { return h.identityCmd(ctx, args[1:]) })
 	case "grant":
 		return withHost(ctx, func(h *host) error { return h.grantCmd(ctx, args[1:]) })
+	case "rule":
+		return withHost(ctx, func(h *host) error { return h.ruleCmd(ctx, args[1:]) })
 	}
 	return usage()
 }

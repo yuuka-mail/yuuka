@@ -40,6 +40,8 @@ func (e *hostEnv) run(cmd string, args ...string) (string, string, error) {
 		err = h.identityCmd(e.t.Context(), args)
 	case "grant":
 		err = h.grantCmd(e.t.Context(), args)
+	case "rule":
+		err = h.ruleCmd(e.t.Context(), args)
 	default:
 		e.t.Fatalf("no command %s", cmd)
 	}

@@ -109,6 +109,47 @@ yuuka grant rm --identity alerts@example.com --principal service:monitoring
 - **非本人以人的地址发信，上限是草稿**，写不进更高的档位。给服务用的地址，`--owner` 就写这个服务
   （[为什么](../design/principals.md#135-identity--principal-授权)）
 
+## 规则
+
+规则在信到达时给它打标签、改判、归档、定推送级别；它不能发信、转发、点链接或删除，格式里根本没有这些动作。
+匹配条件、字段和动作的完整说明见 [`internal/rules`](../../internal/rules/doc.go)，
+为什么这样设计见[设计文档](../design/agents.md#85-协作的单位是任务不是邮件)。
+
+```bash
+yuuka rule ls [--all]
+yuuka rule show <id>
+yuuka rule add --spec rule.json [--name "银行"] [--priority 0] [--disabled]
+yuuka rule set <id> [--spec rule.json] [--name N] [--priority P] [--enable | --disable]
+yuuka rule rm <id>
+yuuka rule apply <id> [--since 2026-01-01] [--dry-run]
+yuuka rule revert <id> [--since 2026-01-01]
+```
+
+`--spec` 是规则本身：一个文件、`-`（从标准输入读），或者直接写 JSON：
+
+```json
+{"v": 1,
+ "match": {"all": [{"field": "from.domain",   "op": "eq", "value": "example.net"},
+                   {"field": "from.verified", "op": "eq", "value": true}]},
+ "actions": [{"kind": "label", "label": "bank"}, {"kind": "archive"}]}
+```
+
+- 保存时校验，存下的是规范化后的形式（地址值折成小写）。按 `From` 匹配却不要求 `from.verified`、
+  动作里又有标签或推送时会给警告：`From` 谁都能伪造
+- 多条规则按 `--priority` 从小到大、同级按 id 对同一封信求值，互相看不到对方的效果。
+  分类、归档、推送级别取第一条命中的，标签取并集
+- 人和 agent 的决定优先于规则：你删掉规则加的标签，之后再跑规则也不会加回来
+- 规则只看收到的信，不看自己发出的。推送级别只能把通知调低或关掉，被降级的信无论规则怎么写都不推送
+- `ls` 的 STATE 有 `enabled` `disabled` `deleted`，以及 `unsupported`（这个版本看不懂的规则，永远不匹配）
+- `set` 只改给出的参数，每次改动都让版本号（REVISION）加一；`--disable` 停用，已经做过的标记保留
+- `rm` 是软删除：规则停止运行，它做过的事留着、历史可查
+
+规则只对之后到达的信生效。要用在已有的信上，显式地跑：
+
+- `apply` 让一条规则过一遍 `--since` 之后收到的信（缺省为全部），尊重人和 agent 的决定，不推送。
+  `--dry-run` 只数会改多少封，什么都不写。中途中断的话再跑一次即可，已经做过的不会重复
+- `revert` 撤回这条规则（含已删除的）对 `--since` 之后的信做过的全部改动；之后又被别人改过的保持现状，命令会报出数量
+
 ## 凭据
 
 agent 和其他服务用凭据访问 yuuka。人没有长期凭据，只用 passkey 登录。

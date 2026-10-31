@@ -15,7 +15,7 @@ import (
 )
 
 // host is what the management commands (prefix, token, outbox, identity,
-// grant) share. They run on the host, like `admin enroll`: being able to
+// grant, rule) share. They run on the host, like `admin enroll`: being able to
 // run them there is the highest authority there is (§13.7), so they need
 // no login, and nobody is authenticated either. Their actions are
 // recorded with the system principal as actor, no credential, and
@@ -27,6 +27,7 @@ type host struct {
 	db  *store.DB
 	out io.Writer // results: tables, the token
 	msg io.Writer // notes for the person at the terminal
+	in  io.Reader // what `--spec -` reads; nil is stdin
 	now func() time.Time
 	// user is the OS user name; "" if unknown.
 	user string
