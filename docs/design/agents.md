@@ -146,13 +146,11 @@ agent 做摘要和提取，人在手机上一点就完成审批/标注，确认�
 ### 8.5 协作的单位是任务，不是邮件
 
 人机协作的单位不是"一封信"，而是"一件待办"：这个验证码给我、这张发票归档、
-这个列表退订、这个前缀换掉。所以有 `proposals` 层：
-
-```
-proposals(id, source(agent|rule), kind, target_message/thread/prefix,
-          payload jsonb, rationale text, cites jsonb,    -- [{uri, quote}]：yuuka:// 锚点 + 原文摘录（§4.2）
-          state(pending|accepted|rejected|expired), decided_by, decided_at)
-```
+这个列表退订、这个前缀换掉。所以有 `proposals` 层（表见
+[`0009_rules.sql`](../../internal/store/migrations/0009_rules.sql)，存取见
+[`internal/store/proposals.go`](../../internal/store/proposals.go)）。
+v1 只有两类提案：`annotate`（对一封信或它所在线程的标注）和 `rule`（一条完整规则加示例信）；
+`cites` 是 `[{uri, quote}]`：yuuka:// 锚点加原文摘录（§4.2）。
 
 - agent 产出提案，附**理由和原文引用**（cites 用 §8.1 的锚点，可点开核对）
 - 人接受/拒绝一次 → 可选"以后同类自动处理" → **提案沉淀成 `rules` 记录**
@@ -167,9 +165,15 @@ proposals(id, source(agent|rule), kind, target_message/thread/prefix,
   而不是一条看起来无害的规则
 - 从提案沉淀的规则要能回溯到提案（`rules.proposal_id`），
   这样「这条规则是谁在什么证据下建议的」在 §8.8 的审计里能查到
+- 只有人能接受、拒绝；提议者能撤回。`expired` 不存，读时按 `expires_at`（默认 14 天）现算，
+  不需要清理任务。每个提议者最多 50 个待决提案，相同的待决提案由唯一索引去重。
+  「以后同类自动处理」只在 WebUI 里做：先从示例信生成候选条件和预览数量，人勾选后接受，
+  规则和它的 `rule:<id>` 主体与接受在同一个事务里建好；不自动回溯，要回溯就显式 `apply`。
+  通知卡片上只有跳转，完整的匹配条件要在大屏上核对
 
 规则的匹配语言、校验、求值和「从示例信生成候选条件」在 [`internal/rules`](../../internal/rules/doc.go)，
-是不碰数据库的纯函数；存储、ingest 时运行和回溯运行随 store 一起落地。这里只记不变量：
+是不碰数据库的纯函数；存储（[`rules.go`](../../internal/store/rules.go)）、ingest 时运行、回溯运行和预览
+（[`ruleruns.go`](../../internal/store/ruleruns.go)）在 store。这里只记不变量：
 
 - **存储格式 v1 是单向门**：`{"v":1,"match":{…},"actions":[…]}`，匹配树是 `all` / `any` / `not` /
   叶子 `{field, op, value}`，字段和运算符是封闭集合。存下的规则含义不随版本变：加字段、运算符、动作不升版本，
@@ -182,6 +186,29 @@ proposals(id, source(agent|rule), kind, target_message/thread/prefix,
   动作又含标签或推送时，保存给警告。从示例信泛化时默认 `from.addr` 加（示例过了 DMARC 时）
   `from.verified = true`，有 List-Id 时改用 `list.id`；**永不从主题或正文泛化**，那是发件人写的
 - 多条规则按 `(priority, id)` 对同一份快照求值、不链式触发：分类、归档、推送级别第一条命中的赢，标签取并集
+
+**到达时应用，不是实时视图。** 规则在 `Fold` 的事务里、内容 / 认证 / extractions 写完之后对这次投递求值，
+崩溃不会留下「已入库但规则没跑」的投递；补跑（backlog）入库的投递同样会跑。规则的效果是按到达时的事实做的决定，
+和人分拣信件一样，所以 reparse、`Rebuild` 和新列的回填**不跑规则、也不撤销它们的效果**：
+解析器修好后老信「现在能匹配」不会自动补标签，要补就显式 `yuuka rule apply`（可以先 `revert`）。
+放弃的是「改规则老信跟着变」：实时视图不需要撤销，但要把规则编译成 SQL（第二套语义实现），
+也表达不了推送。规则只匹配收到的投递，不匹配自己发出的 Sent 副本。
+
+**标注只有一个写入口，优先级按写入者分级。** 人、agent、接受的提案、规则，对 class / archived / 标签的每次改动
+都经 [`annotate.go`](../../internal/store/annotate.go) 写一行 `annotation_log`（前值、后值、写入者等级、对应的 action）。
+它同时是来源追溯、撤销和优先级：写入者只能改「最近一次由不高于自己等级的人写下」的值，
+人或 system（CLI）= 3，agent / service = 2，规则 = 1。人删掉规则加的标签会留下等级 3 的一行，
+之后回溯运行不会再加回来；agent 改不动人的决定，结果是「overruled」，不是错误。值没变就什么都不写。
+撤销有三种：撤销一个 action（逐行回写，之后又被改过的报 superseded）；`yuuka rule revert` 以等级 1 撤回一条规则的全部改动；
+agent 只能撤销自己的 action。标签是 `message_state.labels` 上区分大小写的精确字符串（`rules.ValidLabel`），
+每封信最多 64 个；没有标签表，改名是批量操作。已读状态留在 `flags`，不记日志。
+
+**推送只能被规则调低。** `notify` 的 `off` / `silent` 只在 `Folded.Notify` 为真时生效，
+被降级的信（§4.3）无论规则怎么写都不推送，补跑和回溯运行永不推送。这个上限在 store 里执行，不靠规则自觉。
+
+**回溯运行和预览** 用同一个求值器、同一个事实加载：每页约 200 封、各自一个持 `contentLock` 的短事务，
+不长时间挡住 ingest；写入幂等，中断后再跑一次即可；尊重优先级。预览只读，只看调用者可见的信（§13.8）。
+每条改了东西的规则在每次 ingest 写一行 `actions`（actor `rule:<id>`），个人量级约每年 10^5 行，可以接受。
 
 ### 8.6 事件流和游标
 

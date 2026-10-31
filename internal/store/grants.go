@@ -119,6 +119,10 @@ func (db *DB) SetGrant(ctx context.Context, g Grant, a Action) error {
 		g.Allowlist = []string{}
 	}
 	return pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
+		// A rule has no sending identity and never gets one (§8.5).
+		if err := refuseRulePrincipal(ctx, tx, g.PrincipalID); err != nil {
+			return err
+		}
 		// FOR SHARE: the owner checked is the owner when this commits.
 		var ownerID, ownerKind string
 		err := tx.QueryRow(ctx, `

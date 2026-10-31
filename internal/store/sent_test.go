@@ -406,6 +406,23 @@ func TestVisibility(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Annotations and proposals on every message (§8.5), by a viewer
+	// who sees them all.
+	for n, id := range msgs {
+		now := time.Now()
+		if _, _, err := db.Annotate(ctx, everyone, id, []store.Annotation{store.SetLabel("seen", true)},
+			store.Action{ID: ulid.New(now), Actor: systemID, Tool: "message.annotate", At: now}); err != nil {
+			t.Fatalf("annotate %s: %v", n, err)
+		}
+		if _, _, err := db.CreateProposal(ctx, everyone, store.NewProposal{
+			Kind: store.ProposalAnnotate, MessageID: id,
+			Payload: []byte(`{"v":1,"scope":"message","actions":[{"kind":"archive"}]}`),
+		},
+			store.Action{ID: ulid.New(now), Actor: systemID, Tool: "proposal.create", At: now}); err != nil {
+			t.Fatalf("propose %s: %v", n, err)
+		}
+	}
+
 	visibleTo := map[*auth.Viewer][]string{
 		everyone:   {"both", "in-closed", "in-open", "leak-closed", "sent-closed", "sent-open"},
 		restricted: {"both", "in-open", "sent-open"},
@@ -437,6 +454,57 @@ func TestVisibility(t *testing.T) {
 				t.Errorf("ListMessages %q, want %q", got, want)
 			}
 
+			// The label filter, the label list, the annotation history
+			// and the proposals see what v sees.
+			list, err = db.ListMessages(ctx, v, store.MessageQuery{MessageFilter: store.MessageFilter{
+				Downgraded: store.IncludeDowngraded, Label: "seen", Archived: new(false),
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids = ids[:0]
+			for _, m := range list {
+				ids = append(ids, m.ID)
+			}
+			if got := names(ids); !slices.Equal(got, want) {
+				t.Errorf("ListMessages label=seen %q, want %q", got, want)
+			}
+			labels, err := db.Labels(ctx, v)
+			if err != nil || len(want) > 0 && (len(labels) != 1 || labels[0].Messages != len(want)) || len(want) == 0 && len(labels) != 0 {
+				t.Errorf("Labels %+v %v, want seen on %d", labels, err, len(want))
+			}
+			for n, id := range msgs {
+				h, err := db.MessageAnnotations(ctx, v, id)
+				if slices.Contains(want, n) != (err == nil && len(h) == 1) || err != nil && !errors.Is(err, store.ErrNotFound) {
+					t.Errorf("MessageAnnotations %s: %v %v", n, h, err)
+				}
+			}
+			props, err := db.Proposals(ctx, v, store.ProposalQuery{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids = ids[:0]
+			for _, p := range props {
+				ids = append(ids, p.MessageID)
+			}
+			if got := names(ids); !slices.Equal(got, want) {
+				t.Errorf("Proposals %q, want %q", got, want)
+			}
+			// A preview matches inbound deliveries v can see only:
+			// both is visible through its sent copy, not its delivery.
+			pv, err := db.PreviewRule(ctx, v, []byte(`{"v":1,"match":{"field":"attachment","op":"eq","value":false},"actions":[{"kind":"label","label":"x"}]}`), store.PreviewQuery{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids = ids[:0]
+			for _, m := range pv.Samples {
+				ids = append(ids, m.ID)
+			}
+			wantMatched := slices.DeleteFunc(slices.Clone(want), func(n string) bool { return strings.HasPrefix(n, "sent-") || v != everyone && n == "both" })
+			if got := names(ids); !slices.Equal(got, wantMatched) || pv.Matched != len(wantMatched) {
+				t.Errorf("PreviewRule matched %d, samples %q, want %q", pv.Matched, got, wantMatched)
+			}
+
 			res, err := db.Search(ctx, v, store.SearchQuery{Text: "body", IncludeDowngraded: true})
 			if err != nil {
 				t.Fatal(err)
@@ -448,6 +516,9 @@ func TestVisibility(t *testing.T) {
 			wantBodies := slices.DeleteFunc(slices.Clone(want), func(n string) bool { return strings.HasPrefix(n, "in-") || n == "leak-closed" })
 			if got := names(ids); !slices.Equal(got, wantBodies) || res.Total != len(wantBodies) {
 				t.Errorf("Search %q (total %d), want %q", got, res.Total, wantBodies)
+			}
+			if res, err := db.Search(ctx, v, store.SearchQuery{Text: "body", IncludeDowngraded: true, Label: "seen"}); err != nil || res.Total != len(wantBodies) {
+				t.Errorf("Search label=seen: total %d, %v, want %d", res.Total, err, len(wantBodies))
 			}
 
 			for n, id := range msgs {

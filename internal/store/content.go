@@ -96,15 +96,25 @@ type Folded struct {
 	NewMessage bool
 	// Notify is true when this delivery escapes the spam downgrade and no
 	// earlier delivery of the same message did: the message is new to the
-	// operator's attention. Callers that replay old mail ignore it.
+	// operator's attention, and no rule turned its notification off.
+	// Callers that replay old mail ignore it.
 	Notify bool
+	// Silent: a rule asked for this notification to make no sound. Only
+	// ever set with Notify.
+	Silent bool
+	// RuleFailures are the rules that failed closed on this delivery:
+	// unsupported by this version, or out of time (rules.Hit.Err).
+	RuleFailures []rules.Hit
 }
 
 // Fold runs the content step for one committed delivery (§4.1): register
 // its prefix, fold it into the message with the same content_hash or
 // create one and thread it, record its auth facts, and log the changes.
-// It is idempotent: a delivery that already has a message is left alone.
-// The caller decides whether to act on Folded.Notify.
+// Then the enabled rules run on the delivery (§8.5, runRules), in the
+// same transaction, so a delivery is never committed with its rules not
+// run. It is idempotent: a delivery that already has a message is left
+// alone. The caller decides whether to act on Folded.Notify; a rule can
+// only narrow it.
 func (db *DB) Fold(ctx context.Context, ref RawRef, msg mimeparse.Message, auth authres.Auth) (Folded, error) {
 	var res Folded
 	authJSON, err := json.Marshal(auth)
@@ -124,7 +134,12 @@ func (db *DB) Fold(ctx context.Context, ref RawRef, msg mimeparse.Message, auth 
 			// path. The notification decision does not depend on who
 			// folded, so the live caller still gets it.
 			res.MessageID = *existing
-			return notifyFor(ctx, tx, *existing, ref.DeliveryID, &res.Notify)
+			if err := notifyFor(ctx, tx, *existing, ref.DeliveryID, &res.Notify); err != nil || !res.Notify {
+				return err
+			}
+			level, err := ruleNotify(ctx, tx, ref.DeliveryID, ref.ReceivedAt)
+			res.applyNotify(level)
+			return err
 		}
 		w := writer{tx: tx}
 		if err := w.registerPrefix(ctx, ref.Zone, ref.Prefix, ref.ReceivedAt); err != nil {
@@ -162,6 +177,12 @@ func (db *DB) Fold(ctx context.Context, ref RawRef, msg mimeparse.Message, auth 
 		if err := notifyFor(ctx, tx, id, ref.DeliveryID, &res.Notify); err != nil {
 			return err
 		}
+		run, err := db.runRules(ctx, tx, &w, id, ref.DeliveryID)
+		if err != nil {
+			return fmt.Errorf("rules: %w", err)
+		}
+		res.applyNotify(run.notify)
+		res.RuleFailures = run.failures
 		return w.flush(ctx)
 	})
 	if err != nil {

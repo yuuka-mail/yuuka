@@ -71,8 +71,11 @@ func TestTelegram(t *testing.T) {
 	if err := tg.Notify(t.Context(), "hello"); err != nil {
 		t.Fatal(err)
 	}
-	if got["chat_id"] != "42" || got["text"] != "hello" || got["parse_mode"] != nil {
+	if got["chat_id"] != "42" || got["text"] != "hello" || got["parse_mode"] != nil || got["disable_notification"] != false {
 		t.Fatalf("sent %v", got)
+	}
+	if err := tg.NotifySilently(t.Context(), "quiet"); err != nil || got["disable_notification"] != true {
+		t.Fatalf("silently: sent %v, %v", got, err)
 	}
 
 	bad := &Telegram{Token: "WRONG", ChatID: "42", BaseURL: srv.URL}

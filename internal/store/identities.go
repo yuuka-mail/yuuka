@@ -126,6 +126,9 @@ func (db *DB) AddIdentity(ctx context.Context, i Identity, a Action) error {
 		return fmt.Errorf("add identity %s: zone and prefix must be lowercase and the zone non-empty", i.Address())
 	}
 	return pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
+		if err := refuseRulePrincipal(ctx, tx, i.OwnerID); err != nil {
+			return err
+		}
 		_, err := tx.Exec(ctx, `
 			INSERT INTO identities (id, account_id, zone, prefix, display_name, signature, plain_strip_markup,
 			                        transport, owner_id, created_at)

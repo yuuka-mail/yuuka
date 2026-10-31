@@ -24,6 +24,11 @@ func (in *Ingester) fold(ctx context.Context, ref store.RawRef, raw []byte) (sto
 	if err == nil && f.NewMessage {
 		in.addrsCapped(msg, ref.RawID, f.MessageID)
 	}
+	for _, h := range f.RuleFailures {
+		// The rule did not match; what went wrong is about the rule,
+		// never the mail's content.
+		in.cfg.Log.Warn("rule failed closed", "rule", h.Rule, "message", f.MessageID, "err", h.Err)
+	}
 	return f, err
 }
 

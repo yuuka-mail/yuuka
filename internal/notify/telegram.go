@@ -23,6 +23,16 @@ type Telegram struct {
 // Notify sends text as a plain message (no parse_mode, so header content
 // can never be interpreted as markup).
 func (t *Telegram) Notify(ctx context.Context, text string) error {
+	return t.send(ctx, text, false)
+}
+
+// NotifySilently is Notify without sound on the recipient's device
+// (disable_notification), for mail a rule asked to notify silently.
+func (t *Telegram) NotifySilently(ctx context.Context, text string) error {
+	return t.send(ctx, text, true)
+}
+
+func (t *Telegram) send(ctx context.Context, text string, silent bool) error {
 	base := t.BaseURL
 	if base == "" {
 		base = "https://api.telegram.org"
@@ -35,6 +45,7 @@ func (t *Telegram) Notify(ctx context.Context, text string) error {
 		"chat_id":                  t.ChatID,
 		"text":                     text,
 		"disable_web_page_preview": true,
+		"disable_notification":     silent,
 	})
 	if err != nil {
 		return fmt.Errorf("telegram: %w", err)

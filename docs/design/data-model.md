@@ -15,16 +15,19 @@
 | `raw_objects` | 投递事实 | 原件存储里的每个对象一行，带 `sha256` 和 `content_hash`（§4.1）；发件方重投的那份照样落盘，用 `duplicate_of` 指向第一份，不再生成 delivery。yuuka 为外发组装或规范化的字节（Sent 副本，`sent/` 前缀）也是这里的行，发没发出看 outbox（§4.6） | [0001](../../internal/store/migrations/0001_ingest.sql)、[0006](../../internal/store/migrations/0006_sent_copies.sql) |
 | `accounts` | 配置与授权 | 账户（§9.2）。M2 只有 `cf_catchall` 一种，就是 `YUUKA_ACCOUNT` 命名的那个 | [0005](../../internal/store/migrations/0005_sending.sql) |
 | `deliveries` | 投递事实；只有 `message_id`、`auth` 两列是派生 | 每次投递一行：账户、信封、`(zone, prefix)`、这一路自己的原件（Received / ARC / DKIM 每一路都不同）和认证结果。投递是 ingest 记下的事实，不是从 MIME 派生的：信封、远端定位、卸载状态都不在原件里。`(account_id, source_key)` 是幂等键（§10.1） | [0001](../../internal/store/migrations/0001_ingest.sql)、[0005](../../internal/store/migrations/0005_sending.sql) |
-| `messages` | 派生（id 除外，id 跨 reparse 稳定） | 内容，按 `content_hash` 折叠；隔离状态 `parse_error` 也在这一层（§4.2）。To / Cc / Reply-To 只存折叠后的地址，供线程通信方（§8.9）匹配；阅读区要的显示名在取信时从原件现解析（`mimeparse.ParseRecipients`），不为显示再加一列。`extract_version` 记下哪一版提取器处理过它（§4.2） | [0002](../../internal/store/migrations/0002_content.sql)、[0007](../../internal/store/migrations/0007_message_recipients.sql)、[0008](../../internal/store/migrations/0008_extractions.sql) |
+| `messages` | 派生（id 除外，id 跨 reparse 稳定） | 内容，按 `content_hash` 折叠；`list_id` 是 List-Id 的标识部分，供规则的 `list.id` 匹配（未经验证的头）；隔离状态 `parse_error` 也在这一层（§4.2）。To / Cc / Reply-To 只存折叠后的地址，供线程通信方（§8.9）匹配；阅读区要的显示名在取信时从原件现解析（`mimeparse.ParseRecipients`），不为显示再加一列。`extract_version` 记下哪一版提取器处理过它（§4.2） | [0002](../../internal/store/migrations/0002_content.sql)、[0007](../../internal/store/migrations/0007_message_recipients.sql)、[0008](../../internal/store/migrations/0008_extractions.sql)、[0010](../../internal/store/migrations/0010_message_list_id.sql) |
 | `extractions` | 派生 | 提取器（[`internal/extract`](../../internal/extract/extract.go)）从一封信里找到的验证码、登录 / 验证链接、有效期（§3 原则 4）：通知区一眼看到码（§12.9），`review` 档的外泄检查拿它比对外发正文（§8.9）。值是发件人写的，只当数据；链接从不被打开或抓取。「码用过了」「收起」这类人的决定不放这里 | [0008](../../internal/store/migrations/0008_extractions.sql) |
 | `threads` | 派生 | 消息图的连通分量（§4.1）。reparse 整体重建，旧 id 能沿用就沿用，但不像 message id 那样承诺稳定 | [0002](../../internal/store/migrations/0002_content.sql) |
-| `message_state` | 决定 | 人对一封信的标注、改判（`class_override`）、钉住（§9.6 卸载跳过）；本地标注层，远端永不覆盖（§9.2） | [0002](../../internal/store/migrations/0002_content.sql) |
+| `message_state` | 决定 | 一封信的标注：标签、归档、改判（`class_override`），由人、agent 和规则写，来历在 `annotation_log`；已读等 `flags`；钉住（§9.6 卸载跳过）。本地标注层，远端永不覆盖（§9.2） | [0002](../../internal/store/migrations/0002_content.sql)、[0009](../../internal/store/migrations/0009_rules.sql) |
 | `message_aliases` | 决定 | 折叠算法换版本后被合并掉的旧 id 指向存活的 id，`yuuka://` 锚点和外键引用因此不失效 | [0002](../../internal/store/migrations/0002_content.sql) |
 | `prefixes` | 决定；`first_seen` / `last_seen` 是观测值 | `(zone, prefix)` 注册表：我把它给了谁（`expected_domains`，存组织域）、claimed / discovered 两态（§3.3、§4.3）。实际谁在发、有没有泄漏或仿冒不存，读时从投递现算（§3.3） | [0002](../../internal/store/migrations/0002_content.sql)、[0004](../../internal/store/migrations/0004_prefix_claim.sql) |
 | `changes` | 日志 | 全局变更日志：§8.6 的 `since_state`、JMAP `queryChanges`、前端 SSE 共用。M1 建表就开始写 | [0002](../../internal/store/migrations/0002_content.sql) |
 | `principals` `credentials` `passkeys` `enrollment_tokens` `recovery_codes` | 配置与授权 | 主体、凭据、WebUI 登录（§13.2、§13.3、§13.7） | [0003](../../internal/store/migrations/0003_identity.sql) |
 | `identity_grants` `account_access` | 配置与授权 | 谁能以哪个身份发信、发到哪一步（§13.5）；谁能读哪个账户（§13.8）。M1 建表，M2 补外键 | [0003](../../internal/store/migrations/0003_identity.sql)、[0005](../../internal/store/migrations/0005_sending.sql) |
 | `actions` | 决定 | 审计日志（§8.8） | [0003](../../internal/store/migrations/0003_identity.sql) |
+| `rules` | 决定 | 规则（§8.5）：匹配树和动作存规范化的 JSON，`revision` 每次改动加一，软删除。每条规则有自己的 `rule:<id>` 主体 | [0009](../../internal/store/migrations/0009_rules.sql) |
+| `proposals` | 决定 | agent 的提案和人的决定（§8.5）；`expired` 读时现算 | [0009](../../internal/store/migrations/0009_rules.sql) |
+| `annotation_log` | 决定 | 对 class / archived / 每个标签的每次改动：谁、什么等级、前后值。来源追溯、撤销和优先级都靠它（§8.5） | [0009](../../internal/store/migrations/0009_rules.sql) |
 | `identities` | 配置与授权 | 能用来发信的地址（精确地址或 `*@zone`）、所属账户、出口名、归属主体（§9.3、§8.9） | [0005](../../internal/store/migrations/0005_sending.sql) |
 | `drafts` | 决定 | 写好了、没发出的信；提交超出授权时停在这里，`hold_reason` 说明原因（§8.9） | [0005](../../internal/store/migrations/0005_sending.sql) |
 | `outbox` | 决定 | 决定要发的每封信，和它在 §4.5 状态机里的位置；`raw_id` 指向 Sent 副本 | [0005](../../internal/store/migrations/0005_sending.sql) |
@@ -101,7 +104,6 @@ drafts(attachments jsonb,            -- 要先有上传存储
        proposal_id)                  -- 提案（M3）
 
 attachments(id ulid pk, message_id, filename, mime, size, sha256, content_id, disposition, blob_key)
-rules(id, priority, match jsonb, actions jsonb, enabled, proposal_id)     -- 分流/标签/推送；actions 封顶在标注层（§8.5）
 notifications(id, message_id, channel, state, sent_at)
 ```
 
@@ -175,7 +177,7 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
 | **派生** | `messages`（除 id 外的列）、`threads`、`attachments`、`extractions`、`deliveries.message_id`、`deliveries.auth` | 从 `deliveries.raw_id → raw_objects`、`outbox.raw_id → raw_objects`（Sent 副本，§4.6）、`send_attempts` 记下的 id（线程）和账户配置重算 |
 | **投递事实** | `raw_objects`（含 `content_hash`、`duplicate_of`）；`deliveries` 的其余列（`source_key`、信封、远端定位、`remote_state`、`offloaded_at`、`spf_recheck`） | 不碰。它们来自 ingest 当时的 `InboundRef` 和当时的外部状态 |
 | **发送事实** | `send_attempts`、`outbox_recipients`：远端当时怎么回答、什么时候；Sent 副本本身是 `raw_objects` 里的投递事实 | 不碰 |
-| **决定** | `message_state`、`message_aliases`、`prefixes`（label / note / expected_domains / state）、`rules`、`proposals`、`actions`、`drafts`、`outbox`、`notifications` | 不碰 |
+| **决定** | `message_state`、`message_aliases`、`prefixes`（label / note / expected_domains / state）、`rules`、`proposals`、`annotation_log`、`actions`、`drafts`、`outbox`、`notifications` | 不碰；也不重跑规则，规则的效果是到达时做的决定（§8.5） |
 | **配置与授权** | `principals` / `credentials` / `identity_grants` / `account_access`（§13）、`accounts` / `identities` | 不碰 |
 
 后四类**无法从原件重建**，备份要按正经数据库来（§7）。CF 来源的投递事实能从 R2 对象的
@@ -210,7 +212,7 @@ metadata 恢复（§2.1），但外部账户的远端定位和卸载状态只在
   （webhook 的实时收信不走这个循环，不受影响）。
   个人信箱的量级可以接受；要是哪天不行，给这一遍限速或者让它不写 `changes`
   另一种做法是每次升 `mimeparse.Version` 都自动重建 `parser_version` 落后的行；那等于把 reparse 变成升级的默认动作，
-  而 reparse 要全库重建线程，没有这么做。下一次再给 `messages` 加派生列，照 0007 的写法：可空、部分索引找空行、补跑填
+  而 reparse 要全库重建线程，没有这么做。下一次再给 `messages` 加派生列，照 0007 的写法：可空、部分索引找空行、补跑填（0010 的 `list_id` 就是这样加的）
 - **提取值换版本自动重算，解析器不**：`extractions`（0008）的写法和 0007 一样由补跑填，
   但标记是 `messages.extract_version`（旧行为 0），补跑找的是「低于当前 `extract.Version`」而不只是「没填过」。
   所以升级提取器的版本号，下一个对账周期就把全库的信重新提取一遍，不必 reparse。

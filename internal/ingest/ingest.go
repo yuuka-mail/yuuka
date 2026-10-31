@@ -41,6 +41,13 @@ type Notifier interface {
 	Notify(ctx context.Context, text string) error
 }
 
+// SilentNotifier is a Notifier that can also deliver without sound, for
+// mail a rule asked to notify silently. A Notifier without it notifies
+// normally.
+type SilentNotifier interface {
+	NotifySilently(ctx context.Context, text string) error
+}
+
 // Config holds an Ingester's dependencies.
 type Config struct {
 	Raw     RawStore
@@ -157,7 +164,7 @@ func (in *Ingester) commit(ctx context.Context, m contract.Marker, body []byte) 
 		return out, nil
 	}
 	if f.Notify {
-		in.notify(ctx, notify.Summary(zone, prefix, body))
+		in.notify(ctx, notify.Summary(zone, prefix, body), f.Silent)
 	}
 	return out, nil
 }
@@ -180,7 +187,7 @@ func (in *Ingester) account(ctx context.Context) (string, error) {
 
 // notify runs best effort in the background: it never blocks or fails
 // the ingest that triggered it.
-func (in *Ingester) notify(ctx context.Context, text string) {
+func (in *Ingester) notify(ctx context.Context, text string, silent bool) {
 	if in.cfg.Notifier == nil {
 		return
 	}
@@ -194,7 +201,11 @@ func (in *Ingester) notify(ctx context.Context, text string) {
 		defer func() { <-in.notifySem }()
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
 		defer cancel()
-		if err := in.cfg.Notifier.Notify(ctx, text); err != nil {
+		send := in.cfg.Notifier.Notify
+		if sn, ok := in.cfg.Notifier.(SilentNotifier); ok && silent {
+			send = sn.NotifySilently
+		}
+		if err := send(ctx, text); err != nil {
 			in.cfg.Log.Warn("notify", "err", err)
 		}
 	})

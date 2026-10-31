@@ -93,7 +93,10 @@ type Action struct {
 	Tool         string
 	Args         any
 	Result       any
-	At           time.Time
+	// UndoToken is set on actions whose annotations Undo can revert: the
+	// action's own id, a marker rather than a secret (§8.8).
+	UndoToken string
+	At        time.Time
 }
 
 // querier is what both a pool and a transaction offer.
@@ -124,9 +127,9 @@ func insertAction(ctx context.Context, q querier, a Action) error {
 		}
 	}
 	_, err = q.Exec(ctx, `
-		INSERT INTO actions (id, actor, credential_id, tool, args, result, at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		a.ID, nullable(a.Actor), nullable(a.CredentialID), a.Tool, args, result, a.At)
+		INSERT INTO actions (id, actor, credential_id, tool, args, result, undo_token, at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		a.ID, nullable(a.Actor), nullable(a.CredentialID), a.Tool, args, result, nullable(a.UndoToken), a.At)
 	if err != nil {
 		return fmt.Errorf("insert action %s: %w", a.Tool, err)
 	}
@@ -290,7 +293,12 @@ func (db *DB) TouchCredential(ctx context.Context, id string, at time.Time) erro
 	return nil
 }
 
+// insertCredential stores c. A rule principal never holds one
+// (ErrRulePrincipal): rules act only inside ingest and retroactive runs.
 func insertCredential(ctx context.Context, q querier, c Credential) error {
+	if err := refuseRulePrincipal(ctx, q, c.PrincipalID); err != nil {
+		return err
+	}
 	_, err := q.Exec(ctx, `
 		INSERT INTO credentials (id, principal_id, kind, label, secret_hash, scopes, created_at, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,

@@ -130,6 +130,11 @@ type MessageFilter struct {
 	// together (§12.9).
 	Classes    []classify.Class
 	Downgraded Downgrade
+	// Label, when set, keeps messages carrying it (exact,
+	// case-sensitive). Archived, when set, keeps archived (true) or
+	// unarchived (false) messages; nil means both.
+	Label    string
+	Archived *bool
 }
 
 // MessageCursor is a position in the list order (received_at, id), both
@@ -177,6 +182,10 @@ type MessageSummary struct {
 	// nobody judged. It is a delivery fact: callers withhold it from
 	// viewers without delivery:read.
 	SenderVerified *bool
+	// Labels and Archived are the annotations (§8.5): who set them is
+	// in MessageAnnotations.
+	Labels   []string
+	Archived bool
 }
 
 // summaryCols and summaryFrom are shared by the list and the thread; the
@@ -185,7 +194,7 @@ type MessageSummary struct {
 // the §4.3 downgrade judges how mail arrived, and a sent copy did not.
 const summaryCols = `m.id, m.thread_id, m.received_at, m.subject, m.from_addr, m.from_name, m.snippet,
 	coalesce(s.class_override, m.class), g.downgraded, m.parse_error IS NOT NULL, m.has_attach, g.recipients,
-	ob.id, ob.state, ob.from_addr, ex.items, g.sender_verified`
+	ob.id, ob.state, ob.from_addr, ex.items, g.sender_verified, coalesce(s.labels, '{}'), coalesce(s.archived, false)`
 
 func (db *DB) summaryFrom(v *auth.Viewer) string {
 	return `
@@ -218,7 +227,7 @@ func scanSummary(r pgx.CollectableRow) (MessageSummary, error) {
 	var obID, obState, obFrom *string
 	err := r.Scan(&m.ID, &m.ThreadID, &m.ReceivedAt, &m.Subject, &m.FromAddr, &m.FromName, &m.Snippet,
 		&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState, &obFrom,
-		&m.Extracted, &m.SenderVerified)
+		&m.Extracted, &m.SenderVerified, &m.Labels, &m.Archived)
 	m.Outgoing = outgoing(obID, obState, obFrom)
 	return m, err
 }
@@ -254,6 +263,7 @@ func (db *DB) ListMessages(ctx context.Context, v *auth.Viewer, q MessageQuery) 
 		}
 		where = append(where, `coalesce(s.class_override, m.class) = ANY(`+arg(cs)+`)`)
 	}
+	where = append(where, annotationFilter(q.Label, q.Archived, arg)...)
 	switch q.Downgraded {
 	case HideDowngraded:
 		where = append(where, `NOT g.downgraded`)
@@ -345,7 +355,7 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 			var obID, obState, obFrom *string
 			err := r.Scan(&m.ID, &m.ThreadID, &m.ReceivedAt, &m.Subject, &m.FromAddr, &m.FromName, &m.Snippet,
 				&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState, &obFrom,
-				&m.Extracted, &m.SenderVerified, &d.MessageID, &d.InReplyTo, &d.References, &d.Date, &d.BodyText, &d.ParseError)
+				&m.Extracted, &m.SenderVerified, &m.Labels, &m.Archived, &d.MessageID, &d.InReplyTo, &d.References, &d.Date, &d.BodyText, &d.ParseError)
 			m.Outgoing = outgoing(obID, obState, obFrom)
 			return d, err
 		})
@@ -599,4 +609,18 @@ func (db *DB) prefixStats(ctx context.Context, tx pgx.Tx, v *auth.Viewer, q Pref
 		}
 	}
 	return out, nil
+}
+
+// annotationFilter is the label and archived conditions on message_state
+// s shared by the list and search. labels <> '{}' is implied by the
+// containment; it is spelled out so the partial GIN index applies.
+func annotationFilter(label string, archived *bool, arg func(any) string) []string {
+	var where []string
+	if label != "" {
+		where = append(where, `s.labels <> '{}' AND s.labels @> ARRAY[`+arg(label)+`]::text[]`)
+	}
+	if archived != nil {
+		where = append(where, `coalesce(s.archived, false) = `+arg(*archived))
+	}
+	return where
 }

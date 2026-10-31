@@ -37,6 +37,9 @@ type SearchQuery struct {
 	Class *classify.Class
 	// Since, when set, keeps messages received at or after it.
 	Since time.Time
+	// Label and Archived narrow as in MessageFilter.
+	Label    string
+	Archived *bool
 }
 
 // SearchHit is one message in a search result.
@@ -54,9 +57,12 @@ type SearchHit struct {
 	Quarantined bool
 	// Outgoing is set for our own mail (§4.6), as in MessageSummary.
 	Outgoing *Outgoing
-	// Extracted and SenderVerified are as in MessageSummary.
+	// Extracted, SenderVerified, Labels and Archived are as in
+	// MessageSummary.
 	Extracted      []Extraction
 	SenderVerified *bool
+	Labels         []string
+	Archived       bool
 }
 
 // SearchResult is a page of hits, newest first, and the total number of
@@ -107,6 +113,10 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		args = append(args, q.Since)
 		where = append(where, fmt.Sprintf(`m.received_at >= $%d`, len(args)))
 	}
+	where = append(where, annotationFilter(q.Label, q.Archived, func(a any) string {
+		args = append(args, a)
+		return fmt.Sprintf("$%d", len(args))
+	})...)
 	if !q.IncludeDowngraded {
 		where = append(where, `NOT downgraded`)
 	}
@@ -137,7 +147,7 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 			SELECT m.id, m.thread_id, m.received_at, m.subject, m.from_addr, m.from_name, m.snippet,
 				coalesce(s.class_override, m.class), downgraded, m.parse_error IS NOT NULL, ob.id, ob.state, ob.from_addr,
-				hx.items, hx.sender_verified
+				hx.items, hx.sender_verified, coalesce(s.labels, '{}'), coalesce(s.archived, false)
 			%s
 			ORDER BY m.received_at DESC, m.id DESC
 			LIMIT $%d`, page, len(pageArgs)), pageArgs...)
@@ -149,7 +159,7 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 			var obID, obState, obFrom *string
 			err := r.Scan(&h.ID, &h.ThreadID, &h.ReceivedAt, &h.Subject, &h.FromAddr, &h.FromName,
 				&h.Snippet, &h.Class, &h.Downgraded, &h.Quarantined, &obID, &obState, &obFrom,
-				&h.Extracted, &h.SenderVerified)
+				&h.Extracted, &h.SenderVerified, &h.Labels, &h.Archived)
 			h.Outgoing = outgoing(obID, obState, obFrom)
 			return h, err
 		})

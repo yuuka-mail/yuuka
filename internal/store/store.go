@@ -18,6 +18,8 @@ type DB struct {
 	// enforceAccountAccess filters reads by account_access (§13.8). Off
 	// until M3.5; only the tests turn it on (see readableAccount).
 	enforceAccountAccess bool
+	// progs caches compiled rules for ingest (rules.go).
+	progs programCache
 }
 
 // New wraps pool. The caller keeps ownership of the pool.
