@@ -104,7 +104,9 @@ func (t *SMTP) Caps() Caps { return t.cfg.Caps }
 // or the transaction failed earlier.
 //
 // Send always returns a result. The error is nil for OutcomeAccepted and
-// OutcomePartial and explains the failure otherwise. The context's deadline
+// OutcomePartial and explains the failure otherwise; a failure once the
+// session has started is an *Error naming its Stage (see ExitFailure). The
+// context's deadline
 // (or DefaultTimeout) bounds the whole attempt; cancelling it after commit
 // yields OutcomeUnknown.
 func (t *SMTP) Send(ctx context.Context, env Envelope, raw []byte, commit func(context.Context) error) (*SendResult, error) {
@@ -141,13 +143,13 @@ func (t *SMTP) Send(ctx context.Context, env Envelope, raw []byte, commit func(c
 	}}
 	conn, err := d.DialContext(ctx, "tcp", addr)
 	if err != nil {
-		return a.fail("connect", err)
+		return a.fail(StageConnect, err)
 	}
 	// This Close is also how an attempt is abandoned: closing while the data
 	// is still open makes the server discard the message.
 	defer func() { _ = conn.Close() }()
 	if err := conn.SetDeadline(deadline); err != nil {
-		return a.fail("connect", err)
+		return a.fail(StageConnect, err)
 	}
 	// Cancellation interrupts blocked I/O by moving the deadline into the
 	// past. After commit that surfaces as an I/O error, hence Unknown.
@@ -156,7 +158,7 @@ func (t *SMTP) Send(ctx context.Context, env Envelope, raw []byte, commit func(c
 
 	c, err := smtp.NewClient(conn, t.cfg.Host)
 	if err != nil {
-		return a.fail("greeting", err)
+		return a.fail(StageGreeting, err)
 	}
 	// dataOpen is true while a DotWriter is open. Then nothing else may be
 	// written: textproto closes an open DotWriter, i.e. sends the
@@ -174,15 +176,15 @@ func (t *SMTP) Send(ctx context.Context, env Envelope, raw []byte, commit func(c
 		helo = "localhost"
 	}
 	if err := c.Hello(helo); err != nil {
-		return a.fail("EHLO", err)
+		return a.fail(StageEHLO, err)
 	}
 	if t.cfg.Username != "" {
 		_, mechs := c.Extension("AUTH")
 		if !slices.ContainsFunc(strings.Fields(mechs), func(m string) bool { return strings.EqualFold(m, "PLAIN") }) {
-			return a.local(fmt.Errorf("%w: AUTH PLAIN", ErrUnsupported))
+			return a.localAt(StageAuth, fmt.Errorf("%w: AUTH PLAIN", ErrUnsupported))
 		}
 		if err := c.Auth(smtp.PlainAuth("", t.cfg.Username, t.cfg.Password, t.cfg.Host)); err != nil {
-			return a.fail("AUTH", err)
+			return a.fail(StageAuth, err)
 		}
 	}
 
@@ -209,17 +211,17 @@ func (t *SMTP) Send(ctx context.Context, env Envelope, raw []byte, commit func(c
 
 	r, err := cmd(c.Text, "MAIL FROM:<%s>%s", env.From, params)
 	if err != nil {
-		return a.fail("MAIL", err)
+		return a.fail(StageMail, err)
 	}
 	if r.Code/100 != 2 {
-		return a.refuse("MAIL", r)
+		return a.refuse(StageMail, r)
 	}
 
 	accepted := 0
 	for i, to := range env.To {
 		r, err := cmd(c.Text, "RCPT TO:<%s>", to)
 		if err != nil {
-			return a.fail("RCPT", err)
+			return a.fail(StageRcpt, err)
 		}
 		rr := &a.res.Recipients[i]
 		rr.Code, rr.Text = r.Code, r.Text
@@ -233,15 +235,15 @@ func (t *SMTP) Send(ctx context.Context, env Envelope, raw []byte, commit func(c
 		}
 	}
 	if accepted == 0 {
-		return a.finish(errors.New("transport: RCPT: no recipient accepted"))
+		return a.finish(&Error{Stage: StageRcpt, Err: errors.New("no recipient accepted")})
 	}
 
 	r, err = cmd(c.Text, "DATA")
 	if err != nil {
-		return a.fail("DATA", err)
+		return a.fail(StageData, err)
 	}
 	if r.Code != 354 {
-		return a.refuse("DATA", r)
+		return a.refuse(StageData, r)
 	}
 
 	// net/textproto's DotWriter writes into the connection's bufio.Writer and
@@ -252,27 +254,27 @@ func (t *SMTP) Send(ctx context.Context, env Envelope, raw []byte, commit func(c
 	dataOpen = true
 	w := c.Text.DotWriter()
 	if _, err := w.Write(raw); err != nil {
-		return a.fail("DATA", err)
+		return a.fail(StageData, err)
 	}
 	if err := c.Text.W.Flush(); err != nil {
-		return a.fail("DATA", err)
+		return a.fail(StageData, err)
 	}
 	if err := commit(ctx); err != nil {
 		// Return with the DotWriter open: the deferred conn.Close drops the
 		// connection mid-data, and the server discards the message.
-		err = fmt.Errorf("transport: commit: %w", err)
-		a.settle(StatusDeferred, Reply{Text: "not sent: " + err.Error()})
-		return a.finish(err)
+		e := &Error{Stage: StageCommit, Err: err}
+		a.settle(StatusDeferred, Reply{Text: "not sent: " + e.Error()})
+		return a.finish(e)
 	}
 	a.res.Committed = true
 
 	if err := w.Close(); err != nil {
-		return a.fail("end of data", err)
+		return a.fail(StageEndOfData, err)
 	}
 	dataOpen = false
 	code, text, err := c.Text.ReadResponse(0)
 	if err != nil {
-		return a.fail("final reply", err)
+		return a.fail(StageFinal, err)
 	}
 	final := Reply{Code: code, Text: text}
 	a.res.Final = final
@@ -294,7 +296,7 @@ func (t *SMTP) Send(ctx context.Context, env Envelope, raw []byte, commit func(c
 	default:
 		a.settle(StatusUnknown, final) // not a valid answer to the end of data
 	}
-	return a.finish(fmt.Errorf("transport: final reply: %w", &textproto.Error{Code: code, Msg: text}))
+	return a.finish(&Error{Stage: StageFinal, Err: &textproto.Error{Code: code, Msg: text}})
 }
 
 // cmd sends one command and reads its reply without judging the code, so
@@ -336,32 +338,39 @@ func (a *attempt) local(err error) (*SendResult, error) {
 	return a.finish(err)
 }
 
+// localAt is local for a check that belongs to a stage of the session.
+func (a *attempt) localAt(stage Stage, err error) (*SendResult, error) {
+	e := &Error{Stage: stage, Err: err}
+	a.settle(StatusRejected, Reply{Text: e.Error()})
+	return a.finish(e)
+}
+
 // refuse fails the attempt on a server reply before the commit point.
-func (a *attempt) refuse(stage string, r Reply) (*SendResult, error) {
+func (a *attempt) refuse(stage Stage, r Reply) (*SendResult, error) {
 	s := StatusDeferred
 	if r.Code/100 == 5 {
 		s = StatusRejected
 	}
 	a.settle(s, r)
-	return a.finish(fmt.Errorf("transport: %s: %w", stage, &textproto.Error{Code: r.Code, Msg: r.Text}))
+	return a.finish(&Error{Stage: stage, Err: &textproto.Error{Code: r.Code, Msg: r.Text}})
 }
 
 // fail fails the attempt on an error from net/smtp or the connection.
 // Before the commit point nothing was delivered: a reply decides by its
 // code, anything else is temporary. After it, the outcome is unknown.
-func (a *attempt) fail(stage string, err error) (*SendResult, error) {
+func (a *attempt) fail(stage Stage, err error) (*SendResult, error) {
 	if !a.res.Committed {
 		if te, ok := errors.AsType[*textproto.Error](err); ok {
 			return a.refuse(stage, Reply{Code: te.Code, Text: te.Msg})
 		}
 	}
-	err = fmt.Errorf("transport: %s: %w", stage, err)
+	e := &Error{Stage: stage, Err: err}
 	if a.res.Committed {
-		a.settle(StatusUnknown, Reply{Text: "after commit: " + err.Error()})
+		a.settle(StatusUnknown, Reply{Text: "after commit: " + e.Error()})
 	} else {
-		a.settle(StatusDeferred, Reply{Text: err.Error()})
+		a.settle(StatusDeferred, Reply{Text: e.Error()})
 	}
-	return a.finish(err)
+	return a.finish(e)
 }
 
 // okMsgID is the whole final reply of Cloudflare Email Sending: an enhanced

@@ -134,6 +134,7 @@ func TestSendOutcomes(t *testing.T) {
 		commits   int32
 		sawData   bool // the server got a DATA command
 		dot       bool // the server got the end-of-data
+		exit      bool // ExitFailure: the exit, not the message, failed
 	}{
 		{
 			name: "all accepted", outcome: OutcomeAccepted,
@@ -142,27 +143,27 @@ func TestSendOutcomes(t *testing.T) {
 		},
 		{
 			name: "greeting 421", b: behavior{greeting: "421 4.3.2 Service not available"},
-			outcome: OutcomeFailed, status: []Status{D, D, D}, codes: []int{421, 421, 421},
+			outcome: OutcomeFailed, status: []Status{D, D, D}, codes: []int{421, 421, 421}, exit: true,
 		},
 		{
 			name: "greeting 554", b: behavior{greeting: "554 5.7.1 No SMTP service here"},
-			outcome: OutcomeRejected, status: []Status{R, R, R}, codes: []int{554, 554, 554},
+			outcome: OutcomeRejected, status: []Status{R, R, R}, codes: []int{554, 554, 554}, exit: true,
 		},
 		{
 			name: "greeting never comes", b: behavior{greeting: "hang"}, timeout: 200 * time.Millisecond,
-			outcome: OutcomeFailed, status: []Status{D, D, D}, codes: []int{0, 0, 0},
+			outcome: OutcomeFailed, status: []Status{D, D, D}, codes: []int{0, 0, 0}, exit: true,
 		},
 		{
 			name: "AUTH 535", b: behavior{auth: "535 5.7.8 Authentication credentials invalid"},
-			outcome: OutcomeRejected, status: []Status{R, R, R}, codes: []int{535, 535, 535},
+			outcome: OutcomeRejected, status: []Status{R, R, R}, codes: []int{535, 535, 535}, exit: true,
 		},
 		{
 			name: "AUTH 454", b: behavior{auth: "454 4.7.0 Temporary authentication failure"},
-			outcome: OutcomeFailed, status: []Status{D, D, D}, codes: []int{454, 454, 454},
+			outcome: OutcomeFailed, status: []Status{D, D, D}, codes: []int{454, 454, 454}, exit: true,
 		},
 		{
 			name: "AUTH not offered", b: behavior{ext: []string{"8BITMIME"}},
-			outcome: OutcomeRejected, status: []Status{R, R, R}, codes: []int{0, 0, 0},
+			outcome: OutcomeRejected, status: []Status{R, R, R}, codes: []int{0, 0, 0}, exit: true,
 		},
 		{
 			name: "MAIL 451", b: behavior{mail: "451 4.3.0 Local error"},
@@ -240,6 +241,9 @@ func TestSendOutcomes(t *testing.T) {
 			}
 			if n := c.n.Load(); n != tt.commits {
 				t.Errorf("commit called %d times, want %d", n, tt.commits)
+			}
+			if got := ExitFailure(err); got != tt.exit {
+				t.Errorf("ExitFailure(%v) = %v, want %v", err, got, tt.exit)
 			}
 			if tt.commitErr != nil && !errors.Is(err, tt.commitErr) {
 				t.Errorf("error %v does not wrap the commit error", err)
@@ -397,8 +401,8 @@ func TestSendVerifiesCertificate(t *testing.T) {
 	if _, ok := errors.AsType[*tls.CertificateVerificationError](err); !ok {
 		t.Errorf("error %v, want a certificate verification error", err)
 	}
-	if res.Outcome != OutcomeFailed || res.Committed {
-		t.Errorf("result %+v", res)
+	if res.Outcome != OutcomeFailed || res.Committed || !ExitFailure(err) {
+		t.Errorf("result %+v, exit failure %v", res, ExitFailure(err))
 	}
 	if s := srv.next(t); s.auth != "" || s.mail != "" {
 		t.Errorf("server session got %+v", s)
@@ -414,8 +418,11 @@ func TestSendConnectionRefused(t *testing.T) {
 	_ = ln.Close()
 	cfg := Config{Host: "127.0.0.1", Port: port}
 	res, err := send(t, cfg, t.Context(), []string{"rcpt@example.com"}, testRaw, (&commits{}).fn)
-	if err == nil || res.Outcome != OutcomeFailed || res.Recipients[0].Status != StatusDeferred {
+	if err == nil || res.Outcome != OutcomeFailed || res.Recipients[0].Status != StatusDeferred || !ExitFailure(err) {
 		t.Errorf("result %+v, err %v", res, err)
+	}
+	if e, ok := errors.AsType[*Error](err); !ok || e.Stage != StageConnect {
+		t.Errorf("error %v, want stage %s", err, StageConnect)
 	}
 }
 

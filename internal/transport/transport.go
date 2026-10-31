@@ -15,7 +15,10 @@
 // is never retried blindly.
 package transport
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // Envelope is the SMTP envelope of one attempt. It is independent of the
 // header fields: Bcc recipients appear only here, and From is the
@@ -178,6 +181,57 @@ type SendResult struct {
 	// "Ok <X>" (§10.4.1). Otherwise it is empty; guessing would break
 	// thread matching silently.
 	MessageID string
+}
+
+// Stage is the step of the SMTP session at which an attempt stopped.
+type Stage string
+
+// The stages, in session order.
+const (
+	StageConnect   Stage = "connect" // TCP, TLS handshake and certificate check
+	StageGreeting  Stage = "greeting"
+	StageEHLO      Stage = "EHLO"
+	StageAuth      Stage = "AUTH"
+	StageMail      Stage = "MAIL"
+	StageRcpt      Stage = "RCPT"
+	StageData      Stage = "DATA" // the DATA command and writing the body
+	StageCommit    Stage = "commit"
+	StageEndOfData Stage = "end of data"
+	StageFinal     Stage = "final reply"
+)
+
+// Error is how Send reports a failure at a stage of the session. It wraps
+// the cause: a *textproto.Error for a server reply, a network or TLS error,
+// or a local check error such as ErrUnsupported. Local checks of the
+// message itself, made before connecting, are not wrapped in it.
+type Error struct {
+	Stage Stage
+	Err   error
+}
+
+func (e *Error) Error() string { return "transport: " + string(e.Stage) + ": " + e.Err.Error() }
+
+func (e *Error) Unwrap() error { return e.Err }
+
+// ExitFailure reports whether err says the exit could not be used at all,
+// rather than anything about the message: connecting failed (refused,
+// unreachable, timed out, a certificate that does not verify), or the
+// server turned the session down at the greeting, EHLO or AUTH (bad
+// credentials, 454, no AUTH PLAIN). All of these happen before MAIL, so
+// the server has heard nothing about the message, and the recipient
+// statuses Send reports for them say nothing about it either: a 535 makes
+// every recipient rejected only because a reply code decides. A caller
+// that retries per message should pause the whole exit instead (§4.5).
+func ExitFailure(err error) bool {
+	e, ok := errors.AsType[*Error](err)
+	if !ok {
+		return false
+	}
+	switch e.Stage {
+	case StageConnect, StageGreeting, StageEHLO, StageAuth:
+		return true
+	}
+	return false
 }
 
 // summarize derives the outcome from the recipient statuses.
