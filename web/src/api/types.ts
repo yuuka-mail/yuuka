@@ -24,6 +24,7 @@ export type Offense = S["Offense"];
 export type LeakCheck = S["LeakCheck"];
 export type LeakVerdict = S["LeakVerdict"];
 export type SearchResult = S["SearchResult"];
+export type SearchHint = S["SearchHint"];
 
 /** The query of GET /api/v1/messages. */
 export type MessageListQuery = NonNullable<paths["/api/v1/messages"]["get"]["parameters"]["query"]>;

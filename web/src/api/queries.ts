@@ -5,7 +5,15 @@ import { outboxMoves } from "@/send/outgoing";
 
 import { $api, api, ApiError, isUnauthenticated } from "./client";
 import type { paths } from "./schema.gen";
-import type { Draft, DraftState, MessageSummary, OutboxEntry, OutboxState, Prefix } from "./types";
+import type {
+  Draft,
+  DraftState,
+  MessageSummary,
+  OutboxEntry,
+  OutboxState,
+  Prefix,
+  SearchHint,
+} from "./types";
 
 type PreviewBody =
   paths["/api/v1/rules/preview"]["post"]["requestBody"]["content"]["application/json"];
@@ -131,22 +139,24 @@ export function useMessageList(v: View, enabled: boolean): MailList {
   };
 }
 
-export function useSearchList(
-  text: string,
-  includeDowngraded: boolean,
-  enabled: boolean,
-  triage?: string,
-): MailList {
-  const q = $api.useInfiniteQuery(
+/** A search's hits, and how the server read the query (§16.2). */
+export interface SearchList extends MailList {
+  /** The query as read, normalized; undefined until this query's first page is in. */
+  query?: string;
+  /** Items searched as text that look like a misspelt operator. */
+  hints: SearchHint[];
+}
+
+export function useSearchList(q: string, includeDowngraded: boolean, enabled: boolean): SearchList {
+  const r = $api.useInfiniteQuery(
     "get",
     "/api/v1/search",
     {
       params: {
         query: {
-          // Everything that narrows a search is written in q (§16). A
-          // leading item cannot change how the text groups: OR binds
-          // tighter than the AND between items.
-          q: triage ? `triage:${triage} ${text}` : text,
+          // The whole query is the box's text (§16.5): a view's scope is
+          // written there, where the person sees it, and nothing is added.
+          q,
           downgraded: includeDowngraded ? "include" : "hide",
           // Dates in q (after:2026-10-01) start their day here.
           tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -156,14 +166,18 @@ export function useSearchList(
     },
     { ...cursorPaging, enabled },
   );
+  // The previous query's echo would describe the wrong text.
+  const first = r.isPlaceholderData ? undefined : r.data?.pages[0];
   return {
-    items: q.data?.pages.flatMap((p) => p.hits) ?? [],
-    total: q.data?.pages[0]?.total,
-    hasMore: q.hasNextPage,
-    loadMore: () => void q.fetchNextPage(),
-    isLoading: q.isLoading,
-    isFetchingMore: q.isFetchingNextPage,
-    error: q.error,
+    items: r.data?.pages.flatMap((p) => p.hits) ?? [],
+    total: r.data?.pages[0]?.total,
+    hasMore: r.hasNextPage,
+    loadMore: () => void r.fetchNextPage(),
+    isLoading: r.isLoading,
+    isFetchingMore: r.isFetchingNextPage,
+    error: r.error,
+    query: first?.query,
+    hints: first?.hints ?? [],
   };
 }
 

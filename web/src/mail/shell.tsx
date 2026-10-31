@@ -1,5 +1,5 @@
 import { ParaglideMessage } from "@inlang/paraglide-js-react";
-import { PanelLeftIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { PanelLeftIcon, SquarePenIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { markup } from "@/components/markup";
@@ -11,10 +11,10 @@ import {
   useTriageReport,
   useUnclaimedPrefixes,
   type MailList,
+  type SearchList,
 } from "@/api/queries";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { count } from "@/lib/format";
 import { navigate, useLocation } from "@/lib/router";
@@ -36,6 +36,9 @@ import { MessageList } from "./message-list";
 import { PrefixPane } from "./prefix-pane";
 import { ProposalList, StandaloneProposal } from "./proposals";
 import { ReadingPane } from "./reading-pane";
+import { queryProblem, scopeOf, type QueryProblem } from "./search";
+import { SearchBox } from "./search-box";
+import { SearchNote } from "./search-note";
 import { LeanFilter } from "./triage-box";
 import { UnclaimedList } from "./unclaimed-list";
 import {
@@ -113,8 +116,10 @@ export function MailShell({ session }: { session: SessionInfo }) {
   const outbox = browsing && view.area === "outbox";
   const proposals = browsing && view.area === "proposals";
   const messages = useMessageList(view, !searching);
-  const hits = useSearchList(view.q ?? "", view.dg, searching, view.tr);
+  const hits = useSearchList(view.q ?? "", view.dg, searching);
   const list = searching ? hits : messages;
+  // A query that cannot run is shown under the box, where it is fixed.
+  const problem = searching ? queryProblem(hits.error, view.q ?? "") : undefined;
   // Whether a scorer is configured (§15), and its report: without one there
   // is nothing to filter by, and the filter would answer 400.
   const triage = useTriageReport(undefined, can.triage);
@@ -144,6 +149,9 @@ export function MailShell({ session }: { session: SessionInfo }) {
         <SearchBox
           ref={searchBox}
           value={view.q ?? ""}
+          scope={view.settings ? undefined : scopeOf(view)}
+          bcc={can.outbox}
+          triage={triage.scorer ? triage.report : undefined}
           onSearch={(q) => go({ q: q || undefined, m: undefined }, !!view.q === !!q)}
         />
         {can.compose && (
@@ -194,6 +202,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
               <ListHeader
                 view={view}
                 list={list}
+                search={searching ? { list: hits, problem } : undefined}
                 go={go}
                 pick={pick}
                 managePrefixes={can.prefixes}
@@ -232,7 +241,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
                     )
                   }
                 />
-              ) : (
+              ) : problem ? null : (
                 <MessageList
                   list={list}
                   selected={view.m}
@@ -362,6 +371,7 @@ function areaHint(a: Area): React.ReactNode {
 function ListHeader({
   view,
   list,
+  search,
   go,
   pick,
   managePrefixes,
@@ -370,6 +380,8 @@ function ListHeader({
 }: {
   view: View;
   list: MailList;
+  /** While searching: how the query was read, or why it cannot run. */
+  search?: { list: SearchList; problem?: QueryProblem };
   go: (next: Partial<View>, replace?: boolean) => void;
   pick: (next: Partial<View>) => void;
   /** Claiming, unclaiming and expected domains, beside the prefix's mail (§12.12). */
@@ -431,13 +443,13 @@ function ListHeader({
         <h1
           className={cn(
             "min-w-0 truncate font-semibold",
-            view.prefix && "font-mono",
+            view.prefix && !view.q && "font-mono",
             zone && "max-lg:sr-only",
           )}
         >
           {title}
         </h1>
-        {!list.isLoading && !sending && (
+        {!list.isLoading && !list.error && !sending && (
           <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
             {count(n)}
             {more && "+"}
@@ -456,6 +468,14 @@ function ListHeader({
         )}
       </div>
       {hint && <p className="text-small text-muted-foreground">{hint}</p>}
+      {search && view.q && (
+        <SearchNote
+          q={view.q}
+          list={search.list}
+          problem={search.problem}
+          onQuery={(q) => go({ q, m: undefined }, true)}
+        />
+      )}
       {view.prefix && !view.q && (
         <PrefixFacts
           address={view.prefix}
@@ -469,16 +489,15 @@ function ListHeader({
       {browsing && view.area === "outbox" && (
         <OutboxFilterBar st={view.st} onChange={(st) => go({ st, o: undefined })} />
       )}
-      {/* By what a model's estimate leans to (§15.4): the leanings view, or narrowing a search. */}
-      {triage && (view.q || (browsing && view.area === "leanings")) && (
+      {/* By what a model's estimate leans to (§15.4); a search says it with triage: in its text. */}
+      {triage && browsing && view.area === "leanings" && (
         <div className="flex min-w-0 items-center gap-3">
           <LeanFilter
             report={triage}
-            value={view.q ? view.tr : leanOf(view)}
-            optional={!!view.q}
+            value={leanOf(view)}
             onChange={(tr) => go({ tr, m: undefined })}
           />
-          {onReport && !view.q && (
+          {onReport && (
             <button
               type="button"
               className="shrink-0 text-small text-muted-foreground underline underline-offset-2 hover:text-foreground"
@@ -556,65 +575,6 @@ function OutboxFilterBar({
         </ToggleGroupItem>
       ))}
     </ToggleGroup>
-  );
-}
-
-function SearchBox({
-  ref,
-  value,
-  onSearch,
-}: {
-  ref: React.Ref<HTMLInputElement>;
-  value: string;
-  onSearch: (q: string) => void;
-}) {
-  const [text, setText] = useState(value);
-  const [lastValue, setLastValue] = useState(value);
-  // Follow the URL when it changes underneath (Back, a prefix click).
-  if (value !== lastValue) {
-    setLastValue(value);
-    setText(value);
-  }
-  const latest = useRef(onSearch);
-  useEffect(() => {
-    latest.current = onSearch;
-  });
-  useEffect(() => {
-    if (text.trim() === value) return;
-    const t = setTimeout(() => latest.current(text.trim()), 300);
-    return () => clearTimeout(t);
-  }, [text, value]);
-
-  return (
-    <div className="relative min-w-0 flex-1 md:max-w-md">
-      <SearchIcon
-        aria-hidden
-        className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
-      />
-      <Input
-        ref={ref}
-        type="search"
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") latest.current(text.trim());
-          if (e.key === "Escape") e.currentTarget.blur();
-        }}
-        placeholder={msg.shell_search_placeholder()}
-        aria-label={msg.shell_search_label()}
-        className="h-7 pr-7 pl-7"
-      />
-      {text && (
-        <button
-          type="button"
-          aria-label={msg.shell_search_clear()}
-          onClick={() => setText("")}
-          className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-        >
-          <XIcon className="size-3.5" />
-        </button>
-      )}
-    </div>
   );
 }
 

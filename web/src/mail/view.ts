@@ -49,7 +49,7 @@ export interface View {
   rule?: string;
   /**
    * What a model's estimate leans to, as question:option (§15.4): the
-   * leanings view lists that mail, and search narrows to it.
+   * leanings view lists that mail. A search says it in q (triage:).
    */
   tr?: string;
 }

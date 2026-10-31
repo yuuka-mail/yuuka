@@ -268,19 +268,16 @@ export function LeanMarks({ tops }: { tops: Record<string, string> | undefined }
 
 /**
  * The filter by leaning (§15.4): the options the report counted, each
- * with its count. In the leanings view one is always picked; in search
- * it narrows the hits and can be cleared.
+ * with its count. One is always picked; a search narrows by leaning with
+ * triage: in its text (§16.5), which the box completes from the same report.
  */
 export function LeanFilter({
   report,
   value,
-  optional,
   onChange,
 }: {
   report: TriageReport | undefined;
   value: string | undefined;
-  /** Search: no leaning is a choice too. */
-  optional: boolean;
   onChange: (tr: string | undefined) => void;
 }) {
   const current = parseLean(value);
@@ -294,7 +291,6 @@ export function LeanFilter({
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value || undefined)}
       >
-        {optional && <option value="">{m.triage_filter_any()}</option>}
         {choices.map((l: Lean & { messages?: number }) => (
           <option key={leanParam(l)} value={leanParam(l)}>
             {l.messages === undefined

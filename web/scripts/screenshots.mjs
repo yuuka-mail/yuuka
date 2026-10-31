@@ -59,12 +59,14 @@ async function page(scheme, size, storageState, lang) {
     origin: new URL(base).origin,
   });
   const p = await ctx.newPage();
-  // A signed-out /auth/session is a 401 by design; anything else is a problem.
+  // A signed-out /auth/session is a 401 by design, and so is a 400 for a
+  // query the search screens show going wrong; anything else is a problem.
   p.on(
     "console",
     (m) =>
       m.type() === "error" &&
       !/status of 401/.test(m.text()) &&
+      !(/status of 400/.test(m.text()) && m.location().url.includes("/api/v1/search")) &&
       problems.push(`${scheme}/${size} ${p.url()}: ${m.text()}`),
   );
   p.on("pageerror", (e) => problems.push(`${scheme}/${size} ${p.url()}: ${e.message}`));
@@ -283,6 +285,33 @@ if (enrollURL) {
       await s.goto(base + "/?q=verification");
       await s.getByRole("listbox", { name: "Messages" }).waitFor();
       await shot(s, `search-${tag}`);
+      // The box is the query (§16.5): a view's scope prefilled in it, values
+      // offered as typed, the operators one press away, how yuuka read the
+      // query and where it could not.
+      const box = s.getByRole("combobox", { name: "Search mail" });
+      if (claimed) {
+        await s.goto(base + `/?prefix=${encodeURIComponent(claimed)}`);
+        await s.getByRole("listbox", { name: "Messages" }).waitFor();
+        await box.focus();
+        await s.keyboard.type("invoice");
+        await s.getByRole("heading", { name: /deliveredto:/ }).waitFor();
+        await shot(s, `search-prefill-${tag}`);
+      }
+      await s.goto(base + "/");
+      await s.getByRole("listbox", { name: "Messages" }).waitFor();
+      await box.fill("is:a");
+      await s.getByRole("listbox", { name: "Values for is:" }).waitFor();
+      await shot(s, `search-complete-${tag}`);
+      await box.fill("");
+      await s.getByRole("button", { name: "Search operators" }).click();
+      await s.getByRole("dialog", { name: "Search operators" }).waitFor();
+      await shot(s, `search-help-${tag}`);
+      await s.goto(base + "/?q=" + encodeURIComponent("FROM:example form:alice after:-7d"));
+      await s.getByRole("button", { name: "Use from:" }).waitFor();
+      await shot(s, `search-echo-${tag}`);
+      await s.goto(base + "/?q=" + encodeURIComponent("invoice after:2026-13-01"));
+      await s.getByRole("alert").waitFor();
+      await shot(s, `search-error-${tag}`);
       if (discovered) {
         await s.goto(base + `/?prefix=${encodeURIComponent(discovered)}&m=${forged}`);
         await s.getByRole("heading").first().waitFor();
@@ -494,10 +523,17 @@ if (enrollURL) {
           await s.getByRole("button", { name: "Fold the estimate into one line" }).waitFor();
           await shot(s, `reading-estimate-open-${tag}`);
           const word = leaning.subject.split(/\s+/).find((w) => w.length > 3) ?? leaning.subject;
-          await s.goto(base + `/?q=${encodeURIComponent(word)}&tr=phishing:yes`);
+          await s.goto(base + `/?q=${encodeURIComponent(`triage:phishing:yes ${word}`)}`);
           await s.getByRole("listbox", { name: "Messages" }).waitFor();
           await shot(s, `search-leaning-${tag}`);
         }
+        // Searching from the leanings view starts from its leaning, in the box.
+        await s.goto(base + "/?area=leanings");
+        await s.getByRole("heading", { name: "Model leans to…" }).waitFor();
+        await s.getByRole("combobox", { name: "Search mail" }).focus();
+        await s.keyboard.type("triage:");
+        await s.getByRole("listbox", { name: "Values for triage:" }).waitFor();
+        await shot(s, `search-complete-triage-${tag}`);
         await s.goto(base + "/?settings=triage");
         await s.getByRole("region", { name: "Estimate report" }).waitFor();
         await shot(s, `settings-triage-${tag}`);
@@ -536,6 +572,16 @@ if (enrollURL) {
         await s.goto(base + "/?compose=1");
         await s.locator("textarea").waitFor();
         await shot(s, `compose-${tag}`);
+        await s.goto(base + "/");
+        await s.getByRole("button", { name: t.search_help }).click();
+        await s.getByRole("dialog", { name: t.search_help }).waitFor();
+        await shot(s, `search-help-${tag}`);
+        await s.goto(base + "/?q=" + encodeURIComponent("FROM:example form:alice after:-7d"));
+        await s.getByText(t.search_read_as).waitFor();
+        await shot(s, `search-echo-${tag}`);
+        await s.goto(base + "/?q=" + encodeURIComponent("invoice after:2026-13-01"));
+        await s.getByRole("alert").waitFor();
+        await shot(s, `search-error-${tag}`);
         await s.goto(base + "/?area=leaks");
         await s.locator("section h1").first().waitFor();
         await shot(s, `area-leaks-${tag}`);
