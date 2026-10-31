@@ -15,6 +15,7 @@ Cloudflare 生态里已有若干成熟的邮件项目。先说结论：**它们�
 | [cloudflare/agentic-inbox](https://github.com/cloudflare/agentic-inbox) | 官方的 AI 邮件客户端示例，Durable Objects + R2 | 见 §1.1 |
 | [dreamhunter2333/cloudflare_temp_email](https://github.com/dreamhunter2333/cloudflare_temp_email) | 临时邮箱，功能面最广（TG bot、webhook、SMTP/IMAP 代理） | 数据模型围绕「一次性地址」，与长期自持相反 |
 | [Newspicel/cloudflare-mail](https://github.com/Newspicel/cloudflare-mail) | Worker 内实现 IMAP4rev1，另有 iOS 客户端 | IMAP 依赖 Workers inbound TCP 私测 + Spectrum，不可依赖 |
+| [cristianadrielbraun/gofer](https://github.com/cristianadrielbraun/gofer) | 自托管 webmail，Go + SQLite，聚合 IMAP / Gmail / Outlook / JMAP 账户，带日历、通讯录 | 不在 Cloudflare 生态里，和 M3.5 的多账户聚合重叠；本地库是远端的缓存，不是权威存储。见 §1.2 |
 
 ### 1.1 agentic-inbox 的四处错配
 
@@ -37,3 +38,35 @@ Cloudflare 生态里已有若干成熟的邮件项目。先说结论：**它们�
 
 不沿用的一点：它把鉴权完全交给 Cloudflare Access。本设计由应用自己认证每个端点，
 前置身份代理只作纵深防御（§13.7）。
+
+### 1.2 gofer：同样聚合外部账户，但本地只是缓存
+
+gofer 和本项目在「一个收件箱看全部」（§9）上重叠，下面基于 2026-10 的 v0.19.0 源码。
+**根本差别在本地数据的地位**：gofer 把远端当权威，本地 SQLite 只是缓存。远端删了的信本地就删，
+UIDVALIDITY 一变就清掉该文件夹的状态重拉；同步只取 ENVELOPE 和几个线程头，原件点开时才下载，
+超过 64 MB 不下载。这对客户端是对的取舍，对本项目不成立：yuuka 是原件的权威存储（§3.1），
+卸载之后还是唯一副本（§9.6），远端消失只能记成投递的状态，不能删行。
+它没有 agent 面，也不收 catch-all。
+
+它的迁移历史（v0.19.0 时 schema 已到 133 版）记录了几次改方向，其中几次本设计一开始就绕开了：
+
+| gofer 后来改掉的 | 本设计 |
+|---|---|
+| 每个账户按 Message-ID 一行，发给自己的信在 Sent 和 Inbox 的两份副本被合成一行，后来把远端 id 挪到「文件夹状态」上，又补了副本表 | 内容 / 投递两层从第一天就拆开，折叠键是内容哈希（§4.1） |
+| IMAP ENVELOPE 给的 Message-ID 不带尖括号、本地 Sent 副本带，于是重复入库；缺 Message-ID 时合成 `<文件夹-UID@…>`，同一封信在两个文件夹里是两行，UIDVALIDITY 一变又换一个 | 不拿 Message-ID 做身份，缺失时也不合成；跨文件夹的身份交给 `X-GM-MSGID` / `EMAILID`（§10.1） |
+| 凭据密文的 AAD 先用 NUL 拼接字段，有歧义，改成带长度前缀的第二版并启动时重写所有行 | 落地时直接用带长度前缀的版本（§13.3） |
+| 从共享库改成每个用户一个库，写了一整套带日志、可续跑、单向的转换 | 单库，前缀和账户都是维度，不是分库（§3.2、§9.5） |
+
+结论和本设计一致、可作旁证的：
+
+- **发信崩溃后的处理**：启动时把所有「发送中」改成「可能已发出」，重发要人确认。
+  本设计以提交点区分 `abandoned` 和 `unknown`（§4.5），粒度更细
+- **认证头不可信**：展示时它只认最上面一条 `Authentication-Results`，做安全决定时自己验 DKIM 并要求与 From 域对齐。
+  本设计只认可信接收方的那一条（§10.1.1）
+- **规则在入库的同一个事务里排队、动作幂等，并且记下「规则做了什么」**；默认不匹配已发送和草稿。
+  本设计在 `Fold` 事务里求值，每条改了东西的规则写一行 `actions`（§8.5）
+
+真正值得拿来的有四处：它在 IMAP 和 Gmail 上踩过的坑（§10.1.2），远程图片代理的出站防护（§12.2），
+凭据密文的绑定方式（§13.3），以及把不受 ACL 约束的 store 方法列成清单（§13.8）。
+不学的是它的功能面扩张速度（日历、通讯录、翻译、三套主题，一个月五百多个提交，CI 只构建镜像不跑测试），
+以及在 iframe 里加 `allow-scripts` 跑自己的脚本：本设计不加（§12.2）。
