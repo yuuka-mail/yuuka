@@ -420,15 +420,21 @@ func TestToolsWriteOnlyTheAuditLog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var names []string
+	var names, writers []string
 	for _, tl := range tools.Tools {
-		names = append(names, tl.Name)
 		if tl.Annotations == nil || !tl.Annotations.ReadOnlyHint {
-			t.Errorf("%s is not annotated read-only", tl.Name)
+			writers = append(writers, tl.Name)
+			continue
 		}
+		names = append(names, tl.Name)
 	}
-	if strings.Join(names, ",") != "get_message,list_prefixes,search_messages" {
-		t.Fatalf("tools = %v; a new tool needs its own write test", names)
+	if strings.Join(names, ",") != "get_message,list_identities,list_prefixes,search_messages" {
+		t.Fatalf("read-only tools = %v; a new tool needs its own write test", names)
+	}
+	// The draft tools write drafts (TestDraftTools). submit_draft is
+	// absent: this server has no submission core.
+	if strings.Join(writers, ",") != "create_draft,update_draft" {
+		t.Fatalf("writing tools = %v; a new one needs its own test", writers)
 	}
 	before := snapshot(t, e.pool)
 	var actionsBefore int
@@ -445,6 +451,7 @@ func TestToolsWriteOnlyTheAuditLog(t *testing.T) {
 		{"get_message", map[string]any{"uri": uri, "level": "part"}},
 		{"get_message", map[string]any{"uri": "yuuka://message/bad"}},
 		{"list_prefixes", map[string]any{}},
+		{"list_identities", map[string]any{}},
 	}
 	for _, c := range calls {
 		callTool(t, cs, c.tool, c.args)

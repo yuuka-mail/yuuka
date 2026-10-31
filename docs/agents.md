@@ -213,8 +213,29 @@ M1 的落法（`internal/mcp`）：
   跟着协议版本走；自己实现要长期追协议协商、streamable HTTP 和 SSE 的变化，不值得
 - **agent 怎么拿到 token**：运维者在主机上用 `yuuka token issue` 签发（§13.3），scope 只给
   `message:read` `delivery:read` `prefix:read`：只读的三件工具用不到别的 scope，多给的也不会让它多做什么，
-  只会扩大泄漏面。HTTP 形态放进 `Authorization: Bearer`，stdio 形态放进上面那个环境变量。
+  只会扩大泄漏面。要它起草再加 `draft:create`，要它的提交有机会真正发出再加 `submission:send`（见下）。
+  HTTP 形态放进 `Authorization: Bearer`，stdio 形态放进上面那个环境变量。
   `yuuka token revoke` 收回，下一次调用起失效。WebUI 入口还没有
+
+M2 的写工具（[`internal/mcp/drafts.go`](../internal/mcp/drafts.go)），四件都要 `draft:create`：
+
+- `list_identities`：调用方能用哪些发信地址、每个地址提交后是「会发出」还是「一律停在草稿」以及原因。
+  算法是 store 的 `Standings`：对每个身份用不带收件人的输入跑一遍 `sendpolicy.Decide`，
+  只取「与这封信内容无关、每次提交都会遇到」的那几条规则（停用、硬上限、凭据、档位、熔断，加上 `review` 档）。
+  它是预览，不是决定：收件人范围、限额、循环检查只在真正提交时才算
+- `create_draft` / `update_draft`：上面签名里的 `identity` 落成 `from`（一个地址，而不是身份 id：
+  `*@zone` 身份要知道具体用哪个前缀）。不给 `from` 时，回复默认用原信进来的那个地址（`ReplyIdentities`，§9.3），
+  新线程则必须给。`update_draft` 整体替换内容，不给 `from` 就保留原来的；只能改自己写的、还没进 outbox 的草稿
+  （`visibleDraft`，§13.8：别的 agent 的草稿和不存在的一样）。结果里附上 `list_identities` 的那个预览，
+  agent 写完就知道交上去会怎样。审计只记地址、收件人个数和 cites 个数，不记主题和正文：审计日志不是信的副本
+- `submit_draft(draft_id)`：经 [`internal/submit`](../internal/submit/submit.go) 的 `SubmitDraft`，
+  和 REST、SMTP 提交口是同一个入口。结果是 `queued`（带 outbox id）或 `held`（`hold_reason` + `hold_detail`），
+  两种都是成功；描述和返回文本都写明「停在草稿是正常结果，不要换条路再发」。
+  **这个工具不要求 `submission:send`**：缺它的凭据提交照样成功，结果是 `policy` 原因的草稿（§8.9 规则 4），
+  而不是工具报错——这正是「超出授权是降级不是拒绝」。只有带提交核心的进程（`yuuka serve`）才注册它；
+  `yuuka mcp --stdio` 没有 outbox，只能起草，提交交给 serve 上的 agent 或人
+- 工具描述是写死的字符串，不拼任何邮件内容；返回文本里的收发地址和主题包进不可信边界：
+  它们可能是从信里抄来的，默认的 `from` 前缀还可能是发件人随便起的（未认领前缀）
 
 ### 8.8 审计与回放
 
