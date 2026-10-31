@@ -162,6 +162,12 @@ type Expunger interface {
 | `Authentication-Results` | authserv-id 为 `mx.cloudflare.net`；含 dmarc、helo 与 mailfrom 两次 spf、`smtp.remote-ip` |
 | `X-CF-SpamH-Score` | 垃圾评分，刻度无文档（§4.3） |
 
+正文末尾还会多出一个 CRLF（多一个空行），2026-10-31 实测：经 Email Sending 和直投 MX 的两种发件方都有，
+标记里的 `raw_size` 等于对象长度，说明 Worker 读到的 `message.raw` 里就已经有它，是 Cloudflare 入站一侧加的；
+Worker 原样写入，不去掉——`raw/` 的含义是「Cloudflare 交给 Worker 的字节」。它不影响 DKIM
+（两种正文规范化都忽略末尾空行）、检索文本和 multipart（落在 epilogue）；会让同一封信经不同路径进来时
+`content_hash` 不同，按 §4.1「宁可重复显示、不可误合」接受。
+
 所以 Cloudflare 账户的配置是：`trusted_authserv_id = mx.cloudflare.net`，
 可信 `Received` 的 `by` 是 `cloudflare-email.net`（两者不是同一个名字）。
 `Received` 里的事务 id 在同一笔事务的各个收件人之间相同，发件方重投时会变，
@@ -374,7 +380,7 @@ multipart/mixed                         ← 只在有普通附件时出现
    | 加的头 | 在我们的头之上依次加 `DKIM-Signature` ×2、`Feedback-ID: <域>:5:5:Cloudflare`、`Received: from authenticated-submission.invalid by mx.cloudflare.net (Cloudflare Email Submission) with ESMTPSA id …`、`Message-ID`。**不加 `X-Mailer`**、`User-Agent`、`List-Unsubscribe` |
    | `Received` 链 | 提交那一跳不暴露我们的主机名和 IP；外发主机是 `*.cloudflare-smtp.net`，它的 HELO 没有 SPF 记录（`spf=none`，不影响 DMARC） |
    | 我们的头 | 全部原样保留，次序不变、连续，`Date` 不改，折行与 encoded-word 逐字节一致 |
-   | 正文 | 逐字节一致（QP、base64、附件、multipart 边界）。收到的原件末尾多一个空行；直投 MX 的入站信也有，看来是入站一侧加的，与出口无关 |
+   | 正文 | 除末尾多出的一个空行外逐字节一致（QP、base64、附件、multipart 边界）。那个空行是入站一侧加的，与出口无关（§10.1.1） |
    | 耗时 | 连接到最终回复 1–2 秒 |
 
    由此：
