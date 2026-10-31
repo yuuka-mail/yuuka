@@ -46,7 +46,10 @@ type Caps struct {
 
 // CloudflareCaps are the caps of Cloudflare Email Sending. Message-ID,
 // DKIM-Signature and Return-Path are platform-controlled headers there
-// (§10.4.1, §10.4.2, §10.4.4), and there is no status query we use.
+// (§10.4.1, §10.4.2, §10.4.4), and there is no status query we use. Its
+// SMTP endpoint accepts a message carrying our Message-ID or DKIM-Signature,
+// but whether either reaches the recipient unchanged is unmeasured, so
+// both stay false.
 func CloudflareCaps() Caps {
 	return Caps{
 		CallerMessageID:  false,
@@ -161,14 +164,17 @@ type SendResult struct {
 	// delivered to anyone and the outcome is never Unknown.
 	Committed bool
 	// Final is the reply to the end of the data, when one arrived. It is
-	// kept verbatim because the exits' formats are not known yet (§10.4.1).
+	// kept verbatim: most exits' formats are still unmeasured (§10.4.1).
 	Final Reply
 	// ProviderID is the exit's id for the accepted message, parsed from
-	// Final only when it has an unambiguous form ("queued as X").
+	// Final only when it has an unambiguous form: "queued as X" (Postfix)
+	// or "Ok <X>" (Cloudflare, X without the brackets).
 	ProviderID string
 	// MessageID is the Message-ID the exit actually used. It stays empty
-	// until a real send shows where an exit reports it (§10.4.1); guessing
-	// would break thread matching silently.
+	// until a received copy shows that an exit reports it (§10.4.1).
+	// Cloudflare's "Ok <X>" looks like one but is not verified yet, so it
+	// goes to ProviderID only; guessing would break thread matching
+	// silently.
 	MessageID string
 }
 

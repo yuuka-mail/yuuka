@@ -222,9 +222,11 @@ SMTP 出口实现在 [`internal/transport`](../internal/transport/smtp.go)：`SM
 配置里唯一的口子是换一组根证书（测试用自己的 CA），没有跳过校验的选项。
 上下文没有截止时间时整次尝试最长 10 分钟，对应 RFC 5321 §4.5.3.2 里最长的那个等待（等最终回复）。
 
-**回复原文要留着**。各出口 `250` 的格式还不知道（§10.4.1 的实测项），所以 `SendResult` 原样保存最终回复；
-`ProviderID` 只从毫无歧义的 `queued as <id>`（Postfix）里取，`MessageID` 在实测之前一律留空，
-不去猜——猜错的 Message-ID 会让回信静默地拼不上线程。
+**回复原文要留着**。多数出口 `250` 的格式还没测过（§10.4.1），所以 `SendResult` 原样保存最终回复；
+`ProviderID` 只从毫无歧义的两种形状里取：`queued as <id>`（Postfix），和整条回复恰好是
+`2.0.0 Ok <msg-id>`（Cloudflare，2026-10 实测，取尖括号里的部分）。`MessageID` 在用收到的副本验证之前一律留空，
+不去猜——猜错的 Message-ID 会让回信静默地拼不上线程。Cloudflare 回复里的那个 id 长得就像 Message-ID，
+但还没对上过收到的头，所以先只进 `ProviderID`（见 §10.4.1）。
 
 **关键决策：MIME 由我们自己组装（[`internal/compose`](../internal/compose/compose.go)），transport 只投递字节。**
 好处是线程头（`In-Reply-To` / `References`）完全可控，Sent 副本就是我们提交的字节。
@@ -314,7 +316,7 @@ multipart/mixed                         ← 只在有普通附件时出现
 
 | 出口 | raw MIME | 自定 Message-ID | 任意 From 前缀 | 附件/收件人上限 | bounce 回流 | 计费 |
 |---|---|---|---|---|---|---|
-| **CF Email Sending (SMTP 465)** | ✓ | ✗ 平台生成，**SMTP 下的表现实测** | ✓ 域级 onboard | 25 MiB / 50 | suppression list + API；不能自定 Return-Path | 3000/月含，$0.35/1k，需 Workers Paid |
+| **CF Email Sending (SMTP 465)** | ✓ | ✗ 平台生成；SMTP 下带了不拒收，`250` 回复里给一个新 id（§10.4.1） | ✓ 域级 onboard | 25 MiB / 50 | suppression list + API；不能自定 Return-Path | 3000/月含，$0.35/1k，需 Workers Paid |
 | 标准 SMTP submission（工作邮箱/自建） | ✓ | ✓ | 取决服务器策略 | 服务器定 | DSN 回到 Return-Path | — |
 | Resend (SMTP 口) | ✓ | 多半 ✓，**实测** | 需验证域 | 40 MB | webhook | 免费额度 + 按量 |
 | SES (SMTP 或 SendRawEmail) | ✓ | **可能被改写，实测** | 需验证域 | 40 MB / 50 | SNS 事件（最完整） | 最便宜 |
@@ -333,17 +335,40 @@ multipart/mixed                         ← 只在有普通附件时出现
 ### 10.4 抽象漏出的四件事
 
 1. **Message-ID 归属**。能自己生成就自己生成（线程才拼得起来），但这是出口的一项 cap，
-   不是默认成立的事。Cloudflare Email Sending 把 `Message-ID` 列为平台控制的头，
-   由它用自己的域生成；调用方带了这类头，整封请求会被拒（API 下是 `E_HEADER_NOT_ALLOWED`，
-   SMTP 下是拒收还是改写，文档没写，要实测）。所以：
+   不是默认成立的事。Cloudflare Email Sending 把 `Message-ID` 列为平台控制的头，由它生成；
+   API 下调用方带了这类头整封请求会被拒（`E_HEADER_NOT_ALLOWED`），SMTP 下不拒（见下方实测）。所以：
    - `CallerMessageID=false` 的出口，组装时**不写** `Message-ID`，发出后把出口实际用的那个
      回填到 `send_attempts.message_id`。平台每次发送都重新生成，`partial` 之后的重试会拿到另一个，
      所以回填按尝试记、线程匹配认全部。否则对方回信的 `In-Reply-To` 对不上本地任何一条
-   - 回填从哪里拿是实测项：SMTP 的 `250` 响应文本、事件订阅、Activity log。
-     Cloudflare 的 Worker send binding 会返回一个 `messageId`，它是否等于 `Message-ID` 头也待实测；
-     若 SMTP 拿不到而它能，CF 出口改走 Worker binding，多写一个 driver
+   - 回填从哪里拿：Cloudflare 的 SMTP `250` 回复里就有一个候选（下方实测），但它是否等于投递出去的
+     `Message-ID` 头还没验证。验证不了或不相等时，剩下的来源是事件订阅、Activity log，
+     以及 Worker send binding 返回的 `messageId`（它是否等于头同样待测）；
+     若 SMTP 拿不到而 binding 能，CF 出口改走 Worker binding，多写一个 driver
    - 都拿不到时，靠对方回信 `References` 里我们自己写进去的上游 id 拼线程；
      只有一条新线程的第一封会断开，落到 `class=human` 的 `subject + sender` 兜底匹配（§4.1）
+
+   **Cloudflare SMTP 出口的实测（2026-10-31）**：从一个已 onboard 的域发给同域的 catch-all，共 3 封。
+   收件域的 catch-all 当时没有接到能读回原件的 Worker，**收到的字节没能取回**，
+   所以下面只有 SMTP 会话层面的结论，「提交 vs 收到」的逐字节比对还欠着。
+
+   | 项 | 结果 |
+   |---|---|
+   | `EHLO` | `AUTH PLAIN LOGIN`、`SIZE 26214400`（25 MiB）、`8BITMIME`、`ENHANCEDSTATUSCODES`；**没有** `SMTPUTF8`、`PIPELINING`、`CHUNKING`、`DSN` |
+   | 最终回复 | 整条是 `2.0.0 Ok <36 位字母数字@发件人的域>`，每次发送都不同；域部分是 From 的域，不是 Cloudflare 的 |
+   | 不带 `Message-ID` | 接受，回复里有上面那个 id |
+   | 自带 `Message-ID` | **接受，不拒收**；回复里仍是平台新生成的 id，不是我们的 |
+   | 自带 `DKIM-Signature`（故意无效） | **接受，不拒收** |
+   | 耗时 | 连接到最终回复 1–2 秒 |
+
+   结论与没定下来的事：
+   - `transport` 把这个 id 记进 `ProviderID`。它的形状是 msg-id、域是我们的，极可能就是投递副本的
+     `Message-ID`；一旦用收到的副本对上，就把它同时填进 `MessageID`（一行改动），
+     回填 `send_attempts.message_id` 就不需要别的来源
+   - 自带的 `Message-ID` 是被覆盖、保留还是并存，SMTP 回复分不出来，所以 `CallerMessageID` 仍是 false，
+     组装照旧不写。如果实测是「保留」，CF 出口可以改成自定 Message-ID，线程问题整个消失
+   - 自带的 DKIM 签名是被剥掉还是原样带出去同样不知道，`CallerDKIM` 仍是 false（§10.4.4）
+   - 没有 `SMTPUTF8`：非 ASCII 的地址发不出去，头部必须是 encoded-word——组装本来就这么写
+   - `X-Mailer`、`Return-Path` / 信封发件人、平台 DKIM 的 `d=` / `s=`、正文是否逐字节保留，都要等收到的副本
 
    **接入任何新出口的第一个测试：发一封给自己，比对 Sent 副本和收到的字节**，
    把差异逐项落进 `transport.Caps`。
@@ -373,8 +398,9 @@ multipart/mixed                         ← 只在有普通附件时出现
    支持 primary + fallback 才有意义。
    既然 MIME 由我们组装（§10.2），在 `CallerDKIM=true` 的出口上 **DKIM 可以在 Go 侧自签**：
    自有 selector、私钥在自己机器上，`d=` 对齐 From 域，DMARC 不依赖 provider 的签名。
-   但 Cloudflare 把 `DKIM-Signature` 也列为平台控制，自签的信会被整封拒收——
-   **CF 出口只能用它自己的签名**。所以「出口可替换」的 DNS 成本是：
+   但 Cloudflare 把 `DKIM-Signature` 也列为平台控制：API 下自签的信整封被拒，
+   SMTP 下收下了（§10.4.1 实测），自签的签名是否原样到达还不知道——
+   **CF 出口只按它自己的签名算**。所以「出口可替换」的 DNS 成本是：
    CF 的 DKIM 记录 + 每个备用出口的 DKIM（或自签 selector）+ 各自的 SPF include，都要**提前**配好。
    入口侧对应的成本是 MX 切换：catch-all 的 MX 只能指一家，迁移期双收靠
    `content_hash` 折叠兜住（§4.1 的机制正好复用）。

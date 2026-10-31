@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/smtp"
 	"net/textproto"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -357,10 +358,21 @@ func (a *attempt) fail(stage string, err error) (*SendResult, error) {
 	return a.finish(err)
 }
 
-// parseProviderID extracts the queue id from the one reply form that is
-// unambiguous, Postfix's "queued as <id>". Any other form yields "", and
-// the verbatim reply in SendResult.Final remains for study (§10.4.1).
+// okMsgID is the whole final reply of Cloudflare Email Sending: an enhanced
+// status code, "Ok" and one msg-id in angle brackets (measured 2026-10,
+// §10.4.1). Only the complete form matches, so a free-text reply that
+// happens to contain brackets is not mistaken for an id.
+var okMsgID = regexp.MustCompile(`^(?:[245]\.[0-9]{1,3}\.[0-9]{1,3} )?(?i:ok) <([^<>@\s]+@[^<>@\s]+)>$`)
+
+// parseProviderID extracts the exit's id for the message from the reply
+// forms that are unambiguous: Postfix's "queued as <id>", and Cloudflare's
+// "Ok <msg-id>", whose id is returned without the angle brackets. Any other
+// form yields "", and the verbatim reply in SendResult.Final remains for
+// study (§10.4.1).
 func parseProviderID(text string) string {
+	if m := okMsgID.FindStringSubmatch(text); m != nil {
+		return m[1]
+	}
 	const marker = "queued as "
 	for i := 0; i+len(marker) <= len(text); i++ {
 		if strings.EqualFold(text[i:i+len(marker)], marker) {

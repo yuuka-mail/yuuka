@@ -443,6 +443,14 @@ func TestParseProviderID(t *testing.T) {
 		"2.0.0 OK 1712345678 x12si":        "",
 		"Ok 010001900000000-0000-0000":     "",
 		"":                                 "",
+		// Cloudflare Email Sending: the whole reply is the form.
+		"2.0.0 Ok <Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAb7c@example.com>": "Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAb7c@example.com",
+		"Ok <a1@example.com>":                        "a1@example.com",
+		"2.0.0 Ok <a1@example.com> extra":            "",
+		"2.0.0 Ok <a1@example.com>, <b@example.com>": "",
+		"2.0.0 Ok <no-at-sign>":                      "",
+		"2.0.0 Ok <a@b@example.com>":                 "",
+		"2.0.0 Message accepted <a@example.com>":     "",
 	}
 	for text, want := range tests {
 		if got := parseProviderID(text); got != want {
