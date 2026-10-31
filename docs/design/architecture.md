@@ -58,6 +58,18 @@ yuuka 对网络只有两个要求：ingest 端点能被 Worker 访问到，WebUI
 怎么做到（端口映射、反向代理、隧道）是部署的事；认证不靠它们，每个端点由 yuuka 自己认证（§13.7）。
 唯一有意不认证的是给反向代理做健康检查的 `GET /healthz`，它只回答一位，理由和约束见 §13.7。
 
+**进程配置只放信任根**（已定，未实现，§17）。今天出口和 Telegram 也在环境变量里；多个自有域、多个外部邮箱之后，
+出口、身份的出口链、通知渠道和拉取账户的凭据要在运行时增删，它们进库，机密做信封加密：每条一把 DEK，DEK 由主机上的 KEK（以后可以是 Vault 或云 KMS）包住。留在主机的是这几样：
+
+- 数据库连接串：连上库之前就要用
+- KEK 文件（`YUUKA_KEK_FILE`），或配置了 Vault / KMS 时它的地址和访问凭据：密文的价值全在包装 DEK 的那把钥匙，和密文放在一起，加密就白做了
+- R2 的两把令牌和 `YUUKA_WEBHOOK_SECRETS`：收信必须在没有 KEK、包装器连不上、机密子系统整个坏掉时照常工作（§3.5），
+  所有域共用同一对 bucket，加域名不动它们；webhook 密钥的轮换本来就要和 Worker 的部署一起做
+- `YUUKA_TRIAGE_*`：邮件内容会不会离开部署（§15）是主机的决定，不是一次会话的
+- 提交口的 TLS 文件、WebAuthn 的 origin、可信代理、`YUUKA_MCP_TOKEN`：主机或客户端自己的事实，不是第三方凭据
+
+划线的依据是：丢了或换了它，收信会不会受影响；它是不是决定了别的密文、别的数据能不能被读走。是，就留在主机。
+
 ### 2.1 收信提交协议
 
 信封（`MAIL FROM` / `RCPT TO`）不在 `.eml` 里，而 catch-all 判前缀靠的正是 `RCPT TO`。
@@ -419,6 +431,7 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 | SPF | `ix64/spf` | 同作者的既有库，直接复用 |
 | WebAuthn（passkey 登录，§13.7） | `github.com/go-webauthn/webauthn` | duo-labs/webauthn 的延续，Go 里事实上的标准实现。自己写要带上 CBOR、COSE 密钥、authenticator data、各种 attestation 格式和 origin / RP ID 校验，上千行且全是安全关键代码。只用它的校验部分：仪式状态、存储、会话都在 yuuka 自己手里，换库不动表结构（§13.3） |
 | CSRF | 标准库 `http.CrossOriginProtection` | Go 1.25 起自带，不需要 token 型 CSRF 库 |
+| 第三方机密的静态加密（§17.2，未实现） | 信封加密，标准库 `crypto/hkdf` + AES-256-GCM：每条机密一把 DEK，`local` 包装器用 KEK 包 DEK | 不引 `x/crypto` 的 XChaCha20-Poly1305：每把 DEK 只封一次，KEK 包装的次数十年也离 96 位随机 nonce 的上限很远。Vault Transit、云 KMS 以后作为包装器接入，它们的 SDK 到那时再按依赖三问评估。格式由 `testdata/secret/` 的向量钉住 |
 | 旧字符集解码 | `golang.org/x/text` | 通知里的主题常是 GB2312/GBK 等旧编码，标准库的 `mime.WordDecoder` 只认 UTF-8 和 ISO-8859-1；pgx 本来就间接依赖它 |
 | R2（S3 API） | `aws-sdk-go-v2/service/s3` | Cloudflare 自己的 Go 示例用它，依赖全在 aws/smithy 内。**`RequestChecksumCalculation` 与 `ResponseChecksumValidation` 都设为 `WhenRequired`**：SDK 自 2025 年起默认附带的校验和 R2 不完全支持。R2 的 LIST 与 PUT/DELETE 强一致，reconcile 可以直接依赖列表结果 |
 

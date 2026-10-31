@@ -44,10 +44,12 @@
 - M2 的 `outbox.state` 已经容纳 `held` 和 `withdrawn`、`outbox.review` / `hold_until` 已建；
   `review` 档（M3）只追加了 `drafts.review`、`outbox.withdrawn_by` 和描述 `held` / `withdrawn` 形状的约束
   （[0011](../../internal/store/migrations/0011_review.sql)）
-- **出口（transport）不是表**。出口按名字定义在进程配置里（主机、端口、caps、凭据文件路径），
-  `identities.transport` 只存名字。出口带着一份密钥和一个进程必须连得上的主机，这两样都是部署事实，
-  和 R2、数据库的配置同类；放进表里只是配置的镜像，还可能和配置不一致。代价是改出口要改配置、重启，
-  而不是一条 CLI；回头的条件是出现了需要在运行时增删出口的场景
+- **出口（transport）现在不是表，将会是**（§17，已定，未实现）。M2 把出口按名字定义在进程配置里（主机、端口、caps、凭据文件路径），
+  `identities.transport` 只存名字，理由是出口带着一份密钥和一个必须连得上的主机，都是部署事实，
+  放进表里只是配置的镜像。当时写下的回头条件是「出现需要在运行时增删出口的场景」，多个自有域和外部邮箱让它成立了：
+  每个域、每个邮箱有自己的出口和凭据，一个身份能用哪条备用出口取决于它所在域的 DNS（§9.3）。
+  0017 建 `secrets`、`transports`、`identity_transports`（形状见下方设计块），为每个出现过的出口名建一行占位，
+  然后删掉 `identities.transport`。仍是部署事实、仍留在主机的是信任根（§17.1）
 - **没有 `zones` 表**。它的列（所属账户、是否 catch-all、是否已开通发信）在 M2 没有读者：
   identity 自带 zone 和账户，「这个域开没开通发信」是出口配置的属性。等有东西需要单独问一个域的时候再建
 - `accounts` 只有 M2 读的列，kind 只有 `cf_catchall`：M2 的所有 identity 都属于这个 Cloudflare 账户。
@@ -108,6 +110,99 @@ drafts(attachments jsonb,            -- 要先有上传存储
 
 attachments(id ulid pk, message_id, filename, mime, size, sha256, content_id, disposition, blob_key)
 notifications(id, message_id, channel, state, sent_at)
+  -- notify 策略账户（§9.2）的通知记录，随 M3.5 定；channel 届时指向 channel_bindings。
+  -- 这不是「每次推送的投递记录」，那个不做（§17.10）
+```
+
+第三方机密、出口和通知渠道（§17，已定，未实现；0017 是前三张，0018 是渠道四张）。
+加密格式和 audience 见 §17.2，为什么一张通用 `secrets` 表、出口名为什么不可改见 §17.4：
+
+```sql
+CREATE TABLE secrets (
+    id         text COLLATE "C" PRIMARY KEY,   -- ULID
+    kind       text NOT NULL CHECK (kind IN ('smtp_password', 'telegram_bot_token')),  -- 新类型随第一个使用者的迁移加入
+    audience   text NOT NULL CHECK (audience <> '' AND octet_length(audience) <= 512),  -- 明文可以交给谁（§17.2）
+    -- 信封加密（§17.2）：载荷由本条自己的 DEK 封住，DEK 由包装器包住
+    wrapper     text NOT NULL CHECK (wrapper IN ('local')),   -- 以后加 Vault Transit、云 KMS，不需要数据迁移
+    key_ref     text NOT NULL CHECK (key_ref <> ''),          -- 包装器里的钥匙引用：local 是 KEK 的指纹，Vault 是钥匙名和版本
+    wrapped_dek bytea NOT NULL,                               -- 包好的 DEK，格式归包装器
+    sealed      bytea NOT NULL,                               -- 封好的载荷，带格式版本；字节布局以 internal/secret 和 testdata/secret/ 为准
+    revision   bigint NOT NULL DEFAULT 1 CHECK (revision > 0),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    sealed_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE transports (
+    id            text COLLATE "C" PRIMARY KEY,   -- ULID
+    name          text NOT NULL UNIQUE CHECK (name ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'),  -- 不可改：send_attempts 记的是它
+    kind          text NOT NULL DEFAULT 'smtp' CHECK (kind IN ('smtp')),
+    host          text CHECK (host <> ''),
+    port          integer CHECK (port BETWEEN 1 AND 65535),
+    auth          text CHECK (auth IN ('none', 'plain')),        -- M3.5 加 xoauth2 和 account_id（§17.8）
+    username      text NOT NULL DEFAULT '',
+    secret_id     text COLLATE "C" UNIQUE REFERENCES secrets (id),
+    caps          text[] CHECK (caps <@ ARRAY['message-id', 'return-path', 'dkim', 'status-query']),  -- 配置时必填、无默认（§10.2）
+    configured_at timestamptz,    -- 空 = 迁移为已有出口名建的占位行，不能发信
+    disabled_at   timestamptz,
+    revision      bigint NOT NULL DEFAULT 1,
+    created_at    timestamptz NOT NULL DEFAULT now(),
+    CHECK ((configured_at IS NULL) = (host IS NULL)),
+    CHECK (configured_at IS NULL OR (port IS NOT NULL AND auth IS NOT NULL AND caps IS NOT NULL)),
+    CHECK (configured_at IS NOT NULL OR secret_id IS NULL),
+    CHECK (disabled_at IS NOT NULL OR auth IS DISTINCT FROM 'plain' OR (secret_id IS NOT NULL AND username <> ''))
+);
+-- 迁移为每个不同的 identities.transport 建一行占位，然后：
+
+CREATE TABLE identity_transports (    -- 身份的出口链（§9.3、§10.2.2）
+    identity_id  text COLLATE "C" NOT NULL REFERENCES identities (id),
+    position     smallint NOT NULL CHECK (position BETWEEN 0 AND 7),   -- 0 是主出口；连续性在 Go 里查
+    transport_id text COLLATE "C" NOT NULL REFERENCES transports (id),
+    PRIMARY KEY (identity_id, position),
+    UNIQUE (identity_id, transport_id)
+);
+-- 每个身份以原来的出口为 position 0，然后 ALTER TABLE identities DROP COLUMN transport
+
+CREATE TABLE notification_channels (  -- 一个渠道就是一个 bot（§8.4）
+    id          text COLLATE "C" PRIMARY KEY,
+    name        text NOT NULL UNIQUE CHECK (name ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'),
+    kind        text NOT NULL CHECK (kind IN ('telegram')),   -- 其他类型随各自的迁移加入
+    external_id text NOT NULL,                                -- Telegram：bot 的数字 id，经 getMe 确认
+    settings    jsonb NOT NULL DEFAULT '{}',                  -- 非机密，按类型在 Go 里校验
+    secret_id   text COLLATE "C" UNIQUE REFERENCES secrets (id),
+    disabled_at timestamptz,
+    revision    bigint NOT NULL DEFAULT 1,
+    created_at  timestamptz NOT NULL DEFAULT now()
+);
+-- getUpdates 每个 bot 只允许一个轮询者
+CREATE UNIQUE INDEX ON notification_channels (kind, external_id) WHERE disabled_at IS NULL;
+
+CREATE TABLE channel_bindings (       -- 渠道上属于某个 human 的一个目的地（只限 human，Go 里查）
+    id                text COLLATE "C" PRIMARY KEY,
+    channel_id        text COLLATE "C" NOT NULL REFERENCES notification_channels (id),
+    principal_id      text COLLATE "C" NOT NULL REFERENCES principals (id),
+    address           text NOT NULL,   -- Telegram chat id（私聊或群）
+    actor_external_id text,            -- 谁按的按钮算数；空 = 这个绑定上没有按钮
+    label             text NOT NULL DEFAULT '',
+    created_at        timestamptz NOT NULL DEFAULT now(),
+    last_used_at      timestamptz,
+    revoked_at        timestamptz
+);
+CREATE UNIQUE INDEX ON channel_bindings (channel_id, address) WHERE revoked_at IS NULL;
+
+channel_bind_codes(                   -- 绑定码（§13.7），只存哈希，10 分钟有效
+  id, channel_id, principal_id,
+  code_hash bytea(32) unique,
+  created_with → credentials,         -- 发起它的再验证过的会话；空 = 主机上的 CLI
+  created_at, expires_at,
+  redeemed_at, seen_address, seen_actor_id, seen_label,   -- /start <码> 时 Telegram 报来的身份，确认时展示
+  binding_id → channel_bindings)
+
+CREATE TABLE notification_subscriptions (
+    binding_id text COLLATE "C" NOT NULL REFERENCES channel_bindings (id),
+    event      text NOT NULL CHECK (event IN ('mail.new', 'send.held', 'send.escalated', 'grant.suspended')),
+    PRIMARY KEY (binding_id, event)
+);
+-- 只列今天已有发出方的事件；security 不可订阅，强制发给管理员和当事人的全部有效绑定（§8.4、§13.10）
 ```
 
 全文检索：Postgres 原生 FTS 对中文很弱。先用 `pg_trgm` 够个人用量，
@@ -202,7 +297,7 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
 | **发送事实** | `send_attempts`、`outbox_recipients`：远端当时怎么回答、什么时候；Sent 副本本身是 `raw_objects` 里的投递事实 | 不碰 |
 | **观测事实** | `triage_scores`：某个评分器在某个时刻对一封信的回答（§15.2）。和 `spf_recheck` 同理不是派生：换个模型、过一阵重评，答案就变；也不是谁的决定 | 不碰；只追加，重评写新行 |
 | **决定** | `message_state`、`message_aliases`、`prefixes`（label / note / expected_domains / state）、`rules`、`proposals`、`annotation_log`、`actions`、`drafts`、`notes`、`outbox`、`notifications` | 不碰；也不重跑规则，规则的效果是到达时做的决定（§8.5） |
-| **配置与授权** | `principals` / `credentials` / `identity_grants` / `account_access`（§13）、`accounts` / `identities` | 不碰 |
+| **配置与授权** | `principals` / `credentials` / `identity_grants` / `account_access`（§13）、`accounts` / `identities`；设计中的 `secrets` / `transports` / `identity_transports` 和通知渠道的四张表（§17） | 不碰 |
 
 派生以外的各类都**无法从原件重建**，备份要按正经数据库来（§7）。CF 来源的投递事实能从 R2 对象的
 metadata 恢复（§2.1），但外部账户的远端定位和卸载状态只在库里，同样要靠备份。
@@ -427,7 +522,9 @@ outbox 这一侧只有地址：`outbox_recipients` 是信封收件人，按 `add
   这比一次换密钥就把整个队列判死好
 - **出口不在配置里**：identity 指名的出口在进程配置里找不到，是配置错误而不是这封信的结论。
   到期的行不被领取、不建尝试、不计数，每 10 分钟顺延一次，`outbox.error` 写明原因，日志报错。
-  入队时就找不到出口则直接拒绝入队（剥哪些头取决于出口的 caps，字节没法准备）
+  入队时就找不到出口则直接拒绝入队（剥哪些头取决于出口的 caps，字节没法准备）。
+  出口进库之后（§17）这一条扩成「链上没有可用成员」：占位、停用、上锁（包装器不可用或解不开）的出口都按这里停车，
+  规则见 §10.2.2
 - **停机**：`serve` 收到停止信号后不再领取。还没到提交点的尝试立即取消，`commit` 回调拒绝，
   记 `abandoned` 并立刻到期，下一个进程马上重发；已过提交点的等最终回复（最长一次发送的超时），
   所以正常停机本身不会制造 `unknown`。容器的停止宽限期要够等一次最终回复

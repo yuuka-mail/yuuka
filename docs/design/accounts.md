@@ -51,10 +51,21 @@ identity → 出口必须是硬绑定：
   草稿的 `identity_id` 总由 `from_addr` 解析得出，不由调用方指定，地址和身份不会对不上。
 - 谁能用哪个 identity 发信由 `identity_grants` 决定（§13.5），
   服务主体无法冒用运维者的地址。
-- outbox 每条带 `identity_id`，路由由 identity 决定，不给调用方选 transport 的机会；
-  identity 可配 primary + fallback 传输链，前提是 DNS 已为两者授权（§10.4.4）。
-- 出口按名字定义在进程配置里（主机、端口、caps、凭据文件路径；变量形状见 §10.2），`identities.transport` 只存名字，
-  不建 `transports` 表（理由见 §4 的迁移说明）。传输链也在配置里按名字定义，identity 照样只引用一个名字。
+- outbox 每条带 `identity_id`，路由由 identity 决定，不给调用方选 transport 的机会。
+- 现状（M2）：出口按名字定义在进程配置里（主机、端口、caps、凭据文件路径；变量形状见 §10.2），
+  `identities.transport` 只存一个名字，没有备用。
+- **设计（§17，已定，未实现）：出口进库，每个 identity 一条出口链**（`identity_transports`：位置 0 是主出口，后面是备用，最多 8 个）。
+  - **链按身份设**，不做命名的链，也不做出口级的「这个出口的备用是那个」。备用合不合法取决于这个身份所在域的 DNS：
+    SPF 的 `include` 和 DKIM 要提前给备用出口配好（§10.4.4），一个服务十个域的出口，可能只有其中几个域授权了备用。
+    挂在出口上的备用会把没授权的域也一起带过去，信在收件方那里判为伪造
+  - **只在主出口不可用时才用备用**。运行时能让它不可用的只有出口故障：`MAIL` 之前的失败（连不上、`AUTH` 被拒，§10.2 的 `ExitFailure`），
+    也就是执行器会暂停这个出口的那一类；其余是配置状态（占位、被停用、机密上锁），同样走备用，是一项明确的决定（§10.2.2）。
+    收件方的 4xx / 5xx 是这封信的结论，换出口不会有不同答案，照常退避重试同一个出口。
+    越过提交点之后不切换，`unknown` 仍交给人（§4.5）：换个出口重发可能让对方收到两封
+  - **入队时按链上最严的 caps 去头**：Sent 副本在入队时就定了（§4.6），之后每次尝试发同样的字节，
+    所以这份字节要能从链上任何一个成员发出去。代价是主出口能自定 Message-ID、备用不能时，经主出口发出的信也没有自己的 Message-ID，
+    线程靠回填（§10.4.1）
+  - 执行器怎么在链上挑出口、链在入队之后变了怎么办，见 §10.2.2
 - identity 是精确地址或 `*@zone`。精确地址压过同 zone 的通配：给服务的授权应当落在精确地址上，
   `*@zone` 上的授权碰不到别人单独拥有的地址（表见 [0005](../../internal/store/migrations/0005_sending.sql)）。
 - 每个自有域都要单独在 Cloudflare onboard Email Sending + 配 DNS；
@@ -87,6 +98,12 @@ M2 发信时要按 identity 选出口、按 `identity_grants` 放行，这两张
 `YUUKA_ACCOUNT` 从此是这个账户的名字，ingest 第一次用到时建行（§4）。
 `accounts` 只建了 M2 读的列，kind 只有 `cf_catchall`，M2 的所有 identity 都属于这个账户；
 只发不收的账户和拉取账户，连同 `sync_policy` 等列，随 M3.5 一起加。
+
+拉取账户的来源（IMAP 主机、端口、用户名、认证方式）放在 `account_sources`，密码、OAuth refresh token 和 client secret
+放进 §17 的加密 `secrets` 表，而不是 `credentials`（§13.3）或进程配置：一个人可能有好几个外部邮箱，
+来源要能在运行时增删，凭据的去向（主机、用户名、token 端点）和凭据绑在一起加密（§17.2）。
+Gmail、工作邮箱的 SMTP 出口复用同一个账户的 refresh token（出口的 `xoauth2` 认证，§17.8），不另存一份。
+所以 §17 的出口和机密先于 M3.5 落地（§6）。
 
 ### 9.6 归档卸载：yuuka 作为外部邮箱的容量外置
 
