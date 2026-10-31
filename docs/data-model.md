@@ -63,7 +63,8 @@ threads(id ulid pk, subject_norm, participants text[], first_at, last_at, n, cla
 
 prefixes(
   zone text, prefix text, primary key(zone, prefix), label, note,
-  first_seen, last_seen,            -- 观测值：ingest 与 reparse 只会把区间放宽，不算决定
+  first_seen, last_seen,            -- 观测值：ingest 与 reparse 只会把区间放宽，不算决定；
+                                    --   收到第一封信之前就认领的前缀两者为空
   expected_domains text[],          -- 我把它给了谁
   observed_domains text[],          -- 实际谁在发
   state smallint,                   -- claimed(我认领/给出去过) | discovered(只是有人往这投过)，§3.3
@@ -243,6 +244,14 @@ Cloudflare Email Routing 基本不做内容过滤，`spam_score` 字段必须有
   不必 reparse；`spam_score` 因此在 M1 恒为空。未验证（取不到可信认证头）不算 `dmarc=fail`，不降级。
   推送只在 ingest 当场判断：这条投递不降级、且同一封信没有更早的不降级投递时推一次；
   解析步骤失败、或由补跑（backlog）处理的投递一律不推——前者判断不了降级，后者已经不是新信
+- 认领与取消认领（M1 只有 CLI：`yuuka prefix claim|unclaim <local>@<zone>`）只改 `prefixes.state`，
+  记一条 `actions`、一条 `changes`（kind `prefix`），并和 ingest 的内容步骤持同一把锁，
+  所以一次投递看到的要么是认领前、要么是认领后的状态。地址的大小写按 ingest 的规则折叠。
+  因为降级现算，已有的信立刻不再降级；推送只对认领之后到达的信生效，不补推旧信——
+  补推会让一次认领在 TG 上炸出一串历史邮件。
+  地址往往在给出去时就认领，那时还没收到过信：这样的前缀照样建行，`first_seen` / `last_seen` 为空，
+  第一封信到达时由 ingest 填上（`least` / `greatest` 跳过 NULL），而不是把认领时刻冒充成观测值。
+  对还没收到过信的前缀取消认领会删掉这一行：一个从未被投递、也没人认领的前缀不描述任何事实
 - Cloudflare 入站会加 `X-CF-SpamH-Score: <n>`（§10.1.1 实测）。刻度没有文档，
   先原样记进 `deliveries.auth`、作为一个信号，积累样本后再决定阈值
 - 需要更强判定时旁路 rspamd（标准协议，ingest 多一步调用），不影响模型

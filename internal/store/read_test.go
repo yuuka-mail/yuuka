@@ -31,6 +31,12 @@ var (
 // content, making it a message of its own.
 func deliver(t *testing.T, db *store.DB, file string, edit *strings.Replacer, prefix string, at time.Time) string {
 	t.Helper()
+	return deliverFolded(t, db, file, edit, prefix, at).MessageID
+}
+
+// deliverFolded is deliver returning what the fold decided.
+func deliverFolded(t *testing.T, db *store.DB, file string, edit *strings.Replacer, prefix string, at time.Time) store.Folded {
+	t.Helper()
 	raw, err := os.ReadFile("../../testdata/eml/" + file)
 	if err != nil {
 		t.Fatal(err)
@@ -55,7 +61,7 @@ func deliver(t *testing.T, db *store.DB, file string, edit *strings.Replacer, pr
 	if err != nil {
 		t.Fatal(err)
 	}
-	return f.MessageID
+	return f
 }
 
 func subjects(ms []store.MessageSummary) []string {

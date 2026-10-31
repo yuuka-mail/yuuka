@@ -8,6 +8,11 @@
 //	                         at or after T (RFC 3339 or YYYY-MM-DD; default all)
 //	yuuka admin enroll [--name NAME] [--ttl 15m]
 //	                         one-time passkey enrollment link + new recovery codes
+//	yuuka prefix ls [--state claimed|discovered] [--zone Z]
+//	                         the prefix registry with first/last seen and deliveries
+//	yuuka prefix claim <local>@<zone>
+//	yuuka prefix unclaim <local>@<zone>
+//	                         set a prefix claimed or back to discovered (§3.3)
 //	yuuka mcp --stdio        read-only MCP server on stdin/stdout, acting as the
 //	                         bearer token in YUUKA_MCP_TOKEN (§8.7)
 //	yuuka version
@@ -36,7 +41,9 @@
 //	YUUKA_WEBAUTHN_RP_ID                WebAuthn relying party id (default: the origin's host)
 //	YUUKA_MCP_TOKEN                     bearer token `yuuka mcp --stdio` acts as (required there)
 //
-// `yuuka admin` only needs YUUKA_DATABASE_URL and YUUKA_WEB_ORIGIN.
+// `yuuka admin` only needs YUUKA_DATABASE_URL and YUUKA_WEB_ORIGIN;
+// `yuuka prefix` only YUUKA_DATABASE_URL. They run on the host
+// without a login; host.go says how their actions are recorded.
 //
 // The webhook is served at POST /ingest/cloudflare (HMAC, §2.2); the login
 // endpoints under /auth/ (see internal/authn); the REST API under /api/v1/
@@ -86,7 +93,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka mcp --stdio | yuuka version")
+	return errors.New("usage: yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka mcp --stdio | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -144,6 +151,8 @@ func run(args []string, log *slog.Logger) error {
 			return err
 		}
 		return enroll(ctx, log, *name, *ttl)
+	case "prefix":
+		return withHost(ctx, func(h *host) error { return h.prefixCmd(ctx, args[1:]) })
 	}
 	return usage()
 }

@@ -14,6 +14,9 @@ yuuka serve                             # 常驻：HTTP + ingest + 调度
 yuuka ingest --once                     # 手动跑一轮 pull driver
 yuuka reparse [--since …]               # 从不可变原件重建派生数据（§3.1）
 yuuka prefix ls|label|leaks             # 前缀注册表（§3.3）
+yuuka prefix ls [--state …] [--zone …]  # 列出前缀：状态、首次 / 末次投递、投递数
+yuuka prefix claim <local>@<zone>       # 认领前缀：其信不再降级，此后的新信推送（§4.3）
+yuuka prefix unclaim <local>@<zone>     # 取消认领，回到 discovered
 yuuka outbox ls|retry|dead              # 出口状态机（§3.6）
 yuuka account add|sync|caps             # 多账户（§9）
 yuuka doctor                            # DNS / SPF / DKIM / 出口授权自检（§10.4.4）

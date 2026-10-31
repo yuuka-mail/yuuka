@@ -129,8 +129,12 @@ export interface Prefix {
    */
   claimed: boolean;
   label: string;
-  first_seen: string /* RFC 3339 */;
-  last_seen: string /* RFC 3339 */;
+  /**
+   * FirstSeen and LastSeen are absent for a prefix that was claimed
+   * before any mail reached it.
+   */
+  first_seen?: string /* RFC 3339 */;
+  last_seen?: string /* RFC 3339 */;
   messages: number /* int */;
   downgraded: number /* int */;
 }

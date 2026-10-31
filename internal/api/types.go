@@ -108,12 +108,14 @@ type Prefix struct {
 	Address string `json:"address"` // prefix@zone, the list filter value
 	// Claimed prefixes were handed out on purpose; discovered ones were
 	// first seen in mail and everything to them is downgraded (§3.3).
-	Claimed    bool      `json:"claimed"`
-	Label      string    `json:"label"`
-	FirstSeen  time.Time `json:"first_seen"`
-	LastSeen   time.Time `json:"last_seen"`
-	Messages   int       `json:"messages"`
-	Downgraded int       `json:"downgraded"`
+	Claimed bool   `json:"claimed"`
+	Label   string `json:"label"`
+	// FirstSeen and LastSeen are absent for a prefix that was claimed
+	// before any mail reached it.
+	FirstSeen  *time.Time `json:"first_seen,omitempty"`
+	LastSeen   *time.Time `json:"last_seen,omitempty"`
+	Messages   int        `json:"messages"`
+	Downgraded int        `json:"downgraded"`
 }
 
 // PrefixList is GET /api/v1/prefixes. Messages and Downgraded are

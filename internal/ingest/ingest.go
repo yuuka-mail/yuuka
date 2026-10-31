@@ -106,7 +106,7 @@ func (in *Ingester) commit(ctx context.Context, m contract.Marker, body []byte) 
 	if err := in.cfg.Local.Put(m.RawKey, body); err != nil {
 		return 0, fmt.Errorf("ingest %s: %w", m.ID, err)
 	}
-	zone, prefix := splitAddress(m.EnvelopeTo)
+	zone, prefix := SplitAddress(m.EnvelopeTo)
 	rec := store.Ingest{
 		RawID:        m.ID,
 		R2Key:        m.RawKey,
@@ -180,10 +180,12 @@ func (in *Ingester) notify(ctx context.Context, text string) {
 // Wait blocks until in-flight notifications finish, for shutdown and tests.
 func (in *Ingester) Wait() { in.notifyWG.Wait() }
 
-// splitAddress derives the catch-all dimensions from an envelope address:
+// SplitAddress derives the catch-all dimensions from an envelope address:
 // lowercased domain and local part, split at the last "@" (a quoted local
 // part may contain "@"). The address itself is stored verbatim elsewhere.
-func splitAddress(addr string) (zone, prefix string) {
+// `yuuka prefix claim` derives its key the same way, so a claim matches
+// the mail it is meant for.
+func SplitAddress(addr string) (zone, prefix string) {
 	i := strings.LastIndexByte(addr, '@')
 	if i < 0 {
 		return "", strings.ToLower(addr)

@@ -224,6 +224,11 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
   恢复入口被刷爆时运维者仍有 CLI
 - 进行中的 WebAuthn 仪式（challenge）放在内存里，键是一个 `HttpOnly` cookie，用一次即删。
   重启只意味着重试一次；哪天要多副本部署再挪进 Postgres
+- **主机上的 CLI 不登录，也不冒充任何人**。`yuuka admin enroll`、`yuuka prefix`
+  在服务器上跑，能跑就是最高权限，但 yuuka 并不知道是哪个人在敲：它们写进 `actions` 的
+  `actor` 是 `system`、`credential_id` 为空；管理命令（`prefix`）还在 `args` 里带 `via: "cli"`
+  和执行它的系统用户名 `host_user`。
+  记成 `human:<operator>` 会凭空制造一次没有发生过的登录；多人共用一台主机时，`host_user` 才是真实可查的那一条线索
 - WebAuthn 的 RP ID 与 origin 来自配置（`YUUKA_WEB_ORIGIN`、`YUUKA_WEBAUTHN_RP_ID`），
   不从请求里推断：origin 必须是 https，或 http://localhost
 

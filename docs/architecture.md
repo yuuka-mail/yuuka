@@ -282,7 +282,7 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
    不齐时结果是 `none`；它依赖查询当时的 DNS，所以只在 ingest 时算一次、作为事实保存（§4.2）。
    前缀分两态：**claimed**（我认领过、给出去过）和 **discovered**（只是有人往这投过）。
    泄漏检测、TG 推送、聚合视图默认只看 claimed；discovered 主要是垃圾信字典攻击的产物，
-   静默登记即可，认领是一个显式动作（§4.3、`prefixes.state`）。
+   静默登记即可，认领是一个显式动作（§4.3、`prefixes.state`；M1 由 `yuuka prefix claim` 完成）。
 
 4. **双区分流（machine / human）**
    `class` 字段 + 规则引擎，信号：`List-Unsubscribe`、`Auto-Submitted`、

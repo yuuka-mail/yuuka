@@ -205,16 +205,18 @@ type PrefixesOutput struct {
 // are the operator's; the local part of an unclaimed (discovered) prefix
 // was chosen by whoever sent mail to it.
 type Prefix struct {
-	Address         string    `json:"address"`
-	Claimed         bool      `json:"claimed"`
-	Label           string    `json:"label,omitempty"`
-	Note            string    `json:"note,omitempty"`
-	ExpectedDomains []string  `json:"expected_domains,omitempty"`
-	FirstSeen       time.Time `json:"first_seen"`
-	LastSeen        time.Time `json:"last_seen"`
-	LeakSuspect     bool      `json:"leak_suspect,omitempty"`
-	Inactive        bool      `json:"inactive,omitempty"`
-	Messages        int       `json:"messages"`
+	Address         string   `json:"address"`
+	Claimed         bool     `json:"claimed"`
+	Label           string   `json:"label,omitempty"`
+	Note            string   `json:"note,omitempty"`
+	ExpectedDomains []string `json:"expected_domains,omitempty"`
+	// FirstSeen and LastSeen are absent for a prefix claimed before any
+	// mail reached it.
+	FirstSeen   *time.Time `json:"first_seen,omitempty"`
+	LastSeen    *time.Time `json:"last_seen,omitempty"`
+	LeakSuspect bool       `json:"leak_suspect,omitempty"`
+	Inactive    bool       `json:"inactive,omitempty"`
+	Messages    int        `json:"messages"`
 }
 
 const (
@@ -235,7 +237,7 @@ func (s *Server) listPrefixes(ctx context.Context, v *auth.Viewer, in PrefixesIn
 	for i, p := range list.Prefixes {
 		out.Prefixes[i] = Prefix{
 			Address: p.Prefix + "@" + p.Zone, Claimed: p.State == store.PrefixClaimed, Label: p.Label, Note: p.Note,
-			ExpectedDomains: p.ExpectedDomains, FirstSeen: p.FirstSeen.UTC(), LastSeen: p.LastSeen.UTC(),
+			ExpectedDomains: p.ExpectedDomains, FirstSeen: utc(p.FirstSeen), LastSeen: utc(p.LastSeen),
 			LeakSuspect: p.LeakSuspect, Inactive: !p.Active, Messages: p.Messages,
 		}
 	}
@@ -251,7 +253,10 @@ func (s *Server) listPrefixes(ctx context.Context, v *auth.Viewer, in PrefixesIn
 func prefixesText(out PrefixesOutput) string {
 	var claimed, discovered strings.Builder
 	for _, p := range out.Prefixes {
-		line := fmt.Sprintf("%s · %d messages · last seen %s", p.Address, p.Messages, p.LastSeen.Format(time.RFC3339))
+		line := fmt.Sprintf("%s · %d messages · no mail yet", p.Address, p.Messages)
+		if p.LastSeen != nil {
+			line = fmt.Sprintf("%s · %d messages · last seen %s", p.Address, p.Messages, p.LastSeen.Format(time.RFC3339))
+		}
 		if p.LeakSuspect {
 			line += " · leak suspect"
 		}
@@ -283,4 +288,12 @@ func prefixesText(out PrefixesOutput) string {
 		b.WriteString(agentview.Fence("prefixes", discovered.String()))
 	}
 	return b.String()
+}
+
+func utc(t *time.Time) *time.Time {
+	if t == nil {
+		return nil
+	}
+	u := t.UTC()
+	return &u
 }
