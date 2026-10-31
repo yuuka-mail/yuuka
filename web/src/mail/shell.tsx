@@ -248,20 +248,21 @@ function ListHeader({
       <div className="flex items-baseline gap-2">
         {zone && (
           <ToggleGroup
-            size="sm"
+            size="xs"
             variant="outline"
             spacing={0}
             className="lg:hidden"
+            aria-label="Zone"
             value={[view.area]}
             onValueChange={(v: string[]) => {
               const a = v[0] as Area | undefined;
               if (a) pick({ area: a });
             }}
           >
-            <ToggleGroupItem value="conversations" className="h-6 px-2 text-small">
+            <ToggleGroupItem value="conversations">
               Conversations
             </ToggleGroupItem>
-            <ToggleGroupItem value="notifications" className="h-6 px-2 text-small">
+            <ToggleGroupItem value="notifications">
               Notifications
             </ToggleGroupItem>
           </ToggleGroup>
@@ -296,7 +297,7 @@ function DraftFilter({ st, onChange }: { st?: string; onChange: (st: string | un
   return (
     <ToggleGroup
       multiple
-      size="sm"
+      size="xs"
       variant="outline"
       spacing={0}
       aria-label="Show drafts"
@@ -308,7 +309,7 @@ function DraftFilter({ st, onChange }: { st?: string; onChange: (st: string | un
       }}
     >
       {(Object.keys(draftFilterLabels) as (keyof typeof draftFilterLabels)[]).map((k) => (
-        <ToggleGroupItem key={k} value={k} className="h-6 px-2 text-small">
+        <ToggleGroupItem key={k} value={k}>
           {draftFilterLabels[k]}
         </ToggleGroupItem>
       ))}
@@ -319,7 +320,7 @@ function DraftFilter({ st, onChange }: { st?: string; onChange: (st: string | un
 function OutboxFilterBar({ st, onChange }: { st?: string; onChange: (st: string | undefined) => void }) {
   return (
     <ToggleGroup
-      size="sm"
+      size="xs"
       variant="outline"
       spacing={0}
       aria-label="Show outbox rows"
@@ -330,7 +331,7 @@ function OutboxFilterBar({ st, onChange }: { st?: string; onChange: (st: string 
       }}
     >
       {(Object.keys(outboxFilters) as OutboxFilter[]).map((k) => (
-        <ToggleGroupItem key={k} value={k} className="h-6 px-2 text-small">
+        <ToggleGroupItem key={k} value={k}>
           {outboxFilters[k].label}
         </ToggleGroupItem>
       ))}
