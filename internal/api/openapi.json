@@ -400,7 +400,8 @@
           "draft",
           "outbox",
           "rule",
-          "note"
+          "note",
+          "triage"
         ]
       },
       "ChangePage": {

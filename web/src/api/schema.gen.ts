@@ -2889,7 +2889,7 @@ export interface components {
             at: string;
         };
         /** @enum {string} */
-        ChangeKind: "message" | "delivery" | "thread" | "flag" | "prefix" | "proposal" | "draft" | "outbox" | "rule" | "note";
+        ChangeKind: "message" | "delivery" | "thread" | "flag" | "prefix" | "proposal" | "draft" | "outbox" | "rule" | "note" | "triage";
         ChangePage: {
             changes: components["schemas"]["Change"][];
             cursor: string;

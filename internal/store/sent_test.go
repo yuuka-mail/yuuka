@@ -19,6 +19,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/rules"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
+	"github.com/yuuka-mail/yuuka/internal/triage/score"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
@@ -479,6 +480,12 @@ func TestVisibility(t *testing.T) {
 		}
 		writeNote(restricted, msgs["in-open"])
 	}
+	// A score on every message (§15.2), as the scorer writes it.
+	for n, id := range msgs {
+		if err := db.InsertScore(ctx, newScore(id, laya, tick(), 0.5)); err != nil {
+			t.Fatalf("score %s: %v", n, err)
+		}
+	}
 	// The change log (§8.6) holds what the writers log above; the
 	// outbox rows and drafts here are written with plain SQL, so their
 	// changes are logged as their writers would. A draft of the agent's
@@ -633,6 +640,22 @@ func TestVisibility(t *testing.T) {
 				slices.Sort(wantNotes)
 				if !slices.Equal(got, wantNotes) {
 					t.Errorf("Notes %s: %q, want %q", n, got, wantNotes)
+				}
+			}
+
+			// Scores go where the message goes; their input, facts
+			// of the deliveries, only to a viewer of all of them:
+			// both was delivered to the closed account.
+			for n, id := range msgs {
+				s, err := db.LatestScore(ctx, v, id, laya)
+				if slices.Contains(want, n) != (err == nil && s != nil) || err != nil && !errors.Is(err, store.ErrNotFound) {
+					t.Errorf("LatestScore %s: %v", n, err)
+				}
+				if s != nil && s.InputWithheld != (v != everyone && n == "both") {
+					t.Errorf("LatestScore %s: input withheld %v", n, s.InputWithheld)
+				}
+				if s != nil && s.InputWithheld && s.Input != (score.Input{}) {
+					t.Errorf("LatestScore %s: withheld input %+v", n, s.Input)
 				}
 			}
 
@@ -910,6 +933,10 @@ func TestVisibility(t *testing.T) {
 				case "message", "flag":
 					_, err = db.MessageByID(ctx, v, e.id)
 					visible = err == nil
+				case "triage":
+					var s *store.ScoreRead
+					s, err = db.LatestScore(ctx, v, e.id, laya)
+					visible = err == nil && s != nil
 				case "delivery":
 					var m string
 					if err := pool.QueryRow(ctx, `SELECT message_id FROM deliveries WHERE id = $1`, e.id).Scan(&m); err != nil {
@@ -951,7 +978,7 @@ func TestVisibility(t *testing.T) {
 				t.Errorf("Changes lists what is not in the log: %v", got)
 			}
 			// The fixture covers every kind it can reach without a rule.
-			for _, k := range []string{"message", "delivery", "thread", "flag", "prefix", "proposal", "draft", "outbox", "note"} {
+			for _, k := range []string{"message", "delivery", "thread", "flag", "prefix", "proposal", "draft", "outbox", "note", "triage"} {
 				if !slices.Contains(kinds, k) {
 					t.Errorf("no %s change in the fixture", k)
 				}

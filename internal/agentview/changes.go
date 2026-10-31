@@ -14,7 +14,7 @@ import (
 type ChangeKind string
 
 func (ChangeKind) Enum() []string {
-	return []string{"message", "delivery", "thread", "flag", "prefix", "proposal", "draft", "outbox", "rule", "note"}
+	return []string{"message", "delivery", "thread", "flag", "prefix", "proposal", "draft", "outbox", "rule", "note", "triage"}
 }
 
 // Scopes are what a credential needs to follow changes of kind k, beyond

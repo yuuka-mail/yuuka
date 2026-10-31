@@ -19,7 +19,7 @@ import (
 
 // ChangeKinds are the kinds of the change log (changes_kind_check), in
 // the order they were introduced.
-var ChangeKinds = []string{"message", "delivery", "thread", "flag", "prefix", "proposal", "draft", "outbox", "rule", "note"}
+var ChangeKinds = []string{"message", "delivery", "thread", "flag", "prefix", "proposal", "draft", "outbox", "rule", "note", "triage"}
 
 // ErrCursorExpired: the cursor is not one this log issued, because it is
 // ahead of the log (the database was restored from a backup, or it
@@ -51,8 +51,9 @@ type ChangeQuery struct {
 type Change struct {
 	Seq  int64
 	Kind string
-	// ID is a ULID, or prefix@zone for kind prefix. For message and flag
-	// it is the message id, for delivery the delivery id.
+	// ID is a ULID, or prefix@zone for kind prefix. For message, flag and
+	// triage (a score arrived, §15) it is the message id, for delivery
+	// the delivery id.
 	ID string
 	// MessageID is the message of a delivery, or the message a note is
 	// on (its anchor, for a thread note): the object a client can read.
@@ -77,8 +78,8 @@ type ChangePage struct {
 
 // Changes returns the changes after q.Since that v may see, in the order
 // they committed (§8.6). Visibility is each object's own (§13.8): a
-// message, flag or thread change goes to whom the message (some message
-// of the thread) is visible, a delivery's to whom the delivery is, an
+// message, flag, triage or thread change goes to whom the message (some
+// message of the thread) is visible, a delivery's to whom the delivery is, an
 // outbox row's to whom the account it is sent from is readable; drafts,
 // proposals and notes by their own rules (visibleDraft, proposalVisible,
 // noteVisible), rules to people only; the prefix registry is listed to
@@ -185,6 +186,7 @@ func (db *DB) changeVisible(v *auth.Viewer) string {
 	return `CASE c.kind
 		WHEN 'message' THEN ` + message + `
 		WHEN 'flag' THEN ` + message + `
+		WHEN 'triage' THEN ` + message + `
 		WHEN 'delivery' THEN EXISTS (SELECT 1 FROM deliveries d WHERE d.id = c.target_id AND ` + db.visibleDelivery(v, "d") + `)
 		WHEN 'thread' THEN EXISTS (SELECT 1 FROM messages m WHERE m.thread_id = c.target_id AND ` + db.visibleMessage(v, "m") + `)
 			OR NOT EXISTS (SELECT 1 FROM threads t WHERE t.id = c.target_id) AND ` + db.readsEveryAccount(v) + `
