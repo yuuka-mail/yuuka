@@ -21,6 +21,15 @@ export function useMessage(id: string) {
   });
 }
 
+/**
+ * Where attachment section of message id downloads. The server always
+ * answers with Content-Disposition: attachment; nothing from mail is
+ * rendered in the page (§8.3).
+ */
+export function attachmentHref(id: string, section: string): string {
+  return `/api/v1/messages/${encodeURIComponent(id)}/attachments/${encodeURIComponent(section)}`;
+}
+
 /** The structured view as far as it has been loaded. */
 export interface Reading {
   facts: Facts;

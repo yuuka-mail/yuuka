@@ -1,4 +1,4 @@
-import { ExternalLinkIcon, PaperclipIcon, QuoteIcon } from "lucide-react";
+import { DownloadIcon, ExternalLinkIcon, PaperclipIcon, QuoteIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import type { Attachment, Block, Span } from "@/api/agentview.gen";
@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import { claimedHost, linkTarget } from "./links";
-import type { Reading } from "./reading-data";
+import { attachmentHref, type Reading } from "./reading-data";
 
 /**
  * The message text as the structured view (§8.1, §12.1) gives it: blocks
@@ -18,6 +18,7 @@ import type { Reading } from "./reading-data";
  * target, open without opener or referrer, and show the host they go to.
  */
 export function ReadingBody({
+  id,
   uri,
   reading,
   anchor,
@@ -25,6 +26,8 @@ export function ReadingBody({
   loadMore,
   isFetchingMore,
 }: {
+  /** The message id, for attachment downloads. */
+  id: string;
   uri: string;
   reading: Reading;
   anchor?: string;
@@ -70,7 +73,7 @@ export function ReadingBody({
         </Button>
       )}
       {!found && !more && <p className="text-xs text-muted-foreground">There is no {anchor} in this message; it may have been cited from an older view.</p>}
-      {reading.content.attachments && <Attachments list={reading.content.attachments} />}
+      {reading.content.attachments && <Attachments id={id} list={reading.content.attachments} />}
     </div>
   );
 }
@@ -162,8 +165,12 @@ function Spans({ spans }: { spans: Span[] }) {
   });
 }
 
-/** Attachments are listed for what they are; their bytes are not served in M1. */
-function Attachments({ list }: { list: Attachment[] }) {
+/**
+ * Attachments are plain downloads: no preview, nothing from the file is
+ * shown but its declared name and type (§8.3). The server sends every one
+ * as Content-Disposition: attachment.
+ */
+function Attachments({ id, list }: { id: string; list: Attachment[] }) {
   return (
     <section className="mt-1 border-t pt-2 text-xs">
       <h2 className="mb-1 font-medium text-muted-foreground">
@@ -173,7 +180,15 @@ function Attachments({ list }: { list: Attachment[] }) {
         {list.map((a) => (
           <li key={a.section} className="flex items-baseline gap-2">
             <PaperclipIcon aria-hidden className="size-3 shrink-0 self-center text-muted-foreground" />
-            <span className="min-w-0 truncate">{a.filename || "(no file name)"}</span>
+            <a
+              href={attachmentHref(id, a.section)}
+              download
+              title={`Download ${a.filename || "part " + a.section}`}
+              className="group inline-flex min-w-0 items-baseline gap-1 text-primary underline decoration-muted-foreground/50 underline-offset-2 hover:decoration-current"
+            >
+              <span className="min-w-0 truncate">{a.filename || `(no file name, part ${a.section})`}</span>
+              <DownloadIcon aria-hidden className="size-3 shrink-0 self-center text-muted-foreground group-hover:text-foreground" />
+            </a>
             <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{a.media_type}</span>
           </li>
         ))}

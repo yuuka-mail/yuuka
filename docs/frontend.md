@@ -166,7 +166,7 @@ M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里�
   `?m=<id>&a=part/1/para/3` 打开时滚到那一块并高亮，不在第一段里就自动续取到它出现为止；
   悬停块左侧的 ¶ 把锚点写进地址栏并复制 `yuuka://` URI。正文一律是文本节点，不用
   `dangerouslySetInnerHTML`；链接 `rel="noopener noreferrer"`、不带 referrer，旁边显示真实主机名
-  （punycode 原样显示），链接文字自称的主机和真实主机对不上时标成错误色。附件只列出，不链接。
+  （punycode 原样显示），链接文字自称的主机和真实主机对不上时标成错误色。附件列表里每项是指向上面那个端点的普通下载链接，不预览。
   取舍：引用折叠后只剩一行标记，看不到被引的原文——那是线程里的另一封信，点线程条去看
 - **shadcn 选 Base UI 作底层**（`components.json` 的 `base-nova`），只拷了 Button / Input / Badge /
   ToggleGroup / Skeleton / Separator；三栏、列表、阅读区按 §12.3 自己写

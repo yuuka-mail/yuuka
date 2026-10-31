@@ -92,6 +92,8 @@ if (enrollURL) {
     "reply-html": await find("Release checklist", "Re: Release checklist"),
     phish: await find("confirm your account", "Urgent: confirm your account"),
   };
+  // The attachment list, which links each file as a plain download.
+  const invoice = await find("Invoice attached", "Invoice and logo");
   const prefixes = await p.evaluate(async () => (await fetch("/api/v1/prefixes")).json());
   const discovered = prefixes.prefixes.find((x) => !x.claimed)?.address;
   await p.close();
@@ -114,6 +116,11 @@ if (enrollURL) {
         await s.goto(base + `/?m=${id}`);
         await s.locator('[id="part/1/para/1"], [id="part/1.2/para/1"]').first().waitFor();
         await shot(s, `reading-${name}-${tag}`);
+      }
+      if (invoice) {
+        await s.goto(base + `/?m=${invoice}`);
+        await s.getByRole("link", { name: /invoice\.pdf/i }).waitFor();
+        await shot(s, `reading-attachments-${tag}`);
       }
       if (readings["reply-html"]) {
         await s.goto(base + `/?m=${readings["reply-html"]}&a=part/1.2/para/4`);

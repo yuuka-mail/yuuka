@@ -123,6 +123,7 @@ function Reading({ message: m, anchor, onAnchor, onOpen }: { message: Message } 
 
       {body.reading ? (
         <ReadingBody
+          id={m.id}
           uri={`yuuka://message/${m.id}`}
           reading={body.reading}
           anchor={anchor}

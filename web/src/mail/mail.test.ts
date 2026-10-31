@@ -4,7 +4,7 @@ import type { View } from "@/api/agentview.gen";
 
 import { strippedText, warnings } from "./facts";
 import { claimedHost, linkTarget } from "./links";
-import { merge } from "./reading-data";
+import { attachmentHref, merge } from "./reading-data";
 
 describe("link targets", () => {
   it("shows the real host and flags text naming another", () => {
@@ -68,5 +68,12 @@ describe("reading pages", () => {
     expect(r.parts.map((p) => p.blocks.map((b) => b.anchor))).toEqual([["part/1/para/1", "part/1/para/2", "part/1/para/3"], ["part/2/para/1"]]);
     expect(r.more).toBeUndefined();
     expect(r.content.parts).toBeUndefined();
+  });
+});
+
+describe("attachment links", () => {
+  it("point at the download endpoint with both segments encoded", () => {
+    expect(attachmentHref("01M68JFX8Z9E5RB2VCA8TXVF4E", "1.3")).toBe("/api/v1/messages/01M68JFX8Z9E5RB2VCA8TXVF4E/attachments/1.3");
+    expect(attachmentHref("a/b", "../2")).toBe("/api/v1/messages/a%2Fb/attachments/..%2F2");
   });
 });
