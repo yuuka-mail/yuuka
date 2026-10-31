@@ -1326,6 +1326,7 @@ export interface components {
             /** Format: date-time */
             date?: string;
             snippet: string;
+            extracted?: components["schemas"]["Extraction"][];
             attachments?: components["schemas"]["Attachment"][];
             sections?: components["schemas"]["Section"][];
             parts?: components["schemas"]["Part"][];
@@ -1403,6 +1404,26 @@ export interface components {
         };
         /** @enum {string} */
         DraftState: "draft" | "held" | "outbox";
+        Extracted: {
+            code?: components["schemas"]["Extraction"];
+            link?: components["schemas"]["Extraction"];
+            /** Format: date-time */
+            expires_at?: string;
+            expired: boolean;
+        };
+        Extraction: {
+            kind: components["schemas"]["ExtractionKind"];
+            value: string;
+            confidence: number;
+            source: components["schemas"]["ExtractionSource"];
+            host?: string;
+            /** Format: date-time */
+            expires_at?: string;
+        };
+        /** @enum {string} */
+        ExtractionKind: "otp" | "link" | "expiry" | "amount";
+        /** @enum {string} */
+        ExtractionSource: "subject" | "body" | "html";
         Facts: {
             /** Format: date-time */
             received_at: string;
@@ -1456,6 +1477,8 @@ export interface components {
             has_attach: boolean;
             recipients: string[];
             outgoing?: components["schemas"]["Outgoing"];
+            extracted?: components["schemas"]["Extracted"];
+            sender_verified?: boolean;
             message_id: string;
             in_reply_to: string;
             references: string[];
@@ -1463,6 +1486,7 @@ export interface components {
             date?: string;
             body_text: string;
             parse_error?: string;
+            extractions: components["schemas"]["Extraction"][];
             to: components["schemas"]["Address"][];
             cc: components["schemas"]["Address"][];
             reply_to: components["schemas"]["Address"][];
@@ -1487,6 +1511,8 @@ export interface components {
             has_attach: boolean;
             recipients: string[];
             outgoing?: components["schemas"]["Outgoing"];
+            extracted?: components["schemas"]["Extracted"];
+            sender_verified?: boolean;
         };
         ObservedDomain: {
             domain: string;

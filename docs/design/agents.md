@@ -75,6 +75,12 @@ M1 的落法（`internal/agentview`），以及设计里没写死、实现时定
   spf / dkim / dmarc 的结论和随之而来的警告都不给；store 算出的 `downgraded`（已含 dmarc=fail）照给。
   视图由 `agentview.InputOf` 从 store 的 `MessageDetail` 组装，MCP 和 REST 共用这一处，两边不会对不上
 - `view_version` 和 `parser_version` 任一变化都可能让段落号漂移（§4.2），这就是 `cites` 存原文摘录的原因
+- **提取值**（M3）在 `content.extracted`：验证码、登录 / 验证链接（带主机名）、有效期，
+  取自 `extractions` 表（§4），和 REST 详情的 `extractions` 同源（`agentview.ExtractionOf`）。
+  它放在 `content` 而不是 `facts` 里：「找到了一个码」是 yuuka 的判断，码本身却是发件人写的，
+  和正文一样不可信，给模型的文本里也在 `untrusted_mail_content` 边界之内，前面一句话说明只交给人、不照着做。
+  所有级别都带，`snippet` 级就能拿到码，不必为了一个码读整封信。
+  没有专门的「最新验证码」工具：agent 要码时先搜再 `get_message`；它是读路径的一个变体，等有调用方再加
 
 ### 8.2 能力分级，在 API 层强制
 
@@ -408,7 +414,15 @@ agent 专属身份的默认值是 `review` + `thread`。各类主体的默认档
    - 正文或附件里出现 `extractions` 表中的值（验证码、链接）→ 升级
    - 引用、转发或附带的内容来自另一个线程，而收件人不是那个线程的参与者 → 升级
    - 正文里出现收件箱里没见过、也不在授权白名单里的链接域 → 升级
-   判断依据是草稿的 `in_reply_to`、`cites`（§8.1 的锚点）和正文本身，不依赖 agent 的自述
+   判断依据是草稿的 `in_reply_to`、`cites`（§8.1 的锚点）和正文本身，不依赖 agent 的自述。
+   第一条的输入已经在库里（[0008](../../internal/store/migrations/0008_extractions.sql)，提取器见
+   [`internal/extract`](../../internal/extract/extract.go)），检查本身随 `review` 档落地。定下的形状：
+   按提取器的切法把待发正文（和可读的附件文本）切成候选——数字串去掉分组的空格和连字符、URL 原样——
+   用 `extractions.value` 上的哈希索引做等值查找，不做子串扫描；只认有投递的信（从外面进来的）
+   的值，自己 Sent 副本里提取到的不算，否则 agent 回信里引用自己写过的数字也会被拦。
+   时间窗口按 message id（ULID 即到达时间）限定，码过期很久的仍然算：外泄的代价不随有效期结束。
+   按提取器的阈值，被它漏掉的码这一条也看不见；短数字（4 位）撞上正文里的普通数字时会多升级几次，
+   方向是对的
 3. **模型审核**（可选）：一个独立的 reviewer 主体，**没有任何工具**，只看待发的信、
    收件人与本线程的往来元数据、agent 的 `rationale`，输出 `pass | escalate` 和理由。
    它**只能升级，不能放行**前两步拦下的东西。用和起草者不同的上下文，最好是不同的模型，

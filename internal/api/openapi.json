@@ -194,6 +194,12 @@
           "snippet": {
             "type": "string"
           },
+          "extracted": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Extraction"
+            }
+          },
           "attachments": {
             "type": "array",
             "items": {
@@ -487,6 +493,78 @@
           "outbox"
         ]
       },
+      "Extracted": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/Extraction"
+          },
+          "link": {
+            "$ref": "#/components/schemas/Extraction"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expired": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "expired"
+        ],
+        "additionalProperties": false
+      },
+      "Extraction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ExtractionKind"
+          },
+          "value": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          },
+          "source": {
+            "$ref": "#/components/schemas/ExtractionSource"
+          },
+          "host": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "kind",
+          "value",
+          "confidence",
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "ExtractionKind": {
+        "type": "string",
+        "enum": [
+          "otp",
+          "link",
+          "expiry",
+          "amount"
+        ]
+      },
+      "ExtractionSource": {
+        "type": "string",
+        "enum": [
+          "subject",
+          "body",
+          "html"
+        ]
+      },
       "Facts": {
         "type": "object",
         "properties": {
@@ -689,6 +767,12 @@
           "outgoing": {
             "$ref": "#/components/schemas/Outgoing"
           },
+          "extracted": {
+            "$ref": "#/components/schemas/Extracted"
+          },
+          "sender_verified": {
+            "type": "boolean"
+          },
           "message_id": {
             "type": "string"
           },
@@ -710,6 +794,12 @@
           },
           "parse_error": {
             "type": "string"
+          },
+          "extractions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Extraction"
+            }
           },
           "to": {
             "type": "array",
@@ -753,6 +843,7 @@
           "in_reply_to",
           "references",
           "body_text",
+          "extractions",
           "to",
           "cc",
           "reply_to"
@@ -822,6 +913,12 @@
           },
           "outgoing": {
             "$ref": "#/components/schemas/Outgoing"
+          },
+          "extracted": {
+            "$ref": "#/components/schemas/Extracted"
+          },
+          "sender_verified": {
+            "type": "boolean"
           }
         },
         "required": [

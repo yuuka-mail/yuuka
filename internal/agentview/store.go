@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
+	"github.com/yuuka-mail/yuuka/internal/extract"
 	"github.com/yuuka-mail/yuuka/internal/leak"
 	"github.com/yuuka-mail/yuuka/internal/store"
 )
@@ -32,6 +33,9 @@ func InputOf(v *auth.Viewer, m store.MessageDetail, raw []byte) Input {
 			}
 		}
 	}
+	for _, x := range m.Extractions {
+		in.Extracted = append(in.Extracted, ExtractionOf(x))
+	}
 	if len(m.Deliveries) > 0 && m.Deliveries[0].Auth != nil {
 		in.Auth = *m.Deliveries[0].Auth
 	}
@@ -39,4 +43,17 @@ func InputOf(v *auth.Viewer, m store.MessageDetail, raw []byte) Input {
 		in.Sent = &Sent{OutboxID: o.OutboxID, From: o.From, State: o.State}
 	}
 	return in
+}
+
+// ExtractionOf is the view of one stored extraction, with the host of a
+// link worked out for showing next to it.
+func ExtractionOf(x store.Extraction) Extraction {
+	out := Extraction{
+		Kind: ExtractionKind(x.Kind), Value: x.Value, Confidence: x.Confidence,
+		Source: ExtractionSource(x.Source), ExpiresAt: x.ExpiresAt,
+	}
+	if x.Kind == string(extract.Link) {
+		out.Host = extract.Host(x.Value)
+	}
+	return out
 }

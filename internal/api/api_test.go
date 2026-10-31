@@ -533,6 +533,48 @@ func TestDeliveriesNeedDeliveryRead(t *testing.T) {
 	}
 }
 
+// The notification zone's code (§12.9): the summary carries the best
+// code and its expiry, the detail all extractions; whether the sender
+// is proven is an authentication fact and needs delivery:read.
+func TestExtracted(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	read, full := h.token(auth.MessageRead), h.token(auth.MessageRead, auth.DeliveryRead)
+	id := h.find("Your verification code is 482913")
+	var otp *MessageSummary
+	page := decode[MessagePage](t, h.get("/api/v1/messages?class=machine&downgraded=include&limit=500", full))
+	for i, m := range page.Messages {
+		if m.ID == id {
+			otp = &page.Messages[i]
+		}
+		if m.Extracted != nil && m.Extracted.Code == nil && m.Extracted.Link == nil {
+			t.Errorf("%s: extracted without a code or a link", m.ID)
+		}
+	}
+	if otp == nil || otp.Extracted == nil || otp.Extracted.Code == nil {
+		t.Fatalf("no code in the list: %+v", otp)
+	}
+	x := otp.Extracted
+	if x.Code.Value != "482913" || x.Code.Kind != "otp" || x.ExpiresAt == nil || !x.Expired {
+		// The corpus mail is from 2026-10-31 and lasted ten minutes.
+		t.Errorf("extracted %+v", x)
+	}
+	if otp.SenderVerified == nil || !*otp.SenderVerified {
+		t.Errorf("sender_verified %v, want true (dmarc=pass)", otp.SenderVerified)
+	}
+	m := decode[Message](t, h.get("/api/v1/messages/"+id, read))
+	if m.SenderVerified != nil {
+		t.Error("sender_verified without delivery:read")
+	}
+	if len(m.Extractions) != 2 || m.Extractions[0].Value != "482913" || m.Extractions[1].Kind != "expiry" {
+		t.Errorf("extractions %+v", m.Extractions)
+	}
+	if none := decode[Message](t, h.get("/api/v1/messages/"+h.find("Re: Lunch on Friday?"), read)); none.Extractions == nil ||
+		len(none.Extractions) != 0 || none.Extracted != nil {
+		t.Errorf("a letter with no code: %+v %+v", none.Extractions, none.Extracted)
+	}
+}
+
 // To, Cc and Reply-To come with their names from the raw message, for
 // mail received and mail only sent alike; the outbox row names its sent
 // copy's subject.

@@ -268,7 +268,7 @@ func (a *API) listMessages(ctx context.Context, v *auth.Viewer, p MessagesParams
 	}
 	page := MessagePage{Messages: make([]MessageSummary, len(ms))}
 	for i, m := range ms {
-		page.Messages[i] = summary(m)
+		page.Messages[i] = summary(v, m)
 	}
 	if len(ms) == p.Limit {
 		last := ms[len(ms)-1]
@@ -293,10 +293,14 @@ func (a *API) message(ctx context.Context, v *auth.Viewer, p IDParams) (Message,
 	}
 	rc := mimeparse.ParseRecipients(raw)
 	out := Message{
-		MessageSummary: summary(d.MessageSummary),
+		MessageSummary: summary(v, d.MessageSummary),
+		Extractions:    make([]agentview.Extraction, len(d.Extractions)),
 		MessageID:      d.MessageID, InReplyTo: d.InReplyTo, References: nonNil(d.References),
 		Date: d.Date, BodyText: d.BodyText, ParseError: d.ParseError,
 		To: addressesOf(rc.To), Cc: addressesOf(rc.Cc), ReplyTo: addressesOf(rc.ReplyTo),
+	}
+	for i, x := range d.Extractions {
+		out.Extractions[i] = agentview.ExtractionOf(x)
 	}
 	// Envelope and authentication facts are delivery data (§13.4).
 	if v.Has(auth.DeliveryRead) {
@@ -365,7 +369,7 @@ func (a *API) thread(ctx context.Context, v *auth.Viewer, p IDParams) (Thread, e
 		FirstAt: t.FirstAt, LastAt: t.LastAt, Messages: make([]MessageSummary, len(t.Messages)),
 	}
 	for i, m := range t.Messages {
-		out.Messages[i] = summary(m)
+		out.Messages[i] = summary(v, m)
 	}
 	return out, nil
 }
@@ -395,7 +399,7 @@ func (a *API) prefix(ctx context.Context, v *auth.Viewer, p PrefixParams) (Prefi
 	}
 	out := PrefixDetail{Prefix: prefixOut(d.PrefixStat), Offenses: make([]Offense, len(d.Offenses))}
 	for i, o := range d.Offenses {
-		out.Offenses[i] = Offense{Message: summary(o.Message), Verdict: agentview.LeakVerdict(o.Verdict), Domain: o.Domain, DeliveredAt: o.DeliveredAt}
+		out.Offenses[i] = Offense{Message: summary(v, o.Message), Verdict: agentview.LeakVerdict(o.Verdict), Domain: o.Domain, DeliveredAt: o.DeliveredAt}
 	}
 	return out, nil
 }
@@ -437,13 +441,40 @@ func (a *API) search(ctx context.Context, v *auth.Viewer, p SearchParams) (Searc
 	return out, nil
 }
 
-func summary(m store.MessageSummary) MessageSummary {
-	return MessageSummary{
+func summary(v *auth.Viewer, m store.MessageSummary) MessageSummary {
+	out := MessageSummary{
 		ID: m.ID, ThreadID: m.ThreadID, ReceivedAt: m.ReceivedAt, Subject: m.Subject,
 		FromAddr: m.FromAddr, FromName: m.FromName, Snippet: m.Snippet, Class: classOf(m.Class),
 		Downgraded: m.Downgraded, Quarantined: m.Quarantined, HasAttach: m.HasAttach,
 		Recipients: nonNil(m.Recipients), Outgoing: outgoingOut(m.Outgoing),
+		Extracted: extracted(m.Extracted, time.Now()),
 	}
+	if v.Has(auth.DeliveryRead) {
+		out.SenderVerified = m.SenderVerified
+	}
+	return out
+}
+
+// extracted is the summary's Extracted from the best extraction of each
+// kind, as the store lists them; nil when there is no code or link.
+func extracted(xs []store.Extraction, now time.Time) *Extracted {
+	var out Extracted
+	for _, x := range xs {
+		e := agentview.ExtractionOf(x)
+		switch e.Kind {
+		case "otp":
+			out.Code = &e
+		case "link":
+			out.Link = &e
+		case "expiry":
+			out.ExpiresAt = e.ExpiresAt
+		}
+	}
+	if out.Code == nil && out.Link == nil {
+		return nil
+	}
+	out.Expired = out.ExpiresAt != nil && !now.Before(*out.ExpiresAt)
+	return &out
 }
 
 func classOf(c classify.Class) agentview.Class { return agentview.Class(c.String()) }

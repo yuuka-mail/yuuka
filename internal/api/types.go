@@ -138,6 +138,27 @@ type MessageSummary struct {
 	// it, and how far it got. That the message exists says nothing about
 	// whether anyone received it.
 	Outgoing *Outgoing `json:"outgoing,omitempty"`
+	// Extracted is what the notification zone shows in place of the
+	// subject (§12.9): the message's best code and link and how long
+	// they last. Absent when nothing was found, and in search hits.
+	Extracted *Extracted `json:"extracted,omitempty"`
+	// SenderVerified: the trusted receiver reported dmarc=pass on a
+	// delivery, so the From domain is genuine (§10.1.1). Absent for mail
+	// nobody received (only sent from here), in search hits, and without
+	// delivery:read: it is an authentication fact.
+	SenderVerified *bool `json:"sender_verified,omitempty"`
+}
+
+// Extracted is the best of what yuuka's extractor found in a message.
+// The values are the sender's: untrusted data (§8.3). A link is to be
+// shown with its host and opened only by a person.
+type Extracted struct {
+	Code *agentview.Extraction `json:"code,omitempty"`
+	Link *agentview.Extraction `json:"link,omitempty"`
+	// ExpiresAt is when the code and link stop working, if the mail says.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// Expired: ExpiresAt had passed when this response was made.
+	Expired bool `json:"expired"`
 }
 
 // MessagePage is one page of GET /api/v1/messages, newest first.
@@ -198,6 +219,9 @@ type Message struct {
 	Date       *time.Time `json:"date,omitempty"` // absent if missing or unparseable
 	BodyText   string     `json:"body_text"`
 	ParseError string     `json:"parse_error,omitempty"`
+	// Extractions are everything the extractor found, in its order:
+	// codes, then links, best first, then the expiry (§3 principle 4).
+	Extractions []agentview.Extraction `json:"extractions"`
 	// To, Cc and ReplyTo are the header fields with display names, read
 	// from the raw message the viewer may read when it is fetched. Like
 	// everything the sender wrote they are unverified (§8.3).

@@ -238,6 +238,37 @@ func TestUntrustedBoundary(t *testing.T) {
 	}
 }
 
+// Extracted values are the sender's: they render inside the fence, at
+// every level, and the JSON carries them under content.
+func TestExtractedInsideTheFence(t *testing.T) {
+	in := input(t, "plain-otp")
+	until := time.Date(2026, 10, 31, 1, 51, 30, 0, time.UTC)
+	in.Extracted = []Extraction{
+		{Kind: "otp", Value: "482913", Confidence: 95, Source: "subject"},
+		{Kind: "link", Value: "https://example.net/v?t=1", Confidence: 85, Source: "html", Host: "example.net"},
+		{Kind: "expiry", Value: "PT10M", Confidence: 85, Source: "body", ExpiresAt: &until},
+	}
+	for _, level := range []Level{LevelSnippet, LevelPart} {
+		v, err := Select(Build(in), level, Anchor{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(v.Content.Extracted) != 3 {
+			t.Errorf("%s: extracted %+v", level, v.Content.Extracted)
+		}
+		text := v.Text()
+		open := fenceOpen.FindStringIndex(text)
+		for _, want := range []string{
+			"otp: 482913 (confidence 95, from the subject)",
+			"link: <https://example.net/v?t=1> (host example.net", "expiry: PT10M, until 2026-10-31T01:51:30Z",
+		} {
+			if i := strings.Index(text, want); open == nil || i < open[1] {
+				t.Errorf("%s: %q missing or outside the fence:\n%s", level, want, text)
+			}
+		}
+	}
+}
+
 func TestSelect(t *testing.T) {
 	full := Build(input(t, "html-reply-tracking"))
 	snip, err := Select(full, LevelSnippet, Anchor{})

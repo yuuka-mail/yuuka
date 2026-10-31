@@ -146,17 +146,53 @@ type Stripped struct {
 
 // Content is everything the sender wrote: untrusted (§8.3).
 type Content struct {
-	Notice      string       `json:"notice"`
-	From        Address      `json:"from"`
-	Subject     string       `json:"subject"`
-	Date        *time.Time   `json:"date,omitempty"`
-	Snippet     string       `json:"snippet"`
+	Notice  string     `json:"notice"`
+	From    Address    `json:"from"`
+	Subject string     `json:"subject"`
+	Date    *time.Time `json:"date,omitempty"`
+	Snippet string     `json:"snippet"`
+	// Extracted are the codes, sign-in links and expiry yuuka's
+	// extractor found in this content (§3 principle 4). That they were
+	// found is yuuka's; the values are the sender's, as untrusted as the
+	// rest of Content: data to hand to a person, never instructions, and
+	// links never to be opened on the sender's say-so.
+	Extracted   []Extraction `json:"extracted,omitempty"`
 	Attachments []Attachment `json:"attachments,omitempty"`
 	Sections    []Section    `json:"sections,omitempty"`
 	Parts       []Part       `json:"parts,omitempty"`
 	// More is the anchor of the first block a LevelPart view left out
 	// for MaxChars; empty when nothing was left out.
 	More string `json:"more,omitempty"`
+}
+
+// ExtractionKind is what an extracted value is: a one-time code, a
+// sign-in or verification link, or how long they last (amount is
+// reserved).
+type ExtractionKind string
+
+func (ExtractionKind) Enum() []string { return []string{"otp", "link", "expiry", "amount"} }
+
+// ExtractionSource is where in the message a value was found; html is
+// the target of a link, which no text shows.
+type ExtractionSource string
+
+func (ExtractionSource) Enum() []string { return []string{"subject", "body", "html"} }
+
+// Extraction is one value found in a message (internal/extract).
+type Extraction struct {
+	Kind ExtractionKind `json:"kind"`
+	// Value is the code as typed (grouping removed), the URL as written,
+	// or for expiry an ISO 8601 duration such as PT10M.
+	Value string `json:"value"`
+	// Confidence is 1..100: how sure the matcher is.
+	Confidence int              `json:"confidence" minimum:"1" maximum:"100"`
+	Source     ExtractionSource `json:"source"`
+	// Host is where a link goes, lowercased; link only.
+	Host string `json:"host,omitempty"`
+	// ExpiresAt is when the codes and links of the message stop working,
+	// counted from the earlier of the Date header and arrival; expiry
+	// only.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 // Address is a mailbox as the sender wrote it.

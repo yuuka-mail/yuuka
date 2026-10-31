@@ -83,6 +83,8 @@ type Input struct {
 	// in DeliveredTo it is all the view says about where the mail came
 	// from: Auth is ignored and no verdict is given.
 	Sent *Sent
+	// Extracted are the message's extractions as the store holds them.
+	Extracted []Extraction
 	// WithholdDelivery is set when the viewer may read the message but
 	// not its delivery facts (delivery:read, §13.4): DeliveredTo and Auth
 	// are then ignored and the view says they were withheld.
@@ -124,6 +126,7 @@ func Build(in Input) View {
 			Notice:      Notice,
 			From:        Address{Name: msg.FromName, Addr: msg.FromAddr},
 			Subject:     msg.Subject,
+			Extracted:   in.Extracted,
 			Attachments: r.atts,
 			Parts:       r.parts,
 		},
