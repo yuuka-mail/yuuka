@@ -286,3 +286,24 @@ WebUI 是工具，不是展示面：一天打开几十次，每次几秒——�
   区只是前端对分类的组合（[`web/src/mail/view.ts`](../web/src/mail/view.ts) 的 `listParams`）
 - **M2**：会话区按线程列、已读状态、通知的收起（需要写路径）
 - **M3**：提取值填进码位、改判、在界面上认领前缀、泄漏视图
+
+### 12.10 M2 撰写用的端点
+
+撰写器建在这几个端点上，路径、参数、响应以 [`openapi.json`](../internal/api/openapi.json) 为准，
+handler 在 [`internal/api/sending.go`](../internal/api/sending.go)。这里只写界面该怎么用它们、为什么是这个形状：
+
+- **身份选择器**：新信从 `GET /api/v1/identities` 取，回复从 `GET /api/v1/messages/{id}/reply-identities` 取
+  （第一项就是默认值，默认取自原信进来的地址，§9.3）。每个身份带着当前查看者的有效档位和 `sends`：
+  `false` 时同时给 `hold_reason` / `hold_detail`。选择器应当在按发送之前就把「会直接发出」和「会停在草稿等人确认」
+  区分开——这是系统在说（§12.5），不是 agent 在说。`sends` 是预览：收件人范围和限额要到提交时才算
+- **草稿**：`POST /api/v1/drafts` 建，`PUT /api/v1/drafts/{id}` 整体保存（自动保存直接 PUT 整份），
+  `DELETE` 删。`GET /api/v1/drafts` 默认只列还能改的（`state=draft,held`）；`state=outbox` 是已交出去的，
+  带 `outbox.state`。草稿的作者在 `author` 里：agent 写的草稿要用 agent 的设计 token 呈现（§12.5），
+  人按发送就是确认它（§8.9 规则 2），走的是同一个 submit 端点
+- **发送**：`POST /api/v1/drafts/{id}/submit`。`queued: false` 不是错误，是「停在草稿」，
+  界面按 `hold_reason` 原样告诉人为什么，而不是弹错误框；`409 conflict` 是重复提交（按钮防抖之外的兜底）
+- **发出后**：消息摘要、搜索命中和消息详情上的 `outgoing`（outbox id + 状态）说明这是我们发的、走到了哪一步；
+  信本身存在不代表对方收到了。`GET /api/v1/outbox` 和 `/outbox/{id}` 给逐收件人的状态和尝试次数，
+  要 `delivery:read`（里面有 Bcc）。状态为 `unknown` 的那一行由人决定：`POST /api/v1/outbox/{id}/resolve`，
+  `sent` / `resend` / `abandon`，只接受 human 主体，记一条和 CLI 同名的 `outbox.resolve`。
+  `resend` 可能让对方收到两封，界面上要把这个代价写在按钮旁边

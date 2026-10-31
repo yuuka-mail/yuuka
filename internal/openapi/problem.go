@@ -33,7 +33,12 @@ const (
 	CodeRateLimited     Code = "rate_limited"
 	CodeUndecodable     Code = "undecodable" // stored mail that cannot be decoded as asked
 	CodeUnavailable     Code = "unavailable" // busy; retry later
-	CodeInternal        Code = "internal"
+	// CodeNoIdentity: no identity covers the From address asked for.
+	CodeNoIdentity Code = "no_identity"
+	// CodeSubmissionRejected: the submission core refused outright. A
+	// submission beyond its grant is not this: it is held, a success.
+	CodeSubmissionRejected Code = "submission_rejected"
+	CodeInternal           Code = "internal"
 )
 
 // Enum lists every code: the schema says which codes exist.
@@ -41,7 +46,7 @@ func (Code) Enum() []string {
 	return []string{
 		"invalid_param", "invalid_body", "unsupported_type", "body_too_large", "not_found",
 		"unauthenticated", "scope_required", "forbidden", "conflict", "not_verified", "ceremony_expired", "rate_limited",
-		"undecodable", "unavailable", "internal",
+		"undecodable", "unavailable", "no_identity", "submission_rejected", "internal",
 	}
 }
 

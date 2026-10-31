@@ -346,7 +346,22 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 }
 
 func (a *app) mcp() *mcp.Server {
-	return mcp.New(mcp.Config{DB: a.db, Raw: a.in, Log: slog.Default(), Version: version})
+	cfg := mcp.Config{DB: a.db, Raw: a.in, Log: slog.Default(), Version: version}
+	// Only serve has the outbox, so only its MCP offers submit_draft; the
+	// stdio form writes drafts for serve or a person to submit.
+	if a.submit != nil {
+		cfg.Submitter = a.submit
+	}
+	return mcp.New(cfg)
+}
+
+// rest is the REST API, submitting drafts when this process can (serve).
+func (a *app) rest(log *slog.Logger) *api.API {
+	r := api.New(a.db, a.in, log)
+	if a.submit != nil {
+		r.WithSubmitter(a.submit)
+	}
+	return r
 }
 
 // mcpStdio serves MCP to the client that started this process. The
@@ -568,7 +583,7 @@ func (a *app) routes(log *slog.Logger) ([]route, error) {
 	}
 	return append(rs,
 		route{"/auth/", authPasskey, svc.Handler()},
-		route{"/api/", authSession, api.New(a.db, a.in, log).Handler(svc)},
+		route{"/api/", authSession, a.rest(log).Handler(svc)},
 		// The page shell needs no session; it fetches /auth/session.
 		route{"/", authNoShell, web.Handler()},
 	), nil

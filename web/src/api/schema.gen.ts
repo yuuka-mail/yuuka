@@ -4,6 +4,293 @@
  */
 
 export interface paths {
+    "/api/v1/drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List drafts, most recently changed first */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description only drafts in these states; absent means draft,held */
+                    state?: components["schemas"]["DraftState"][];
+                    /** @description next_cursor of the previous page */
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["DraftPage"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Create a draft */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DraftBody"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Draft"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a draft */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Draft"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        /** Replace a draft's content */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DraftBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Draft"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Delete a draft */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drafts/{id}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit a draft: queued, or held as a draft with the reason (§8.9) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SubmitResult"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the identities the viewer may send as, and how it would go */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["IdentityList"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/messages": {
         parameters: {
             query?: never;
@@ -154,6 +441,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/messages/{id}/reply-identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the identities a reply defaults to, best first */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ReplyIdentities"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/messages/{id}/view": {
         parameters: {
             query?: never;
@@ -244,6 +578,155 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/outbox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List outgoing mail, newest first */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description only rows in these states */
+                    state?: components["schemas"]["OutboxState"][];
+                    /** @description next_cursor of the previous page */
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OutboxPage"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/outbox/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get one outgoing message's state */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OutboxEntry"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/outbox/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Decide on mail whose delivery is unknown (§4.5); people only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ResolveBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["OutboxEntry"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -744,6 +1227,11 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        Actor: {
+            id: string;
+            kind: string;
+            name: string;
+        };
         Address: {
             name?: string;
             addr?: string;
@@ -753,6 +1241,8 @@ export interface components {
             filename?: string;
             media_type: string;
         };
+        /** @enum {string} */
+        AttemptOutcome: "accepted" | "partial" | "rejected" | "failed" | "unknown" | "abandoned";
         Auth: {
             verified: boolean;
             withheld?: boolean;
@@ -771,10 +1261,16 @@ export interface components {
             spans?: components["schemas"]["Span"][];
             lines?: number;
         };
+        Cite: {
+            /** @description yuuka://message/<id>, optionally with #part/<section>/para/<n> */
+            uri: string;
+            /** @description the quoted text, as it read when cited */
+            quote?: string;
+        };
         /** @enum {string} */
         Class: "unknown" | "machine" | "human";
         /** @enum {string} */
-        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "internal";
+        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "internal";
         Content: {
             notice: string;
             from: components["schemas"]["Address"];
@@ -813,6 +1309,50 @@ export interface components {
                 [key: string]: string;
             };
         };
+        Draft: {
+            id: string;
+            author: components["schemas"]["Actor"];
+            state: components["schemas"]["DraftState"];
+            identity_id: string;
+            from: string;
+            to: string[];
+            cc: string[];
+            bcc: string[];
+            subject: string;
+            body_markdown: string;
+            smtp: boolean;
+            in_reply_to?: string;
+            cites: components["schemas"]["Cite"][];
+            hold_reason?: components["schemas"]["HoldReason"];
+            hold_detail?: string;
+            outbox?: components["schemas"]["Outgoing"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DraftBody: {
+            /** @description the address to send from; GET /api/v1/identities lists which may be used. Defaults to the reply identity of in_reply_to */
+            from?: string;
+            /** @description bare addresses */
+            to?: string[];
+            /** @description bare addresses */
+            cc?: string[];
+            /** @description bare addresses */
+            bcc?: string[];
+            subject?: string;
+            /** @description the body as Markdown; the identity's signature is added when it is sent */
+            body_markdown?: string;
+            /** @description the id of the message this replies to */
+            in_reply_to?: string;
+            cites?: components["schemas"]["Cite"][];
+        };
+        DraftPage: {
+            drafts: components["schemas"]["Draft"][];
+            next_cursor?: string;
+        };
+        /** @enum {string} */
+        DraftState: "draft" | "held" | "outbox";
         Facts: {
             /** Format: date-time */
             received_at: string;
@@ -825,9 +1365,19 @@ export interface components {
             stripped: components["schemas"]["Stripped"];
         };
         /** @enum {string} */
+        HoldReason: "policy" | "owner" | "limit" | "recipients" | "suspended" | "loop" | "review" | "withdrawn";
+        IdentityList: {
+            identities: components["schemas"]["SendingIdentity"][];
+        };
+        /** @enum {string} */
         Kind: "heading" | "para" | "item" | "pre" | "quote";
         /** @enum {string} */
         Level: "snippet" | "sections" | "part";
+        Limits: {
+            max_per_hour?: number;
+            max_per_day?: number;
+            max_new_recipients_per_day?: number;
+        };
         LoginResult: {
             principal: string;
             /** Format: date-time */
@@ -847,6 +1397,7 @@ export interface components {
             quarantined: boolean;
             has_attach: boolean;
             recipients: string[];
+            outgoing?: components["schemas"]["Outgoing"];
             message_id: string;
             in_reply_to: string;
             references: string[];
@@ -874,6 +1425,41 @@ export interface components {
             quarantined: boolean;
             has_attach: boolean;
             recipients: string[];
+            outgoing?: components["schemas"]["Outgoing"];
+        };
+        OutboxEntry: {
+            id: string;
+            state: components["schemas"]["OutboxState"];
+            identity: string;
+            identity_id: string;
+            from: string;
+            draft_id?: string;
+            message_id?: string;
+            submitted_by: components["schemas"]["Actor"];
+            approved_by?: components["schemas"]["Actor"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            next_retry_at?: string;
+            error?: string;
+            recipients: components["schemas"]["OutboxRecipient"][];
+            attempts: number;
+            last_outcome?: components["schemas"]["AttemptOutcome"];
+        };
+        OutboxPage: {
+            entries: components["schemas"]["OutboxEntry"][];
+            next_cursor?: string;
+        };
+        OutboxRecipient: {
+            addr: string;
+            kind: components["schemas"]["RecipientKind"];
+            state: components["schemas"]["RecipientState"];
+        };
+        /** @enum {string} */
+        OutboxState: "held" | "queued" | "sending" | "sent" | "partial" | "unknown" | "failed" | "dead" | "withdrawn";
+        Outgoing: {
+            outbox_id: string;
+            state: components["schemas"]["OutboxState"];
         };
         Part: {
             anchor: string;
@@ -905,6 +1491,12 @@ export interface components {
             code: components["schemas"]["Code"];
             detail?: string;
         };
+        /** @enum {string} */
+        RecipientKind: "to" | "cc" | "bcc";
+        /** @enum {string} */
+        RecipientScope: "thread" | "allowlist" | "any";
+        /** @enum {string} */
+        RecipientState: "pending" | "accepted" | "rejected" | "deferred" | "unknown";
         RecoveryGrant: {
             enrollment_token: string;
             /** Format: date-time */
@@ -920,6 +1512,18 @@ export interface components {
         RegisterResult: {
             passkey_id: string;
         };
+        ReplyIdentities: {
+            candidates: components["schemas"]["ReplyIdentity"][];
+        };
+        ReplyIdentity: {
+            from: string;
+            identity: components["schemas"]["SendingIdentity"];
+        };
+        /** @enum {string} */
+        Resolution: "sent" | "resend" | "abandon";
+        ResolveBody: {
+            resolution: components["schemas"]["Resolution"];
+        };
         /** @enum {string} */
         Scope: "message:read" | "delivery:read" | "prefix:read" | "message:annotate" | "draft:create" | "submission:send" | "prefix:manage" | "account:manage" | "rule:manage" | "admin";
         SearchResult: {
@@ -933,6 +1537,22 @@ export interface components {
             level?: number;
             blocks: number;
             chars: number;
+        };
+        SendingIdentity: {
+            id: string;
+            address: string;
+            display_name: string;
+            owner: components["schemas"]["Actor"];
+            tier: components["schemas"]["Tier"];
+            granted: boolean;
+            owner_capped: boolean;
+            recipient_scope: components["schemas"]["RecipientScope"];
+            allowlist: string[];
+            limits: components["schemas"]["Limits"];
+            suspended: boolean;
+            sends: boolean;
+            hold_reason?: components["schemas"]["HoldReason"];
+            hold_detail?: string;
         };
         Sent: {
             outbox_id: string;
@@ -956,6 +1576,13 @@ export interface components {
             unsafe_links?: number;
             quoted_lines?: number;
         };
+        SubmitResult: {
+            queued: boolean;
+            draft_id: string;
+            outbox_id?: string;
+            hold_reason?: components["schemas"]["HoldReason"];
+            hold_detail?: string;
+        };
         Thread: {
             id: string;
             subject: string;
@@ -966,6 +1593,8 @@ export interface components {
             last_at: string;
             messages: components["schemas"]["MessageSummary"][];
         };
+        /** @enum {string} */
+        Tier: "none" | "draft" | "review" | "auto";
         View: {
             uri: string;
             view_version: number;

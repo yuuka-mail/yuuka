@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -22,10 +23,15 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/devseed"
+	"github.com/yuuka-mail/yuuka/internal/ingest"
 	"github.com/yuuka-mail/yuuka/internal/localraw"
 	"github.com/yuuka-mail/yuuka/internal/openapi"
+	"github.com/yuuka-mail/yuuka/internal/outbox"
+	"github.com/yuuka-mail/yuuka/internal/r2/r2fake"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
+	"github.com/yuuka-mail/yuuka/internal/submit"
+	"github.com/yuuka-mail/yuuka/internal/transport"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
@@ -75,6 +81,51 @@ func (s *spy) Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (
 	return s.DB.Search(ctx, v, q)
 }
 
+func (s *spy) DraftByID(ctx context.Context, v *auth.Viewer, id string) (store.Draft, error) {
+	s.saw("DraftByID", v)
+	return s.DB.DraftByID(ctx, v, id)
+}
+
+func (s *spy) Drafts(ctx context.Context, v *auth.Viewer, q store.DraftQuery) ([]store.Draft, error) {
+	s.saw("Drafts", v)
+	return s.DB.Drafts(ctx, v, q)
+}
+
+func (s *spy) CreateDraft(ctx context.Context, v *auth.Viewer, d store.Draft, at time.Time) (store.Draft, error) {
+	s.saw("CreateDraft", v)
+	return s.DB.CreateDraft(ctx, v, d, at)
+}
+
+func (s *spy) UpdateDraft(ctx context.Context, v *auth.Viewer, d store.Draft, at time.Time) (store.Draft, error) {
+	s.saw("UpdateDraft", v)
+	return s.DB.UpdateDraft(ctx, v, d, at)
+}
+
+func (s *spy) DeleteDraft(ctx context.Context, v *auth.Viewer, id string, at time.Time) error {
+	s.saw("DeleteDraft", v)
+	return s.DB.DeleteDraft(ctx, v, id, at)
+}
+
+func (s *spy) ReplyIdentities(ctx context.Context, v *auth.Viewer, id string) ([]store.ReplyIdentity, error) {
+	s.saw("ReplyIdentities", v)
+	return s.DB.ReplyIdentities(ctx, v, id)
+}
+
+func (s *spy) Standings(ctx context.Context, v *auth.Viewer) ([]store.Standing, error) {
+	s.saw("Standings", v)
+	return s.DB.Standings(ctx, v)
+}
+
+func (s *spy) OutboxList(ctx context.Context, v *auth.Viewer, q store.OutboxQuery) ([]store.OutboxEntry, error) {
+	s.saw("OutboxList", v)
+	return s.DB.OutboxList(ctx, v, q)
+}
+
+func (s *spy) OutboxByID(ctx context.Context, v *auth.Viewer, id string) (store.OutboxEntry, error) {
+	s.saw("OutboxByID", v)
+	return s.DB.OutboxByID(ctx, v, id)
+}
+
 // localRaw reads raw messages the way ingest does without R2.
 type localRaw struct{ localraw.Dir }
 
@@ -83,13 +134,26 @@ func (l localRaw) ReadRaw(_ context.Context, ref store.RawRef) ([]byte, error) {
 }
 
 type harness struct {
-	t     *testing.T
-	db    *store.DB
-	pool  *pgxpool.Pool
-	spy   *spy
-	svc   *authn.Service
-	agent store.Principal
-	h     http.Handler
+	t    *testing.T
+	db   *store.DB
+	pool *pgxpool.Pool
+	spy  *spy
+	svc  *authn.Service
+	// agent is agent:arisu, owner of arisu@example.com; human is
+	// human:operator, owner of *@example.com, where devseed's mail
+	// arrives.
+	agent, human store.Principal
+	sub          *submit.Service
+	h            http.Handler
+}
+
+// fakeTransport only answers Caps: nothing here is ever sent.
+type fakeTransport struct{}
+
+func (fakeTransport) Caps() transport.Caps { return transport.CloudflareCaps() }
+
+func (fakeTransport) Send(context.Context, transport.Envelope, []byte, func(context.Context) error) (*transport.SendResult, error) {
+	return nil, errors.New("not in these tests")
 }
 
 func newHarness(t *testing.T) *harness {
@@ -106,22 +170,98 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := db.EnsurePrincipal(t.Context(), store.Principal{ID: ulid.New(time.Now()), Kind: "agent", Name: "arisu", DisplayName: "arisu", CreatedAt: time.Now()})
+	ctx := t.Context()
+	principal := func(kind, name string) store.Principal {
+		p, err := db.EnsurePrincipal(ctx, store.Principal{ID: ulid.New(time.Now()), Kind: kind, Name: name, DisplayName: name, CreatedAt: time.Now()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	agent, human := principal("agent", "arisu"), principal("human", "operator")
+	account, err := db.EnsureCloudflareAccount(ctx, "devseed")
 	if err != nil {
 		t.Fatal(err)
 	}
+	for _, i := range []struct{ addr, owner string }{{"*@example.com", human.ID}, {"arisu@example.com", agent.ID}} {
+		zone, prefix, _ := store.SplitIdentityAddress(i.addr)
+		at := time.Now()
+		if err := db.AddIdentity(ctx, store.Identity{
+			ID: ulid.New(at), AccountID: account, Zone: zone, Prefix: prefix, Transport: "cf", OwnerID: i.owner, CreatedAt: at,
+		}, store.Action{ID: ulid.New(at), Actor: store.SystemPrincipalID, Tool: "identity.add", At: at}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	local := localraw.Dir{Root: raws}
+	bucket := r2fake.New()
+	in := ingest.New(ingest.Config{Raw: bucket, Local: local, DB: db, Log: quiet})
+	out := outbox.New(outbox.Config{
+		DB: db, Raw: bucket, Local: local, Transports: map[string]outbox.Transport{"cf": fakeTransport{}},
+		IndexSent: in.IndexSent, Log: quiet,
+	})
+	sub := submit.New(submit.Config{DB: db, Outbox: out, Log: quiet})
 	sp := &spy{DB: db, calls: map[string][]*auth.Viewer{}}
-	return &harness{t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, h: New(sp, localRaw{localraw.Dir{Root: raws}}, quiet).Handler(svc)}
+	return &harness{
+		t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, human: human, sub: sub,
+		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).Handler(svc),
+	}
+}
+
+// tokenFor issues a credential for p with exactly scopes: a bearer token,
+// or for a human a session as a passkey login stores it (do sends it as
+// the cookie).
+func (h *harness) tokenFor(p store.Principal, scopes ...auth.Scope) string {
+	h.t.Helper()
+	if p.Kind == "human" {
+		now := time.Now()
+		sec := auth.NewSecret(auth.PrefixSession, ulid.New(now))
+		expires := now.Add(time.Hour)
+		if err := h.db.CreateCredential(h.t.Context(), store.Credential{
+			ID: sec.ID, PrincipalID: p.ID, Kind: auth.KindSession, Label: "test", SecretHash: sec.Hash[:],
+			Scopes: auth.Strings(scopes), CreatedAt: now, ExpiresAt: &expires,
+		}, store.Action{ID: ulid.New(now), Actor: p.ID, Tool: "auth.login", At: now}); err != nil {
+			h.t.Fatal(err)
+		}
+		return sec.Text
+	}
+	tok, err := h.svc.IssueToken(h.t.Context(), authn.TokenRequest{PrincipalID: p.ID, Label: "test", Scopes: scopes, IssuedBy: store.SystemPrincipalID})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return tok
+}
+
+// viewer is p as the store sees it, with every scope.
+func viewer(p store.Principal) *auth.Viewer {
+	return &auth.Viewer{PrincipalID: p.ID, PrincipalKind: p.Kind, PrincipalName: p.Name, Scopes: auth.AllScopes}
+}
+
+// do sends a request with a JSON body, if any.
+func (h *harness) do(method, path, body, bearer string) *httptest.ResponseRecorder {
+	h.t.Helper()
+	var rd io.Reader
+	if body != "" {
+		rd = strings.NewReader(body)
+	}
+	r := httptest.NewRequestWithContext(h.t.Context(), method, path, rd)
+	if body != "" {
+		r.Header.Set("Content-Type", "application/json")
+	}
+	switch {
+	case strings.HasPrefix(bearer, auth.PrefixSession+"_"):
+		r.AddCookie(&http.Cookie{Name: authn.SessionCookie, Value: bearer})
+	case bearer != "":
+		r.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	w := httptest.NewRecorder()
+	h.h.ServeHTTP(w, r)
+	return w
 }
 
 // token issues a bearer token for agent:arisu with exactly scopes.
 func (h *harness) token(scopes ...auth.Scope) string {
 	h.t.Helper()
-	tok, err := h.svc.IssueToken(h.t.Context(), authn.TokenRequest{PrincipalID: h.agent.ID, Label: "test", Scopes: scopes, IssuedBy: store.SystemPrincipalID})
-	if err != nil {
-		h.t.Fatal(err)
-	}
-	return tok
+	return h.tokenFor(h.agent, scopes...)
 }
 
 // find returns the id of the message with exactly this subject.
@@ -139,13 +279,7 @@ func (h *harness) find(subject string) string {
 
 func (h *harness) get(path, bearer string) *httptest.ResponseRecorder {
 	h.t.Helper()
-	r := httptest.NewRequestWithContext(h.t.Context(), http.MethodGet, path, nil)
-	if bearer != "" {
-		r.Header.Set("Authorization", "Bearer "+bearer)
-	}
-	w := httptest.NewRecorder()
-	h.h.ServeHTTP(w, r)
-	return w
+	return h.do(http.MethodGet, path, "", bearer)
 }
 
 func decode[T any](t *testing.T, w *httptest.ResponseRecorder) T {
@@ -157,29 +291,108 @@ func decode[T any](t *testing.T, w *httptest.ResponseRecorder) T {
 	return v
 }
 
+// draft stores a draft written by p, as the store's own callers do.
+func (h *harness) draft(p store.Principal, d store.Draft) store.Draft {
+	h.t.Helper()
+	if d.BodyMD == "" {
+		d.BodyMD = "Hello"
+	}
+	if d.To == nil {
+		d.To = []string{"bob@example.net"}
+	}
+	out, err := h.db.CreateDraft(h.t.Context(), viewer(p), d, time.Now())
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return out
+}
+
+// queued is an outbox row the operator queued through the core.
+func (h *harness) queued() string {
+	h.t.Helper()
+	d := h.draft(h.human, store.Draft{FromAddr: "me@example.com", Subject: "Queued"})
+	res, err := h.sub.SubmitDraft(h.t.Context(), viewer(h.human), d.ID)
+	if err != nil || !res.Queued {
+		h.t.Fatalf("submit: %+v, %v", res, err)
+	}
+	return res.OutboxID
+}
+
+// unknown is an outbox row whose fate is unknown (§4.5): queued, then
+// set as an attempt past its commit point would leave it.
+func (h *harness) unknown() string {
+	h.t.Helper()
+	id := h.queued()
+	if _, err := h.pool.Exec(h.t.Context(), `UPDATE outbox SET state = 'unknown', next_retry_at = NULL WHERE id = $1`, id); err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err := h.pool.Exec(h.t.Context(), `UPDATE outbox_recipients SET state = 'unknown' WHERE outbox_id = $1`, id); err != nil {
+		h.t.Fatal(err)
+	}
+	return id
+}
+
 // TestACL walks the route table (AGENTS.md: visibility is computed in
-// one place, and new read paths join this table). In M1 it checks that an
-// unauthenticated request never reaches the store, that the scope is
-// enforced, and that the authenticated viewer is the one the store reads
-// for. When account_access arrives (M3.5), each row also gets a
-// restricted viewer and asserts nothing leaks.
+// one place, and new read paths join this table). For every route it
+// checks that an unauthenticated request never reaches the store, that
+// the scope is enforced, and that the authenticated viewer is the one the
+// store reads and writes for. Drafts are visible to their author and to
+// humans only (§13.8), so another agent with every scope gets 404 for
+// one, never its content. Restricted accounts (account_access, M3.5) are
+// checked per read path in the store's TestVisibility.
 func TestACL(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	page := decode[MessagePage](t, h.get("/api/v1/messages?limit=1", h.token(auth.MessageRead)))
 	msg := page.Messages[0]
 	att := h.find("Invoice and logo")
+	mine := func() string { return h.draft(h.agent, store.Draft{FromAddr: "arisu@example.com"}).ID }
+	get, upd, del, sub := mine(), mine(), mine(), mine()
+	sent, unknown := h.queued(), h.unknown()
+	other := principalNamed(t, h, "agent", "momoi")
 	h.spy.take()
 
-	// How to call each route, and the store method it must read through.
-	calls := map[string]struct{ path, reads string }{
-		"GET /api/v1/messages":                         {"/api/v1/messages?prefix=github@example.com", "ListMessages"},
-		"GET /api/v1/messages/{id}":                    {"/api/v1/messages/" + msg.ID, "MessageByID"},
-		"GET /api/v1/messages/{id}/view":               {"/api/v1/messages/" + msg.ID + "/view?level=sections", "MessageByID"},
-		"GET /api/v1/messages/{id}/attachments/{part}": {"/api/v1/messages/" + att + "/attachments/2", "MessageByID"},
-		"GET /api/v1/threads/{id}":                     {"/api/v1/threads/" + msg.ThreadID, "ThreadByID"},
-		"GET /api/v1/prefixes":                         {"/api/v1/prefixes", "PrefixStats"},
-		"GET /api/v1/search":                           {"/api/v1/search?q=verification", "Search"},
+	// How to call each route, and the store methods it must go through.
+	type call struct {
+		method, path, body string
+		as                 store.Principal // zero: agent:arisu
+		reads              []string
+		// private: the route acts on arisu's draft, which another agent
+		// must not be able to tell from a missing one.
+		private bool
+	}
+	calls := map[string]call{
+		"GET /api/v1/messages":                         {path: "/api/v1/messages?prefix=github@example.com", reads: []string{"ListMessages"}},
+		"GET /api/v1/messages/{id}":                    {path: "/api/v1/messages/" + msg.ID, reads: []string{"MessageByID"}},
+		"GET /api/v1/messages/{id}/view":               {path: "/api/v1/messages/" + msg.ID + "/view?level=sections", reads: []string{"MessageByID"}},
+		"GET /api/v1/messages/{id}/attachments/{part}": {path: "/api/v1/messages/" + att + "/attachments/2", reads: []string{"MessageByID"}},
+		"GET /api/v1/threads/{id}":                     {path: "/api/v1/threads/" + msg.ThreadID, reads: []string{"ThreadByID"}},
+		"GET /api/v1/prefixes":                         {path: "/api/v1/prefixes", reads: []string{"PrefixStats"}},
+		"GET /api/v1/search":                           {path: "/api/v1/search?q=verification", reads: []string{"Search"}},
+		"GET /api/v1/messages/{id}/reply-identities": {
+			path: "/api/v1/messages/" + msg.ID + "/reply-identities", reads: []string{"ReplyIdentities", "Standings"},
+		},
+		"GET /api/v1/identities": {path: "/api/v1/identities", reads: []string{"Standings"}},
+		"GET /api/v1/drafts":     {path: "/api/v1/drafts?state=draft,held,outbox", reads: []string{"Drafts"}},
+		"POST /api/v1/drafts": {
+			method: http.MethodPost, path: "/api/v1/drafts",
+			body:  `{"in_reply_to":"` + msg.ID + `","to":["bob@example.net"],"body_markdown":"Hi"}`,
+			reads: []string{"ReplyIdentities", "CreateDraft"},
+		},
+		"GET /api/v1/drafts/{id}": {path: "/api/v1/drafts/" + get, reads: []string{"DraftByID"}, private: true},
+		"PUT /api/v1/drafts/{id}": {
+			method: http.MethodPut, path: "/api/v1/drafts/" + upd, body: `{"from":"arisu@example.com","subject":"Edited"}`,
+			reads: []string{"UpdateDraft"}, private: true,
+		},
+		"DELETE /api/v1/drafts/{id}": {method: http.MethodDelete, path: "/api/v1/drafts/" + del, reads: []string{"DeleteDraft"}, private: true},
+		// The submission core reads the store itself, as the viewer.
+		"POST /api/v1/drafts/{id}/submit": {method: http.MethodPost, path: "/api/v1/drafts/" + sub + "/submit", private: true},
+		"GET /api/v1/outbox":              {path: "/api/v1/outbox?state=queued,unknown", reads: []string{"OutboxList"}},
+		"GET /api/v1/outbox/{id}":         {path: "/api/v1/outbox/" + sent, reads: []string{"OutboxByID"}},
+		"POST /api/v1/outbox/{id}/resolve": {
+			method: http.MethodPost, path: "/api/v1/outbox/" + unknown + "/resolve", body: `{"resolution":"abandon"}`,
+			as: h.human, reads: []string{"OutboxByID"},
+		},
 	}
 	for _, rt := range routes {
 		pattern := rt.Method + " " + rt.Path
@@ -197,12 +410,21 @@ func TestACL(t *testing.T) {
 		if rt.Access != openapi.Authenticated || len(rt.Scopes) == 0 {
 			t.Errorf("%s: access %v, scopes %v", pattern, rt.Access, rt.Scopes)
 		}
-
-		if w := h.get(row.path, ""); w.Code != http.StatusUnauthorized || problemOf(t, w).Code != openapi.CodeUnauthenticated {
-			t.Errorf("%s anonymous: %d %s", row.path, w.Code, w.Body.String())
+		if row.method == "" {
+			row.method = http.MethodGet
 		}
-		if w := h.get(row.path, "ykt_bogus"); w.Code != http.StatusUnauthorized {
-			t.Errorf("%s bad token: %d", row.path, w.Code)
+		if row.as.ID == "" {
+			row.as = h.agent
+		}
+		send := func(bearer string) *httptest.ResponseRecorder {
+			return h.do(row.method, row.path, row.body, bearer)
+		}
+
+		if w := send(""); w.Code != http.StatusUnauthorized || problemOf(t, w).Code != openapi.CodeUnauthenticated {
+			t.Errorf("%s anonymous: %d %s", pattern, w.Code, w.Body.String())
+		}
+		if w := send("ykt_bogus"); w.Code != http.StatusUnauthorized {
+			t.Errorf("%s bad token: %d", pattern, w.Code)
 		}
 		// Every scope except the required ones is not enough.
 		var others []auth.Scope
@@ -211,29 +433,54 @@ func TestACL(t *testing.T) {
 				others = append(others, s)
 			}
 		}
-		if w := h.get(row.path, h.token(others...)); w.Code != http.StatusForbidden || problemOf(t, w).Code != openapi.CodeScopeRequired {
-			t.Errorf("%s without %v: %d %s", row.path, rt.Scopes, w.Code, w.Body.String())
+		if w := send(h.tokenFor(row.as, others...)); w.Code != http.StatusForbidden || problemOf(t, w).Code != openapi.CodeScopeRequired {
+			t.Errorf("%s without %v: %d %s", pattern, rt.Scopes, w.Code, w.Body.String())
 		}
 		if calls := h.spy.take(); len(calls) != 0 {
-			t.Errorf("%s: refused requests reached the store: %v", row.path, calls)
+			t.Errorf("%s: refused requests reached the store: %v", pattern, calls)
+		}
+		if row.private {
+			if w := send(h.tokenFor(other, auth.AllScopes...)); w.Code != http.StatusNotFound || problemOf(t, w).Code != openapi.CodeNotFound {
+				t.Errorf("%s as another agent: %d %s", pattern, w.Code, w.Body.String())
+			}
+			h.spy.take()
 		}
 
-		w := h.get(row.path, h.token(rt.Scopes...))
-		if w.Code != http.StatusOK {
-			t.Errorf("%s: %d %s", row.path, w.Code, w.Body.String())
+		w := send(h.tokenFor(row.as, rt.Scopes...))
+		if w.Code != openapi.StatusOf(rt.Op) {
+			t.Errorf("%s: %d %s", pattern, w.Code, w.Body.String())
 		}
-		if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
-			t.Errorf("%s: Cache-Control %q", row.path, cc)
+		if cc := w.Header().Get("Cache-Control"); cc != "no-store" && w.Code != http.StatusNoContent {
+			t.Errorf("%s: Cache-Control %q", pattern, cc)
 		}
 		if rt.Response != nil {
-			noNull(t, row.path, decode[any](t, w))
+			noNull(t, pattern, decode[any](t, w))
 		}
 		calls := h.spy.take()
-		vs := calls[row.reads]
-		if len(calls) != 1 || len(vs) != 1 || vs[0] == nil || vs[0].PrincipalID != h.agent.ID {
-			t.Errorf("%s: store calls %v, want one %s for %s", row.path, calls, row.reads, h.agent.ID)
+		var ops []string
+		for op, vs := range calls {
+			ops = append(ops, op)
+			for _, v := range vs {
+				if v == nil || v.PrincipalID != row.as.ID {
+					t.Errorf("%s: %s for %v, want %s", pattern, op, v, row.as.ID)
+				}
+			}
+		}
+		slices.Sort(ops)
+		want := slices.Sorted(slices.Values(row.reads))
+		if !slices.Equal(ops, want) {
+			t.Errorf("%s: store calls %v, want %v", pattern, ops, want)
 		}
 	}
+}
+
+func principalNamed(t *testing.T, h *harness, kind, name string) store.Principal {
+	t.Helper()
+	p, err := h.db.EnsurePrincipal(t.Context(), store.Principal{ID: ulid.New(time.Now()), Kind: kind, Name: name, DisplayName: name, CreatedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // noNull fails on any null in a response: the schema promises arrays are

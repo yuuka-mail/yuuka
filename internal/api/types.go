@@ -58,8 +58,10 @@ func (m *Mailbox) UnmarshalText(b []byte) error {
 	return nil
 }
 
-// Cursor is a position in a list that new mail joins at the top. It is
-// opaque to clients: base64url of "<RFC 3339 nano> <id>".
+// Cursor is a position in a list ordered by (time, id), newest first,
+// that new rows join at the top: messages by arrival, drafts by their
+// last change. It is opaque to clients: base64url of
+// "<RFC 3339 nano> <id>".
 type Cursor store.MessageCursor
 
 func (c *Cursor) UnmarshalText(b []byte) error {
@@ -132,6 +134,10 @@ type MessageSummary struct {
 	HasAttach   bool `json:"has_attach"`
 	// Recipients are prefix@zone of the deliveries; empty in search hits.
 	Recipients []string `json:"recipients"`
+	// Outgoing is set for mail we sent: the latest outbox row that sent
+	// it, and how far it got. That the message exists says nothing about
+	// whether anyone received it.
+	Outgoing *Outgoing `json:"outgoing,omitempty"`
 }
 
 // MessagePage is one page of GET /api/v1/messages, newest first.

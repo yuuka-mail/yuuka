@@ -1,6 +1,26 @@
 {
   "components": {
     "schemas": {
+      "Actor": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "name"
+        ],
+        "additionalProperties": false
+      },
       "Address": {
         "type": "object",
         "properties": {
@@ -31,6 +51,17 @@
           "media_type"
         ],
         "additionalProperties": false
+      },
+      "AttemptOutcome": {
+        "type": "string",
+        "enum": [
+          "accepted",
+          "partial",
+          "rejected",
+          "failed",
+          "unknown",
+          "abandoned"
+        ]
       },
       "Auth": {
         "type": "object",
@@ -97,6 +128,23 @@
         ],
         "additionalProperties": false
       },
+      "Cite": {
+        "type": "object",
+        "properties": {
+          "uri": {
+            "type": "string",
+            "description": "yuuka://message/\u003cid\u003e, optionally with #part/\u003csection\u003e/para/\u003cn\u003e"
+          },
+          "quote": {
+            "type": "string",
+            "description": "the quoted text, as it read when cited"
+          }
+        },
+        "required": [
+          "uri"
+        ],
+        "additionalProperties": false
+      },
       "Class": {
         "type": "string",
         "enum": [
@@ -122,6 +170,8 @@
           "rate_limited",
           "undecodable",
           "unavailable",
+          "no_identity",
+          "submission_rejected",
           "internal"
         ]
       },
@@ -266,6 +316,170 @@
         ],
         "additionalProperties": false
       },
+      "Draft": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "author": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "state": {
+            "$ref": "#/components/schemas/DraftState"
+          },
+          "identity_id": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body_markdown": {
+            "type": "string"
+          },
+          "smtp": {
+            "type": "boolean"
+          },
+          "in_reply_to": {
+            "type": "string"
+          },
+          "cites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Cite"
+            }
+          },
+          "hold_reason": {
+            "$ref": "#/components/schemas/HoldReason"
+          },
+          "hold_detail": {
+            "type": "string"
+          },
+          "outbox": {
+            "$ref": "#/components/schemas/Outgoing"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "author",
+          "state",
+          "identity_id",
+          "from",
+          "to",
+          "cc",
+          "bcc",
+          "subject",
+          "body_markdown",
+          "smtp",
+          "cites",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "DraftBody": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string",
+            "description": "the address to send from; GET /api/v1/identities lists which may be used. Defaults to the reply identity of in_reply_to"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "bare addresses"
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "bare addresses"
+          },
+          "bcc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "bare addresses"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "body_markdown": {
+            "type": "string",
+            "description": "the body as Markdown; the identity's signature is added when it is sent"
+          },
+          "in_reply_to": {
+            "type": "string",
+            "description": "the id of the message this replies to"
+          },
+          "cites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Cite"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "DraftPage": {
+        "type": "object",
+        "properties": {
+          "drafts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Draft"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "drafts"
+        ],
+        "additionalProperties": false
+      },
+      "DraftState": {
+        "type": "string",
+        "enum": [
+          "draft",
+          "held",
+          "outbox"
+        ]
+      },
       "Facts": {
         "type": "object",
         "properties": {
@@ -311,6 +525,34 @@
         ],
         "additionalProperties": false
       },
+      "HoldReason": {
+        "type": "string",
+        "enum": [
+          "policy",
+          "owner",
+          "limit",
+          "recipients",
+          "suspended",
+          "loop",
+          "review",
+          "withdrawn"
+        ]
+      },
+      "IdentityList": {
+        "type": "object",
+        "properties": {
+          "identities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SendingIdentity"
+            }
+          }
+        },
+        "required": [
+          "identities"
+        ],
+        "additionalProperties": false
+      },
       "Kind": {
         "type": "string",
         "enum": [
@@ -328,6 +570,21 @@
           "sections",
           "part"
         ]
+      },
+      "Limits": {
+        "type": "object",
+        "properties": {
+          "max_per_hour": {
+            "type": "integer"
+          },
+          "max_per_day": {
+            "type": "integer"
+          },
+          "max_new_recipients_per_day": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
       },
       "LoginResult": {
         "type": "object",
@@ -388,6 +645,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "outgoing": {
+            "$ref": "#/components/schemas/Outgoing"
           },
           "message_id": {
             "type": "string"
@@ -498,6 +758,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "outgoing": {
+            "$ref": "#/components/schemas/Outgoing"
           }
         },
         "required": [
@@ -513,6 +776,141 @@
           "quarantined",
           "has_attach",
           "recipients"
+        ],
+        "additionalProperties": false
+      },
+      "OutboxEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OutboxState"
+          },
+          "identity": {
+            "type": "string"
+          },
+          "identity_id": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "draft_id": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "submitted_by": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "approved_by": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "next_retry_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": "string"
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OutboxRecipient"
+            }
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "last_outcome": {
+            "$ref": "#/components/schemas/AttemptOutcome"
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "identity",
+          "identity_id",
+          "from",
+          "submitted_by",
+          "created_at",
+          "recipients",
+          "attempts"
+        ],
+        "additionalProperties": false
+      },
+      "OutboxPage": {
+        "type": "object",
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OutboxEntry"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entries"
+        ],
+        "additionalProperties": false
+      },
+      "OutboxRecipient": {
+        "type": "object",
+        "properties": {
+          "addr": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RecipientKind"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RecipientState"
+          }
+        },
+        "required": [
+          "addr",
+          "kind",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "OutboxState": {
+        "type": "string",
+        "enum": [
+          "held",
+          "queued",
+          "sending",
+          "sent",
+          "partial",
+          "unknown",
+          "failed",
+          "dead",
+          "withdrawn"
+        ]
+      },
+      "Outgoing": {
+        "type": "object",
+        "properties": {
+          "outbox_id": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/OutboxState"
+          }
+        },
+        "required": [
+          "outbox_id",
+          "state"
         ],
         "additionalProperties": false
       },
@@ -633,6 +1031,32 @@
         ],
         "additionalProperties": false
       },
+      "RecipientKind": {
+        "type": "string",
+        "enum": [
+          "to",
+          "cc",
+          "bcc"
+        ]
+      },
+      "RecipientScope": {
+        "type": "string",
+        "enum": [
+          "thread",
+          "allowlist",
+          "any"
+        ]
+      },
+      "RecipientState": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "accepted",
+          "rejected",
+          "deferred",
+          "unknown"
+        ]
+      },
       "RecoveryGrant": {
         "type": "object",
         "properties": {
@@ -683,6 +1107,57 @@
         },
         "required": [
           "passkey_id"
+        ],
+        "additionalProperties": false
+      },
+      "ReplyIdentities": {
+        "type": "object",
+        "properties": {
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReplyIdentity"
+            }
+          }
+        },
+        "required": [
+          "candidates"
+        ],
+        "additionalProperties": false
+      },
+      "ReplyIdentity": {
+        "type": "object",
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "identity": {
+            "$ref": "#/components/schemas/SendingIdentity"
+          }
+        },
+        "required": [
+          "from",
+          "identity"
+        ],
+        "additionalProperties": false
+      },
+      "Resolution": {
+        "type": "string",
+        "enum": [
+          "sent",
+          "resend",
+          "abandon"
+        ]
+      },
+      "ResolveBody": {
+        "type": "object",
+        "properties": {
+          "resolution": {
+            "$ref": "#/components/schemas/Resolution"
+          }
+        },
+        "required": [
+          "resolution"
         ],
         "additionalProperties": false
       },
@@ -747,6 +1222,71 @@
           "title",
           "blocks",
           "chars"
+        ],
+        "additionalProperties": false
+      },
+      "SendingIdentity": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "tier": {
+            "$ref": "#/components/schemas/Tier"
+          },
+          "granted": {
+            "type": "boolean"
+          },
+          "owner_capped": {
+            "type": "boolean"
+          },
+          "recipient_scope": {
+            "$ref": "#/components/schemas/RecipientScope"
+          },
+          "allowlist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limits": {
+            "$ref": "#/components/schemas/Limits"
+          },
+          "suspended": {
+            "type": "boolean"
+          },
+          "sends": {
+            "type": "boolean"
+          },
+          "hold_reason": {
+            "$ref": "#/components/schemas/HoldReason"
+          },
+          "hold_detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "address",
+          "display_name",
+          "owner",
+          "tier",
+          "granted",
+          "owner_capped",
+          "recipient_scope",
+          "allowlist",
+          "limits",
+          "suspended",
+          "sends"
         ],
         "additionalProperties": false
       },
@@ -833,6 +1373,31 @@
         },
         "additionalProperties": false
       },
+      "SubmitResult": {
+        "type": "object",
+        "properties": {
+          "queued": {
+            "type": "boolean"
+          },
+          "draft_id": {
+            "type": "string"
+          },
+          "outbox_id": {
+            "type": "string"
+          },
+          "hold_reason": {
+            "$ref": "#/components/schemas/HoldReason"
+          },
+          "hold_detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "queued",
+          "draft_id"
+        ],
+        "additionalProperties": false
+      },
       "Thread": {
         "type": "object",
         "properties": {
@@ -872,6 +1437,15 @@
           "messages"
         ],
         "additionalProperties": false
+      },
+      "Tier": {
+        "type": "string",
+        "enum": [
+          "none",
+          "draft",
+          "review",
+          "auto"
+        ]
       },
       "View": {
         "type": "object",
@@ -922,6 +1496,359 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/drafts": {
+      "get": {
+        "summary": "List drafts, most recently changed first",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "description": "only drafts in these states; absent means draft,held",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/DraftState"
+              }
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "next_cursor of the previous page",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DraftPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a draft",
+        "security": [
+          {
+            "bearer": [
+              "draft:create"
+            ]
+          },
+          {
+            "session": [
+              "draft:create"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Draft"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/drafts/{id}": {
+      "delete": {
+        "summary": "Delete a draft",
+        "security": [
+          {
+            "bearer": [
+              "draft:create"
+            ]
+          },
+          {
+            "session": [
+              "draft:create"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Get a draft",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Draft"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace a draft's content",
+        "security": [
+          {
+            "bearer": [
+              "draft:create"
+            ]
+          },
+          {
+            "session": [
+              "draft:create"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DraftBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Draft"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/drafts/{id}/submit": {
+      "post": {
+        "summary": "Submit a draft: queued, or held as a draft with the reason (§8.9)",
+        "security": [
+          {
+            "bearer": [
+              "draft:create"
+            ]
+          },
+          {
+            "session": [
+              "draft:create"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SubmitResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/identities": {
+      "get": {
+        "summary": "List the identities the viewer may send as, and how it would go",
+        "security": [
+          {
+            "bearer": [
+              "draft:create"
+            ]
+          },
+          {
+            "session": [
+              "draft:create"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/messages": {
       "get": {
         "summary": "List messages, newest first",
@@ -1119,6 +2046,57 @@
         }
       }
     },
+    "/api/v1/messages/{id}/reply-identities": {
+      "get": {
+        "summary": "List the identities a reply defaults to, best first",
+        "security": [
+          {
+            "bearer": [
+              "message:read",
+              "draft:create"
+            ]
+          },
+          {
+            "session": [
+              "message:read",
+              "draft:create"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReplyIdentities"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/messages/{id}/view": {
       "get": {
         "summary": "Get the structured view of a message (§8.1)",
@@ -1193,6 +2171,191 @@
             "description": "OK",
             "content": {
               "application/json": {}
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/outbox": {
+      "get": {
+        "summary": "List outgoing mail, newest first",
+        "security": [
+          {
+            "bearer": [
+              "message:read",
+              "delivery:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read",
+              "delivery:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "description": "only rows in these states",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/OutboxState"
+              }
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "next_cursor of the previous page",
+            "schema": {
+              "type": "string",
+              "pattern": "^[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/outbox/{id}": {
+      "get": {
+        "summary": "Get one outgoing message's state",
+        "security": [
+          {
+            "bearer": [
+              "message:read",
+              "delivery:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read",
+              "delivery:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxEntry"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/outbox/{id}/resolve": {
+      "post": {
+        "summary": "Decide on mail whose delivery is unknown (§4.5); people only",
+        "security": [
+          {
+            "bearer": [
+              "submission:send"
+            ]
+          },
+          {
+            "session": [
+              "submission:send"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OutboxEntry"
+                }
+              }
             }
           },
           "default": {

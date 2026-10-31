@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/yuuka-mail/yuuka/internal/agentview"
 	"github.com/yuuka-mail/yuuka/internal/auth"
@@ -25,10 +26,12 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/classify"
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/submit"
 )
 
-// Store is the slice of the store the API reads. Every method takes the
-// viewer; the ACL test wraps the real store to check that it arrives.
+// Store is the slice of the store the API uses. Every read and every
+// draft write takes the viewer; the ACL test wraps the real store to
+// check that it arrives.
 type Store interface {
 	ListMessages(ctx context.Context, v *auth.Viewer, q store.MessageQuery) ([]store.MessageSummary, error)
 	MessageByID(ctx context.Context, v *auth.Viewer, id string) (store.MessageDetail, error)
@@ -37,6 +40,19 @@ type Store interface {
 	Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (store.SearchResult, error)
 	// RecordAction appends to the audit log (attachment downloads).
 	RecordAction(ctx context.Context, a store.Action) error
+
+	DraftByID(ctx context.Context, v *auth.Viewer, id string) (store.Draft, error)
+	Drafts(ctx context.Context, v *auth.Viewer, q store.DraftQuery) ([]store.Draft, error)
+	CreateDraft(ctx context.Context, v *auth.Viewer, d store.Draft, at time.Time) (store.Draft, error)
+	UpdateDraft(ctx context.Context, v *auth.Viewer, d store.Draft, at time.Time) (store.Draft, error)
+	DeleteDraft(ctx context.Context, v *auth.Viewer, id string, at time.Time) error
+	ReplyIdentities(ctx context.Context, v *auth.Viewer, id string) ([]store.ReplyIdentity, error)
+	Standings(ctx context.Context, v *auth.Viewer) ([]store.Standing, error)
+	OutboxList(ctx context.Context, v *auth.Viewer, q store.OutboxQuery) ([]store.OutboxEntry, error)
+	OutboxByID(ctx context.Context, v *auth.Viewer, id string) (store.OutboxEntry, error)
+	// ResolveOutbox records a person's decision on an unknown row; the
+	// handler reads the row as the viewer first (OutboxByID).
+	ResolveOutbox(ctx context.Context, id, resolution string, a store.Action, p store.RetryPolicy) (string, error)
 }
 
 // RawReader loads the raw message of a delivery (ingest.Ingester).
@@ -52,9 +68,10 @@ type Guard interface {
 
 // API is the REST handler.
 type API struct {
-	db  Store
-	raw RawReader
-	log *slog.Logger
+	db     Store
+	raw    RawReader
+	submit Submitter
+	log    *slog.Logger
 }
 
 // New returns the API over db, reading raw messages for the structured
@@ -66,9 +83,24 @@ func New(db Store, raw RawReader, log *slog.Logger) *API {
 	return &API{db: db, raw: raw, log: log}
 }
 
+// WithSubmitter makes a submit drafts through s. Without one the submit
+// route is not served at all: there is no other way into the outbox.
+func (a *API) WithSubmitter(s Submitter) *API {
+	a.submit = s
+	return a
+}
+
 var (
 	read   = []auth.Scope{auth.MessageRead}
 	prefix = []auth.Scope{auth.PrefixRead}
+	// draft:create writes drafts and submits them. Submitting needs no
+	// more: the core decides, and a credential without submission:send
+	// gets a draft held for policy rather than an error (§8.9).
+	draftWrite = []auth.Scope{auth.DraftCreate}
+	// The outbox holds envelope recipients, Bcc included: delivery data.
+	outboxRead = []auth.Scope{auth.MessageRead, auth.DeliveryRead}
+	// Resolving resends: a sending decision, and a person's (§4.5).
+	outboxResolve = []auth.Scope{auth.SubmissionSend}
 )
 
 // routes is every operation under /api/. A new one is one entry here and
@@ -82,6 +114,21 @@ var routes = []route{
 	jsonRoute(http.MethodGet, "/api/v1/threads/{id}", "Get a thread", read, (*API).thread),
 	jsonRoute(http.MethodGet, "/api/v1/prefixes", "List prefixes with message counts", prefix, (*API).prefixes),
 	jsonRoute(http.MethodGet, "/api/v1/search", "Search messages, newest first", read, (*API).search),
+	jsonRoute(http.MethodGet, "/api/v1/messages/{id}/reply-identities", "List the identities a reply defaults to, best first",
+		[]auth.Scope{auth.MessageRead, auth.DraftCreate}, (*API).replyIdentities),
+	jsonRoute(http.MethodGet, "/api/v1/identities", "List the identities the viewer may send as, and how it would go",
+		draftWrite, (*API).identities),
+	jsonRoute(http.MethodGet, "/api/v1/drafts", "List drafts, most recently changed first", read, (*API).drafts),
+	jsonRoute(http.MethodPost, "/api/v1/drafts", "Create a draft", draftWrite, (*API).createDraft).withStatus(http.StatusCreated),
+	jsonRoute(http.MethodGet, "/api/v1/drafts/{id}", "Get a draft", read, (*API).draft),
+	jsonRoute(http.MethodPut, "/api/v1/drafts/{id}", "Replace a draft's content", draftWrite, (*API).updateDraft),
+	jsonRoute(http.MethodDelete, "/api/v1/drafts/{id}", "Delete a draft", draftWrite, (*API).deleteDraft),
+	jsonRoute(http.MethodPost, "/api/v1/drafts/{id}/submit", "Submit a draft: queued, or held as a draft with the reason (§8.9)",
+		draftWrite, (*API).submitDraft).submitting(),
+	jsonRoute(http.MethodGet, "/api/v1/outbox", "List outgoing mail, newest first", outboxRead, (*API).outboxList),
+	jsonRoute(http.MethodGet, "/api/v1/outbox/{id}", "Get one outgoing message's state", outboxRead, (*API).outboxEntry),
+	jsonRoute(http.MethodPost, "/api/v1/outbox/{id}/resolve", "Decide on mail whose delivery is unknown (§4.5); people only",
+		outboxResolve, (*API).resolveOutbox),
 	{Op: openapi.Op{
 		Method: http.MethodGet, Path: "/api/v1/openapi.json", Summary: "This document",
 		Access: openapi.Public, Media: "application/json",
@@ -107,6 +154,9 @@ func (a *API) Handler(g Guard) http.Handler {
 	mux := http.NewServeMux()
 	for _, rt := range routes {
 		pattern := rt.Method + " " + rt.Path
+		if rt.needsSubmitter && a.submit == nil {
+			continue // answered by the 404 below
+		}
 		if rt.serve == nil {
 			// The contract is public: the repository is, and an agent
 			// with a token can read what it may call.
@@ -151,15 +201,36 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 // fail maps an error to a problem: one a handler or bind returned as is,
-// store.ErrNotFound to not_found, anything else to internal.
+// the store's and the submission core's sentinels to their codes,
+// anything else to internal.
 func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 	if p, ok := errors.AsType[*openapi.Problem](err); ok {
 		openapi.Write(w, p)
 		return
 	}
-	if errors.Is(err, store.ErrNotFound) {
-		openapi.Write(w, openapi.Errorf(http.StatusNotFound, openapi.CodeNotFound, "not found"))
-		return
+	for _, m := range []struct {
+		err    error
+		status int
+		code   openapi.Code
+		detail string // "" for the error's own text, which names no mail content
+	}{
+		{store.ErrNotFound, http.StatusNotFound, openapi.CodeNotFound, "not found"},
+		{store.ErrInvalidDraft, http.StatusBadRequest, openapi.CodeInvalidBody, ""},
+		{store.ErrInFlight, http.StatusConflict, openapi.CodeConflict, "the draft has gone to the outbox"},
+		{store.ErrRawDraft, http.StatusConflict, openapi.CodeConflict, ""},
+		{store.ErrOutboxState, http.StatusConflict, openapi.CodeConflict, ""},
+		{store.ErrNoIdentity, http.StatusUnprocessableEntity, openapi.CodeNoIdentity, ""},
+		{submit.ErrNoIdentity, http.StatusUnprocessableEntity, openapi.CodeNoIdentity, ""},
+		{submit.ErrRejected, http.StatusForbidden, openapi.CodeSubmissionRejected, ""},
+	} {
+		if errors.Is(err, m.err) {
+			detail := m.detail
+			if detail == "" {
+				detail = err.Error()
+			}
+			openapi.Write(w, openapi.Errorf(m.status, m.code, "%s", detail))
+			return
+		}
 	}
 	if r.Context().Err() != nil {
 		return // the client went away
@@ -300,6 +371,7 @@ func (a *API) search(ctx context.Context, v *auth.Viewer, p SearchParams) (Searc
 			ID: h.ID, ThreadID: h.ThreadID, ReceivedAt: h.ReceivedAt, Subject: h.Subject,
 			FromAddr: h.FromAddr, FromName: h.FromName, Snippet: h.Snippet, Class: classOf(h.Class),
 			Downgraded: h.Downgraded, Quarantined: h.Quarantined, Recipients: []string{},
+			Outgoing: outgoingOut(h.Outgoing),
 		}
 	}
 	if len(res.Hits) == p.Limit {
@@ -314,7 +386,7 @@ func summary(m store.MessageSummary) MessageSummary {
 		ID: m.ID, ThreadID: m.ThreadID, ReceivedAt: m.ReceivedAt, Subject: m.Subject,
 		FromAddr: m.FromAddr, FromName: m.FromName, Snippet: m.Snippet, Class: classOf(m.Class),
 		Downgraded: m.Downgraded, Quarantined: m.Quarantined, HasAttach: m.HasAttach,
-		Recipients: nonNil(m.Recipients),
+		Recipients: nonNil(m.Recipients), Outgoing: outgoingOut(m.Outgoing),
 	}
 }
 

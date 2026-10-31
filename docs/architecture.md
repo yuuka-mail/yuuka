@@ -494,9 +494,16 @@ web/src/api/schema.gen.ts → openapi-fetch + openapi-react-query（web/src/api/
 - **错误用 RFC 9457 的 `application/problem+json`**（[`internal/openapi/problem.go`](../internal/openapi/problem.go)），
   `/api/` 和 `/auth/` 都是。扩展成员 `code` 是稳定的机器可读码，取值在 schema 里列全；`detail` 给人读，
   客户端只按 `code` 分支。`type` 一律缺省（`about:blank`），所以 `title` 就是状态码的文字。
-  §8.9 的"超出授权降级为草稿"不算错误：照常返回成功，结果里说明原因
-- **分页**：新行会从列表头部插入的（消息、搜索，以后的事件），一律用不透明游标，因为 offset 在新信到达时会重复或跳行；
-  搜索的 `total` 照常单独返回，且不受游标影响。变化很慢、只给人翻的表（未认领前缀，§12.9）用 `limit` / `offset`
+  §8.9 的"超出授权降级为草稿"不算错误：照常返回成功，结果里说明原因。
+  store 和提交核心的哨兵错误只在 [`api.go`](../internal/api/api.go) 的 `fail` 一处映射成 code，handler 不各自翻译：
+  对象已不在可改的状态（草稿已进 outbox、outbox 行不是 `unknown`）是 `409 conflict`，
+  `from` 没有身份覆盖是 `422 no_identity`，提交核心直接拒收是 `403 submission_rejected`
+- **写端点**：创建回 `201` 和新对象，删除回 `204`。修改是 `PUT` 整体替换，不做 `PATCH`：
+  只有一种写法，就不必在 JSON 里区分「缺省」和「清空」（`omitempty` 的零值本来就算缺省）。
+  例外只有一个且写在字段说明里：草稿缺省 `from` 表示保留原值，因为草稿总有一个发件地址
+- **分页**：新行会从列表头部插入的（消息、搜索、草稿、outbox，以后的事件），一律用不透明游标，因为 offset 在新信到达时会重复或跳行；
+  搜索的 `total` 照常单独返回，且不受游标影响。变化很慢、只给人翻的表（未认领前缀，§12.9）用 `limit` / `offset`。
+  草稿按最后修改时间排，被编辑的草稿会跳到头部、越过已经发出的游标，和新信到达是同一回事
 - **多值参数**一律逗号分隔（OpenAPI 里的 `style: form, explode: false`），如 `class=human,unknown`
 - **哪个端点接受哪些值，就用哪个类型**。搜索不接受 `downgraded=only`，所以它的参数类型是
   `SearchDowngraded`，不在 handler 里另拒一次

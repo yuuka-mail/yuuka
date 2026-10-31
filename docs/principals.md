@@ -444,6 +444,8 @@ REST 层的 [`TestACL`](../internal/api/api_test.go) 管的是另一半：它遍
 
 发信授权读的事实也走同一个条件：回复的默认身份（`ReplyIdentities`）和线程参与者（`ReplyFacts`）
 只来自可见的投递、可见的消息和可见的 outbox 行，同在 `TestVisibility` 里。
+outbox 本身的读路径（`OutboxList`、`OutboxByID`，REST 的 `/api/v1/outbox`）也按这一条过滤：发信身份的账户可读才可见。
+TestACL 对草稿类端点另断言：别的 agent 即使持有全部 scope，拿到的也是和「不存在」一样的 404。
 草稿行另有一条 M2 规则（[`drafts.go`](../internal/store/drafts.go) 的 `visibleDraft`，唯一的一处）：
 human 看全部，其他主体只看自己写的。草稿是没发出去的字，常常是替人写的，比信件收得更窄。
 

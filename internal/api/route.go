@@ -24,6 +24,8 @@ type route struct {
 	// send with Op.Status; an HTTP-native one writes its response itself
 	// and returns nil.
 	serve func(a *API, w http.ResponseWriter, r *http.Request, v *auth.Viewer) (any, error)
+	// needsSubmitter: served only by an API with a submission core.
+	needsSubmitter bool
 }
 
 // jsonRoute is an operation answered with JSON: P is bound from the
@@ -35,7 +37,7 @@ func jsonRoute[P, R any](method, path, summary string, scopes []auth.Scope,
 	if op.Response = reflect.TypeFor[R](); op.Response == reflect.TypeFor[struct{}]() {
 		op.Response = nil // 204 No Content
 	}
-	return route{op, func(a *API, _ http.ResponseWriter, r *http.Request, v *auth.Viewer) (any, error) {
+	return route{Op: op, serve: func(a *API, _ http.ResponseWriter, r *http.Request, v *auth.Viewer) (any, error) {
 		var p P
 		if err := bind(r, &p); err != nil {
 			return nil, err
@@ -51,7 +53,7 @@ func rawRoute[P any](method, path, summary, media string, scopes []auth.Scope,
 ) route {
 	op := describe[P](method, path, summary, scopes)
 	op.Media = media
-	return route{op, func(a *API, w http.ResponseWriter, r *http.Request, v *auth.Viewer) (any, error) {
+	return route{Op: op, serve: func(a *API, w http.ResponseWriter, r *http.Request, v *auth.Viewer) (any, error) {
 		var p P
 		if err := bind(r, &p); err != nil {
 			return nil, err
@@ -67,6 +69,12 @@ func describe[P any](method, path, summary string, scopes []auth.Scope) openapi.
 // withStatus sets the success status, e.g. 201 for a creation.
 func (rt route) withStatus(code int) route {
 	rt.Status = code
+	return rt
+}
+
+// submitting marks a route that hands mail to the submission core.
+func (rt route) submitting() route {
+	rt.needsSubmitter = true
 	return rt
 }
 
