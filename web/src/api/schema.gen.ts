@@ -756,6 +756,7 @@ export interface components {
         Auth: {
             verified: boolean;
             withheld?: boolean;
+            not_received?: boolean;
             spf?: string;
             dkim?: string;
             dmarc?: string;
@@ -817,6 +818,7 @@ export interface components {
             received_at: string;
             delivered_to: string[];
             class: components["schemas"]["Class"];
+            sent?: components["schemas"]["Sent"];
             auth: components["schemas"]["Auth"];
             downgraded: boolean;
             warnings?: string[];
@@ -931,6 +933,11 @@ export interface components {
             level?: number;
             blocks: number;
             chars: number;
+        };
+        Sent: {
+            outbox_id: string;
+            from: string;
+            state: string;
         };
         SessionInfo: {
             principal: string;

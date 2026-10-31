@@ -131,7 +131,7 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		pageArgs = append(pageArgs, limit)
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 			SELECT m.id, m.thread_id, m.received_at, m.subject, m.from_addr, m.from_name, m.snippet,
-				coalesce(s.class_override, m.class), downgraded, m.parse_error IS NOT NULL, ob.id, ob.state
+				coalesce(s.class_override, m.class), downgraded, m.parse_error IS NOT NULL, ob.id, ob.state, ob.from_addr
 			%s
 			ORDER BY m.received_at DESC, m.id DESC
 			LIMIT $%d`, page, len(pageArgs)), pageArgs...)
@@ -140,10 +140,10 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		}
 		res.Hits, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (SearchHit, error) {
 			var h SearchHit
-			var obID, obState *string
+			var obID, obState, obFrom *string
 			err := r.Scan(&h.ID, &h.ThreadID, &h.ReceivedAt, &h.Subject, &h.FromAddr, &h.FromName,
-				&h.Snippet, &h.Class, &h.Downgraded, &h.Quarantined, &obID, &obState)
-			h.Outgoing = outgoing(obID, obState)
+				&h.Snippet, &h.Class, &h.Downgraded, &h.Quarantined, &obID, &obState, &obFrom)
+			h.Outgoing = outgoing(obID, obState, obFrom)
 			return h, err
 		})
 		return err

@@ -47,10 +47,15 @@ type View struct {
 // Facts are asserted by yuuka itself: they come from the store and from
 // the trusted receiver, never from what the sender wrote.
 type Facts struct {
+	// ReceivedAt is when the message reached yuuka: its earliest delivery,
+	// or for mail it only sent, when the sent copy was submitted (§4.6).
 	ReceivedAt  time.Time `json:"received_at"`
 	DeliveredTo []string  `json:"delivered_to"`
 	Class       Class     `json:"class"`
-	Auth        Auth      `json:"auth"`
+	// Sent is set when this system sent the message (§4.6), whether or
+	// not it also arrived here.
+	Sent *Sent `json:"sent,omitempty"`
+	Auth Auth  `json:"auth"`
 	// Downgraded is true when the message fails the §4.3 minimal
 	// downgrade (unclaimed prefix, or dmarc=fail from the trusted
 	// receiver). Agents treat such mail as suspect.
@@ -60,6 +65,16 @@ type Facts struct {
 	Stripped Stripped `json:"stripped"`
 }
 
+// Sent marks mail this system sent: the sent copy of an outbox row.
+type Sent struct {
+	OutboxID string `json:"outbox_id"`
+	// From is the address of the identity it was sent as.
+	From string `json:"from"`
+	// State is the outbox state (§4.5), read when the view was built:
+	// whether it reached anyone is this, not that the message exists.
+	State string `json:"state"`
+}
+
 // Auth is the authentication line of §8.1. Only the trusted receiver's
 // Authentication-Results counts (§10.1.1); without it the message is
 // unverified and nothing else is filled in.
@@ -67,10 +82,14 @@ type Auth struct {
 	Verified bool `json:"verified"`
 	// Withheld is set when the viewer lacks delivery:read; nothing but
 	// FromDomain is filled in then.
-	Withheld bool   `json:"withheld,omitempty"`
-	SPF      string `json:"spf,omitempty"`
-	DKIM     string `json:"dkim,omitempty"`
-	DMARC    string `json:"dmarc,omitempty"`
+	Withheld bool `json:"withheld,omitempty"`
+	// NotReceived is set for mail this system sent and the viewer has no
+	// delivery of: no receiver judged it, so there is no verdict, and
+	// nothing but FromDomain is filled in.
+	NotReceived bool   `json:"not_received,omitempty"`
+	SPF         string `json:"spf,omitempty"`
+	DKIM        string `json:"dkim,omitempty"`
+	DMARC       string `json:"dmarc,omitempty"`
 	// FromDomain is the domain of the From header. Whether it is genuine
 	// is answered by DMARC alone (§8.1).
 	FromDomain string `json:"from_domain,omitempty"`

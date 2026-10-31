@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -12,9 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/classify"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
+	"github.com/yuuka-mail/yuuka/internal/store"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -349,5 +352,67 @@ func TestNeverPanics(t *testing.T) {
 	} {
 		v := Build(Input{ID: testID, Raw: []byte(in)})
 		_ = v.Text()
+	}
+}
+
+// ownLetter is a synthetic message this system sent from me@example.com.
+const ownLetter = "From: Me <me@example.com>\r\nTo: %s\r\nSubject: Lunch on Friday\r\n" +
+	"Date: Sat, 31 Oct 2026 12:00:00 +0000\r\nMessage-ID: <lunch.1@example.com>\r\n" +
+	"MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nShall we meet at noon?\r\n"
+
+// sentDetail is message testID as the store returns mail we sent: an
+// outbox row's sent copy, plus the deliveries of it the viewer can see.
+func sentDetail(deliveries ...store.DeliveryFact) store.MessageDetail {
+	m := store.MessageDetail{Deliveries: deliveries}
+	m.ID = testID
+	m.ReceivedAt = time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	m.Class = classify.Unknown
+	m.Outgoing = &store.Outgoing{OutboxID: "01JC0000000000000000000001", State: "sent", From: "me@example.com"}
+	return m
+}
+
+var reader = &auth.Viewer{PrincipalKind: "agent", PrincipalName: "arisu", Scopes: []auth.Scope{auth.MessageRead, auth.DeliveryRead}}
+
+// Our own mail says so, and carries no receiver verdict: there is none
+// for a sent-only message, and mail we sent to ourselves keeps the
+// verdict of its delivery.
+func TestSentGolden(t *testing.T) {
+	sentOnly := []byte(fmt.Sprintf(ownLetter, "bob@example.net"))
+	self := []byte("Authentication-Results: mx.cloudflare.net; spf=pass smtp.mailfrom=example.com; " +
+		"dkim=pass header.d=example.com; dmarc=pass header.from=example.com\r\n" + fmt.Sprintf(ownLetter, "inbox@example.com"))
+	selfAuth := authres.Extract(self, "mx.cloudflare.net")
+	for name, in := range map[string]Input{
+		"sent-only": InputOf(reader, sentDetail(), sentOnly),
+		"self-sent": InputOf(reader, sentDetail(store.DeliveryFact{EnvelopeTo: "inbox@example.com", Auth: &selfAuth}), self),
+	} {
+		t.Run(name, func(t *testing.T) {
+			v := Build(in)
+			j, err := json.MarshalIndent(v, "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			golden(t, name+".json", append(j, '\n'))
+			golden(t, name+".txt", []byte(v.Text()))
+		})
+	}
+
+	v := Build(InputOf(reader, sentDetail(), sentOnly))
+	f := v.Facts
+	if f.Sent == nil || f.Sent.From != "me@example.com" || f.Sent.State != "sent" || !f.Auth.NotReceived ||
+		f.Auth.Verified || f.Auth.Reason != "" || f.Auth.DMARC != "" || len(f.Warnings) != 0 || f.Downgraded {
+		t.Errorf("sent-only facts = %+v", f)
+	}
+	if text := v.Text(); strings.Contains(text, "unverified") || strings.Contains(text, "warning:") {
+		t.Errorf("sent-only text casts doubt on our own mail:\n%s", text)
+	}
+	f = Build(InputOf(reader, sentDetail(store.DeliveryFact{EnvelopeTo: "inbox@example.com", Auth: &selfAuth}), self)).Facts
+	if f.Sent == nil || f.Auth.NotReceived || f.Auth.Line != "spf=pass dkim=pass dmarc=pass from_domain=example.com" {
+		t.Errorf("self-sent facts = %+v", f)
+	}
+	// Whether a delivery exists is itself withheld without delivery:read.
+	blind := &auth.Viewer{Scopes: []auth.Scope{auth.MessageRead}}
+	f = Build(InputOf(blind, sentDetail(), sentOnly)).Facts
+	if f.Sent == nil || !f.Auth.Withheld || f.Auth.NotReceived || len(f.Warnings) != 0 {
+		t.Errorf("sent-only facts without delivery:read = %+v", f)
 	}
 }

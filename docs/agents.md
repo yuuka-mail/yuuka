@@ -57,6 +57,12 @@ M1 的落法（`internal/agentview`），以及设计里没写死、实现时定
 - 认证行取消息最早一条可见投递的 `deliveries.auth`：SPF 取 `smtp.mailfrom` 那条（没有才用 HELO），
   DKIM 任一签名 pass 即 pass；没有可信接收方的结论就是 `unverified (原因)`，其余一概不填。
   可信接收方报 `dmarc=fail` 的信，不论前缀状态都在视图里标 `downgraded` 并带警告（§8.3）
+- **自己发的信**（§4.6）在 `facts.sent` 里说明：以哪个身份的地址发出（`outbox.from_addr`）、
+  outbox id 和现读的 outbox 状态。只有 Sent 副本、没有可见投递的信，`facts.auth` 标 `not_received`，
+  只留 From 头的域名，不给任何结论，也不带「未验证」警告：这些字节没经过任何接收方，
+  标 `unverified` 会让 agent 把自己的信当成可疑来信，填 `pass` 则是编造。
+  自己发给自己、也收到了的信照常给那条投递的认证结论，同时带 `facts.sent`。
+  没有 `delivery:read` 时一律 `withheld`，`not_received` 也不给——「有没有投递」本身就是投递事实
 - `level=part` 一次最多给 32K 字符，超出时 `more` 给出下一块的锚点；带 `para` 的锚点
   在 `part` 级别表示「从这一块开始」，所以核对一个引用时返回的第一块就是被引的那块。
   它一直读到信的末尾、跨过后面的部分，这样顺着 `more` 能读完整封信；只写 `part/<section>`

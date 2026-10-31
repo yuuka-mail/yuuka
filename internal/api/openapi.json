@@ -41,6 +41,9 @@
           "withheld": {
             "type": "boolean"
           },
+          "not_received": {
+            "type": "boolean"
+          },
           "spf": {
             "type": "string"
           },
@@ -278,6 +281,9 @@
           },
           "class": {
             "$ref": "#/components/schemas/Class"
+          },
+          "sent": {
+            "$ref": "#/components/schemas/Sent"
           },
           "auth": {
             "$ref": "#/components/schemas/Auth"
@@ -741,6 +747,26 @@
           "title",
           "blocks",
           "chars"
+        ],
+        "additionalProperties": false
+      },
+      "Sent": {
+        "type": "object",
+        "properties": {
+          "outbox_id": {
+            "type": "string"
+          },
+          "from": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "outbox_id",
+          "from",
+          "state"
         ],
         "additionalProperties": false
       },

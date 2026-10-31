@@ -153,7 +153,7 @@ func TestSentCopyIsAMessage(t *testing.T) {
 		t.Fatalf("canonical %s at %v (%v), want the sent copy at submission", canonical, received, err)
 	}
 
-	want := &store.Outgoing{OutboxID: outbox, State: "queued"}
+	want := &store.Outgoing{OutboxID: outbox, State: "queued", From: "me@example.com"}
 	list, err := db.ListMessages(t.Context(), operator, store.MessageQuery{})
 	if err != nil {
 		t.Fatal(err)

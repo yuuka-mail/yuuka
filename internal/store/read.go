@@ -81,7 +81,7 @@ func (db *DB) visibleMessage(v *auth.Viewer, m string) string {
 // or a recalled one queued again).
 func (db *DB) outgoingJoin(v *auth.Viewer) string {
 	return `
-		LEFT JOIN LATERAL (SELECT so.id, so.state ` + db.visibleOutbox(v, "m") + `
+		LEFT JOIN LATERAL (SELECT so.id, so.state, so.from_addr ` + db.visibleOutbox(v, "m") + `
 			ORDER BY so.created_at DESC, so.id DESC LIMIT 1) ob ON true`
 }
 
@@ -94,13 +94,16 @@ type Outgoing struct {
 	// is this, not that the message exists: every outbox row's sent copy
 	// is a message, whatever its fate.
 	State string
+	// From is outbox.from_addr: the address of the identity it was sent
+	// as, with the prefix named for a *@zone identity.
+	From string
 }
 
-func outgoing(id, state *string) *Outgoing {
+func outgoing(id, state, from *string) *Outgoing {
 	if id == nil {
 		return nil
 	}
-	return &Outgoing{OutboxID: *id, State: *state}
+	return &Outgoing{OutboxID: *id, State: *state, From: *from}
 }
 
 // Downgrade selects messages by the §4.3 minimal downgrade.
@@ -170,7 +173,7 @@ type MessageSummary struct {
 // the §4.3 downgrade judges how mail arrived, and a sent copy did not.
 const summaryCols = `m.id, m.thread_id, m.received_at, m.subject, m.from_addr, m.from_name, m.snippet,
 	coalesce(s.class_override, m.class), g.downgraded, m.parse_error IS NOT NULL, m.has_attach, g.recipients,
-	ob.id, ob.state`
+	ob.id, ob.state, ob.from_addr`
 
 func (db *DB) summaryFrom(v *auth.Viewer) string {
 	return `
@@ -186,10 +189,10 @@ func (db *DB) summaryFrom(v *auth.Viewer) string {
 
 func scanSummary(r pgx.CollectableRow) (MessageSummary, error) {
 	var m MessageSummary
-	var obID, obState *string
+	var obID, obState, obFrom *string
 	err := r.Scan(&m.ID, &m.ThreadID, &m.ReceivedAt, &m.Subject, &m.FromAddr, &m.FromName, &m.Snippet,
-		&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState)
-	m.Outgoing = outgoing(obID, obState)
+		&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState, &obFrom)
+	m.Outgoing = outgoing(obID, obState, obFrom)
 	return m, err
 }
 
@@ -304,11 +307,11 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 		d, err = pgx.CollectExactlyOneRow(rows, func(r pgx.CollectableRow) (MessageDetail, error) {
 			var d MessageDetail
 			m := &d.MessageSummary
-			var obID, obState *string
+			var obID, obState, obFrom *string
 			err := r.Scan(&m.ID, &m.ThreadID, &m.ReceivedAt, &m.Subject, &m.FromAddr, &m.FromName, &m.Snippet,
-				&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState,
+				&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState, &obFrom,
 				&d.MessageID, &d.InReplyTo, &d.References, &d.Date, &d.BodyText, &d.ParseError)
-			m.Outgoing = outgoing(obID, obState)
+			m.Outgoing = outgoing(obID, obState, obFrom)
 			return d, err
 		})
 		if errors.Is(err, pgx.ErrNoRows) {

@@ -17,9 +17,16 @@ func (v View) Text() string {
 	var b strings.Builder
 	f := v.Facts
 	fmt.Fprintf(&b, "yuuka message %s (view v%d, level %s)\n", v.URI, v.Version, v.Level)
-	fmt.Fprintf(&b, "received: %s\n", f.ReceivedAt.Format(time.RFC3339))
+	if f.Auth.NotReceived {
+		fmt.Fprintf(&b, "submitted: %s\n", f.ReceivedAt.Format(time.RFC3339))
+	} else {
+		fmt.Fprintf(&b, "received: %s\n", f.ReceivedAt.Format(time.RFC3339))
+	}
 	if len(f.DeliveredTo) > 0 {
 		fmt.Fprintf(&b, "delivered to: %s\n", strings.Join(f.DeliveredTo, ", "))
+	}
+	if s := f.Sent; s != nil {
+		fmt.Fprintf(&b, "sent: by this system as %s (outbox %s, state %s)\n", s.From, s.OutboxID, s.State)
 	}
 	fmt.Fprintf(&b, "class: %s\n", f.Class)
 	fmt.Fprintf(&b, "auth: %s\n", f.Auth.Line)

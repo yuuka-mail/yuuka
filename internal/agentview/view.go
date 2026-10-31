@@ -11,7 +11,8 @@
 // boundary (§8.3).
 //
 // The tree separates what yuuka asserts (Facts: when and where the mail
-// arrived, the trusted receiver's authentication results) from what the
+// arrived, the trusted receiver's authentication results, whether yuuka
+// sent it) from what the
 // sender wrote (Content). Everything under Content is untrusted
 // third-party input, including the subject and the From header.
 //
@@ -76,6 +77,10 @@ type Input struct {
 	Downgraded bool
 	// Auth is the authentication facts of the delivery the view is for.
 	Auth authres.Auth
+	// Sent is set when this system sent the message. With no delivery
+	// in DeliveredTo it is all the view says about where the mail came
+	// from: Auth is ignored and no verdict is given.
+	Sent *Sent
 	// WithholdDelivery is set when the viewer may read the message but
 	// not its delivery facts (delivery:read, §13.4): DeliveredTo and Auth
 	// are then ignored and the view says they were withheld.
@@ -107,6 +112,7 @@ func Build(in Input) View {
 			ReceivedAt:  in.ReceivedAt.UTC(),
 			DeliveredTo: in.DeliveredTo,
 			Class:       in.Class,
+			Sent:        in.Sent,
 			Auth:        authFacts(in.Auth, msg.FromAddr),
 			Downgraded:  in.Downgraded,
 			Stripped:    r.stripped,
@@ -132,9 +138,16 @@ func Build(in Input) View {
 	v.Content.Snippet = snippet(r.parts)
 
 	f := &v.Facts
-	if in.WithholdDelivery {
+	switch {
+	case in.WithholdDelivery:
+		// Whether a delivery exists is a delivery fact too, so mail we
+		// sent is withheld like any other.
 		f.DeliveredTo = []string{}
 		f.Auth = Auth{Withheld: true, FromDomain: f.Auth.FromDomain, Line: "withheld (needs delivery:read)"}
+	case in.Sent != nil && len(in.DeliveredTo) == 0:
+		// Our own bytes never passed a receiver. "unverified" would read
+		// as a suspect sender, and anything else would be made up.
+		f.Auth = Auth{NotReceived: true, FromDomain: f.Auth.FromDomain, Line: "none (sent by this system, never received)"}
 	}
 	// §8.3: mail that failed DMARC is downgraded and marked whatever the
 	// prefix state says.
@@ -142,6 +155,7 @@ func Build(in Input) View {
 	case f.Auth.Withheld:
 		// The store's downgrade, which already counts a DMARC failure,
 		// is all this viewer learns.
+	case f.Auth.NotReceived:
 	case !f.Auth.Verified:
 		f.Warnings = append(f.Warnings, "unverified: no result from the trusted receiver, so the sender is unproven")
 	case f.Auth.DMARC == "fail":
