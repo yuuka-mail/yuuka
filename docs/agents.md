@@ -26,6 +26,41 @@ MCP server 了事，它和 WebUI 一样是一等外壳。三条外壳（WebUI / 
 人在 WebUI 里一点就跳到原文那一段。**agent 的输出可被当场验证**，
 而不是要人重新找信。
 
+M1 的落法（`internal/agentview`），以及设计里没写死、实现时定下的几处：
+
+- **锚点语法**（单向门，定下就不再改）：`yuuka://message/<ULID>`、`…#part/<section>`、
+  `…#part/<section>/para/<n>`。`<section>` 用 IMAP 的 section 编号（RFC 3501 §6.4.5：
+  单部分信是 `1`，multipart 里是 `2`、`1.2`……），只取决于原件的 MIME 结构，
+  不取决于我们挑了哪个 alternative——以后改挑选规则不会让编号整体平移。
+  `<n>` 是该部分的块序号，从 1 数，不分块的种类（标题、段落、列表项、折叠的引用都占一个号）。
+  §8.1 例子里的 `part/2/para/7` 恰好是这个语法的特例
+- 视图是 JSON 树而不是字符串（§12.1 的通知区直接渲染它）。顶层分两半：
+  `facts` 是 yuuka 自己断言的（接收时间、投递地址、分类、可信接收方的认证结论、降级与警告、
+  剥掉了什么），`content` 是发件人写的（含主题和 From 头），整体不可信。
+  给模型的文本由树渲染，`content` 那一半包在带 nonce 的
+  `<untrusted_mail_content nonce="…">` 边界里（§8.3）。nonce 由消息 URI 和内容哈希得出：
+  同样输入同样输出（golden 可测），发件人不知道消息 id 就猜不出闭合标签；
+  内容里拼出这个标签名的地方会被改写
+- multipart/alternative 取**最后一个能出字的**表示（RFC 2046 按保真度递增排序），
+  通常是 HTML：标题、列表、链接目标都在它里面。这和 `body_text` 的「plain 优先」相反——
+  那一列服务于搜索，纯文本更干净
+- 链接只保留 http / https / mailto / tel，`href` 原样给出（显示文本和真实目标不一致时两者都在）；
+  其他 scheme 只留文字并计数。没有文字的链接（无 alt 的图片按钮）保留目标
+- 剥掉的东西计数而不是静默丢弃：tracking pixel（任一边 ≤1px 或隐藏的图片）、
+  隐藏元素（`display:none`、`font-size:0`、`max-height:0`+`overflow:hidden` 等——
+  preheader 和「只给模型看的注入文字」都靠这个）、无 alt 的图片、不安全链接、折叠的引用行数
+- 引用折叠：纯文本里连续的 `>` 行、`-----Original Message-----` 之后的全部；
+  HTML 里 `blockquote type=cite`、Gmail / Yahoo / Proton 的引用容器、Outlook 的
+  `divRplyFwdMsg` 之后的全部；**回复信**（有 In-Reply-To / References）里的任何 blockquote。
+  折叠块只留「On …, X wrote:」这一行和行数，不带引用正文——那是线程里另一封信。
+  代价：非回复信里的普通 blockquote 不折叠；转发正文不折叠（转发的内容就是正文）
+- 认证行取消息最早一条可见投递的 `deliveries.auth`：SPF 取 `smtp.mailfrom` 那条（没有才用 HELO），
+  DKIM 任一签名 pass 即 pass；没有可信接收方的结论就是 `unverified (原因)`，其余一概不填。
+  可信接收方报 `dmarc=fail` 的信，不论前缀状态都在视图里标 `downgraded` 并带警告（§8.3）
+- `level=part` 一次最多给 32K 字符，超出时 `more` 给出下一块的锚点；带 `para` 的锚点
+  在 `part` 级别表示「从这一块开始」，所以核对一个引用时返回的第一块就是被引的那块
+- `view_version` 和 `parser_version` 任一变化都可能让段落号漂移（§4.2），这就是 `cites` 存原文摘录的原因
+
 ### 8.2 能力分级，在 API 层强制
 
 | 级别 | 动作 | agent 权限 | 机制 |

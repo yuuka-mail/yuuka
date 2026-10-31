@@ -27,6 +27,9 @@ func TestCorpus(t *testing.T) {
 		"multipart-no-boundary": Unknown,
 		"bad-base64":            Unknown,
 		"unknown-charset":       Unknown,
+		"html-reply-tracking":   Human, // In-Reply-To
+		"plain-quoted-list":     Human, // In-Reply-To
+		"phish-dmarc-fail":      Unknown,
 	}
 	files, _ := filepath.Glob("../../testdata/eml/*.eml")
 	for _, f := range files {

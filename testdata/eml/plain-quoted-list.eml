@@ -1,0 +1,39 @@
+Received: from mail.example.org (198.51.100.7)
+	by cloudflare-email.net (cloudflare) id tx0018 for <alice@example.com>;
+	Fri, 31 Oct 2026 04:00:00 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=fail header.d=example.org header.s=s1 header.b=DDDD;
+	dkim=pass header.d=lists.example.org header.s=s2 header.b=GGGG;
+	dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=example.org policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mail.example.org) smtp.helo=mail.example.org;
+	spf=softfail (mx.cloudflare.net: domain of dave@example.org does not designate 198.51.100.7 as permitted sender) smtp.mailfrom=dave@example.org;
+	arc=none smtp.remote-ip=198.51.100.7
+From: Dave Example <dave@example.org>
+To: alice@example.com
+Subject: Re: Trip plan
+Date: Fri, 31 Oct 2026 03:59:00 +0000
+Message-ID: <reply-18@example.org>
+In-Reply-To: <orig-18@example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Sounds good. Two things:
+
+1. Book the train (see https://rail.example.org/booking?id=42).
+2. Pack light
+   and bring a charger.
+
+On Thu, 30 Oct 2026, Alice wrote:
+> Shall we go on Saturday?
+>
+> > Earlier: how about the weekend?
+
+Cheers,
+Dave
+
+-----Original Message-----
+From: Alice
+Sent: Thursday
+Subject: Trip plan
+
+Older text that a client appended without quoting.

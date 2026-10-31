@@ -10,6 +10,7 @@ require (
 	github.com/emersion/go-message v0.18.2
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/jackc/pgx/v5 v5.12.0
+	golang.org/x/net v0.60.0
 	golang.org/x/text v0.42.0
 )
 

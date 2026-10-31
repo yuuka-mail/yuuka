@@ -1,0 +1,35 @@
+{
+  "trusted": true,
+  "authserv_id": "mx.cloudflare.net",
+  "dmarc": "fail",
+  "results": [
+    {
+      "method": "dkim",
+      "result": "none"
+    },
+    {
+      "method": "dmarc",
+      "result": "fail",
+      "props": {
+        "header.from": "bank.example.com",
+        "policy.dmarc": "reject"
+      }
+    },
+    {
+      "method": "spf",
+      "result": "fail",
+      "props": {
+        "smtp.mailfrom": "x@spam.example"
+      }
+    },
+    {
+      "method": "arc",
+      "result": "none",
+      "props": {
+        "smtp.remote-ip": "203.0.113.66"
+      }
+    }
+  ],
+  "remote_ip": "203.0.113.66",
+  "cf_spamh_score": "9"
+}
