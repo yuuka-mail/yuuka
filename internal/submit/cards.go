@@ -53,6 +53,15 @@ func details(cs []sendpolicy.Check) []string {
 	return out
 }
 
+// cardRecipients are rs as a card lists them, each name with its address.
+func cardRecipients(rs []store.Recipient) []notify.Recipient {
+	out := make([]notify.Recipient, len(rs))
+	for i, r := range rs {
+		out[i] = notify.Recipient{Name: r.Name, Addr: r.Addr}
+	}
+	return out
+}
+
 // cardTimeout bounds sending one card.
 const cardTimeout = 30 * time.Second
 
@@ -63,8 +72,8 @@ func (s *Service) afterHeld(p *store.PolicyTx, v *auth.Viewer, d store.Draft, o 
 	}
 	now := s.cfg.Now()
 	c := notify.HeldCard{
-		OutboxID: res.OutboxID, From: d.FromAddr, To: d.To, Cc: d.Cc, Bcc: d.Bcc, Submitter: v.String(),
-		Subject: o.subject, Attachments: o.attachments, Excerpt: o.excerpt,
+		OutboxID: res.OutboxID, From: d.FromAddr, To: cardRecipients(d.To), Cc: cardRecipients(d.Cc), Bcc: cardRecipients(d.Bcc),
+		Submitter: v.String(), Subject: o.subject, Attachments: o.attachments, Excerpt: o.excerpt,
 		SendAt: now.Add(time.Duration(res.HoldSeconds) * time.Second), Now: now,
 	}
 	if r := p.Decision().Review; r != nil {
@@ -88,7 +97,10 @@ func (s *Service) afterEscalated(p *store.PolicyTx, v *auth.Viewer, d store.Draf
 	if s.cfg.Notifier == nil || dec.Review == nil || dec.HoldReason != sendpolicy.HoldReview {
 		return
 	}
-	c := notify.EscalatedCard{DraftID: d.ID, From: d.FromAddr, To: d.To, Cc: d.Cc, Bcc: d.Bcc, Submitter: v.String(), Subject: d.Subject}
+	c := notify.EscalatedCard{
+		DraftID: d.ID, From: d.FromAddr, To: cardRecipients(d.To), Cc: cardRecipients(d.Cc),
+		Bcc: cardRecipients(d.Bcc), Submitter: v.String(), Subject: d.Subject,
+	}
 	c.Reasons, c.Flags = details(dec.Review.Failed()), details(dec.Review.Flagged())
 	p.AfterCommit(func(ctx context.Context) {
 		s.card(ctx, "escalated", d.ID, func(ctx context.Context) error { return s.cfg.Notifier.Escalated(ctx, c) })

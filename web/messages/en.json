@@ -618,6 +618,7 @@
   "send_filter_held": "Pending",
   "send_filter_moving": "In flight",
   "send_filter_sent": "Sent",
+  "send_goes_to": "Goes to",
   "send_held_as_draft": "Held as a draft: {reason}",
   "send_held_no_grant": "Held as a draft: no grant",
   "send_held_nothing_sent": "Nothing was sent. The draft stays in Drafts; a person can confirm it there.",

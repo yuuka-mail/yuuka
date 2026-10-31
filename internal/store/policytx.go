@@ -421,11 +421,11 @@ func sameRecipients(decided []string, got []OutboxRecipient) error {
 func DraftRecipients(d Draft) []OutboxRecipient {
 	var out []OutboxRecipient
 	for _, l := range []struct {
-		kind  string
-		addrs []string
+		kind string
+		rs   []Recipient
 	}{{RecipientTo, d.To}, {RecipientCc, d.Cc}, {RecipientBcc, d.Bcc}} {
-		for _, a := range l.addrs {
-			out = append(out, OutboxRecipient{Addr: a, Kind: l.kind})
+		for _, r := range l.rs {
+			out = append(out, OutboxRecipient{Addr: r.Addr, Kind: l.kind})
 		}
 	}
 	return out

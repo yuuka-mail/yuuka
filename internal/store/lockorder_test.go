@@ -73,7 +73,7 @@ func TestHeldLockOrder(t *testing.T) {
 		})
 		wg.Go(func() {
 			<-start
-			_, err := e.db.UpdateDraft(ctx, e.arisu, store.Draft{ID: r.draft, FromAddr: r.from, To: []string{"bob@example.net"}, BodyMD: "y"}, time.Now())
+			_, err := e.db.UpdateDraft(ctx, e.arisu, store.Draft{ID: r.draft, FromAddr: r.from, To: []store.Recipient{{Addr: "bob@example.net"}}, BodyMD: "y"}, time.Now())
 			check("update draft", err, store.ErrInFlight)
 		})
 		wg.Go(func() {

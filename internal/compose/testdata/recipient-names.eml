@@ -1,0 +1,37 @@
+Date: Sat, 31 Oct 2026 09:30:00 +0800
+From: "Operator" <operator@example.com>
+To: =?utf-8?q?=E7=8E=8B=E5=B0=8F=E6=98=8E?= <wang@example.com>, "Smith,
+ John" <john@example.com>, "Dr. Who (TARDIS)" <who@example.com>
+Cc: "O\"Brien \\ Co" <obrien@example.com>, "ceo@example.com"
+ <intern@example.net>, "Eve <eve@example.org>" <eve@example.net>,
+ =?utf-8?q?=E5=9B=BD=E9=99=85=E4=B8=9A=E5=8A=A1=E9=83=A8=E9=97=A8=E7=AC=AC?=
+ =?utf-8?q?=E4=B8=89=E5=AD=A3=E5=BA=A6=E9=A2=84=E7=AE=97=E5=AE=A1=E6=A0=B8?=
+ =?utf-8?q?=E5=A7=94=E5=91=98=E4=BC=9A=E8=81=94=E7=BB=9C=E4=BA=BA=EF=BC=88?=
+ =?utf-8?q?=E4=B8=B4=E6=97=B6=EF=BC=89?= <budget@example.com>, "Mallory 
+ Bcc: victim@example.com" <mallory@example.com>
+Subject: Names
+Message-ID: <01JBXM0000000000000000000H@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="=_892889f35f745d4b520a872e"
+
+--=_892889f35f745d4b520a872e
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Hello all.
+
+--=_892889f35f745d4b520a872e
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8">
+</head>
+<body>
+<p>Hello all.</p>
+</body>
+</html>
+
+--=_892889f35f745d4b520a872e--

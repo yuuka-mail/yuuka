@@ -107,14 +107,14 @@ type Cite struct {
 
 // DraftInput is the content of a draft.
 type DraftInput struct {
-	From         string   `json:"from,omitempty" jsonschema:"the address to send from, one of list_identities; without it a reply goes out as the address the replied-to mail came in through"`
-	To           []string `json:"to,omitempty" jsonschema:"bare addresses"`
-	Cc           []string `json:"cc,omitempty" jsonschema:"bare addresses"`
-	Bcc          []string `json:"bcc,omitempty" jsonschema:"bare addresses"`
-	Subject      string   `json:"subject,omitempty"`
-	BodyMarkdown string   `json:"body_markdown,omitempty" jsonschema:"the body as Markdown; the identity's signature is added when it is sent"`
-	InReplyTo    string   `json:"in_reply_to,omitempty" jsonschema:"yuuka://message/<id> of the message this replies to"`
-	Cites        []Cite   `json:"cites,omitempty" jsonschema:"the passages the draft relies on; whoever reviews the draft checks them; at most 32, each quote at most 1000 characters"`
+	From         string                `json:"from,omitempty" jsonschema:"the address to send from, one of list_identities; without it a reply goes out as the address the replied-to mail came in through"`
+	To           []agentview.Recipient `json:"to,omitempty" jsonschema:"each a bare address, or {name, addr} to give it a display name; a message's to and cc from get_message can be copied in as they are. Only the address decides anything"`
+	Cc           []agentview.Recipient `json:"cc,omitempty" jsonschema:"as to"`
+	Bcc          []agentview.Recipient `json:"bcc,omitempty" jsonschema:"as to; names are kept on the draft and written into no header"`
+	Subject      string                `json:"subject,omitempty"`
+	BodyMarkdown string                `json:"body_markdown,omitempty" jsonschema:"the body as Markdown; the identity's signature is added when it is sent"`
+	InReplyTo    string                `json:"in_reply_to,omitempty" jsonschema:"yuuka://message/<id> of the message this replies to"`
+	Cites        []Cite                `json:"cites,omitempty" jsonschema:"the passages the draft relies on; whoever reviews the draft checks them; at most 32, each quote at most 1000 characters"`
 }
 
 // auditArgs names the draft's addressing, never its text: the audit log
@@ -139,13 +139,13 @@ func (in UpdateDraftInput) auditArgs() map[string]any {
 
 // DraftOutput is the structured result of create_draft and update_draft.
 type DraftOutput struct {
-	DraftID   string   `json:"draft_id"`
-	From      string   `json:"from"`
-	To        []string `json:"to"`
-	Cc        []string `json:"cc"`
-	Bcc       []string `json:"bcc"`
-	Subject   string   `json:"subject"`
-	InReplyTo string   `json:"in_reply_to,omitempty"`
+	DraftID   string              `json:"draft_id"`
+	From      string              `json:"from"`
+	To        []agentview.Address `json:"to"`
+	Cc        []agentview.Address `json:"cc"`
+	Bcc       []agentview.Address `json:"bcc"`
+	Subject   string              `json:"subject"`
+	InReplyTo string              `json:"in_reply_to,omitempty"`
 	// Outcome, Sends and HoldReason say how submitting it as From would
 	// go now, before its recipients are looked at (list_identities).
 	Outcome    string `json:"outcome"`
@@ -207,7 +207,8 @@ func (s *Server) draftOf(ctx context.Context, v *auth.Viewer, in DraftInput, fro
 		return store.Draft{}, err
 	}
 	d := store.Draft{
-		FromAddr: in.From, To: in.To, Cc: in.Cc, Bcc: in.Bcc, Subject: in.Subject, BodyMD: in.BodyMarkdown, Cites: raw,
+		FromAddr: in.From, To: agentview.DraftRecipients(in.To), Cc: agentview.DraftRecipients(in.Cc),
+		Bcc: agentview.DraftRecipients(in.Bcc), Subject: in.Subject, BodyMD: in.BodyMarkdown, Cites: raw,
 	}
 	if in.InReplyTo != "" {
 		id, _, err := agentview.ParseURI(in.InReplyTo)
@@ -240,7 +241,8 @@ func (s *Server) draftOf(ctx context.Context, v *auth.Viewer, in DraftInput, fro
 
 func (s *Server) draftResult(ctx context.Context, v *auth.Viewer, d store.Draft, verb string) (result, error) {
 	out := DraftOutput{
-		DraftID: d.ID, From: d.FromAddr, To: nonNil(d.To), Cc: nonNil(d.Cc), Bcc: nonNil(d.Bcc), Subject: d.Subject,
+		DraftID: d.ID, From: d.FromAddr, To: agentview.AddressesOf(d.To), Cc: agentview.AddressesOf(d.Cc),
+		Bcc: agentview.AddressesOf(d.Bcc), Subject: d.Subject,
 	}
 	if d.InReplyToID != "" {
 		out.InReplyTo = agentview.MessageURI(d.InReplyToID)
@@ -261,12 +263,12 @@ func (s *Server) draftResult(ctx context.Context, v *auth.Viewer, d store.Draft,
 	// The addressing may be copied from mail, and a default From names
 	// a local part a sender chose: it is fenced like mail content.
 	var addr strings.Builder
-	fmt.Fprintf(&addr, "From: %s\nTo: %s\n", out.From, strings.Join(out.To, ", "))
+	fmt.Fprintf(&addr, "From: %s\nTo: %s\n", out.From, addressList(out.To))
 	if len(out.Cc) > 0 {
-		fmt.Fprintf(&addr, "Cc: %s\n", strings.Join(out.Cc, ", "))
+		fmt.Fprintf(&addr, "Cc: %s\n", addressList(out.Cc))
 	}
 	if len(out.Bcc) > 0 {
-		fmt.Fprintf(&addr, "Bcc: %s\n", strings.Join(out.Bcc, ", "))
+		fmt.Fprintf(&addr, "Bcc: %s\n", addressList(out.Bcc))
 	}
 	fmt.Fprintf(&addr, "Subject: %s\n", out.Subject)
 	if out.InReplyTo != "" {
@@ -397,9 +399,12 @@ func draftErr(err error) error {
 	return err
 }
 
-func nonNil(s []string) []string {
-	if s == nil {
-		return []string{}
+// addressList is a draft's recipients as the result text shows them,
+// `Name <addr>` for each one with a name.
+func addressList(as []agentview.Address) string {
+	s := make([]string, len(as))
+	for i, a := range as {
+		s[i] = a.String()
 	}
-	return s
+	return strings.Join(s, ", ")
 }

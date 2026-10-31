@@ -526,6 +526,7 @@
   "send_filter_held": "待发出",
   "send_filter_moving": "进行中",
   "send_filter_sent": "已发出",
+  "send_goes_to": "实际发往",
   "send_held_as_draft": "停在草稿：{reason}",
   "send_held_no_grant": "停在草稿：没有授权",
   "send_held_nothing_sent": "什么都没有发出。草稿留在草稿箱里，人可以在那里确认。",

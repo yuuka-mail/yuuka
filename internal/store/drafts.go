@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -46,8 +47,11 @@ type Draft struct {
 	IdentityOwner Principal
 	FromAddr      string
 	InReplyToID   string // "" for a new thread
-	To, Cc, Bcc   []string
-	Subject       string
+	// To, Cc and Bcc are the envelope recipients by role, each with the
+	// display name its author gave it. Only the addresses decide anything
+	// (Addrs); a name is shown and written into To / Cc, nothing else.
+	To, Cc, Bcc []Recipient
+	Subject     string
 	// Exactly one body: BodyMD for composed mail, RawID for an SMTP
 	// submission held as a draft (already MIME, stored under sent/).
 	BodyMD string
@@ -69,6 +73,47 @@ type Draft struct {
 	OutboxState string
 }
 
+// Recipient is one recipient of a draft. Name is "" for none.
+type Recipient struct {
+	Name string
+	Addr string
+}
+
+// MaxRecipientName bounds a display name, in characters: a name is shown
+// on review cards, and a page of it would bury the address next to it.
+const MaxRecipientName = 256
+
+// Addrs returns the addresses of rs, in order: what every decision about
+// recipients reads (§8.9), never the names.
+func Addrs(rs []Recipient) []string {
+	out := make([]string, len(rs))
+	for i, r := range rs {
+		out[i] = r.Addr
+	}
+	return out
+}
+
+// names returns the names of rs, in order.
+func names(rs []Recipient) []string {
+	out := make([]string, len(rs))
+	for i, r := range rs {
+		out[i] = r.Name
+	}
+	return out
+}
+
+// recipients pairs the stored addresses and names of one role.
+func recipients(addrs, names []string) []Recipient {
+	out := make([]Recipient, len(addrs))
+	for i, a := range addrs {
+		out[i].Addr = a
+		if i < len(names) {
+			out[i].Name = names[i]
+		}
+	}
+	return out
+}
+
 // Who sees which drafts. M2: humans see all of them, everyone else the
 // drafts they wrote, like the audit log of §13.8 (an agent sees what it
 // started). A draft is unsent text, often written on someone's behalf,
@@ -87,7 +132,7 @@ func visibleDraft(v *auth.Viewer) string {
 func seesEveryDraft(v *auth.Viewer) bool { return v.PrincipalKind == sendpolicy.KindHuman }
 
 const draftCols = `dr.id, dr.principal_id, ap.kind, ap.name, dr.identity_id, dr.from_addr, coalesce(dr.in_reply_to_id, ''),
-	dr.to_addrs, dr.cc_addrs, dr.bcc_addrs, dr.subject, coalesce(dr.body_md, ''), coalesce(dr.raw_id, ''),
+	dr.to_addrs, dr.cc_addrs, dr.bcc_addrs, dr.to_names, dr.cc_names, dr.bcc_names, dr.subject, coalesce(dr.body_md, ''), coalesce(dr.raw_id, ''),
 	dr.cites, coalesce(dr.hold_reason, ''), coalesce(dr.hold_detail, ''), dr.review, dr.created_at, dr.updated_at,
 	coalesce(o.id, ''), coalesce(o.state, ''), op.id, op.kind, op.name`
 
@@ -104,14 +149,16 @@ const draftFrom = ` FROM drafts dr
 func scanDraft(row pgx.Row) (Draft, error) {
 	var d Draft
 	var reason string
+	var to, cc, bcc, toNames, ccNames, bccNames []string
 	err := row.Scan(&d.ID, &d.PrincipalID, &d.AuthorKind, &d.AuthorName, &d.IdentityID, &d.FromAddr, &d.InReplyToID,
-		&d.To, &d.Cc, &d.Bcc, &d.Subject, &d.BodyMD, &d.RawID,
+		&to, &cc, &bcc, &toNames, &ccNames, &bccNames, &d.Subject, &d.BodyMD, &d.RawID,
 		&d.Cites, &reason, &d.HoldDetail, &d.Review, &d.CreatedAt, &d.UpdatedAt, &d.OutboxID, &d.OutboxState,
 		&d.IdentityOwner.ID, &d.IdentityOwner.Kind, &d.IdentityOwner.Name)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound
 	}
 	d.HoldReason = sendpolicy.HoldReason(reason)
+	d.To, d.Cc, d.Bcc = recipients(to, toNames), recipients(cc, ccNames), recipients(bcc, bccNames)
 	return d, err
 }
 
@@ -201,13 +248,23 @@ func (db *DB) Drafts(ctx context.Context, v *auth.Viewer, q DraftQuery) ([]Draft
 	return out, nil
 }
 
-// checkAddrs refuses what cannot be an envelope recipient: an address
-// without @, or with whitespace or control characters (header and
-// command injection).
-func checkAddrs(role string, addrs []string) error {
-	for _, a := range addrs {
+// checkRecipients refuses what cannot be an envelope recipient: an
+// address without @, or with whitespace or control characters (header
+// and command injection). A name may say anything printable: compose
+// quotes or encodes it (§10.2.1), so it cannot leave its header field,
+// but a line break or control character in one is refused rather than
+// silently replaced, since nobody types them into a name.
+func checkRecipients(role string, rs []Recipient) error {
+	for _, r := range rs {
+		a := r.Addr
 		if !strings.Contains(a, "@") || strings.IndexFunc(a, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
 			return fmt.Errorf("%s address %q: want a bare address", role, a)
+		}
+		if !utf8.ValidString(r.Name) || strings.IndexFunc(r.Name, unicode.IsControl) >= 0 {
+			return fmt.Errorf("%s name of %s: want one line of text", role, a)
+		}
+		if utf8.RuneCountInString(r.Name) > MaxRecipientName {
+			return fmt.Errorf("%s name of %s: longer than %d characters", role, a, MaxRecipientName)
 		}
 	}
 	return nil
@@ -217,13 +274,15 @@ func checkAddrs(role string, addrs []string) error {
 // replied-to message as v sees them.
 func (db *DB) prepareDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, d *Draft) error {
 	for _, l := range []struct {
-		role  string
-		addrs *[]string
+		role string
+		rs   *[]Recipient
 	}{{"to", &d.To}, {"cc", &d.Cc}, {"bcc", &d.Bcc}} {
-		if *l.addrs == nil {
-			*l.addrs = []string{}
+		// A copy: the trim below is not the caller's to see.
+		*l.rs = append([]Recipient{}, *l.rs...)
+		for i := range *l.rs {
+			(*l.rs)[i].Name = strings.TrimSpace((*l.rs)[i].Name)
 		}
-		if err := checkAddrs(l.role, *l.addrs); err != nil {
+		if err := checkRecipients(l.role, *l.rs); err != nil {
 			return fmt.Errorf("%w: %w", ErrInvalidDraft, err)
 		}
 	}
@@ -323,9 +382,11 @@ func (db *DB) createDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, d Draf
 	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO drafts (id, principal_id, identity_id, from_addr, in_reply_to_id, to_addrs, cc_addrs, bcc_addrs,
+		                    to_names, cc_names, bcc_names,
 		                    subject, body_md, raw_id, cites, hold_reason, hold_detail, review, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16)`,
-		d.ID, d.PrincipalID, d.IdentityID, d.FromAddr, nullable(d.InReplyToID), d.To, d.Cc, d.Bcc,
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $19)`,
+		d.ID, d.PrincipalID, d.IdentityID, d.FromAddr, nullable(d.InReplyToID), Addrs(d.To), Addrs(d.Cc), Addrs(d.Bcc),
+		names(d.To), names(d.Cc), names(d.Bcc),
 		d.Subject, body, nullable(d.RawID), d.Cites, nullable(string(d.HoldReason)), nullable(d.HoldDetail), d.Review, at)
 	if err != nil {
 		return Draft{}, fmt.Errorf("insert draft: %w", err)
@@ -365,10 +426,11 @@ func (db *DB) UpdateDraft(ctx context.Context, v *auth.Viewer, d Draft, at time.
 		}
 		_, err = tx.Exec(ctx, `
 			UPDATE drafts SET identity_id = $2, from_addr = $3, in_reply_to_id = $4, to_addrs = $5, cc_addrs = $6,
-				bcc_addrs = $7, subject = $8, body_md = $9, cites = $10, hold_reason = NULL, hold_detail = NULL,
-				review = NULL, updated_at = $11
+				bcc_addrs = $7, to_names = $8, cc_names = $9, bcc_names = $10, subject = $11, body_md = $12,
+				cites = $13, hold_reason = NULL, hold_detail = NULL, review = NULL, updated_at = $14
 			WHERE id = $1`,
-			d.ID, d.IdentityID, d.FromAddr, nullable(d.InReplyToID), d.To, d.Cc, d.Bcc, d.Subject, d.BodyMD, d.Cites, at)
+			d.ID, d.IdentityID, d.FromAddr, nullable(d.InReplyToID), Addrs(d.To), Addrs(d.Cc), Addrs(d.Bcc),
+			names(d.To), names(d.Cc), names(d.Bcc), d.Subject, d.BodyMD, d.Cites, at)
 		if err != nil {
 			return fmt.Errorf("update draft: %w", err)
 		}

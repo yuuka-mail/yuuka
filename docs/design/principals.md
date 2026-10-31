@@ -153,6 +153,7 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 在没人注意时发出一整天的信。人按发送本身就是确认，所以人不设默认限额。需要更多就在授权里写明数字。
 窗口是滚动的（最近 60 分钟、最近 24 小时），不依赖时区；按 outbox 行计数，不论状态，提交过就占一个名额。
 「新收件人」是此前没有任何处于已发出或在途状态（`queued`…`failed`）的 outbox 行发往过的地址，按 `addr_fold` 比较。
+收件人范围和限额都只看地址，收件人的显示名不参与任何一项（§8.9）。
 
 `review` 档的撤回窗口 `hold_seconds` 同理：空值是 [`sendpolicy.DefaultHoldSeconds`](../../internal/sendpolicy/sendpolicy.go)（600 秒，
 对所有主体一样），0 是明确不设窗口，其余是秒数；一个存着的值代表多长由 `sendpolicy.EffectiveHoldSeconds` 回答，
@@ -213,7 +214,8 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 
 - 换行一律改成 CRLF；裸 CR、NUL、超过 998 字节的行拒收而不是修——修了就不是客户端交来的那封
 - `From`（和 `Sender`）整行重写成 identity 的显示名 + 决定所用的地址；`Bcc` 头删掉，收件人只看信封，
-  按信头 `To` / `Cc` 标记 `outbox_recipients.kind`，其余算 Bcc
+  按信头 `To` / `Cc` 标记 `outbox_recipients.kind`，其余算 Bcc。To / Cc 的显示名原样保留；
+  提交停在草稿时，草稿的收件人带上信头给的名字，只为显示（不合格的名字留空，发出的仍是原件），和撰写的草稿一致（§8.9）
 - 缺 `Date` 就补（RFC 6409 §8.2）；缺 `Message-ID` 且出口投递我们的 id 时才补（§8.3），
   否则 `transport.StripHeaders` 照常剥掉客户端写的
 - 决定要求 `Auto-Submitted` 时补上 `auto-generated`；客户端自己写了别的值（`auto-replied` 等）就保留，写 `no` 则替换

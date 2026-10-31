@@ -29,14 +29,14 @@ type Cite struct {
 // defaults to the address the replied-to message came in through
 // (create, with in_reply_to).
 type DraftBody struct {
-	From         string   `json:"from,omitempty" jsonschema:"the address to send from; GET /api/v1/identities lists which may be used. Defaults to the reply identity of in_reply_to"`
-	To           []string `json:"to,omitempty" jsonschema:"bare addresses"`
-	Cc           []string `json:"cc,omitempty" jsonschema:"bare addresses"`
-	Bcc          []string `json:"bcc,omitempty" jsonschema:"bare addresses"`
-	Subject      string   `json:"subject,omitempty"`
-	BodyMarkdown string   `json:"body_markdown,omitempty" jsonschema:"the body as Markdown; the identity's signature is added when it is sent"`
-	InReplyTo    string   `json:"in_reply_to,omitempty" jsonschema:"the id of the message this replies to"`
-	Cites        []Cite   `json:"cites,omitempty" jsonschema:"the passages the draft relies on, which the review checks; at most 32, each quote at most 1000 characters"`
+	From         string                `json:"from,omitempty" jsonschema:"the address to send from; GET /api/v1/identities lists which may be used. Defaults to the reply identity of in_reply_to"`
+	To           []agentview.Recipient `json:"to,omitempty" jsonschema:"each a bare address or {name, addr}; only the address decides who may receive it"`
+	Cc           []agentview.Recipient `json:"cc,omitempty" jsonschema:"as to"`
+	Bcc          []agentview.Recipient `json:"bcc,omitempty" jsonschema:"as to; the names are kept on the draft and written into no header"`
+	Subject      string                `json:"subject,omitempty"`
+	BodyMarkdown string                `json:"body_markdown,omitempty" jsonschema:"the body as Markdown; the identity's signature is added when it is sent"`
+	InReplyTo    string                `json:"in_reply_to,omitempty" jsonschema:"the id of the message this replies to"`
+	Cites        []Cite                `json:"cites,omitempty" jsonschema:"the passages the draft relies on, which the review checks; at most 32, each quote at most 1000 characters"`
 }
 
 // CreateDraftParams are the parameters of POST /api/v1/drafts.
@@ -81,14 +81,16 @@ type Draft struct {
 	// owns it: when that is a person other than the viewer, only they
 	// can confirm the draft (§8.9 owner cap), even where the viewer's
 	// own tier on the identity is none and /identities leaves it out.
-	IdentityID    string   `json:"identity_id"`
-	IdentityOwner Actor    `json:"identity_owner"`
-	From          string   `json:"from"`
-	To            []string `json:"to"`
-	Cc            []string `json:"cc"`
-	Bcc           []string `json:"bcc"`
-	Subject       string   `json:"subject"`
-	BodyMarkdown  string   `json:"body_markdown"`
+	IdentityID    string `json:"identity_id"`
+	IdentityOwner Actor  `json:"identity_owner"`
+	From          string `json:"from"`
+	// To, Cc and Bcc are the recipients with the names the draft gives
+	// them, the shape of a message's to and cc.
+	To           []agentview.Address `json:"to"`
+	Cc           []agentview.Address `json:"cc"`
+	Bcc          []agentview.Address `json:"bcc"`
+	Subject      string              `json:"subject"`
+	BodyMarkdown string              `json:"body_markdown"`
 	// SMTP: a submission of the SMTP port held as a draft. Its body is
 	// the MIME the service sent, not body_markdown; it is confirmed or
 	// deleted, never edited.

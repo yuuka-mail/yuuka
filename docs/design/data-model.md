@@ -31,7 +31,7 @@
 | `annotation_log` | 决定 | 对 class / archived / 每个标签的每次改动：谁、什么等级、前后值。来源追溯、撤销和优先级都靠它（§8.5） | [0009](../../internal/store/migrations/0009_rules.sql) |
 | `triage_scores` | 观测事实 | 决策模型对一封信的评分，一次评分一行，只追加（§15.2）。只显示、不驱动任何东西（§15.4） | [0013](../../internal/store/migrations/0013_triage.sql) |
 | `identities` | 配置与授权 | 能用来发信的地址（精确地址或 `*@zone`）、所属账户、出口名、归属主体（§9.3、§8.9） | [0005](../../internal/store/migrations/0005_sending.sql) |
-| `drafts` | 决定 | 写好了、没发出的信；提交超出授权时停在这里，`hold_reason` 说明原因（§8.9） | [0005](../../internal/store/migrations/0005_sending.sql) |
+| `drafts` | 决定 | 写好了、没发出的信；提交超出授权时停在这里，`hold_reason` 说明原因（§8.9）。收件人的显示名和地址列并排存，只用于显示（§8.9） | [0005](../../internal/store/migrations/0005_sending.sql)、[0014](../../internal/store/migrations/0014_draft_recipient_names.sql) |
 | `outbox` | 决定 | 决定要发的每封信，和它在 §4.5 状态机里的位置；`raw_id` 指向 Sent 副本 | [0005](../../internal/store/migrations/0005_sending.sql) |
 | `send_attempts` `outbox_recipients` | 发送事实 | 每次发送尝试的执行归属、提交点和结果；逐收件人的结果、退信与投诉（§4.5） | [0005](../../internal/store/migrations/0005_sending.sql)、[0006](../../internal/store/migrations/0006_sent_copies.sql) |
 
@@ -343,6 +343,11 @@ outbox 行只有一个来处：[`store.WithDecision`](../../internal/store/polic
 它带着在授权锁下做出的 `sendpolicy.Decide` 决定，只有 `Queue` 才能落成行：`queued`，或审核通过时的 `held`（§8.9）。
 **审核升级不经过 outbox**：被升级的信直接停在草稿（`hold_reason = review`，结论在 `drafts.review`），
 不建行、不占限额，也不会有一份没人收到的 Sent 副本挂进线程。所以 `withdrawn` 只来自 `held`。
+
+outbox 这一侧只有地址：`outbox_recipients` 是信封收件人，按 `addr_fold` 去重、计数、记结果。
+收件人的显示名是作者写的，To / Cc 的名字在 Sent 副本的头里，Bcc 的名字留在行所来自的草稿上
+（`drafts.*_names`，[0014](../../internal/store/migrations/0014_draft_recipient_names.sql)）。
+所以加名字不用改 outbox，状态机和崩溃恢复也碰不到名字。
 
 `held → queued` 只有一条语句（[`store.PromoteHeld`](../../internal/store/held.go)），由执行器在领取前调用；
 `held → withdrawn` 是撤回（`store.WithdrawOutbox`）或放行时发现授权已暂停。两边都先拿内容锁再拿行，必然串行。

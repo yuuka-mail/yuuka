@@ -268,17 +268,18 @@ type Message struct {
 }
 
 // ReplyAddressing is whom a reply to a message goes to by default
-// (§12.10): bare addresses as the message wrote them, each once by
-// store.FoldAddr.
+// (§12.10): the addresses as the message wrote them, each once by
+// store.FoldAddr, To and Cc with the names it gave them, so that a reply
+// keeps them (a draft's recipients take this shape as they are).
 type ReplyAddressing struct {
 	// To is the Reply-To when it counts by the rule of the thread
 	// correspondents (§8.9: a delivery escaping the downgrade passed
 	// DMARC), else the From. For mail we sent, whom it went to.
-	To []string `json:"to"`
+	To []agentview.Address `json:"to"`
 	// Cc is what a reply to all adds: the message's To and Cc, without
 	// To and without our own addresses (those it reached us at, the From
 	// we sent it as).
-	Cc []string `json:"cc"`
+	Cc []agentview.Address `json:"cc"`
 	// UnverifiedReplyTo is a Reply-To that does not count, where it
 	// names someone other than the From. On a forged sender it is the
 	// forger's own mailbox: a client shows it, so that a person can pick

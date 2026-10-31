@@ -82,6 +82,17 @@ func (c *collector) message(raw []byte, where string, depth int) mimeparse.Messa
 		c.unreadable(where + "the message structure (" + m.Problem + ")")
 	}
 	c.text(where+"subject", m.Subject, false)
+	// Display names go out as written: a code written as the name of a
+	// recipient leaves as surely as one in the body.
+	rc := mimeparse.ParseRecipients(raw)
+	for _, l := range []struct {
+		field string
+		ms    []mimeparse.Mailbox
+	}{{"to", rc.To}, {"cc", rc.Cc}, {"reply-to", rc.ReplyTo}} {
+		for _, mb := range l.ms {
+			c.text(where+l.field+" name", mb.Name, false)
+		}
+	}
 	if len(m.Links) >= maxLinks {
 		c.unreadable(fmt.Sprintf("%smore than %d links", where, maxLinks-1))
 	}

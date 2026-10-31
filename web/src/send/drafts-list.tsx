@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages.js";
 
 import { AuthorMark, HeldMark, OutgoingMark } from "./marks";
-import { draftSnippet, isMine, problem } from "./outgoing";
+import { draftSnippet, formatRecipient, isMine, problem } from "./outgoing";
 
 const draftStates: readonly DraftState[] = ["draft", "held", "outbox"];
 
@@ -104,9 +104,15 @@ function Row({
     >
       <span className="flex min-w-0 items-center gap-1.5 text-ui">
         {!mine && d.author.kind !== "human" && <AuthorMark author={d.author} />}
-        <span className="min-w-0 truncate font-medium">
+        <span
+          className="min-w-0 truncate font-medium"
+          title={to.map(formatRecipient).join(", ") || undefined}
+        >
           {to.length ? (
-            to.join(", ")
+            // Addresses, not the names a draft gives them: a name is the
+            // author's word, and one such as "ceo@example.com" would pass
+            // for the address it is not (§8.9). The names are in the title.
+            to.map((a) => a.addr).join(", ")
           ) : (
             <span className="text-muted-foreground">{m.send_no_recipients()}</span>
           )}

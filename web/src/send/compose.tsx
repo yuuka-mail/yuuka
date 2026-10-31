@@ -37,6 +37,8 @@ import {
   identityNote,
   isMine,
   onlyConfirmer,
+  parseRecipients,
+  recipientsField,
   problem,
   replyBody,
   replyRecipients,
@@ -155,14 +157,12 @@ function ComposeError({ err, onClose }: { err: unknown; onClose: () => void }) {
   );
 }
 
-const join = (xs: string[]) => xs.join(", ");
-
 function fieldsOf(d: Draft): Fields {
   return {
     from: d.from,
-    to: join(d.to),
-    cc: join(d.cc),
-    bcc: join(d.bcc),
+    to: recipientsField(d.to),
+    cc: recipientsField(d.cc),
+    bcc: recipientsField(d.bcc),
     subject: d.subject,
     body: d.body_markdown,
     inReplyTo: d.in_reply_to,
@@ -179,7 +179,8 @@ function defaultFrom(ids: SendingIdentity[]): string {
 
 /**
  * A reply: to whom the server says (the sender, or a Reply-To that
- * counts), the others in Cc for a reply to all, Re: the subject, the text
+ * counts) by the names the message gave, the others in Cc for a reply to
+ * all, Re: the subject, the text
  * quoted below room to write, from the address the message came in
  * through (§9.3) when an identity covers it.
  */
@@ -581,6 +582,7 @@ function Editor({
               </Row>
             </>
           )}
+          <GoesTo fields={[f.to, f.cc, f.bcc]} />
           <Row label={msg.send_field_subject()}>
             <input
               aria-label={msg.send_field_subject()}
@@ -714,6 +716,33 @@ function AddrInput({
       onChange={(e) => onChange(e.target.value)}
       className="h-8 min-w-0 flex-1 bg-transparent font-mono text-ui outline-none placeholder:font-sans placeholder:text-muted-foreground aria-invalid:text-warning"
     />
+  );
+}
+
+/**
+ * Where the mail goes, once any recipient has a name: every address, with
+ * the name after it. A name is the author's word and decides nothing
+ * (§8.9); one such as "CEO" or another address must not pass for who it
+ * goes to, least of all when a person confirms an agent's draft.
+ */
+function GoesTo({ fields }: { fields: string[] }) {
+  const rs = fields.flatMap(parseRecipients);
+  if (!rs.some((r) => r.name)) return null;
+  return (
+    <p className="flex gap-2 border-b py-1 text-small">
+      <span className="w-14 shrink-0 text-muted-foreground">{msg.send_goes_to()}</span>
+      <span className="flex min-w-0 flex-1 flex-wrap gap-x-2">
+        {rs.map((r, i) => (
+          <span key={`${i}:${r.addr}`} className="min-w-0 wrap-anywhere">
+            <span className="font-mono">{r.addr}</span>
+            {r.name && r.name.toLowerCase() !== r.addr.toLowerCase() && (
+              <span className="text-muted-foreground"> ({r.name})</span>
+            )}
+            {i < rs.length - 1 && <span className="text-muted-foreground">,</span>}
+          </span>
+        ))}
+      </span>
+    </p>
   );
 }
 

@@ -126,6 +126,31 @@ var cases = map[string]*Message{
 		// Written with its own delimiter, as people do: it is not doubled.
 		Signature: "-- \r\nOperator\r\nsent from example.com\r\n",
 	},
+	// Display names as a draft carries them (§10.2.1): CJK long enough to
+	// fold, RFC 5322 specials that need quoting, a quote and a backslash
+	// that need escaping, and names an induced agent might write to pass
+	// as someone else or to start a new field. Each must come back as
+	// the same name on the same address, and no Bcc name may appear.
+	"recipient-names": {
+		From: Address{Name: "Operator", Addr: "operator@example.com"},
+		To: []Address{
+			{Name: "王小明", Addr: "wang@example.com"},
+			{Name: "Smith, John", Addr: "john@example.com"},
+			{Name: "Dr. Who (TARDIS)", Addr: "who@example.com"},
+		},
+		Cc: []Address{
+			{Name: `O"Brien \ Co`, Addr: "obrien@example.com"},
+			{Name: "ceo@example.com", Addr: "intern@example.net"},
+			{Name: "Eve <eve@example.org>", Addr: "eve@example.net"},
+			{Name: "国际业务部门第三季度预算审核委员会联络人（临时）", Addr: "budget@example.com"},
+			{Name: "Mallory\r\nBcc: victim@example.com", Addr: "mallory@example.com"},
+		},
+		Bcc:       []Address{{Name: "Hidden Archive", Addr: "archive@example.com"}},
+		Subject:   "Names",
+		Date:      date,
+		MessageID: "01JBXM0000000000000000000H@example.com",
+		Body:      "Hello all.\n",
+	},
 	"no-message-id": {
 		From:    Address{Addr: "operator@example.com"},
 		To:      []Address{{Addr: "alice@example.com"}},
@@ -231,6 +256,24 @@ func TestRoundTrip(t *testing.T) {
 			if got.FromAddr != m.From.Addr || got.FromName != collapse(m.From.Name) {
 				t.Errorf("from = %q <%s>", got.FromName, got.FromAddr)
 			}
+			rc := mimeparse.ParseRecipients(raw)
+			for _, l := range []struct {
+				field     string
+				got, want []Address
+			}{{"to", mailboxes(rc.To), m.To}, {"cc", mailboxes(rc.Cc), m.Cc}} {
+				want := make([]Address, len(l.want))
+				for i, a := range l.want {
+					want[i] = Address{Name: collapse(a.Name), Addr: a.Addr}
+				}
+				if !slices.Equal(l.got, want) {
+					t.Errorf("%s = %q, want %q", l.field, l.got, want)
+				}
+			}
+			for _, a := range m.Bcc {
+				if a.Name != "" && bytes.Contains(raw, []byte(a.Name)) {
+					t.Errorf("Bcc name %q appears in the message", a.Name)
+				}
+			}
 			if got.MessageID != m.MessageID {
 				t.Errorf("message id = %q, want %q", got.MessageID, m.MessageID)
 			}
@@ -291,6 +334,14 @@ func TestRoundTrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+func mailboxes(ms []mimeparse.Mailbox) []Address {
+	out := make([]Address, len(ms))
+	for i, m := range ms {
+		out[i] = Address{Name: m.Name, Addr: m.Addr}
+	}
+	return out
 }
 
 func walk(e mimeparse.Entity, f func(mimeparse.Entity)) {

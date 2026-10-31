@@ -494,6 +494,27 @@ func TestStandings(t *testing.T) {
 	}
 }
 
+// A recipient's display name is kept beside its address (0014), trimmed,
+// in order; one without a name reads back as "".
+func TestDraftRecipientNames(t *testing.T) {
+	t.Parallel()
+	e := newSendEnv(t)
+	ctx := t.Context()
+	named := []store.Recipient{{Name: " 王小明 ", Addr: "wang@example.net"}, {Addr: "bob@example.net"}, {Name: `Smith, "J"`, Addr: "j@example.org"}}
+	nd, err := e.db.CreateDraft(ctx, e.arisu, store.Draft{FromAddr: "arisu@example.com", To: named[:1], Cc: named[1:2], Bcc: named[2:], BodyMD: "x"}, e.at())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := e.db.DraftByID(ctx, e.arisu, nd.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []store.Recipient{{Name: "王小明", Addr: "wang@example.net"}}; !slices.Equal(got.To, want) ||
+		!slices.Equal(got.Cc, named[1:2]) || !slices.Equal(got.Bcc, named[2:]) {
+		t.Errorf("names read back as to %q cc %q bcc %q", got.To, got.Cc, got.Bcc)
+	}
+}
+
 func TestDrafts(t *testing.T) {
 	t.Parallel()
 	e := newSendEnv(t)
@@ -502,7 +523,7 @@ func TestDrafts(t *testing.T) {
 	other := e.principal("agent", "momoi", auth.DraftCreate)
 
 	d, err := e.db.CreateDraft(ctx, e.arisu, store.Draft{
-		FromAddr: "GitHub@example.com", InReplyToID: m1, To: []string{"bob@example.net"}, Subject: "Re: Hello", BodyMD: "Hi **Bob**",
+		FromAddr: "GitHub@example.com", InReplyToID: m1, To: []store.Recipient{{Addr: "bob@example.net"}}, Subject: "Re: Hello", BodyMD: "Hi **Bob**",
 	}, e.at())
 	if err != nil {
 		t.Fatal(err)
@@ -513,8 +534,10 @@ func TestDrafts(t *testing.T) {
 	for name, bad := range map[string]store.Draft{
 		"unknown From":       {FromAddr: "me@example.org", BodyMD: "x"},
 		"identity mismatch":  {FromAddr: "github@example.com", IdentityID: e.arisuID.ID, BodyMD: "x"},
-		"bad recipient":      {FromAddr: "arisu@example.com", To: []string{"bob@example.net\r\nBcc: eve@example.org"}, BodyMD: "x"},
-		"no @":               {FromAddr: "arisu@example.com", To: []string{"bob"}, BodyMD: "x"},
+		"bad recipient":      {FromAddr: "arisu@example.com", To: []store.Recipient{{Addr: "bob@example.net\r\nBcc: eve@example.org"}}, BodyMD: "x"},
+		"no @":               {FromAddr: "arisu@example.com", To: []store.Recipient{{Addr: "bob"}}, BodyMD: "x"},
+		"name on two lines":  {FromAddr: "arisu@example.com", Cc: []store.Recipient{{Name: "Bob\r\nBcc: eve@example.org", Addr: "bob@example.net"}}, BodyMD: "x"},
+		"name too long":      {FromAddr: "arisu@example.com", Bcc: []store.Recipient{{Name: strings.Repeat("名", store.MaxRecipientName+1), Addr: "bob@example.net"}}, BodyMD: "x"},
 		"missing reply":      {FromAddr: "arisu@example.com", InReplyToID: ulid.New(base), BodyMD: "x"},
 		"cites not an array": {FromAddr: "arisu@example.com", Cites: []byte(`{}`), BodyMD: "x"},
 	} {
@@ -551,7 +574,7 @@ func TestDrafts(t *testing.T) {
 	// clears the hold.
 	hold := func(d store.Draft) error {
 		return e.db.WithDecision(ctx, e.arisu, store.Submission{
-			FromAddr: d.FromAddr, IdentityID: d.IdentityID, Recipients: d.To, InReplyToID: d.InReplyToID, Now: e.at(),
+			FromAddr: d.FromAddr, IdentityID: d.IdentityID, Recipients: store.Addrs(d.To), InReplyToID: d.InReplyToID, Now: e.at(),
 		}, func(ctx context.Context, p *store.PolicyTx) error { return p.HoldDraft(ctx, d.ID, e.at()) })
 	}
 	if err := hold(d); err != nil {
@@ -562,12 +585,12 @@ func TestDrafts(t *testing.T) {
 	}
 	upd, err := e.db.UpdateDraft(ctx, e.arisu, store.Draft{
 		ID: d.ID, FromAddr: "arisu@example.com", InReplyToID: m1,
-		To: []string{"bob@example.net"}, Bcc: []string{"carol@example.org"}, BodyMD: "Hi",
+		To: []store.Recipient{{Addr: "bob@example.net"}}, Bcc: []store.Recipient{{Addr: "carol@example.org"}}, BodyMD: "Hi",
 	}, e.at())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if upd.IdentityID != e.arisuID.ID || upd.HoldReason != "" || upd.Bcc[0] != "carol@example.org" || !upd.UpdatedAt.After(upd.CreatedAt) {
+	if upd.IdentityID != e.arisuID.ID || upd.HoldReason != "" || upd.Bcc[0].Addr != "carol@example.org" || !upd.UpdatedAt.After(upd.CreatedAt) {
 		t.Errorf("updated: %+v", upd)
 	}
 
@@ -579,7 +602,7 @@ func TestDrafts(t *testing.T) {
 	err = e.db.WithDecision(ctx, e.monitor, store.Submission{FromAddr: "alerts@example.com", Recipients: []string{"ops@example.net"}, Now: at},
 		func(ctx context.Context, p *store.PolicyTx) error {
 			var err error
-			smtp, err = p.CreateDraft(ctx, store.Draft{FromAddr: "alerts@example.com", To: []string{"ops@example.net"}}, &raw, msg, at)
+			smtp, err = p.CreateDraft(ctx, store.Draft{FromAddr: "alerts@example.com", To: []store.Recipient{{Addr: "ops@example.net"}}}, &raw, msg, at)
 			return err
 		})
 	if err != nil {

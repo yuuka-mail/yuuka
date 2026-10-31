@@ -542,7 +542,7 @@ func (h *harness) draft(p store.Principal, d store.Draft) store.Draft {
 		d.BodyMD = "Hello"
 	}
 	if d.To == nil {
-		d.To = []string{"bob@example.net"}
+		d.To = []store.Recipient{{Addr: "bob@example.net"}}
 	}
 	out, err := h.db.CreateDraft(h.t.Context(), viewer(p), d, time.Now())
 	if err != nil {
@@ -1124,7 +1124,7 @@ func TestMessageRecipients(t *testing.T) {
 	}
 
 	d := h.draft(h.human, store.Draft{
-		FromAddr: "me@example.com", Subject: "Sent only", To: []string{"bob@example.net"}, Cc: []string{"carol@example.net"},
+		FromAddr: "me@example.com", Subject: "Sent only", To: []store.Recipient{{Addr: "bob@example.net"}}, Cc: []store.Recipient{{Addr: "carol@example.net"}},
 	})
 	res, err := h.sub.SubmitDraft(t.Context(), viewer(h.human), d.ID)
 	if err != nil || !res.Queued {
@@ -1143,7 +1143,7 @@ func TestMessageRecipients(t *testing.T) {
 		t.Errorf("sent: to %+v, cc %+v, reply-to %+v", out.To, out.Cc, out.ReplyTo)
 	}
 	// A follow-up to our own mail goes where it went, not back to us.
-	if r := out.Reply; !slices.Equal(r.To, []string{"bob@example.net"}) || !slices.Equal(r.Cc, []string{"carol@example.net"}) {
+	if r := out.Reply; !slices.Equal(r.To, addrs{{Addr: "bob@example.net"}}) || !slices.Equal(r.Cc, addrs{{Addr: "carol@example.net"}}) {
 		t.Errorf("reply to sent: %+v", r)
 	}
 }
@@ -1171,10 +1171,13 @@ func TestReplyAddressing(t *testing.T) {
 		t.Helper()
 		return decode[Message](t, h.get("/api/v1/messages/"+id, read)).Reply
 	}
-	others := []string{"bob@example.net", "carol@example.net"}
+	type addrs = []agentview.Address
+	// To and Cc keep the names the message gave them, for the reply.
+	others := addrs{{Name: "Bob", Addr: "bob@example.net"}, {Addr: "carol@example.net"}}
+	dave := addrs{{Name: "Dave Example", Addr: "dave@example.org"}}
 
 	verified := reply(h.deliver("plain-quoted-list.eml", letter("Verified", "pass"), "alice"))
-	if want := []string{"trips@lists.example.org", "dave@example.org"}; !slices.Equal(verified.To, want) ||
+	if want := (addrs{{Name: "Trips", Addr: "trips@lists.example.org"}, {Addr: "dave@example.org"}}); !slices.Equal(verified.To, want) ||
 		!slices.Equal(verified.Cc, others) || len(verified.UnverifiedReplyTo) != 0 {
 		t.Errorf("verified Reply-To: %+v", verified)
 	}
@@ -1186,14 +1189,14 @@ func TestReplyAddressing(t *testing.T) {
 	} {
 		r := reply(h.deliver("plain-quoted-list.eml", letter(c.name, c.dmarc), c.prefix))
 		// The From is dropped from the notice: the reply goes there anyway.
-		if !slices.Equal(r.To, []string{"dave@example.org"}) || !slices.Equal(r.UnverifiedReplyTo, []string{"trips@lists.example.org"}) {
+		if !slices.Equal(r.To, dave) || !slices.Equal(r.UnverifiedReplyTo, []string{"trips@lists.example.org"}) {
 			t.Errorf("%s: %+v", c.name, r)
 		}
 		// Ours is the address it reached us at: alice on a claimed prefix,
 		// alice-unclaimed on the other, where alice stays a recipient.
 		want := others
 		if c.prefix != "alice" {
-			want = []string{"alice@example.com", "bob@example.net", "carol@example.net"}
+			want = append(addrs{{Addr: "alice@example.com"}}, others...)
 		}
 		if !slices.Equal(r.Cc, want) {
 			t.Errorf("%s: reply to all %v, want %v", c.name, r.Cc, want)
@@ -1204,7 +1207,7 @@ func TestReplyAddressing(t *testing.T) {
 	same := reply(h.deliver("plain-quoted-list.eml", strings.NewReplacer(
 		"Subject: Re: Trip plan", "Subject: Same", "dmarc=pass", "dmarc=none",
 		"To: alice@example.com\r\n", "To: alice@example.com\r\nReply-To: DAVE@example.org\r\n"), "alice"))
-	if !slices.Equal(same.To, []string{"dave@example.org"}) || len(same.UnverifiedReplyTo) != 0 || len(same.Cc) != 0 {
+	if !slices.Equal(same.To, dave) || len(same.UnverifiedReplyTo) != 0 || len(same.Cc) != 0 {
 		t.Errorf("Reply-To is the From: %+v", same)
 	}
 }

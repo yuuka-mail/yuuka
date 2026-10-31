@@ -58,6 +58,7 @@ export type ReplyIdentity = S["ReplyIdentity"];
 export type Outgoing = S["Outgoing"];
 export type OutboxState = S["OutboxState"];
 export type OutboxEntry = S["OutboxEntry"];
+export type Recipient = S["Recipient"];
 export type RecipientState = S["RecipientState"];
 export type Resolution = S["Resolution"];
 export type Sent = S["Sent"];

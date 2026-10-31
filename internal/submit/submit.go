@@ -214,13 +214,14 @@ func (s *Service) SubmitRaw(ctx context.Context, v *auth.Viewer, mailFrom string
 		recipients := m.recipients(rcpts)
 		dr := store.Draft{FromAddr: f.FromAddr, InReplyToID: replyTo, Subject: m.subject}
 		for _, r := range recipients {
+			f := store.FoldAddr(r.Addr)
 			switch r.Kind {
 			case store.RecipientTo:
-				dr.To = append(dr.To, r.Addr)
+				dr.To = append(dr.To, store.Recipient{Name: m.to[f], Addr: r.Addr})
 			case store.RecipientCc:
-				dr.Cc = append(dr.Cc, r.Addr)
+				dr.Cc = append(dr.Cc, store.Recipient{Name: m.cc[f], Addr: r.Addr})
 			default:
-				dr.Bcc = append(dr.Bcc, r.Addr)
+				dr.Bcc = append(dr.Bcc, store.Recipient{Addr: r.Addr})
 			}
 		}
 		result := map[string]any{}
@@ -482,10 +483,12 @@ func (s *Service) queueHeld(ctx context.Context, p *store.PolicyTx, d store.Draf
 	return s.cfg.Outbox.Enqueue(ctx, p, sub)
 }
 
-func addresses(addrs []string) []compose.Address {
-	out := make([]compose.Address, 0, len(addrs))
-	for _, a := range addrs {
-		out = append(out, compose.Address{Addr: a})
+// addresses are a draft's recipients as compose writes them, names and
+// all; the names go into To and Cc only (§10.2.1).
+func addresses(rs []store.Recipient) []compose.Address {
+	out := make([]compose.Address, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, compose.Address{Name: r.Name, Addr: r.Addr})
 	}
 	return out
 }

@@ -198,7 +198,7 @@ func header(raw string) string {
 // endings, a display name of its own choosing, a Bcc.
 func alert(from string, extra ...string) []byte {
 	return []byte("From: \"The CEO\" <" + from + ">\n" + strings.Join(extra, "") +
-		"To: ops@example.net\nBcc: secret@example.org\nSubject: =?utf-8?q?Disk_f=C3=BCll?=\n\nDisk full on host-1.\n")
+		"To: \"Ops, on call\" <ops@example.net>\nBcc: Secret <secret@example.org>\nSubject: =?utf-8?q?Disk_f=C3=BCll?=\n\nDisk full on host-1.\n")
 }
 
 var opsAndSecret = []string{"ops@example.net", "secret@example.org"}
@@ -391,7 +391,7 @@ I am away.
 			raw: &raw{e.monitor, "alerts@example.com", []string{"ops@example.net"}, ""}, want: sendpolicy.HoldPolicy,
 		},
 		{name: "owner cap, raw", raw: &raw{e.arisu, "ops@example.com", []string{"ops@example.net"}, ""}, want: sendpolicy.HoldOwner},
-		{name: "owner cap, draft", draft: &store.Draft{FromAddr: "ops@example.com", To: []string{"ops@example.net"}, BodyMD: "x"}, want: sendpolicy.HoldOwner},
+		{name: "owner cap, draft", draft: &store.Draft{FromAddr: "ops@example.com", To: []store.Recipient{{Addr: "ops@example.net"}}, BodyMD: "x"}, want: sendpolicy.HoldOwner},
 		{name: "suspended", setup: func() {
 			e.grant(e.alerts, e.monitor, sendpolicy.Auto, sendpolicy.ScopeAny, "suspended_at = now()")
 		}, raw: &raw{e.monitor, "alerts@example.com", []string{"ops@example.net"}, ""}, want: sendpolicy.HoldSuspended},
@@ -400,14 +400,14 @@ I am away.
 		}, raw: &raw{e.monitor, "alerts@example.com", []string{"ops@example.net", "x@example.org"}, ""}, want: sendpolicy.HoldRecipients},
 		{
 			name: "thread scope, new thread", setup: func() { e.grant(e.arisuID, e.arisu, sendpolicy.Auto, sendpolicy.ScopeThread, "") },
-			draft: &store.Draft{FromAddr: "arisu@example.com", To: []string{"bob@example.net"}, BodyMD: "x"}, want: sendpolicy.HoldRecipients,
+			draft: &store.Draft{FromAddr: "arisu@example.com", To: []store.Recipient{{Addr: "bob@example.net"}}, BodyMD: "x"}, want: sendpolicy.HoldRecipients,
 		},
 		{
 			name: "loop, raw reply", setup: func() { e.grant(e.arisuID, e.arisu, sendpolicy.Auto, sendpolicy.ScopeAny, "") },
 			raw: &raw{e.arisu, "arisu@example.com", []string{"robot@example.net"}, "In-Reply-To: <ooo@example.net>\n"}, want: sendpolicy.HoldLoop,
 		},
 		{
-			name: "loop, draft reply", draft: &store.Draft{FromAddr: "arisu@example.com", InReplyToID: auto, To: []string{"robot@example.net"}, BodyMD: "x"},
+			name: "loop, draft reply", draft: &store.Draft{FromAddr: "arisu@example.com", InReplyToID: auto, To: []store.Recipient{{Addr: "robot@example.net"}}, BodyMD: "x"},
 			want: sendpolicy.HoldLoop,
 		},
 		{name: "limit", setup: func() {
@@ -415,7 +415,7 @@ I am away.
 		}, raw: &raw{e.monitor, "alerts@example.com", []string{"ops@example.net"}, ""}, want: sendpolicy.HoldLimit},
 		{
 			name: "review", setup: func() { e.grant(e.arisuID, e.arisu, sendpolicy.Review, sendpolicy.ScopeAny, "") },
-			draft: &store.Draft{FromAddr: "arisu@example.com", To: []string{"bob@example.net"}, BodyMD: "x"}, want: sendpolicy.HoldReview,
+			draft: &store.Draft{FromAddr: "arisu@example.com", To: []store.Recipient{{Addr: "bob@example.net"}}, BodyMD: "x"}, want: sendpolicy.HoldReview,
 		},
 	} {
 		if c.setup != nil {
@@ -445,7 +445,11 @@ I am away.
 		}
 		if c.raw != nil {
 			// Held raw: the normalized bytes under sent/, no message yet.
-			if got.RawID == "" || got.Subject != "Disk füll" {
+			// It shows the names the header gives To and Cc; Bcc has
+			// none, its header is gone.
+			if got.RawID == "" || got.Subject != "Disk füll" ||
+				len(got.To) > 0 && !slices.Equal(got.To, []store.Recipient{{Name: "Ops, on call", Addr: "ops@example.net"}}) ||
+				len(got.Bcc) > 0 && got.Bcc[0].Name != "" {
 				t.Errorf("%s: raw draft %+v", c.name, got)
 			}
 			b := e.rawBytes(got.RawID)
@@ -480,7 +484,7 @@ func TestOwnerCapOverEntryPoints(t *testing.T) {
 			if res.Queued || (tier == sendpolicy.None) != errors.Is(err, ErrRejected) {
 				t.Errorf("%s, SMTP: %+v, %v", name, res, err)
 			}
-			d, err := e.db.CreateDraft(ctx, sub, store.Draft{FromAddr: "ops@example.com", To: []string{"x@example.net"}, BodyMD: "x"}, e.at())
+			d, err := e.db.CreateDraft(ctx, sub, store.Draft{FromAddr: "ops@example.com", To: []store.Recipient{{Addr: "x@example.net"}}, BodyMD: "x"}, e.at())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -502,7 +506,7 @@ func TestOwnerCapOverEntryPoints(t *testing.T) {
 		t.Fatalf("%d outbox rows", n)
 	}
 	// The owner's confirmation is what lets it go.
-	d, err := e.db.CreateDraft(ctx, e.arisu, store.Draft{FromAddr: "ops@example.com", To: []string{"x@example.net"}, BodyMD: "x"}, e.at())
+	d, err := e.db.CreateDraft(ctx, e.arisu, store.Draft{FromAddr: "ops@example.com", To: []store.Recipient{{Addr: "x@example.net"}}, BodyMD: "x"}, e.at())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,7 +561,8 @@ References: <root@example.net>
 Hello.
 `, "github")
 	d, err := e.db.CreateDraft(ctx, e.op, store.Draft{
-		FromAddr: "github@example.com", InReplyToID: parent, To: []string{"bob@example.net"}, Bcc: []string{"archive@example.org"},
+		FromAddr: "github@example.com", InReplyToID: parent, To: []store.Recipient{{Name: "王小明", Addr: "bob@example.net"}},
+		Cc: []store.Recipient{{Name: `Smith, "J"`, Addr: "j@example.org"}}, Bcc: []store.Recipient{{Name: "Archive", Addr: "archive@example.org"}},
 		Subject: "Re: Hello", BodyMD: "Hi **Bob**\n",
 	}, e.at())
 	if err != nil {
@@ -579,7 +584,13 @@ Hello.
 			t.Errorf("header lacks %q:\n%s", want, h)
 		}
 	}
-	for _, not := range []string{"Message-ID", "Auto-Submitted", "Bcc", "archive@"} {
+	// The names go into To and Cc, encoded; the Bcc's into nothing.
+	rc := mimeparse.ParseRecipients([]byte(raw))
+	if len(rc.To) != 1 || rc.To[0] != (mimeparse.Mailbox{Name: "王小明", Addr: "bob@example.net"}) ||
+		len(rc.Cc) != 1 || rc.Cc[0] != (mimeparse.Mailbox{Name: `Smith, "J"`, Addr: "j@example.org"}) {
+		t.Errorf("recipients as sent: %+v", rc)
+	}
+	for _, not := range []string{"Message-ID", "Auto-Submitted", "Bcc", "archive@", "Archive"} {
 		if strings.Contains(h, not) {
 			t.Errorf("header has %q:\n%s", not, h)
 		}
@@ -610,7 +621,7 @@ Hello.
 func TestSubmitDraftConcurrentSend(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, transport.CloudflareCaps())
-	d, err := e.db.CreateDraft(t.Context(), e.op, store.Draft{FromAddr: "github@example.com", To: []string{"bob@example.net"}, BodyMD: "x"}, e.at())
+	d, err := e.db.CreateDraft(t.Context(), e.op, store.Draft{FromAddr: "github@example.com", To: []store.Recipient{{Addr: "bob@example.net"}}, BodyMD: "x"}, e.at())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -639,7 +650,7 @@ func TestSubmitDraftMessageIDAndAgent(t *testing.T) {
 	e := newEnv(t, caps)
 	ctx := t.Context()
 	e.grant(e.arisuID, e.arisu, sendpolicy.Auto, sendpolicy.ScopeAny, "")
-	d, err := e.db.CreateDraft(ctx, e.arisu, store.Draft{FromAddr: "arisu@example.com", To: []string{"bob@example.net"}, Subject: "Hi", BodyMD: "x"}, e.at())
+	d, err := e.db.CreateDraft(ctx, e.arisu, store.Draft{FromAddr: "arisu@example.com", To: []store.Recipient{{Addr: "bob@example.net"}}, Subject: "Hi", BodyMD: "x"}, e.at())
 	if err != nil {
 		t.Fatal(err)
 	}

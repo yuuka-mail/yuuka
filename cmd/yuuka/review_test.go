@@ -55,7 +55,7 @@ func TestRecaller(t *testing.T) {
 		t.Fatal(err)
 	}
 	held := enqueue(arisu, "arisu@example.com", store.Submission{Content: &store.ReviewInput{}},
-		&store.Draft{FromAddr: "arisu@example.com", To: []string{"bob@example.net"}})
+		&store.Draft{FromAddr: "arisu@example.com", To: []store.Recipient{{Addr: "bob@example.net"}}})
 
 	recall := recaller(e.db, &auth.Viewer{PrincipalID: op.PrincipalID, PrincipalKind: "human", PrincipalName: "operator"})
 	answer, done, suspended, err := recall(ctx, held, 12345)

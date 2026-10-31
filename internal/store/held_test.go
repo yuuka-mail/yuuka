@@ -37,7 +37,7 @@ func (e *sendEnv) knowBob() {
 func (e *sendEnv) hold(from string) (string, string, sendpolicy.Decision) {
 	e.t.Helper()
 	ctx := e.t.Context()
-	dr, err := e.db.CreateDraft(ctx, e.arisu, store.Draft{FromAddr: from, To: []string{"bob@example.net"}, BodyMD: "x"}, e.at())
+	dr, err := e.db.CreateDraft(ctx, e.arisu, store.Draft{FromAddr: from, To: []store.Recipient{{Addr: "bob@example.net"}}, BodyMD: "x"}, e.at())
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestHeldBreaker(t *testing.T) {
 	e2.knowBob()
 	m := e2.deliver("\nFrom: bob@example.net\nTo: arisu@example.com\nSubject: hi\nMessage-ID: <b1@example.net>\n\nhello\n", "arisu")
 	holdReply := func() string {
-		dr, err := e2.db.CreateDraft(ctx, e2.arisu, store.Draft{FromAddr: "arisu@example.com", InReplyToID: m, To: []string{"bob@example.net"}, BodyMD: "x"}, e2.at())
+		dr, err := e2.db.CreateDraft(ctx, e2.arisu, store.Draft{FromAddr: "arisu@example.com", InReplyToID: m, To: []store.Recipient{{Addr: "bob@example.net"}}, BodyMD: "x"}, e2.at())
 		if err != nil {
 			t.Fatal(err)
 		}

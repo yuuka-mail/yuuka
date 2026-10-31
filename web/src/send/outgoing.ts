@@ -1,6 +1,7 @@
 import { ApiError } from "@/api/client";
 import type {
   Actor,
+  Address,
   CheckName,
   Code,
   Draft,
@@ -9,6 +10,7 @@ import type {
   Message,
   OutboxEntry,
   OutboxState,
+  Recipient,
   RecipientScope,
   RecipientState,
   SendingIdentity,
@@ -353,18 +355,83 @@ export function abilities(s: SessionInfo) {
 }
 export type Abilities = ReturnType<typeof abilities>;
 
-/** Addresses as typed: separated by commas, semicolons or spaces. */
-export function parseAddrs(s: string): string[] {
-  return s
-    .split(/[\s,;]+/)
-    .map((a) => a.trim())
-    .filter(Boolean);
+/**
+ * Recipients as typed into one field: `Name <addr>`, `"Doe, John" <addr>`
+ * or bare addresses, separated by commas, semicolons or line breaks
+ * outside quotes and angle brackets. Bare addresses may also be separated
+ * by spaces, as before names were allowed.
+ */
+export function splitRecipients(s: string): string[] {
+  const parts: string[] = [];
+  let cur = "";
+  let quoted = false;
+  let angle = false;
+  const push = () => {
+    const t = cur.trim();
+    cur = "";
+    if (!t) return;
+    // Without <addr> a part is bare addresses, or a name typed alone.
+    parts.push(...(t.includes("<") || t.includes('"') ? [t] : t.split(/\s+/)));
+  };
+  let escaped = false;
+  for (const c of s) {
+    if (escaped || (quoted && c === "\\")) {
+      escaped = !escaped;
+      cur += c;
+      continue;
+    }
+    if (c === '"' && !angle) quoted = !quoted;
+    else if (!quoted && c === "<") angle = true;
+    else if (!quoted && c === ">") angle = false;
+    else if (!quoted && !angle && /[,;\n]/.test(c)) {
+      push();
+      continue;
+    }
+    cur += c;
+  }
+  push();
+  return parts;
 }
 
-/** The typed addresses that are not one bare address each. */
-export function badAddrs(s: string): string[] {
-  return parseAddrs(s).filter((a) => !/^[^@\s<>"]+@[^@\s<>"]+$/.test(a));
+const bareAddr = /^[^@\s<>"]+@[^@\s<>"]+$/;
+
+/** One typed recipient as {name, addr}; undefined when it is not one. */
+export function parseRecipient(t: string): { name: string; addr: string } | undefined {
+  const m = /^(.*)<([^<>]*)>\s*$/s.exec(t);
+  if (!m) return bareAddr.test(t) ? { name: "", addr: t } : undefined;
+  const [, typed = "", within = ""] = m;
+  let name = typed.trim();
+  const addr = within.trim();
+  if (name.length >= 2 && name.startsWith('"') && name.endsWith('"')) {
+    name = name.slice(1, -1).replace(/\\(.)/g, "$1");
+  }
+  return bareAddr.test(addr) ? { name, addr } : undefined;
 }
+
+/** The recipients of one field, those that parse. */
+export function parseRecipients(s: string): { name: string; addr: string }[] {
+  return splitRecipients(s).flatMap((t) => parseRecipient(t) ?? []);
+}
+
+/** The typed recipients that are not `Name <addr>` or a bare address. */
+export function badAddrs(s: string): string[] {
+  return splitRecipients(s).filter((t) => !parseRecipient(t));
+}
+
+/**
+ * a as people type it, the inverse of parseRecipient: `Name <addr>`, the
+ * name quoted when it holds a character that would end it (RFC 5322
+ * specials), the same text the server writes for agents.
+ */
+export function formatRecipient(a: Address): string {
+  const addr = a.addr ?? "";
+  if (!a.name) return addr;
+  const name = /[()<>[\]:;@\\,."]/.test(a.name) ? `"${a.name.replace(/[\\"]/g, "\\$&")}"` : a.name;
+  return `${name} <${addr}>`;
+}
+
+const recipientsBody = (s: string): Recipient[] =>
+  parseRecipients(s).map((r) => (r.name ? r : r.addr));
 
 /**
  * The recipients a reply to m starts with. The server says whom
@@ -372,15 +439,18 @@ export function badAddrs(s: string): string[] {
  * (§8.9), never made here. A reply to all adds the others in Cc.
  */
 export function replyRecipients(m: Message, all: boolean): { to: string; cc: string } {
-  return { to: m.reply.to.join(", "), cc: all ? m.reply.cc.join(", ") : "" };
+  return { to: recipientsField(m.reply.to), cc: all ? recipientsField(m.reply.cc) : "" };
 }
+
+/** Recipients as one field of the composer shows them. */
+export const recipientsField = (as: Address[]): string => as.map(formatRecipient).join(", ");
 
 /**
  * The unverified Reply-To addresses not yet among the typed recipients,
  * compared as store.FoldAddr does: a person who typed one in has decided.
  */
 export function unusedReplyTo(unverified: string[], ...typed: string[]): string[] {
-  const have = new Set(typed.flatMap(parseAddrs).map((a) => a.toLowerCase()));
+  const have = new Set(typed.flatMap(parseRecipients).map((r) => r.addr.toLowerCase()));
   return unverified.filter((a) => !have.has(a.toLowerCase()));
 }
 
@@ -416,9 +486,9 @@ export function draftBody(f: {
 }): DraftBody {
   return {
     from: f.from || undefined,
-    to: parseAddrs(f.to),
-    cc: parseAddrs(f.cc),
-    bcc: parseAddrs(f.bcc),
+    to: recipientsBody(f.to),
+    cc: recipientsBody(f.cc),
+    bcc: recipientsBody(f.bcc),
     subject: f.subject,
     body_markdown: f.body,
     in_reply_to: f.inReplyTo || undefined,

@@ -81,8 +81,8 @@ func (a *API) draftOf(ctx context.Context, v *auth.Viewer, b DraftBody, from str
 		return store.Draft{}, err
 	}
 	d := store.Draft{
-		FromAddr: b.From, InReplyToID: b.InReplyTo, To: b.To, Cc: b.Cc, Bcc: b.Bcc,
-		Subject: b.Subject, BodyMD: b.BodyMarkdown, Cites: raw,
+		FromAddr: b.From, InReplyToID: b.InReplyTo, To: agentview.DraftRecipients(b.To),
+		Cc: agentview.DraftRecipients(b.Cc), Bcc: agentview.DraftRecipients(b.Bcc), Subject: b.Subject, BodyMD: b.BodyMarkdown, Cites: raw,
 	}
 	if d.FromAddr == "" {
 		d.FromAddr = from
@@ -168,7 +168,8 @@ func draftOut(d store.Draft) Draft {
 		ID: d.ID, Author: Actor{ID: d.PrincipalID, Kind: d.AuthorKind, Name: d.AuthorName},
 		State: "draft", IdentityID: d.IdentityID, From: d.FromAddr,
 		IdentityOwner: Actor{ID: d.IdentityOwner.ID, Kind: d.IdentityOwner.Kind, Name: d.IdentityOwner.Name},
-		To:            nonNil(d.To), Cc: nonNil(d.Cc), Bcc: nonNil(d.Bcc), Subject: d.Subject,
+		To:            agentview.AddressesOf(d.To), Cc: agentview.AddressesOf(d.Cc), Bcc: agentview.AddressesOf(d.Bcc),
+		Subject:      d.Subject,
 		BodyMarkdown: d.BodyMD, SMTP: d.RawID != "", InReplyTo: d.InReplyToID, Cites: []Cite{},
 		CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt,
 	}

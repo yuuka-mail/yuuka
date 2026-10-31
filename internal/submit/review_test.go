@@ -39,7 +39,7 @@ func (f *fakeNotifier) Escalated(_ context.Context, c notify.EscalatedCard) erro
 // first contact.
 func (e *env) know(addr string) {
 	e.t.Helper()
-	d, err := e.db.CreateDraft(e.t.Context(), e.op, store.Draft{FromAddr: "op@example.com", To: []string{addr}, BodyMD: "hi"}, e.at())
+	d, err := e.db.CreateDraft(e.t.Context(), e.op, store.Draft{FromAddr: "op@example.com", To: []store.Recipient{{Addr: addr}}, BodyMD: "hi"}, e.at())
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ Your verification code is 740219.
 `, "github")
 
 	draft := func(to, body string) string {
-		d, err := e.db.CreateDraft(ctx, e.arisu, store.Draft{FromAddr: "arisu@example.com", To: []string{to}, Subject: "Lunch", BodyMD: body}, e.at())
+		d, err := e.db.CreateDraft(ctx, e.arisu, store.Draft{FromAddr: "arisu@example.com", To: []store.Recipient{{Addr: to}}, Subject: "Lunch", BodyMD: body}, e.at())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -112,7 +112,7 @@ Your verification code is 740219.
 	if d := e.draftRow(id); d.HoldReason != sendpolicy.HoldWithdrawn || d.OutboxID != "" {
 		t.Errorf("withdrawn draft %+v", d)
 	}
-	if _, err := e.db.UpdateDraft(ctx, e.arisu, store.Draft{ID: id, FromAddr: "arisu@example.com", To: []string{"bob@example.net"}, BodyMD: "Noon."}, e.at()); err != nil {
+	if _, err := e.db.UpdateDraft(ctx, e.arisu, store.Draft{ID: id, FromAddr: "arisu@example.com", To: []store.Recipient{{Addr: "bob@example.net"}}, BodyMD: "Noon."}, e.at()); err != nil {
 		t.Fatal(err)
 	}
 	if res, err := e.svc.SubmitDraft(ctx, e.arisu, id); err != nil || !res.Held {
@@ -133,13 +133,25 @@ Your verification code is 740219.
 		t.Error("an escalation made an outbox row")
 	}
 
+	// Or written as a recipient's name: names go out too.
+	named, err := e.db.CreateDraft(ctx, e.arisu, store.Draft{
+		FromAddr: "arisu@example.com", To: []store.Recipient{{Name: "Bob 740219", Addr: "bob@example.net"}}, Subject: "Lunch", BodyMD: "Noon.",
+	}, e.at())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := e.svc.SubmitDraft(ctx, e.arisu, named.ID); err != nil || res.Held || res.HoldReason != string(sendpolicy.HoldReview) ||
+		!strings.Contains(string(e.draftRow(named.ID).Review), `"where": "to name"`) {
+		t.Errorf("a code in a name: %+v %v %s", res, err, e.draftRow(named.ID).Review)
+	}
+
 	// A first contact: escalated, with the reason on the card.
 	res, err = e.svc.SubmitDraft(ctx, e.arisu, draft("carol@example.org", "Hello."))
 	if err != nil || res.Held || res.HoldReason != string(sendpolicy.HoldReview) || !strings.Contains(res.Detail, "first contact") {
 		t.Errorf("first contact: %+v %v", res, err)
 	}
 	e.svc.Wait()
-	if len(cards.escalated) != 2 || !slices.ContainsFunc(cards.escalated[1].Reasons, func(r string) bool { return strings.Contains(r, "carol@example.org") }) {
+	if len(cards.escalated) != 3 || !slices.ContainsFunc(cards.escalated[2].Reasons, func(r string) bool { return strings.Contains(r, "carol@example.org") }) {
 		t.Errorf("escalated cards %+v", cards.escalated)
 	}
 

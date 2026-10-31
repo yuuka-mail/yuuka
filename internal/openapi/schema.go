@@ -22,10 +22,17 @@ type Enum interface{ Enum() []string }
 
 var enumType = reflect.TypeFor[Enum]()
 
+// Schemer is a type that says its own schema, one reflection cannot
+// derive: a value that takes more than one JSON shape.
+type Schemer interface{ JSONSchema() *jsonschema.Schema }
+
+var schemerType = reflect.TypeFor[Schemer]()
+
 // Options are the ForOptions every schema of yuuka's contracts is derived
 // with, REST and MCP alike: each Enum type reachable from roots becomes a
-// string schema listing its values, time.Time a date-time string, and
-// each type in refs (named by its key) a $ref instead.
+// string schema listing its values, each Schemer its own schema,
+// time.Time a date-time string, and each type in refs (named by its key)
+// a $ref instead.
 func Options(refs map[reflect.Type]string, roots ...reflect.Type) *jsonschema.ForOptions {
 	m := map[reflect.Type]*jsonschema.Schema{
 		reflect.TypeFor[time.Time](): {Type: "string", Format: "date-time"},
@@ -35,6 +42,9 @@ func Options(refs map[reflect.Type]string, roots ...reflect.Type) *jsonschema.Fo
 			if t.Implements(enumType) && t.Kind() == reflect.String {
 				vals := reflect.Zero(t).Interface().(Enum).Enum()
 				m[t] = &jsonschema.Schema{Type: "string", Enum: anys(vals)}
+			}
+			if t.Implements(schemerType) {
+				m[t] = reflect.Zero(t).Interface().(Schemer).JSONSchema()
 			}
 		})
 	}

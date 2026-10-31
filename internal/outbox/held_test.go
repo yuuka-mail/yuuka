@@ -38,7 +38,7 @@ func TestHeldReleasedThenSent(t *testing.T) {
 			var err error
 			q, err = e.svc.Enqueue(ctx, p, Submission{
 				Raw: []byte(testRaw), Recipients: to("bob@example.net"),
-				HeldDraft: &store.Draft{FromAddr: "me@example.com", To: []string{"bob@example.net"}},
+				HeldDraft: &store.Draft{FromAddr: "me@example.com", To: []store.Recipient{{Addr: "bob@example.net"}}},
 			})
 			return err
 		})

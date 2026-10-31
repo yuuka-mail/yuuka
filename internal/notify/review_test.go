@@ -73,14 +73,14 @@ func press(update int64, from, chat int64, data string) Update {
 func TestHeldCard(t *testing.T) {
 	now := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
 	text := HeldText(HeldCard{
-		OutboxID: "01JB0000000000000000000000", From: "arisu@example.com", To: []string{"bob@example.net"},
-		Bcc: []string{"x@example.org"}, Submitter: "agent:arisu", ThreadSubject: "Plans\r\nInjected: header",
+		OutboxID: "01JB0000000000000000000000", From: "arisu@example.com", To: []Recipient{{Name: "CEO\r\nInjected: x", Addr: "bob@example.net"}},
+		Bcc: []Recipient{{Name: "x@example.org", Addr: "x@example.org"}}, Submitter: "agent:arisu", ThreadSubject: "Plans\r\nInjected: header",
 		Subject: "Re: Plans", Attachments: []Attachment{{Name: "a.txt", Type: "text/plain", Size: 2048}},
 		Excerpt: "line one\n\n\x07line two\nline three\nline four", Passed: []string{"first_contact", "readable"},
 		Flags: []string{"links to 1 domain(s) never seen\r\nInjected: line"}, SendAt: now.Add(10 * time.Minute), Now: now,
 	}, time.UTC)
 	for _, want := range []string{
-		"yuuka · held for review", "arisu@example.com → bob@example.net; bcc x@example.org", "submitted by agent:arisu",
+		"yuuka · held for review", "arisu@example.com → bob@example.net (CEO Injected: x); bcc x@example.org\n", "submitted by agent:arisu",
 		"in reply to: Plans Injected: header", "attachment: a.txt (text/plain, 2 KiB)", "line one\nline two\nline three\n",
 		"passed: first_contact, readable", "note: links to 1 domain(s) never seen Injected: line",
 		"goes out at 09:10 (in 10 min) unless recalled",

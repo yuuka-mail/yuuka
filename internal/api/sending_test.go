@@ -117,9 +117,13 @@ func TestSubmitQueued(t *testing.T) {
 		!ids.Identities[0].Sends || ids.Identities[0].Owner.Name != "operator" {
 		t.Errorf("operator's identities: %+v", ids)
 	}
-	w := h.post("/api/v1/drafts", `{"from":"Me@Example.com","to":["bob@example.net"],"bcc":["carol@example.org"],"subject":"Hi","body_markdown":"Hello"}`, op)
+	// A recipient is a bare address or {name, addr}, and reads back as
+	// {name, addr} either way.
+	w := h.post("/api/v1/drafts", `{"from":"Me@Example.com","to":[{"name":"Bob, Jr.","addr":"bob@example.net"}],`+
+		`"bcc":["carol@example.org"],"subject":"Hi","body_markdown":"Hello"}`, op)
 	d := decode[Draft](t, w)
-	if w.Code != http.StatusCreated || d.From != "me@example.com" || d.Bcc[0] != "carol@example.org" {
+	if w.Code != http.StatusCreated || d.From != "me@example.com" || d.Bcc[0] != (agentview.Address{Addr: "carol@example.org"}) ||
+		d.To[0] != (agentview.Address{Name: "Bob, Jr.", Addr: "bob@example.net"}) {
 		t.Fatalf("create: %d %+v", w.Code, d)
 	}
 	res := decode[SubmitResult](t, h.post("/api/v1/drafts/"+d.ID+"/submit", "", op))
@@ -180,15 +184,19 @@ func TestDraftProblems(t *testing.T) {
 	agent := h.token(auth.MessageRead, auth.DraftCreate, auth.SubmissionSend)
 	missingCite := ulid.New(time.Now())
 	for body, code := range map[string]openapi.Code{
-		`{"to":["bob@example.net"]}`:                                                openapi.CodeInvalidBody, // no from, not a reply
-		`{"from":"me@example.org"}`:                                                 openapi.CodeNoIdentity,
-		`{"from":"*@example.com"}`:                                                  openapi.CodeInvalidBody,
-		`{"from":"arisu@example.com","to":["bob"]}`:                                 openapi.CodeInvalidBody,
-		`{"from":"arisu@example.com","to":["bob@example.net\r\nBcc: x@y.z"]}`:       openapi.CodeInvalidBody,
-		`{"from":"arisu@example.com","cites":[{"uri":"https://example.com"}]}`:      openapi.CodeInvalidBody,
-		`{"from":"arisu@example.com","in_reply_to":"` + ulid.New(time.Now()) + `"}`: openapi.CodeInvalidBody,
-		`{"in_reply_to":"` + ulid.New(time.Now()) + `"}`:                            openapi.CodeInvalidBody,
-		`{"from":"arisu@example.com","html":"<b>"}`:                                 openapi.CodeInvalidBody,
+		`{"to":["bob@example.net"]}`:                                                              openapi.CodeInvalidBody, // no from, not a reply
+		`{"from":"me@example.org"}`:                                                               openapi.CodeNoIdentity,
+		`{"from":"*@example.com"}`:                                                                openapi.CodeInvalidBody,
+		`{"from":"arisu@example.com","to":["bob"]}`:                                               openapi.CodeInvalidBody,
+		`{"from":"arisu@example.com","to":["bob@example.net\r\nBcc: x@y.z"]}`:                     openapi.CodeInvalidBody,
+		`{"from":"arisu@example.com","to":["Bob <bob@example.net>"]}`:                             openapi.CodeInvalidBody, // a string is a bare address
+		`{"from":"arisu@example.com","to":[{"name":"Bob"}]}`:                                      openapi.CodeInvalidBody,
+		`{"from":"arisu@example.com","to":[{"addr":"bob@example.net","nick":"B"}]}`:               openapi.CodeInvalidBody,
+		`{"from":"arisu@example.com","cc":[{"name":"B\r\nBcc: x@y.z","addr":"bob@example.net"}]}`: openapi.CodeInvalidBody,
+		`{"from":"arisu@example.com","cites":[{"uri":"https://example.com"}]}`:                    openapi.CodeInvalidBody,
+		`{"from":"arisu@example.com","in_reply_to":"` + ulid.New(time.Now()) + `"}`:               openapi.CodeInvalidBody,
+		`{"in_reply_to":"` + ulid.New(time.Now()) + `"}`:                                          openapi.CodeInvalidBody,
+		`{"from":"arisu@example.com","html":"<b>"}`:                                               openapi.CodeInvalidBody,
 		// Bounded as a proposal's or a note's cites (agentview.CheckCites).
 		`{"from":"arisu@example.com","cites":[` + strings.Repeat(`{"uri":"yuuka://message/`+missingCite+`"},`, agentview.MaxCites) +
 			`{"uri":"yuuka://message/` + missingCite + `"}]}`: openapi.CodeInvalidBody,
@@ -224,7 +232,7 @@ func TestDraftProblems(t *testing.T) {
 	}
 	w := h.do(http.MethodPut, "/api/v1/drafts/"+d.ID, `{"cc":["carol@example.org"],"subject":"Two"}`, agent)
 	u := decode[Draft](t, w)
-	if w.Code != http.StatusOK || u.From != "arisu@example.com" || len(u.To) != 0 || u.Cc[0] != "carol@example.org" || u.Subject != "Two" {
+	if w.Code != http.StatusOK || u.From != "arisu@example.com" || len(u.To) != 0 || u.Cc[0].Addr != "carol@example.org" || u.Subject != "Two" {
 		t.Errorf("update: %d %+v", w.Code, u)
 	}
 	if w := h.do(http.MethodDelete, "/api/v1/drafts/"+d.ID, "", agent); w.Code != http.StatusNoContent {

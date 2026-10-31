@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/transport"
@@ -23,9 +24,11 @@ type rawMessage struct {
 	header mail.Header
 	from   *mail.Address
 	sender *mail.Address // nil without a Sender field
-	// to and cc are the folded header addresses: the kind of an envelope
-	// recipient (outbox_recipients.kind) is where the header names it.
-	to, cc    map[string]bool
+	// to and cc map the folded header addresses to the names the header
+	// gives them: the kind of an envelope recipient (outbox_recipients.kind)
+	// is where the header names it, and a draft the submission stops at
+	// shows the name.
+	to, cc    map[string]string
 	subject   string
 	inReplyTo string // the first id of In-Reply-To, without brackets
 }
@@ -74,13 +77,27 @@ func readRaw(raw []byte) (*rawMessage, error) {
 	return m, nil
 }
 
-func folded(h mail.Header, name string) map[string]bool {
-	out := map[string]bool{}
+func folded(h mail.Header, name string) map[string]string {
+	out := map[string]string{}
 	list, _ := h.AddressList(name)
 	for _, a := range list {
-		out[store.FoldAddr(a.Address)] = true
+		f := store.FoldAddr(a.Address)
+		if _, ok := out[f]; !ok {
+			out[f] = shownName(a.Name)
+		}
 	}
 	return out
+}
+
+// shownName is a header name as a draft may hold it: "" for one that
+// is not one short line of text. It is only shown; the bytes sent are
+// the submission's, name and all.
+func shownName(n string) string {
+	n = strings.TrimSpace(n)
+	if !utf8.ValidString(n) || strings.ContainsFunc(n, unicode.IsControl) || utf8.RuneCountInString(n) > store.MaxRecipientName {
+		return ""
+	}
+	return n
 }
 
 // crlf makes every line end in CRLF, the last one too. Submission
@@ -137,10 +154,10 @@ func (m *rawMessage) recipients(rcpts []string) []store.OutboxRecipient {
 	out := make([]store.OutboxRecipient, 0, len(rcpts))
 	for _, r := range rcpts {
 		kind := store.RecipientBcc
-		switch f := store.FoldAddr(r); {
-		case m.to[f]:
+		f := store.FoldAddr(r)
+		if _, ok := m.to[f]; ok {
 			kind = store.RecipientTo
-		case m.cc[f]:
+		} else if _, ok := m.cc[f]; ok {
 			kind = store.RecipientCc
 		}
 		out = append(out, store.OutboxRecipient{Addr: r, Kind: kind})

@@ -718,19 +718,19 @@
           "to": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Address"
             }
           },
           "cc": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Address"
             }
           },
           "bcc": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Address"
             }
           },
           "subject": {
@@ -801,23 +801,23 @@
           "to": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Recipient"
             },
-            "description": "bare addresses"
+            "description": "each a bare address or {name, addr}; only the address decides who may receive it"
           },
           "cc": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Recipient"
             },
-            "description": "bare addresses"
+            "description": "as to"
           },
           "bcc": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Recipient"
             },
-            "description": "bare addresses"
+            "description": "as to; the names are kept on the draft and written into no header"
           },
           "subject": {
             "type": "string"
@@ -2481,6 +2481,31 @@
           "expired"
         ]
       },
+      "Recipient": {
+        "anyOf": [
+          {
+            "type": "string",
+            "description": "a bare address"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "addr": {
+                "type": "string",
+                "description": "a bare address"
+              },
+              "name": {
+                "type": "string",
+                "description": "the display name, shown and written into To / Cc; it decides nothing"
+              }
+            },
+            "required": [
+              "addr"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
       "RecipientKind": {
         "type": "string",
         "enum": [
@@ -2566,13 +2591,13 @@
           "to": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Address"
             }
           },
           "cc": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/Address"
             }
           },
           "unverified_reply_to": {

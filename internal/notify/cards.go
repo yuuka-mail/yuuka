@@ -17,6 +17,16 @@ import (
 // a card sends mail, so a stolen Telegram account can at worst hold mail
 // back.
 
+// Recipient is one recipient as a card lists it: the address the
+// review decided on, and the display name the draft gave it ("" for
+// none). The name is the author's word and goes out in the header, so
+// the card shows it, after the address: a name such as "CEO" or
+// "boss@example.com" must not read as who the mail goes to.
+type Recipient struct {
+	Name string
+	Addr string
+}
+
 // Attachment is one attachment as a card lists it.
 type Attachment struct {
 	Name string
@@ -28,9 +38,9 @@ type Attachment struct {
 type HeldCard struct {
 	OutboxID string
 	From     string
-	To       []string
-	Cc       []string
-	Bcc      []string
+	To       []Recipient
+	Cc       []Recipient
+	Bcc      []Recipient
 	// Submitter is kind:name.
 	Submitter string
 	// ThreadSubject is the subject of the message replied to, "" for a
@@ -54,9 +64,9 @@ type HeldCard struct {
 type EscalatedCard struct {
 	DraftID   string
 	From      string
-	To        []string
-	Cc        []string
-	Bcc       []string
+	To        []Recipient
+	Cc        []Recipient
+	Bcc       []Recipient
 	Submitter string
 	Subject   string
 	// Reasons are the gates that did not pass, Flags what the advisory
@@ -137,18 +147,21 @@ func SuspendedText(c SuspendedCard) string {
 		"`yuuka grant set --resume`.", clean(c.Principal), clean(c.Identity), c.Recalls, c.Withdrawn)
 }
 
-func recipients(to, cc, bcc []string) string {
+func recipients(to, cc, bcc []Recipient) string {
 	var parts []string
 	for _, l := range []struct {
 		label string
-		addrs []string
+		rs    []Recipient
 	}{{"", to}, {"cc ", cc}, {"bcc ", bcc}} {
-		if len(l.addrs) == 0 {
+		if len(l.rs) == 0 {
 			continue
 		}
-		shown := make([]string, len(l.addrs))
-		for i, a := range l.addrs {
-			shown[i] = clean(a)
+		shown := make([]string, len(l.rs))
+		for i, r := range l.rs {
+			shown[i] = clean(r.Addr)
+			if n := clean(r.Name); n != "" && !strings.EqualFold(n, shown[i]) {
+				shown[i] += " (" + n + ")"
+			}
 		}
 		parts = append(parts, l.label+strings.Join(shown, ", "))
 	}

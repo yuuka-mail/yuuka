@@ -3067,9 +3067,9 @@ export interface components {
             identity_id: string;
             identity_owner: components["schemas"]["Actor"];
             from: string;
-            to: string[];
-            cc: string[];
-            bcc: string[];
+            to: components["schemas"]["Address"][];
+            cc: components["schemas"]["Address"][];
+            bcc: components["schemas"]["Address"][];
             subject: string;
             body_markdown: string;
             smtp: boolean;
@@ -3087,12 +3087,12 @@ export interface components {
         DraftBody: {
             /** @description the address to send from; GET /api/v1/identities lists which may be used. Defaults to the reply identity of in_reply_to */
             from?: string;
-            /** @description bare addresses */
-            to?: string[];
-            /** @description bare addresses */
-            cc?: string[];
-            /** @description bare addresses */
-            bcc?: string[];
+            /** @description each a bare address or {name, addr}; only the address decides who may receive it */
+            to?: components["schemas"]["Recipient"][];
+            /** @description as to */
+            cc?: components["schemas"]["Recipient"][];
+            /** @description as to; the names are kept on the draft and written into no header */
+            bcc?: components["schemas"]["Recipient"][];
             subject?: string;
             /** @description the body as Markdown; the identity's signature is added when it is sent */
             body_markdown?: string;
@@ -3536,6 +3536,12 @@ export interface components {
         };
         /** @enum {string} */
         ProposalState: "pending" | "accepted" | "rejected" | "withdrawn" | "expired";
+        Recipient: string | {
+            /** @description a bare address */
+            addr: string;
+            /** @description the display name, shown and written into To / Cc; it decides nothing */
+            name?: string;
+        };
         /** @enum {string} */
         RecipientKind: "to" | "cc" | "bcc";
         /** @enum {string} */
@@ -3558,8 +3564,8 @@ export interface components {
             passkey_id: string;
         };
         ReplyAddressing: {
-            to: string[];
-            cc: string[];
+            to: components["schemas"]["Address"][];
+            cc: components["schemas"]["Address"][];
             unverified_reply_to: string[];
         };
         ReplyIdentities: {

@@ -598,12 +598,12 @@ func replyAddressing(d store.MessageDetail, rc mimeparse.Recipients) ReplyAddres
 	if d.Outgoing != nil {
 		ours[store.FoldAddr(d.Outgoing.From)] = true
 	}
-	out := ReplyAddressing{To: []string{}, Cc: []string{}, UnverifiedReplyTo: []string{}}
+	out := ReplyAddressing{To: []agentview.Address{}, Cc: []agentview.Address{}, UnverifiedReplyTo: []string{}}
 	seen := map[string]bool{}
-	add := func(to *[]string, a string) {
+	add := func(to *[]agentview.Address, name, a string) {
 		if f := store.FoldAddr(a); a != "" && !seen[f] {
 			seen[f] = true
-			*to = append(*to, a)
+			*to = append(*to, agentview.Address{Name: name, Addr: a})
 		}
 	}
 	switch {
@@ -612,18 +612,18 @@ func replyAddressing(d store.MessageDetail, rc mimeparse.Recipients) ReplyAddres
 		// never counts.
 		for _, m := range rc.To {
 			if !ours[store.FoldAddr(m.Addr)] {
-				add(&out.To, m.Addr)
+				add(&out.To, m.Name, m.Addr)
 			}
 		}
 		if len(out.To) == 0 {
-			add(&out.To, d.FromAddr)
+			add(&out.To, d.FromName, d.FromAddr)
 		}
 	case d.ReplyToCounts && len(rc.ReplyTo) > 0:
 		for _, m := range rc.ReplyTo {
-			add(&out.To, m.Addr)
+			add(&out.To, m.Name, m.Addr)
 		}
 	default:
-		add(&out.To, d.FromAddr)
+		add(&out.To, d.FromName, d.FromAddr)
 		named := map[string]bool{store.FoldAddr(d.FromAddr): true}
 		for _, m := range rc.ReplyTo {
 			if f := store.FoldAddr(m.Addr); !named[f] {
@@ -634,7 +634,7 @@ func replyAddressing(d store.MessageDetail, rc mimeparse.Recipients) ReplyAddres
 	}
 	for _, m := range slices.Concat(rc.To, rc.Cc) {
 		if !ours[store.FoldAddr(m.Addr)] {
-			add(&out.Cc, m.Addr)
+			add(&out.Cc, m.Name, m.Addr)
 		}
 	}
 	return out

@@ -17,6 +17,11 @@ WebUI 用的是浏览器会话，程序不要模仿它。
 
 - **错误**是 RFC 9457 的 `application/problem+json`。按扩展成员 `code` 分支，它是稳定的机器可读码，取值在 schema 里列全；
   `detail` 是给人读的
+- **草稿的收件人**（`to`、`cc`、`bcc`）每项是裸地址字符串，或 `{"name": "王小明", "addr": "wang@example.com"}`；
+  读回来一律是 `{name, addr}`，和消息详情里 `to` / `cc` 的形状一样，可以原样抄进草稿。字符串只能是裸地址，
+  `"王小明 <wang@example.com>"` 这样的字符串回 `400 invalid_body`；`{name, addr}` 之外的字段、缺 `addr`、
+  名字带换行或控制字符、名字超过 256 个字符也是。名字只用于显示：To / Cc 的名字写进发出的信头，Bcc 的名字不写进任何头部；
+  能不能发、审不审核只看地址（[§8.9](../design/agents.md#89-外发授权身份决定档位)）。名字会被审核读到，写在名字里的验证码同样会被拦下
 - **超出授权不是错误**：提交草稿（`POST /api/v1/drafts/{id}/submit`）照常返回成功，`state` 说明信是进了队列（`queued`）、
   审核通过后扣在撤回窗口里（`held`，到 `hold_until` 发出）还是停在草稿（`draft`，`hold_reason` 说为什么）。
   被审核拦下的草稿带 `review`：每项检查的结论和触发它的东西；验证码和登录链接只说在哪里找到，不带值。
@@ -25,7 +30,8 @@ WebUI 用的是浏览器会话，程序不要模仿它。
 - **用某个身份发会怎样**：`GET /api/v1/identities` 每项的 `outcome` 直接说：`sends`（不经人发出）、
   `held_after_review`（先审核，过了扣在 `hold_seconds` 的撤回窗口里再发，拦下的停在草稿）、`draft_only`、`none`。
   `review` 档的 `sends` 是假、`hold_reason` 是 `review`，和被审核拦下的草稿一样，所以按 `outcome` 分支，不要从 `hold_seconds` 推
-- **回信发给谁**：消息详情 `GET /api/v1/messages/{id}` 的 `reply` 是默认收件人，都是裸地址：
+- **回信发给谁**：消息详情 `GET /api/v1/messages/{id}` 的 `reply` 是默认收件人：
+  `to` 和 `cc` 是 `{name, addr}`，带着原信给的显示名，可以原样放进草稿的 `to` / `cc`；`unverified_reply_to` 只有地址。
   `to` 在 Reply-To 经过验证（有一条没被降级的投递，而且 DMARC 是 pass）时是 Reply-To，否则是 From，我们自己发出的信是它当时的 To；
   `cc` 是回复全部要加的，即原信的 To 和 Cc 去掉 `to` 里的和这封信进来的地址；
   `unverified_reply_to` 是没验证、又和 From 不同的 Reply-To，伪造发件人时它就是对方的信箱，不要不经人确认就发过去。

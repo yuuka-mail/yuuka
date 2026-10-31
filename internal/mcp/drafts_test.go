@@ -108,11 +108,15 @@ func TestDraftTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A recipient may carry a name, as get_message gives one.
 	r = callTool(t, cs, "update_draft", map[string]any{
-		"draft_id": d.DraftID, "from": "arisu@example.com", "to": []string{m.FromAddr}, "in_reply_to": uri, "body_markdown": "x",
+		"draft_id": d.DraftID, "from": "arisu@example.com", "to": []any{map[string]any{"name": "Bob, the sender", "addr": m.FromAddr}},
+		"in_reply_to": uri, "body_markdown": "x",
 	})
-	if u := structured[mcp.DraftOutput](t, r); u.From != "arisu@example.com" || u.HoldReason != "review" || u.Subject != "" {
-		t.Errorf("update_draft: %+v", u)
+	if u := structured[mcp.DraftOutput](t, r); u.From != "arisu@example.com" || u.HoldReason != "review" || u.Subject != "" ||
+		len(u.To) != 1 || u.To[0] != (agentview.Address{Name: "Bob, the sender", Addr: m.FromAddr}) ||
+		!strings.Contains(r.text, `To: "Bob, the sender" <`+m.FromAddr+">") {
+		t.Errorf("update_draft: %+v\n%s", u, r.text)
 	}
 	res = structured[mcp.SubmitOutput](t, callTool(t, cs, "submit_draft", map[string]any{"draft_id": d.DraftID}))
 	if res.Queued || res.HoldReason != "review" {
@@ -143,11 +147,12 @@ func TestDraftTools(t *testing.T) {
 	}
 
 	for args, want := range map[string]string{
-		`{"to":["x@example.net"]}`:                                   "from is required",
-		`{"from":"me@example.org"}`:                                  "no identity covers",
-		`{"from":"arisu@example.com","to":["bob"]}`:                  "want a bare address",
-		`{"from":"arisu@example.com","in_reply_to":"not-a-uri"}`:     "in_reply_to",
-		`{"from":"arisu@example.com","cites":[{"uri":"https://x"}]}`: "cites",
+		`{"to":["x@example.net"]}`:                  "from is required",
+		`{"from":"me@example.org"}`:                 "no identity covers",
+		`{"from":"arisu@example.com","to":["bob"]}`: "want a bare address",
+		`{"from":"arisu@example.com","to":[{"name":"B\nBcc: x@y.z","addr":"bob@example.net"}]}`: "want one line",
+		`{"from":"arisu@example.com","in_reply_to":"not-a-uri"}`:                                "in_reply_to",
+		`{"from":"arisu@example.com","cites":[{"uri":"https://x"}]}`:                            "cites",
 	} {
 		var a map[string]any
 		if err := json.Unmarshal([]byte(args), &a); err != nil {

@@ -12,11 +12,13 @@ import {
   checkLabel,
   draftBody,
   duration,
+  formatRecipient,
   holdLabel,
   onlyConfirmer,
   outboxMoves,
   outboxState,
-  parseAddrs,
+  parseRecipient,
+  parseRecipients,
   problem,
   recallable,
   replyBody,
@@ -267,18 +269,38 @@ describe("host commands", () => {
 });
 
 describe("composing", () => {
-  it("reads addresses as typed", () => {
-    expect(parseAddrs(" a@example.org, b@example.org;c@example.org\nd@example.org ")).toEqual([
-      "a@example.org",
-      "b@example.org",
-      "c@example.org",
-      "d@example.org",
+  it("reads recipients as typed", () => {
+    expect(
+      parseRecipients(" a@example.org, b@example.org;c@example.org\nd@example.org e@example.org "),
+    ).toEqual(["a", "b", "c", "d", "e"].map((x) => ({ name: "", addr: `${x}@example.org` })));
+    expect(
+      parseRecipients(
+        '王小明 <wang@example.org>, "Smith, John" <j@example.org>; "O\\"Brien \\\\ Co" <o@example.org>, "Eve <eve@example.net>" <eve@example.org>',
+      ),
+    ).toEqual([
+      { name: "王小明", addr: "wang@example.org" },
+      { name: "Smith, John", addr: "j@example.org" },
+      { name: 'O"Brien \\ Co', addr: "o@example.org" },
+      { name: "Eve <eve@example.net>", addr: "eve@example.org" },
     ]);
-    expect(badAddrs("a@example.org, Bob <b@example.org>, nobody")).toEqual([
-      "Bob",
-      "<b@example.org>",
+    expect(badAddrs("a@example.org, Bob <b@example.org>, nobody, Bob <not an address>")).toEqual([
       "nobody",
+      "Bob <not an address>",
     ]);
+  });
+  it("writes a recipient back as it reads it", () => {
+    for (const a of [
+      { name: "", addr: "a@example.org" },
+      { name: "王小明", addr: "wang@example.org" },
+      { name: "Smith, John", addr: "j@example.org" },
+      { name: 'O"Brien \\ Co', addr: "o@example.org" },
+      { name: "ceo@example.com", addr: "intern@example.org" },
+    ]) {
+      expect(parseRecipient(formatRecipient(a))).toEqual(a);
+    }
+    expect(formatRecipient({ name: "Smith, John", addr: "j@example.org" })).toBe(
+      '"Smith, John" <j@example.org>',
+    );
   });
   it("replies Re: once, quoting the text below room to write", () => {
     expect(replySubject("Lunch")).toBe("Re: Lunch");
@@ -298,16 +320,20 @@ describe("composing", () => {
     const verified = {
       from_addr: "dave@example.org",
       reply: {
-        to: ["trips@lists.example.org"],
-        cc: ["bob@example.net", "carol@example.net"],
+        to: [{ name: "Trips", addr: "trips@lists.example.org" }],
+        cc: [{ name: "Smith, Bob", addr: "bob@example.net" }, { addr: "carol@example.net" }],
         unverified_reply_to: [],
       },
     } as unknown as Message;
-    expect(replyRecipients(verified, false)).toEqual({ to: "trips@lists.example.org", cc: "" });
+    // With the names the message gave, quoted where they need it.
+    expect(replyRecipients(verified, false)).toEqual({
+      to: "Trips <trips@lists.example.org>",
+      cc: "",
+    });
     // To all: our own addresses are already out of reply.cc.
     expect(replyRecipients(verified, true)).toEqual({
-      to: "trips@lists.example.org",
-      cc: "bob@example.net, carol@example.net",
+      to: "Trips <trips@lists.example.org>",
+      cc: '"Smith, Bob" <bob@example.net>, carol@example.net',
     });
   });
   it("keeps saying an unverified Reply-To until a person types it in", () => {
@@ -316,7 +342,7 @@ describe("composing", () => {
     expect(unusedReplyTo(unverified, "dave@example.org, Trips@Lists.example.org", "", "")).toEqual(
       [],
     );
-    expect(unusedReplyTo(unverified, "", "", "trips@lists.example.org")).toEqual([]);
+    expect(unusedReplyTo(unverified, "", "", "Trips <trips@lists.example.org>")).toEqual([]);
     expect(msg.send_reply_to_unverified({ list: "x@example.org" })).toBe(
       "Not replying to the Reply-To x@example.org: it is not verified.",
     );
@@ -325,7 +351,7 @@ describe("composing", () => {
     expect(
       draftBody({
         from: "",
-        to: "a@example.org",
+        to: "a@example.org, Bob <b@example.org>",
         cc: "",
         bcc: "",
         subject: "s",
@@ -334,7 +360,7 @@ describe("composing", () => {
       }),
     ).toEqual({
       from: undefined,
-      to: ["a@example.org"],
+      to: ["a@example.org", { name: "Bob", addr: "b@example.org" }],
       cc: [],
       bcc: [],
       subject: "s",
