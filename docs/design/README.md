@@ -13,7 +13,7 @@
 | §2 §3 §5 | [architecture.md](architecture.md) | 总体架构、八条设计原则、Go 侧选型、API 契约 |
 | §4 §9.1 | [data-model.md](data-model.md) | Postgres 数据模型；内容/投递两层拆分 |
 | §6 §7 | [roadmap.md](roadmap.md) | 分期路线 M0–M5、已知风险与取舍 |
-| §8 §11.1 | [agents.md](agents.md) | Agent 面：锚点、能力分级、提案、审计、外发授权、人格分层 |
+| §8 §11.1 | [agents.md](agents.md) | Agent 面：锚点、能力分级、提案、审计、外发授权、笔记、人格分层 |
 | §9 | [accounts.md](accounts.md) | 多账户整合：统一视图、分级归属、身份绑传输、归档卸载 |
 | §10 | [drivers.md](drivers.md) | 收发 driver 契约、能力矩阵、抽象漏出的四件事 |
 | §11 | [naming.md](naming.md) | 命名、命令面、仓库与 module path |

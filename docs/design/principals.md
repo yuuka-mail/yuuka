@@ -114,7 +114,7 @@ scope 是一张封闭的扁平列表，定义在 [`internal/auth/auth.go`](../..
 scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一步由 §13.5 的授权表回答**。
 所以 agent 持有 `submission:send` 不等于能发信：没有 `identity_grants` 的身份它用不了，
 以人的身份它最多到草稿。两层都是 API 层的事实，不是提示词的约定（§8.2）。
-注意 `message:annotate` 的动作必须可撤销（§8.8 的 `undo_token`）。
+注意 `message:annotate` 的动作必须可撤销（§8.8 的 `undo_token`）；agent 笔记的撤销就是删除（§8.10）。
 `rule:manage` 是人的能力：规则是建好之后不再经人复核的常设能力，所以管理规则、以及接受提案时顺手建规则，
 端点在 scope 之外还按主体类型只放人（§8.5）。agent 的 token 不该带它，带了也用不上。
 
