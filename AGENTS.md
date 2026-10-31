@@ -94,13 +94,27 @@ WebUI，agent 结构化视图与 MCP；发信：outbox 状态机与崩溃恢复�
 - 改了 UI 就要**亲眼看**：跑起来截图检查，亮暗两套主题、窄屏都看一遍。没看过不算做完
 
 **文档**
-- 中文；新章节沿用全局 § 编号，在 `docs/design/README.md` 的索引表登记
-- 写取舍而不是宣传：说清楚放弃了什么、什么情况下该回头
-- 实现了就以代码为准：代码回答「是什么」，文档回答「为什么」。落地一项设计时，
-  在同一个提交里把文档里对应的定义（表结构、接口、环境变量、CLI 参数、端点清单……）
-  换成指向代码的链接，只留理由、不变量和取舍。例外是 §2.2 的 Worker ↔ Go 契约：
+
+文档按读者分三类（入口 [`docs/README.md`](docs/README.md)），各管一件事：
+
+| 目录 | 读者 | 回答 |
+|---|---|---|
+| [`docs/design/`](docs/design/README.md) | 开发者 | 为什么：不变量、取舍、放弃了什么 |
+| `docs/operate/`、[`deploy/`](deploy/README.md) | 服务器管理员 | 怎么部署、配置、管理、排障 |
+| `docs/integrate/` | 接 MCP、REST、SMTP 的 agent 作者和服务 | 怎么接、会得到什么结果 |
+
+- 全部用中文。写取舍而不是宣传；不写营销腔，不堆形容词
+- **设计文档**：新章节沿用全局 § 编号，在 [`docs/design/README.md`](docs/design/README.md) 的索引表登记。
+  节号是稳定标识，代码注释靠它指过来：调整章节保留旧号，不重新编号。
+  实现了就以代码为准：代码回答「是什么」，设计文档回答「为什么」。落地一项设计时，
+  在同一个提交里把文档里对应的定义（表结构、接口、端点清单……）换成指向代码的链接，
+  只留理由、不变量和取舍。例外是 §2.2 的 Worker ↔ Go 契约：
   两种语言共用，它的权威是文档加 `testdata/contract/` 的向量
-- 不写营销腔，不堆形容词
+- **运维、接入文档**：读者不读代码，所以这里要写清「是什么、怎么做」——
+  环境变量、CLI 用法、端口、回复码、工具语义。理由一句话带过，链到设计文档；
+  不用裸的 `§x.y`，写成指向对应章节的链接。和代码重复的清单（环境变量、子命令）由测试对照代码，
+  改了运维或接入方看得到的行为，同一个提交里改这两类文档
+- 操作步骤不写进设计文档；设计文档里讲到某个命令时，只说它为什么存在，用法链到运维文档
 
 ## 公开仓库
 
@@ -116,67 +130,9 @@ WebUI，agent 结构化视图与 MCP；发信：outbox 状态机与崩溃恢复�
 ## 怎样算做完
 
 1. `mise run check` 通过——它和 CI 跑的是同一条命令
-2. 改动涉及的设计章节已同步
+2. 改动涉及的文档已同步：设计章节，以及运维、接入文档里对应的步骤和参考
 3. UI 改动已截图自查
 4. 你自己 review 过一遍 diff：有没有多余的抽象、遗留的调试代码、没必要的依赖
 
-工具链由 [`mise.toml`](mise.toml) 固定版本，任务也定义在那里：
-
-```bash
-mise install        # 首次：装好固定版本的 Go、golangci-lint、Node、pnpm
-mise run check      # lint（含 vet 与格式检查）+ go test -race + WebUI 与 Worker 检查
-mise run fmt        # 就地格式化
-mise run db:down    # 用完后删掉测试用的 Postgres 容器（test 会自动拉起）
-```
-
-本地开发环境（`yuuka_dev` 库 + `local/dev/`，都不进 git；R2 配置读 `mise.local.toml`）：
-
-```bash
-mise watch dev:serve --restart   # 后端 127.0.0.1:31480，改 Go 代码自动重编译重启
-mise run dev:web                 # 前端 http://localhost:31473，Vite 热更新，/api 与 /auth 转给后端
-mise run dev:enroll              # 首次：打印一次性 passkey 注册链接
-mise run dev:reset               # 清空开发库和原件，重新灌合成邮件
-```
-
-passkey 绑定浏览器看到的源，所以开发时一律从 `http://localhost:31473` 进，不要直接开 31480。
-截图、调试 UI 用这套环境，不要另起端口手拼环境变量。
-
-- **Node 的版本只写在 [`.node-version`](.node-version)**（Node 生态通用的文件，fnm、编辑器、CI 都认），
-  mise 也从它读；其余工具的版本写在 `mise.toml`
-- **JS 一律用 pnpm**，`web/` 与 `worker/` 是同一个 workspace、一份 `pnpm-lock.yaml`。
-  pnpm 的版本写在根 `package.json` 的 `packageManager`，与 `mise.toml` 不一致时 pnpm 会直接报错。
-  [`pnpm-workspace.yaml`](pnpm-workspace.yaml) 强制两条规则：**发布不满 14 天的版本装不上**，
-  **安装脚本只对 `allowBuilds` 里审过的包放行**——新增需要安装脚本的依赖时，在那里显式加一行并说明理由
-
-- **非标准端口一律在 31400–31499 之间**：测试 Postgres 是 `127.0.0.1:31432`，
-  其他需要固定端口的东西（开发服务、本地依赖）也在这个段里挑，不占别的项目常用的端口
-
-- 不要绕过 mise 直接用系统里别的版本；需要新工具时加进 `mise.toml` 并固定版本。
-  只被 `go generate` 调用的 Go 工具（sqlc 等）用 `go.mod` 的 `tool` 指令固定
-- lint 规则在 [`.golangci.yml`](.golangci.yml)。`//nolint` 必须指明 linter 并写理由
-- 本机配置和凭据（如 Cloudflare token）放 gitignore 的 `mise.local.toml`，
-  或仓库外的文件由它加载，不进被跟踪的文件
-- 新的检查（Worker 测试、前端检查等）随对应代码一起加进 `check`，不提前加
-
-## 提交
-
-遵循 [Conventional Commits 1.0](https://www.conventionalcommits.org/zh-hans/v1.0.0/)：
-
-```
-<type>(<scope>): <描述>
-
-<正文：为什么、取舍>
-
-<footer>
-```
-
-- **type**：`feat` `fix` `docs` `refactor` `perf` `test` `build` `ci` `chore` `revert`
-- **scope** 可选，取改动所在的区域，和目录对应：`design`（`docs/` 下的设计文档）、
-  `ingest` `store` `outbox` `transport` `api` `mcp` `worker` `web` 等 `internal/` 包名或顶层目录。
-  跨多个区域就省略 scope
-- **提交信息全部用英文**（设计文档仍是中文）。描述用祈使句、小写开头、不加句号，
-  标题行不超过 72 字符，如 `feat(ingest): reconcile pending markers against raw objects`
-- **正文**写为什么和取舍，不复述 diff，按 72 字符折行
-- **破坏性变更**用 `!` 并加 `BREAKING CHANGE:` footer。触及上文「单向门」的改动
-  （Worker 契约、对外标识、迁移语义）一律按破坏性变更标注
-- 一个提交一件事；不要主动 push，除非被要求
+工具链、开发环境、端口和依赖的规矩、提交格式写在 [`CONTRIBUTING.md`](CONTRIBUTING.md)，
+人和 agent 用同一份；动手前读一遍，照做。
