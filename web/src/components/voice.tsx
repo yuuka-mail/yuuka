@@ -27,7 +27,7 @@ const styles = {
 export function Signature({ speaker, className }: { speaker: Speaker; className?: string }) {
   const s = styles[speaker.kind];
   return (
-    <span className={cn("inline-flex items-center gap-1.5 text-[11px] font-semibold tracking-wide", s.sign, className)}>
+    <span className={cn("inline-flex items-center gap-1.5 text-meta font-semibold tracking-wide", s.sign, className)}>
       <span aria-hidden className={cn("size-2", s.mark)} />
       {speaker.kind === "system" ? "yuuka" : speaker.name}
     </span>
@@ -37,7 +37,7 @@ export function Signature({ speaker, className }: { speaker: Speaker; className?
 /** A block of text attributed to a speaker. */
 export function Voice({ speaker, title, children, className }: { speaker: Speaker; title?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={cn("rounded-md border px-3 py-2 text-xs", styles[speaker.kind].box, className)}>
+    <section className={cn("rounded-md border px-3 py-2 text-small", styles[speaker.kind].box, className)}>
       <header className="mb-1 flex items-center gap-2">
         <Signature speaker={speaker} />
         {title && <span className="text-muted-foreground">{title}</span>}

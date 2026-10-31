@@ -36,14 +36,14 @@ export function LoginPage({ error }: { error?: unknown }) {
 
   return (
     <AuthLayout title="Sign in">
-      <p className="text-sm text-muted-foreground">Use a passkey registered for this mailbox.</p>
+      <p className="text-body text-muted-foreground">Use a passkey registered for this mailbox.</p>
       <Button size="lg" onClick={signIn} disabled={busy || !supported()} className="self-start">
         <KeyRoundIcon data-icon="inline-start" />
         {busy ? "Waiting for passkey…" : "Sign in with passkey"}
       </Button>
       {!supported() && <ErrorText>This browser does not support passkeys.</ErrorText>}
       <ErrorText>{failure}</ErrorText>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-small text-muted-foreground">
         No passkey yet? Run <code className="font-mono">yuuka admin enroll</code> on the server for a one-time link.
       </p>
     </AuthLayout>

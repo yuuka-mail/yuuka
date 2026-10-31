@@ -57,7 +57,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
         </Button>
         <Logo className="hidden w-[12.25rem] sm:inline-flex" />
         <SearchBox ref={searchBox} value={view.q ?? ""} onSearch={(q) => go({ q: q || undefined, m: undefined }, !!view.q === !!q)} />
-        <span className="ml-auto hidden truncate text-xs text-muted-foreground sm:inline">{session.principal}</span>
+        <span className="ml-auto hidden truncate text-meta text-muted-foreground sm:inline">{session.principal}</span>
         <Logout />
       </header>
 
@@ -89,7 +89,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
               onOpen={(m) => go({ m }, true)}
             />
           ) : (
-            <div className="m-auto text-center text-xs text-muted-foreground">
+            <div className="m-auto text-center text-small text-muted-foreground">
               <p>No message selected.</p>
               <p className="mt-1">
                 <Kbd>j</Kbd> <Kbd>k</Kbd> move · <Kbd>/</Kbd> search · <Kbd>Esc</Kbd> close
@@ -103,7 +103,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
 }
 
 function Kbd({ children }: { children: string }) {
-  return <kbd className="rounded border bg-muted px-1 font-mono text-[10px]">{children}</kbd>;
+  return <kbd className="rounded border bg-muted px-1 font-mono text-meta">{children}</kbd>;
 }
 
 const classes: { value: Class | "all"; label: string }[] = [
@@ -125,15 +125,15 @@ function ListHeader({ view, list, go }: { view: View; list: MailList; go: (next:
   return (
     <div className="flex shrink-0 flex-col gap-1.5 border-b px-3 py-2">
       <div className="flex items-baseline gap-2">
-        <h1 className={cn("min-w-0 truncate text-sm font-semibold", view.prefix && "font-mono")}>{title}</h1>
+        <h1 className={cn("min-w-0 truncate font-semibold", view.prefix && "font-mono")}>{title}</h1>
         {!list.isLoading && (
-          <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+          <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
             {count(n)}
             {more && "+"}
           </span>
         )}
         {canToggleDowngraded && (
-          <label className="ml-auto flex shrink-0 items-center gap-1.5 self-center text-xs text-muted-foreground">
+          <label className="ml-auto flex shrink-0 items-center gap-1.5 self-center text-small text-muted-foreground">
             <input
               type="checkbox"
               className="accent-current"
@@ -156,7 +156,7 @@ function ListHeader({ view, list, go }: { view: View; list: MailList; go: (next:
           }}
         >
           {classes.map((c) => (
-            <ToggleGroupItem key={c.value} value={c.value} className="h-6 px-2 text-xs">
+            <ToggleGroupItem key={c.value} value={c.value} className="h-6 px-2 text-small">
               {c.label}
             </ToggleGroupItem>
           ))}
@@ -198,7 +198,7 @@ function SearchBox({ ref, value, onSearch }: { ref: React.Ref<HTMLInputElement>;
         }}
         placeholder="Search subject, sender, body"
         aria-label="Search mail"
-        className="h-7 pr-7 pl-7 text-sm"
+        className="h-7 pr-7 pl-7"
       />
       {text && (
         <button type="button" aria-label="Clear search" onClick={() => setText("")} className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground hover:text-foreground">

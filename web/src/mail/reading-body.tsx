@@ -53,12 +53,12 @@ export function ReadingBody({
   }, [anchor, found]);
 
   return (
-    <div className="flex max-w-[78ch] flex-col gap-3 text-sm leading-relaxed">
+    <div className="flex max-w-[78ch] flex-col gap-3 text-body">
       {parts.length === 0 && <p className="text-muted-foreground italic">No text body.</p>}
       {parts.map((p) => (
         <section key={p.anchor} id={p.anchor} aria-label={parts.length > 1 ? `Part ${p.anchor.slice(5)}` : undefined} className="flex flex-col gap-2">
           {parts.length > 1 && (
-            <p className="border-b pb-0.5 font-mono text-[11px] text-muted-foreground">
+            <p className="border-b pb-0.5 font-mono text-meta text-muted-foreground">
               {p.anchor} · {p.media_type}
             </p>
           )}
@@ -72,7 +72,7 @@ export function ReadingBody({
           {isFetchingMore ? "Loading…" : "Load the rest"}
         </Button>
       )}
-      {!found && !more && <p className="text-xs text-muted-foreground">There is no {anchor} in this message; it may have been cited from an older view.</p>}
+      {!found && !more && <p className="text-small text-muted-foreground">There is no {anchor} in this message; it may have been cited from an older view.</p>}
       {reading.content.attachments && <Attachments id={id} list={reading.content.attachments} />}
     </div>
   );
@@ -80,7 +80,7 @@ export function ReadingBody({
 
 function BlockView({ block: b, uri, highlight, onAnchor }: { block: Block; uri: string; highlight: boolean; onAnchor: (a: string) => void }) {
   return (
-    <div id={b.anchor} className={cn("group relative -mx-1.5 rounded-sm px-1.5 scroll-mt-4", highlight && "bg-accent ring-1 ring-ring/50")}>
+    <div id={b.anchor} className={cn("group relative -mx-1.5 rounded-sm px-1.5 scroll-mt-4", highlight && "bg-ring/10 ring-1 ring-ring/40")}>
       <button
         type="button"
         aria-label={`Link to ${b.anchor}`}
@@ -89,7 +89,7 @@ function BlockView({ block: b, uri, highlight, onAnchor }: { block: Block; uri: 
           onAnchor(b.anchor);
           void navigator.clipboard?.writeText(`${uri}#${b.anchor}`).catch(() => undefined);
         }}
-        className="absolute top-0 -left-4 hidden font-mono text-xs text-muted-foreground group-hover:block hover:text-foreground focus-visible:block"
+        className="absolute top-0 -left-4 hidden font-mono text-small text-muted-foreground group-hover:block hover:text-foreground focus-visible:block"
       >
         ¶
       </button>
@@ -104,7 +104,7 @@ function BlockContent({ b }: { b: Block }) {
     case "heading": {
       const level = Math.min(Math.max(b.level ?? 1, 1), 5);
       const H = `h${level + 1}` as "h2" | "h3" | "h4" | "h5" | "h6";
-      return <H className={cn("pt-1 font-semibold break-words", level === 1 ? "text-base" : "text-sm")}>{spans}</H>;
+      return <H className={cn("font-semibold break-words", level === 1 ? "pt-2" : "pt-1")}>{spans}</H>;
     }
     case "item":
       return (
@@ -116,10 +116,10 @@ function BlockContent({ b }: { b: Block }) {
         </div>
       );
     case "pre":
-      return <pre className="overflow-x-auto rounded-sm bg-muted px-2 py-1 font-mono text-xs leading-normal whitespace-pre">{spans}</pre>;
+      return <pre className="overflow-x-auto rounded-sm bg-muted px-2 py-1 font-mono text-small whitespace-pre">{spans}</pre>;
     case "quote":
       return (
-        <div className="flex items-baseline gap-1.5 border-l-2 pl-2 text-xs text-muted-foreground">
+        <div className="flex items-baseline gap-1.5 border-l-2 pl-2 text-small text-muted-foreground">
           <QuoteIcon aria-hidden className="size-3 shrink-0 self-center" />
           <span className="min-w-0 break-words">
             {b.spans?.length ? <span className="italic">{spans}</span> : "Quoted text"}
@@ -154,9 +154,9 @@ function Spans({ spans }: { spans: Span[] }) {
         {(t.mismatch || !echoed) && (
           <span
             title={t.mismatch ? `The text names another site; this link goes to ${t.shown}` : `Goes to ${t.shown}`}
-            className={cn("ml-1 inline-flex items-baseline gap-0.5 font-mono text-[11px]", t.mismatch ? "font-semibold text-destructive" : "text-muted-foreground")}
+            className={cn("ml-1 inline-flex items-baseline gap-0.5 font-mono text-meta", t.mismatch ? "font-semibold text-destructive" : "text-muted-foreground")}
           >
-            <ExternalLinkIcon aria-hidden className="size-2.5 self-center" />
+            <ExternalLinkIcon aria-hidden className="size-3 self-center" />
             {t.shown}
           </span>
         )}
@@ -172,7 +172,7 @@ function Spans({ spans }: { spans: Span[] }) {
  */
 function Attachments({ id, list }: { id: string; list: Attachment[] }) {
   return (
-    <section className="mt-1 border-t pt-2 text-xs">
+    <section className="mt-1 border-t pt-2 text-small">
       <h2 className="mb-1 font-medium text-muted-foreground">
         {list.length} attachment{list.length === 1 ? "" : "s"}
       </h2>
@@ -189,7 +189,7 @@ function Attachments({ id, list }: { id: string; list: Attachment[] }) {
               <span className="min-w-0 truncate">{a.filename || `(no file name, part ${a.section})`}</span>
               <DownloadIcon aria-hidden className="size-3 shrink-0 self-center text-muted-foreground group-hover:text-foreground" />
             </a>
-            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{a.media_type}</span>
+            <span className="shrink-0 font-mono text-meta text-muted-foreground">{a.media_type}</span>
           </li>
         ))}
       </ul>

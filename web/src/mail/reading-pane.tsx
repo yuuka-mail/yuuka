@@ -26,7 +26,7 @@ export function ReadingPane({ id, onBack, ...rest }: Props) {
   const q = useMessage(id);
   return (
     <article className="flex h-full min-h-0 flex-col">
-      <div className="flex h-10 shrink-0 items-center border-b px-2 md:hidden">
+      <div className="flex h-11 shrink-0 items-center border-b px-2 md:hidden">
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeftIcon data-icon="inline-start" />
           Back
@@ -36,7 +36,7 @@ export function ReadingPane({ id, onBack, ...rest }: Props) {
         {q.data ? (
           <Reading message={q.data} {...rest} />
         ) : q.error ? (
-          <p className="p-6 text-sm text-destructive">{q.error instanceof Error ? q.error.message : "Could not load the message."}</p>
+          <p className="p-6 text-destructive">{q.error instanceof Error ? q.error.message : "Could not load the message."}</p>
         ) : (
           <div className="flex flex-col gap-3 p-6">
             <Skeleton className="h-6 w-2/3" />
@@ -63,12 +63,12 @@ function Reading({ message: m, anchor, onAnchor, onOpen }: { message: Message } 
   return (
     <div className="flex max-w-[56rem] flex-col gap-4 px-4 py-4 md:px-6">
       <header className="flex flex-col gap-1.5">
-        <h1 className="text-lg leading-snug font-semibold break-words">{m.subject || <span className="text-muted-foreground">(no subject)</span>}</h1>
-        <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
+        <h1 className="text-title font-semibold break-words">{m.subject || <span className="text-muted-foreground">(no subject)</span>}</h1>
+        <div className="flex flex-wrap items-baseline gap-x-2 text-body">
           <span className="font-medium">{sender(m.from_name, m.from_addr)}</span>
           {m.from_name && <span className="text-muted-foreground">&lt;{m.from_addr}&gt;</span>}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-1.5 text-small text-muted-foreground">
           <span>to</span>
           {m.recipients.map((r) => (
             <Badge key={r} variant="outline" className="font-mono font-normal">
@@ -91,9 +91,9 @@ function Reading({ message: m, anchor, onAnchor, onOpen }: { message: Message } 
             {warns.map((w) => (
               <li key={w.key} className={cn("flex items-baseline gap-1.5", w.tone === "bad" ? "text-destructive" : "text-warning")}>
                 {w.tone === "bad" ? (
-                  <OctagonAlertIcon aria-hidden className="size-3.5 shrink-0 self-center" />
+                  <OctagonAlertIcon aria-hidden className="size-3 shrink-0 self-center" />
                 ) : (
-                  <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0 self-center" />
+                  <TriangleAlertIcon aria-hidden className="size-3 shrink-0 self-center" />
                 )}
                 <span>
                   <span className="font-semibold">{w.key}</span>
@@ -132,7 +132,7 @@ function Reading({ message: m, anchor, onAnchor, onOpen }: { message: Message } 
           isFetchingMore={body.isFetchingMore}
         />
       ) : body.error ? (
-        <p className="text-sm text-destructive">{body.error instanceof Error ? body.error.message : "Could not load the text."}</p>
+        <p className="text-destructive">{body.error instanceof Error ? body.error.message : "Could not load the text."}</p>
       ) : (
         <div className="flex flex-col gap-2">
           <Skeleton className="h-4 w-full" />
@@ -141,7 +141,7 @@ function Reading({ message: m, anchor, onAnchor, onOpen }: { message: Message } 
         </div>
       )}
 
-      {m.message_id && <p className="font-mono text-[11px] break-all text-muted-foreground">Message-ID &lt;{m.message_id}&gt;</p>}
+      {m.message_id && <p className="font-mono text-meta break-all text-muted-foreground">Message-ID &lt;{m.message_id}&gt;</p>}
     </div>
   );
 }
@@ -159,7 +159,7 @@ function ThreadStrip({ message, onOpen }: { message: Message; onOpen: (id: strin
   const ms = t.data?.messages ?? [];
   if (ms.length < 2) return null;
   return (
-    <section className="rounded-md border text-xs">
+    <section className="rounded-md border text-small">
       <header className="border-b px-3 py-1.5 text-muted-foreground">
         Thread · {ms.length} messages · {t.data?.participants.length} participants
       </header>
@@ -172,7 +172,7 @@ function ThreadStrip({ message, onOpen }: { message: Message; onOpen: (id: strin
               onClick={() => onOpen(s.id)}
               className={cn(
                 "flex w-full items-baseline gap-2 px-3 py-1 text-left hover:bg-muted",
-                s.id === message.id && "bg-accent text-accent-foreground",
+                s.id === message.id && "bg-accent text-accent-foreground shadow-[inset_2px_0_0_var(--color-foreground)]",
               )}
             >
               <span className="w-28 shrink-0 truncate font-medium">{sender(s.from_name, s.from_addr)}</span>

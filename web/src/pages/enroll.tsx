@@ -57,7 +57,7 @@ export function EnrollPage() {
     return (
       <AuthLayout title="Passkey registered">
         <Voice speaker={system}>
-          <p className="text-sm text-foreground">
+          <p className="text-body text-foreground">
             The passkey is stored. {viaSession ? "It works from the next sign-in." : "The link is used up; sign in with the new passkey."}
           </p>
         </Voice>
@@ -80,12 +80,12 @@ export function EnrollPage() {
         </ErrorText>
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-4">
-          <p className="text-sm text-muted-foreground">
+          <p className="text-body text-muted-foreground">
             {viaSession
               ? `Adds another passkey for ${session.data?.principal}.`
               : "This link registers one passkey and then expires. Registering does not sign you in."}
           </p>
-          <label className="flex flex-col gap-1.5 text-sm">
+          <label className="flex flex-col gap-1.5 text-body">
             <span className="font-medium">Name for this passkey</span>
             <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. laptop, phone" maxLength={100} />
           </label>

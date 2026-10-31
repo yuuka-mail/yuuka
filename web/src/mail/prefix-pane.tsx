@@ -20,7 +20,7 @@ export function PrefixPane({ view, onPick }: { view: View; onPick: (next: Partia
   const all = !view.prefix;
 
   return (
-    <nav aria-label="Prefixes" className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2 text-[13px]">
+    <nav aria-label="Prefixes" className="flex min-h-0 flex-1 flex-col overflow-y-auto py-2 text-ui">
       <Item active={all && view.dg !== "only"} label="All mail" n={q.data && q.data.messages - q.data.downgraded} onClick={() => onPick({ prefix: undefined, dg: "hide" })} />
       <Item
         active={all && view.dg === "only"}
@@ -47,7 +47,7 @@ function Group({ title, ps, view, onPick }: { title: string; ps: Prefix[]; view:
   const zones = new Set(ps.map((p) => p.zone));
   return (
     <>
-      <h2 className="mt-4 mb-1 px-3 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">{title}</h2>
+      <h2 className="mt-4 mb-1 px-3 text-meta font-medium tracking-wide text-muted-foreground uppercase">{title}</h2>
       {ps.map((p) => (
         <Item
           key={p.address}
@@ -75,11 +75,11 @@ function Item(props: { active: boolean; label: string; hint?: string; n?: number
         props.active && "bg-accent text-accent-foreground hover:bg-accent",
       )}
     >
-      <span className={cn("min-w-0 truncate", props.mono && "font-mono text-[12px]", props.muted && !props.active && "text-muted-foreground")}>
+      <span className={cn("min-w-0 truncate", props.mono && "font-mono text-small", props.muted && !props.active && "text-muted-foreground")}>
         {props.label}
       </span>
-      {props.hint && <span className="min-w-0 truncate text-[11px] text-muted-foreground">{props.hint}</span>}
-      {props.n !== undefined && <span className="ml-auto shrink-0 text-[11px] text-muted-foreground tabular-nums">{count(props.n)}</span>}
+      {props.hint && <span className="min-w-0 truncate text-meta text-muted-foreground">{props.hint}</span>}
+      {props.n !== undefined && <span className="ml-auto shrink-0 text-meta text-muted-foreground tabular-nums">{count(props.n)}</span>}
     </button>
   );
 }

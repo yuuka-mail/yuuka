@@ -34,11 +34,11 @@ export function RecoverPage() {
 
   return (
     <AuthLayout title="Recover access">
-      <p className="text-sm text-muted-foreground">
+      <p className="text-body text-muted-foreground">
         A recovery code lets you register one new passkey. It does not sign you in, works once, and the operator is alerted when it is used.
       </p>
       <form onSubmit={submit} className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1.5 text-sm">
+        <label className="flex flex-col gap-1.5 text-body">
           <span className="font-medium">Recovery code</span>
           <Input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" spellCheck={false} className="font-mono" required />
         </label>

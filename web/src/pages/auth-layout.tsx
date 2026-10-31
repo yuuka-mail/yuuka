@@ -8,7 +8,7 @@ export function AuthLayout({ title, children }: { title: string; children: React
     <main className="flex min-h-full items-start justify-center px-4 pt-[18vh] pb-8">
       <div className="flex w-full max-w-sm flex-col gap-5">
         <Logo />
-        <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+        <h1 className="text-title font-semibold tracking-tight">{title}</h1>
         {children}
       </div>
     </main>
@@ -18,7 +18,7 @@ export function AuthLayout({ title, children }: { title: string; children: React
 export function ErrorText({ children }: { children: ReactNode }) {
   if (!children) return null;
   return (
-    <p role="alert" className="text-sm text-destructive">
+    <p role="alert" className="text-body text-destructive">
       {children}
     </p>
   );

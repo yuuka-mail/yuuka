@@ -1,16 +1,22 @@
 @import "tailwindcss";
 
 /*
- * Design tokens. shadcn's names for the base palette, plus two voices
- * (§11.1, §12.5) that must be told apart at a glance, not by wording:
+ * Design tokens (§12.8). Colour carries meaning and nothing else: the
+ * chrome is neutral grey, and a hue on screen is one of
  *
- *   system  yuuka speaking: facts the system established (auth results,
- *           downgrade, quarantine, extracted codes). Cool teal, a square
- *           mark, signed "yuuka".
- *   agent   arisu speaking: guesses and proposals, always with cites.
- *           Violet, a round mark, signed with the agent's display name.
- *           Defined now so that nothing else borrows these colours; the
- *           first agent content arrives with M3.
+ *   ring         where the keyboard is, or the block a link pointed at.
+ *   warning      something to check: unverified, downgraded.
+ *   destructive  something wrong: dmarc=fail, quarantine, a link whose
+ *                text names another site.
+ *   system       yuuka speaking (§11.1, §12.5): facts the system
+ *                established. Teal, a square mark, signed "yuuka".
+ *   agent        arisu speaking: guesses and proposals, always with
+ *                cites. Violet, a round mark, signed with the agent's
+ *                name. Reserved now so nothing else borrows it; the
+ *                first agent content arrives with M3.
+ *
+ * Hover is muted; the selection (accent) is a stronger neutral, so the
+ * open message never looks like something the system is saying.
  *
  * Light and dark follow the OS; there is no in-app switch in M1.
  */
@@ -23,13 +29,13 @@
   --muted-foreground: oklch(0.5 0.01 260);
   --border: oklch(0.91 0.004 260);
   --input: oklch(0.88 0.005 260);
-  --ring: oklch(0.6 0.08 210);
+  --ring: oklch(0.58 0.12 255);
   --primary: oklch(0.27 0.01 260);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.955 0.004 260);
   --secondary-foreground: oklch(0.25 0.01 260);
-  --accent: oklch(0.94 0.02 220);
-  --accent-foreground: oklch(0.25 0.03 230);
+  --accent: oklch(0.925 0.006 260);
+  --accent-foreground: oklch(0.2 0.005 260);
   --destructive: oklch(0.56 0.2 25);
   --warning: oklch(0.6 0.13 70);
   --sidebar: oklch(0.975 0.002 260);
@@ -53,13 +59,13 @@
     --muted-foreground: oklch(0.68 0.01 260);
     --border: oklch(0.29 0.006 260);
     --input: oklch(0.34 0.008 260);
-    --ring: oklch(0.6 0.08 210);
+    --ring: oklch(0.68 0.12 255);
     --primary: oklch(0.92 0.004 260);
     --primary-foreground: oklch(0.2 0.005 260);
     --secondary: oklch(0.25 0.006 260);
     --secondary-foreground: oklch(0.92 0.004 260);
-    --accent: oklch(0.29 0.03 225);
-    --accent-foreground: oklch(0.94 0.01 220);
+    --accent: oklch(0.285 0.006 260);
+    --accent-foreground: oklch(0.96 0.003 260);
     --destructive: oklch(0.68 0.18 25);
     --warning: oklch(0.78 0.13 75);
     --sidebar: oklch(0.155 0.005 260);
@@ -77,8 +83,40 @@
 }
 
 @theme inline {
-  --font-sans: system-ui, -apple-system, "Segoe UI", "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  /*
+   * System fonts only: a CJK webfont runs to megabytes, and a Latin-only
+   * one would not match the CJK fallback beside it. Named fonts come
+   * before system-ui because on Linux system-ui usually resolves to
+   * DejaVu Sans, while Noto Sans CJK carries a better Latin set.
+   */
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", "Segoe UI", Roboto, "Noto Sans", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei UI", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+
+  /*
+   * The type scale, by role. Tailwind's own sizes are cleared so the
+   * roles are the only sizes there are (web/src/design.test.ts keeps
+   * arbitrary ones out too).
+   *
+   *   meta   11px  times, counts, recipients, hosts, section labels
+   *   small  12px  secondary blocks: system facts, thread strip, quotes,
+   *               attachments, segmented controls, badges
+   *   ui     13px  the working chrome: list rows, prefixes, search, buttons
+   *   body   14px  message text, explanatory text on the auth pages
+   *   title  18px  the message subject, a page title
+   */
+  --text-*: initial;
+  --text-meta: 0.6875rem;
+  --text-meta--line-height: 1rem;
+  --text-small: 0.75rem;
+  --text-small--line-height: 1rem;
+  --text-ui: 0.8125rem;
+  --text-ui--line-height: 1.25rem;
+  --text-body: 0.875rem;
+  --text-body--line-height: 1.625;
+  --text-title: 1.125rem;
+  --text-title--line-height: 1.4;
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -123,6 +161,18 @@
     height: 100%;
   }
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-background text-ui text-foreground antialiased;
+  }
+}
+
+/*
+ * Mobile Safari zooms into a field under 16px when it takes focus.
+ * Unlayered, so it wins over the text-* utility on the field.
+ */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: max(1rem, 1em);
   }
 }

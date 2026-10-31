@@ -50,10 +50,10 @@ export function MessageList({ list, selected, onSelect }: { list: MailList; sele
     );
   }
   if (list.error) {
-    return <p className="p-4 text-sm text-destructive">{list.error instanceof Error ? list.error.message : "Could not load mail."}</p>;
+    return <p className="p-4 text-destructive">{list.error instanceof Error ? list.error.message : "Could not load mail."}</p>;
   }
   if (list.items.length === 0) {
-    return <p className="p-4 text-sm text-muted-foreground">No mail here.</p>;
+    return <p className="p-4 text-muted-foreground">No mail here.</p>;
   }
 
   return (
@@ -66,7 +66,7 @@ export function MessageList({ list, selected, onSelect }: { list: MailList; sele
               {m ? (
                 <Row m={m} selected={m.id === selected} onSelect={onSelect} />
               ) : (
-                <div className="flex h-full items-center px-3 text-xs text-muted-foreground">Loading more…</div>
+                <div className="flex h-full items-center px-3 text-small text-muted-foreground">Loading more…</div>
               )}
             </div>
           );
@@ -85,22 +85,22 @@ function Row({ m, selected, onSelect }: { m: MessageSummary; selected: boolean; 
       onClick={() => onSelect(m.id)}
       className={cn(
         "flex h-full w-full flex-col justify-center gap-0.5 border-b px-3 text-left outline-none hover:bg-muted focus-visible:bg-muted",
-        selected && "bg-accent text-accent-foreground hover:bg-accent",
-        m.downgraded && !selected && "opacity-60",
+        selected && "bg-accent text-accent-foreground shadow-[inset_2px_0_0_var(--color-foreground)] hover:bg-accent",
+        m.downgraded && !selected && "text-muted-foreground",
       )}
     >
-      <span className="flex min-w-0 items-center gap-1.5 text-[13px]">
+      <span className="flex min-w-0 items-center gap-1.5 text-ui">
         <span className={cn("min-w-0 truncate", m.class === "human" ? "font-semibold" : "font-medium")}>{sender(m.from_name, m.from_addr)}</span>
         {m.recipients.length > 0 && (
-          <span className="shrink-0 truncate font-mono text-[11px] text-muted-foreground">→ {m.recipients.map(localPart).join(", ")}</span>
+          <span className="shrink-0 truncate font-mono text-meta text-muted-foreground">→ {m.recipients.map(localPart).join(", ")}</span>
         )}
-        <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-[11px] text-muted-foreground tabular-nums">
+        <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-meta text-muted-foreground tabular-nums">
           {m.quarantined && <TriangleAlertIcon aria-label="quarantined" className="size-3 text-warning" />}
           {m.has_attach && <PaperclipIcon aria-label="attachment" className="size-3" />}
           {listTime(m.received_at)}
         </span>
       </span>
-      <span className="truncate text-[13px]">
+      <span className="truncate text-ui">
         {m.subject || <span className="text-muted-foreground">(no subject)</span>}
         {m.snippet && <span className="text-muted-foreground"> — {m.snippet}</span>}
       </span>
