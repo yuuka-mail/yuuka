@@ -52,6 +52,24 @@ docker build --build-arg VERSION=$(git describe --tags --always) -t yuuka:local 
 Email Worker 的 webhook 地址是 `<YUUKA_WEB_ORIGIN>/ingest/cloudflare`，密钥与 `YUUKA_WEBHOOK_SECRETS` 一致。
 这个路径必须能从 Cloudflare 访问，不要在它前面加 IP 白名单或浏览器登录（见 [`Caddyfile`](Caddyfile)）。
 
+## R2 令牌
+
+yuuka 用两把 R2 API 令牌（S3 兼容的 Access Key ID / Secret），各自只限定到一个 bucket（§2.2）：
+
+| 变量前缀 | bucket | 权限 | yuuka 用它做什么 |
+|---|---|---|---|
+| `YUUKA_R2_RAW_` | raw | Object Read & Write | 读 Worker 写下的 `raw/` 原件；只新建、从不覆盖 `sent/` 下的 Sent 副本 |
+| `YUUKA_R2_PENDING_` | pending | Object Read & Write | 读、列、删投递标记 |
+
+raw 令牌要写权限，是因为发出的信（Sent 副本）也存在 raw bucket 的 `sent/` 前缀下。R2 的令牌管不到前缀，
+所以「`raw/` 下的原件不可变」靠 yuuka 的代码守住：它只往 `sent/` 写、每次写都是「不存在才写」，没有删除操作。
+这把令牌泄露时，持有者能改写或删除 `raw/` 下的原件，按对待 pending 令牌的方式保管它，不要给 yuuka 以外的进程。
+想在权限层面再加一道，可以给 raw bucket 的 `raw/`、`sent/` 前缀加 R2 bucket lock 规则（阻止删除和覆盖，不阻止新建）；
+代价是保留期内谁都删不掉这些对象，取舍见 §2.2。
+
+早先的部署给 raw bucket 的是 Object Read only 令牌。只收信时它仍然够用；启用发信（M2）之前换成 Object Read & Write，
+否则 Sent 副本写不进去。
+
 ## 数据库角色
 
 yuuka 不以超级用户连库。[`postgres-roles.sh`](postgres-roles.sh) 在 Postgres 第一次初始化空数据目录时建三个角色，

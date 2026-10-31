@@ -4,27 +4,142 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/yuuka-mail/yuuka/internal/r2"
 )
 
+const (
+	testULID = "01M67SX66B38NKRKAYDXR834N3"
+	// badRequestULID names a sent key the fake answers with a 400.
+	badRequestULID = "01M67SX66B38NKRKAYDXR834N4"
+)
+
+func TestSentKey(t *testing.T) {
+	// 23:30 on the last day of October in UTC-5 is already November in UTC.
+	at := time.Date(2026, 10, 31, 23, 30, 0, 0, time.FixedZone("x", -5*3600))
+	k := r2.SentKey(at, testULID)
+	if k != "sent/2026/11/"+testULID+".eml" {
+		t.Fatalf("SentKey = %q", k)
+	}
+	if err := r2.CheckSentKey(k); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCheckSentKeyRejects(t *testing.T) {
+	for _, k := range []string{
+		"raw/2026/10/" + testULID + ".eml",
+		"pending/" + testULID,
+		"",
+		"sent/",
+		"sent/2026/10/" + testULID,
+		"sent/2026/10/" + testULID + ".eml/x",
+		"sent/2026/10/" + strings.ToLower(testULID) + ".eml",
+		"sent/2026/10/x.eml",
+		"sent/2026/13/" + testULID + ".eml",
+		"sent/2026/00/" + testULID + ".eml",
+		"sent/2026/1/" + testULID + ".eml",
+		"sent/+026/10/" + testULID + ".eml",
+		"sent//2026/10/" + testULID + ".eml",
+		"/sent/2026/10/" + testULID + ".eml",
+		"sent/../raw/10/" + testULID + ".eml",
+		"Sent/2026/10/" + testULID + ".eml",
+	} {
+		if err := r2.CheckSentKey(k); err == nil {
+			t.Errorf("CheckSentKey(%q) accepted", k)
+		}
+	}
+}
+
+func TestRawBucketPutSent(t *testing.T) {
+	f, cfg := setup(t)
+	raw := r2.NewRawBucket(cfg)
+	ctx := t.Context()
+	key := "sent/2026/10/" + testULID + ".eml"
+	body := []byte("From: a@example.com\r\n\r\nhi\r\n")
+
+	if err := raw.PutSent(ctx, key, body); err != nil {
+		t.Fatal(err)
+	}
+	req := f.reqs[len(f.reqs)-1]
+	if req.Method != http.MethodPut || req.URL.Path != "/b/"+key {
+		t.Fatalf("sent %s %s", req.Method, req.URL)
+	}
+	if got := req.Header.Get("If-None-Match"); got != "*" {
+		t.Fatalf("If-None-Match = %q", got)
+	}
+	for h := range req.Header {
+		if strings.HasPrefix(strings.ToLower(h), "x-amz-checksum") || strings.EqualFold(h, "X-Amz-Sdk-Checksum-Algorithm") {
+			t.Errorf("PUT carries checksum header %s", h)
+		}
+	}
+
+	if err := raw.PutSent(ctx, key, []byte("other bytes")); !errors.Is(err, r2.ErrExists) {
+		t.Fatalf("second put: %v", err)
+	}
+	if got := string(f.objects["/b/"+key]); got != string(body) {
+		t.Fatalf("stored object replaced: %q", got)
+	}
+
+	n := len(f.reqs)
+	for _, k := range []string{
+		"raw/2026/10/" + testULID + ".eml",
+		"pending/" + testULID,
+		"sent/2026/10/" + testULID + ".eml/x",
+	} {
+		if err := raw.PutSent(ctx, k, body); err == nil {
+			t.Errorf("PutSent(%q) accepted", k)
+		}
+	}
+	if err := raw.PutSent(ctx, "sent/2026/11/"+testULID+".eml", make([]byte, r2.MaxObjectSize+1)); err == nil {
+		t.Error("oversized put accepted")
+	}
+	if len(f.reqs) != n {
+		t.Fatalf("a refused put still reached the server: %v", f.reqs[n:])
+	}
+
+	err := raw.PutSent(ctx, "sent/2026/10/"+badRequestULID+".eml", body)
+	if err == nil || errors.Is(err, r2.ErrExists) {
+		t.Fatalf("400 answer: %v", err)
+	}
+}
+
 // fakeS3 answers just enough of the S3 protocol to check what the client
-// sends: path-style addressing, no default checksums, pagination.
+// sends: path-style addressing, no default checksums, pagination, and
+// PUT with S3's conditional semantics (without If-None-Match it overwrites,
+// as S3 and R2 do, so a test can tell the header is what protects a key).
 type fakeS3 struct {
-	mu   sync.Mutex
-	reqs []*http.Request
+	mu      sync.Mutex
+	reqs    []*http.Request
+	objects map[string][]byte
 }
 
 func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	body, _ := io.ReadAll(r.Body)
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.reqs = append(f.reqs, r.Clone(context.Background()))
-	f.mu.Unlock()
 	switch {
+	case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/"+badRequestULID+".eml"):
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = fmt.Fprint(w, `<Error><Code>InvalidRequest</Code><Message>no</Message></Error>`)
+	case r.Method == http.MethodPut:
+		if _, ok := f.objects[r.URL.Path]; ok && r.Header.Get("If-None-Match") == "*" {
+			w.Header().Set("Content-Type", "application/xml")
+			w.WriteHeader(http.StatusPreconditionFailed)
+			_, _ = fmt.Fprint(w, `<Error><Code>PreconditionFailed</Code><Message>At least one of the pre-conditions you specified did not hold</Message></Error>`)
+			return
+		}
+		f.objects[r.URL.Path] = body
+		w.Header().Set("ETag", `"x"`)
 	case r.Method == http.MethodGet && r.URL.Query().Get("list-type") == "2":
 		w.Header().Set("Content-Type", "application/xml")
 		if r.URL.Query().Get("continuation-token") == "" {
@@ -51,7 +166,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func setup(t *testing.T) (*fakeS3, r2.Config) {
 	t.Helper()
-	f := &fakeS3{}
+	f := &fakeS3{objects: map[string][]byte{}}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	return f, r2.Config{Endpoint: srv.URL, Bucket: "b", AccessKeyID: "k", SecretAccessKey: "s"}

@@ -1,25 +1,34 @@
 // Package r2 reads and manages the two Cloudflare R2 buckets of the ingest
 // contract (§2.2) through the S3 API.
 //
-// The raw bucket is exposed read-only on purpose: its type has no method
-// that could issue a write or delete, and the deployment gives it a
-// read-only token, so "raw is immutable" holds by construction rather than
-// by discipline. The pending bucket has its own credentials.
+// The raw bucket holds two kinds of immutable MIME: raw/ (inbound, written
+// by the Worker) and sent/ (the exact bytes yuuka submitted). Go's token for
+// it can write, because of sent/, so immutability is kept here rather than
+// by the token (§2.2): RawBucket has no delete, and its one write, PutSent,
+// refuses any key that is not a sent copy key before a request is made and
+// is create-only (If-None-Match: *), so even a bug that names an existing
+// key cannot replace it. The pending bucket has its own credentials.
 package r2
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"iter"
+	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"github.com/aws/smithy-go"
+
+	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
 // MaxObjectSize bounds how much of one object is read into memory. Inbound
@@ -28,6 +37,45 @@ const MaxObjectSize = 32 << 20
 
 // ErrNotFound is returned (wrapped) when a key does not exist.
 var ErrNotFound = errors.New("r2: object not found")
+
+// ErrExists is returned (wrapped) by a create-only write when the key is
+// already taken. A retried write whose first attempt did land ends here
+// too, so the caller decides by comparing the stored bytes with its own.
+var ErrExists = errors.New("r2: object already exists")
+
+// SentKey is the raw bucket key of a sent copy: sent/YYYY/MM/<id>.eml, with
+// year and month taken from submittedAt in UTC and id a ULID. It is not
+// part of the Worker contract: the Worker never reads or writes sent/.
+func SentKey(submittedAt time.Time, id string) string {
+	t := submittedAt.UTC()
+	return fmt.Sprintf("sent/%04d/%02d/%s.eml", t.Year(), int(t.Month()), id)
+}
+
+// CheckSentKey accepts exactly the keys SentKey produces for a valid ULID.
+// It is the only thing between Go's writable raw bucket token and raw/, so
+// it checks the whole shape rather than the prefix.
+func CheckSentKey(key string) error {
+	parts := strings.Split(key, "/")
+	ok := len(parts) == 4 && parts[0] == "sent" &&
+		digitsInRange(parts[1], 4, 1, 9999) && digitsInRange(parts[2], 2, 1, 12)
+	if ok {
+		id, eml := strings.CutSuffix(parts[3], ".eml")
+		ok = eml && ulid.Valid(id)
+	}
+	if !ok {
+		return fmt.Errorf("r2: %q is not a sent copy key", key)
+	}
+	return nil
+}
+
+// digitsInRange reports whether s is exactly n decimal digits in [lo, hi].
+func digitsInRange(s string, n, lo, hi int) bool {
+	if len(s) != n || strings.Trim(s, "0123456789") != "" {
+		return false
+	}
+	v, err := strconv.Atoi(s)
+	return err == nil && v >= lo && v <= hi
+}
 
 // Object is a whole object read into memory.
 type Object struct {
@@ -119,10 +167,24 @@ func isNotFound(err error) bool {
 	return errors.As(err, &ae) && (ae.ErrorCode() == "NoSuchKey" || ae.ErrorCode() == "NotFound")
 }
 
-// RawBucket is read-only access to raw/YYYY/MM/<id>.eml objects.
+// isPreconditionFailed recognises the 412 a create-only PUT gets when the
+// key exists. The status decides; the error code is a fallback in case a
+// wrapper hides the HTTP response.
+func isPreconditionFailed(err error) bool {
+	var re interface{ HTTPStatusCode() int }
+	if errors.As(err, &re) && re.HTTPStatusCode() == http.StatusPreconditionFailed {
+		return true
+	}
+	var ae smithy.APIError
+	return errors.As(err, &ae) && ae.ErrorCode() == "PreconditionFailed"
+}
+
+// RawBucket reads raw/ and sent/ objects and creates sent/ objects. It has
+// no way to overwrite or delete anything.
 type RawBucket struct{ b bucket }
 
-// NewRawBucket returns a client for the raw bucket. Give it a read-only token.
+// NewRawBucket returns a client for the raw bucket. Its token needs object
+// read and write; the write is for sent copies only (§2.2).
 func NewRawBucket(c Config) *RawBucket {
 	return &RawBucket{bucket{newClient(c), c.Bucket}}
 }
@@ -133,6 +195,35 @@ func (r *RawBucket) Get(ctx context.Context, key string) (Object, error) { retur
 // List yields every key under prefix.
 func (r *RawBucket) List(ctx context.Context, prefix string) iter.Seq2[string, error] {
 	return r.b.list(ctx, prefix)
+}
+
+// PutSent stores body under key, which must pass CheckSentKey, only if
+// nothing is stored there yet. R2 evaluates If-None-Match: * atomically with
+// the write, so of concurrent writers at most one succeeds; the others, like
+// any write to an existing key, get an error wrapping ErrExists and leave
+// the stored object as it was.
+func (r *RawBucket) PutSent(ctx context.Context, key string, body []byte) error {
+	if err := CheckSentKey(key); err != nil {
+		return err
+	}
+	if len(body) > MaxObjectSize {
+		// Get could not read it back.
+		return fmt.Errorf("put %s/%s: larger than %d bytes", r.b.name, key, MaxObjectSize)
+	}
+	_, err := r.b.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:        &r.b.name,
+		Key:           &key,
+		Body:          bytes.NewReader(body),
+		ContentLength: aws.Int64(int64(len(body))),
+		IfNoneMatch:   aws.String("*"),
+	})
+	if err != nil {
+		if isPreconditionFailed(err) {
+			return fmt.Errorf("put %s/%s: %w", r.b.name, key, ErrExists)
+		}
+		return fmt.Errorf("put %s/%s: %w", r.b.name, key, err)
+	}
+	return nil
 }
 
 // PendingBucket reads, lists and deletes pending/<id> markers.

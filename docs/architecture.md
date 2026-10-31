@@ -11,7 +11,7 @@ flowchart TB
   subgraph cfin["Cloudflare · 入站"]
     routing["Email Routing<br/>catch-all *@example.com"]
     worker["Email Worker<br/>薄：~150 行 TS，不解析"]
-    r2[("R2<br/>pending/ · raw/")]
+    r2[("R2<br/>pending/ · raw/ · sent/")]
     routing --> worker -- "① 标记 ② 原件" --> r2
   end
 
@@ -42,6 +42,7 @@ flowchart TB
   worker -. "④ 兜底：直推一行" .-> im
   notify --> im
   outbox -- SMTP --> sending --> rcpt
+  outbox -. "Sent 副本：只新建 sent/" .-> r2
 ```
 
 **Worker 为什么必须薄**：它是唯一不能用 Go 写的部分，所以把它压到"落盘 + 通知"
@@ -165,12 +166,39 @@ sequenceDiagram
 
 | bucket | key | 内容 | Worker 的权限 | Go 的权限 |
 |---|---|---|---|---|
-| raw | `raw/YYYY/MM/<id>.eml` | 原始 MIME 字节，写一次永不改 | 写（只在不存在时写） | **只读** |
+| raw | `raw/YYYY/MM/<id>.eml` | 收到的原始 MIME 字节，写一次永不改 | 写（只在不存在时写） | 读、列 |
+| raw | `sent/YYYY/MM/<id>.eml` | 发出的原始 MIME 字节（Sent 副本，§3.6），写一次永不改 | 不碰 | 读、列、写（只在不存在时写） |
 | pending | `pending/<id>` | 投递标记 | 写 | 读、列、删 |
 
-`YYYY/MM` 取 `received_at` 的 UTC 年月。分成两个 bucket，是因为 R2 令牌的权限粒度到 bucket 为止：
-分开后 Go 侧凭据对原件只有读权限，「原件不可变」由权限保证，而不是靠 Go 代码自觉。
+`raw/` 的 `YYYY/MM` 取 `received_at` 的 UTC 年月。`sent/` 不属于 Worker 的契约，列在这里是因为它和 `raw/` 共用一个 bucket、
+一把 Go 侧凭据：`<id>` 是 Go 生成的 ULID，`YYYY/MM` 取提交时间的 UTC 年月，key 函数是 [`r2.SentKey`](../internal/r2/r2.go)。
+Worker 不读、不写、不列 `sent/`，它的行为和 `testdata/contract/v1/` 的向量都不因 `sent/` 改变。
+
+分成两个 bucket，是因为 R2 令牌的权限粒度到 bucket 为止，前缀管不住。Go 要例行删除标记，
+pending 单独一个 bucket，删除就用一把碰不到原件的凭据，删错 key 也删不到原件。
 key 仍保留 `raw/`、`pending/` 前缀，文档、日志里的引用不用改，将来合回一个 bucket 也不必迁移 key。
+
+**原件不可变靠代码守住，而不是靠令牌。** Sent 副本放进 raw bucket 而不是第三个 bucket，换来的是少一个 bucket、
+少一把令牌，收发两类原件在同一处归档、用同一套保管方式。代价是 Go 侧的 raw 令牌必须是 Object Read & Write，
+「`raw/` 不可变」不再由权限保证，改由下面几条保证：
+
+- 读写 raw bucket 的类型 [`r2.RawBucket`](../internal/r2/r2.go) 没有删除方法，唯一的写方法 `PutSent` 先用 `r2.CheckSentKey`
+  核对整个 key 的形状（`sent/` + 四位年 + 两位月 + ULID + `.eml`），不符就在发请求之前拒绝，`raw/` 下的 key 永远到不了 R2
+- 每次写都带 `If-None-Match: *`。R2 的 S3 API 把条件头和写入放在同一步原子判定，并发写同一 key 至多一个成功，
+  其余得到 `412 PreconditionFailed`（[R2 S3 API 兼容性：Conditional operations](https://developers.cloudflare.com/r2/api/s3/api/)）。
+  所以哪怕代码拼错了 key、撞上一个已存在的对象，也只会失败，覆盖不了。412 映射为 `r2.ErrExists`：
+  一次重试的前一次可能已经写成，调用方读回已存对象、比对 sha256 和长度，相同即视为成功，不同就是程序错误
+- 不先查再写：check-then-put 有竞争窗口，条件写是唯一的写法
+
+放弃的是对**凭据泄露**的防护：拿到这把令牌的人可以无条件覆盖或删除 `raw/` 下的原件，条件头只约束守规矩的客户端。
+只读令牌原本对程序错误和凭据泄露都管用，现在只剩前者。可选的加固是 R2 的 bucket lock 规则：
+它按前缀阻止删除和覆盖、不阻止新建；规则属于 bucket 配置，按 Cloudflare 文档要能编辑 bucket 配置的令牌才能设，
+Object 级令牌不含这项权限（[Bucket locks](https://developers.cloudflare.com/r2/buckets/bucket-locks/)，未实测）。
+代价是锁住的对象在保留期内谁也删不掉，所以目前没有作为部署要求。
+
+**什么时候回头把 `sent/` 挪到自己的 bucket**：Go 进程跑在不那么可信的环境里、raw 令牌需要分发给更多进程，
+或者出现了任何一次 `sent/` 之外的写入——那就说明代码这道闸不够，应当回到「Go 对原件只读」由权限保证。
+迁移只是复制对象、加一组配置：`sent/` 前缀原样保留，key 不变。
 
 #### 投递标记
 
@@ -259,7 +287,8 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 ## 3. 八条设计原则
 
 1. **原始 MIME 是邮件内容的唯一事实来源，不可变**
-   `raw/YYYY/MM/<ulid>.eml` 写一次永不改。从内容派生的一切（解析结果、线程、附件索引、
+   `raw/YYYY/MM/<ulid>.eml` 写一次永不改；发出的信同理，交给出口的那份字节就是
+   `sent/YYYY/MM/<ulid>.eml`（Sent 副本，§2.2）。从内容派生的一切（解析结果、线程、附件索引、
    提取值）都能用 `reparse` 一条命令整库重放，解析器出 bug 不等于丢信息。
    但**人和系统做出的决定不是派生物**：标注、改判、前缀登记、规则、授权、
    投递事实与远端卸载状态。它们和派生数据分开存放、`reparse` 不碰、按正经数据库备份（§4.2）。

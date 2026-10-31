@@ -33,7 +33,8 @@
 //	                                    development; deployments give it to migrate alone. See db.go
 //	YUUKA_R2_ENDPOINT                   R2 S3 endpoint, https://<account id>.r2.cloudflarestorage.com (required)
 //	YUUKA_R2_RAW_BUCKET                 raw bucket name (required)
-//	YUUKA_R2_RAW_ACCESS_KEY_ID          read-only token for the raw bucket (required)
+//	YUUKA_R2_RAW_ACCESS_KEY_ID          object read & write token for the raw bucket; it writes only
+//	                                    create-only sent copies under sent/ (§2.2) (required)
 //	YUUKA_R2_RAW_SECRET_ACCESS_KEY
 //	YUUKA_R2_PENDING_BUCKET             pending bucket name (required)
 //	YUUKA_R2_PENDING_ACCESS_KEY_ID      read-write token for the pending bucket (required)

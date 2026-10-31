@@ -23,11 +23,34 @@ type Bucket struct {
 // New returns an empty bucket.
 func New() *Bucket { return &Bucket{objects: map[string]r2.Object{}} }
 
-// Put stores a copy of body under key.
+// Put stores a copy of body under key, replacing what is there. It is a
+// seeding helper for tests, standing in for the Worker; code under test
+// writes through PutSent.
 func (b *Bucket) Put(key string, body []byte, meta map[string]string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.objects[key] = r2.Object{Body: slices.Clone(body), Metadata: maps.Clone(meta)}
+}
+
+// PutSent behaves like r2.RawBucket.PutSent: only keys that pass
+// r2.CheckSentKey, create-only, ErrExists when the key is taken.
+func (b *Bucket) PutSent(_ context.Context, key string, body []byte) error {
+	if err := r2.CheckSentKey(key); err != nil {
+		return err
+	}
+	if len(body) > r2.MaxObjectSize {
+		return fmt.Errorf("put %s: larger than %d bytes", key, r2.MaxObjectSize)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.Err != nil {
+		return b.Err
+	}
+	if _, ok := b.objects[key]; ok {
+		return fmt.Errorf("put %s: %w", key, r2.ErrExists)
+	}
+	b.objects[key] = r2.Object{Body: slices.Clone(body), Metadata: map[string]string{}}
+	return nil
 }
 
 // Has reports whether key exists.
