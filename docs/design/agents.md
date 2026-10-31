@@ -216,6 +216,17 @@ agent 只能撤销自己的 action。标签是 `message_state.labels` 上区分�
 和 JMAP 的 `Email/queryChanges` 用同一套状态机——**人和 agent 共用一套增量同步**，
 不维护两份。agent 断线重连只拉差量。
 
+拉取和推送分两步落地：**M3 先给游标的拉取**（REST 和 MCP 各一个 `list_changes(since_state)`），
+M4 再在同一个游标上加 SSE 推送。M3 就要它，因为提案闭环和 §15 的「模型拿不准的信交给 agent」
+都要求 agent 跟上旧信上的变化（评分晚到、提取重算、改判、规则回溯），
+而按 `received_at` 轮询 `search_messages` 只看得到新到的信。也不做 yuuka 主动回调 agent：
+那是一条要鉴权、重试、登记目标的新外发通道，而无状态 HTTP 的 MCP 客户端本来就要拉。
+
+- 游标就是 `changes.seq`。它能当游标，是因为每个写 `changes` 的事务都先拿内容层那把咨询锁（§4.5），
+  `seq` 因此按提交顺序分配，读者不会在跳过一个尚未提交的号之后前进。新加 `changes` 的写入方必须照做
+- 流里只有 `(seq, kind, target_id)`，不带头部和内容；要看再调读工具。读它走 `Viewer`（§13.8）、进 ACL 测试表：
+  受限主体只看到它看得见的对象的变化
+
 ### 8.7 MCP 面要窄且语义化
 
 MCP server 暴露的不是 REST 的全量投影，而是一把语义化的窄工具：

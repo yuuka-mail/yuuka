@@ -20,7 +20,7 @@
 | §12 | [frontend.md](frontend.md) | 前端选型、邮件渲染两条路径、PWA |
 | §13 | [principals.md](principals.md) | 多主体、凭据、scope、SMTP submission |
 | §14 | [brand.md](brand.md) | 吉祥物、logo、品牌色与美术资源授权 |
-| §15 | [triage.md](triage.md) | 分诊：决策模型判断垃圾、欺诈与分区，判定是观测事实 |
+| §15 | [triage.md](triage.md) | 分诊：决策模型判断垃圾、欺诈与分区，评分是观测事实 |
 
 ## 阅读顺序
 
