@@ -4,31 +4,44 @@
 
 ## 2. 总体架构
 
-```
-          ┌───────────────── Cloudflare ─────────────────┐
-  MX ───► │ Email Routing (catch-all *@example.com)      │
-          │          │                                   │
-          │          ▼                                   │
-          │   Email Worker  (薄，~150 行 TS，不解析)     │
-          │     1. 写 pending/<id> 标记对象              │
-          │     2. raw MIME ──PUT──► R2 raw/YYYY/MM/..   │
-          │     3. HMAC 签名 webhook ──┐                 │
-          │     4.（兜底）直推 TG 一行 │                 │
-          │                            │                 │
-          │   Email Sending (SMTP 465 / API)  ◄───┐      │
-          └────────────────────────────┼──────────┼──────┘
-                                       ▼          │
-          ┌──────── yuuka（Go，常驻，自托管） ────┴──────────────┐
-          │  ingest ──► parse ──► classify ──► notify            │
-          │     │         │          │           └► TG / 其他 IM │
-          │     │         │          └► 规则引擎 / 验证码提取    │
-          │     │         └► go-message                          │
-          │     └► 幂等 + reconcile(定时扫 pending/)             │
-          │  store: Postgres(元数据/索引) + 本地 raw 副本        │
-          │  api:   REST(内部) + JMAP 子集(对外) + MCP           │
-          │  out:   outbox 状态机 ──► CF SMTP                    │
-          │  web:   WebUI (嵌入 Go 二进制)                       │
-          └──────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  sender(["发件方 MTA"])
+
+  subgraph cfin["Cloudflare · 入站"]
+    routing["Email Routing<br/>catch-all *@example.com"]
+    worker["Email Worker<br/>薄：~150 行 TS，不解析"]
+    r2[("R2<br/>pending/ · raw/")]
+    routing --> worker -- "① 标记 ② 原件" --> r2
+  end
+
+  subgraph yuuka["yuuka（Go，常驻，自托管）"]
+    ingest["ingest<br/>幂等 · 重投去重 · reconcile"]
+    parse["parse<br/>go-message"]
+    classify["classify<br/>规则引擎 · 验证码提取"]
+    notify["notify"]
+    store[("Postgres<br/>+ 本地 raw 副本")]
+    api["api<br/>REST · JMAP 子集 · MCP · WebUI"]
+    outbox["outbox 状态机"]
+    ingest --> parse --> classify --> notify
+    parse --> store
+    api <--> store
+    api --> outbox
+  end
+
+  subgraph cfout["Cloudflare · 出站"]
+    sending["Email Sending<br/>SMTP 465"]
+  end
+
+  im["TG / 其他 IM"]
+  rcpt(["收件方"])
+
+  sender -- SMTP --> routing
+  worker -- "③ HMAC webhook" --> ingest
+  r2 -. "取原件 · 扫 pending/" .-> ingest
+  worker -. "④ 兜底：直推一行" .-> im
+  notify --> im
+  outbox -- SMTP --> sending --> rcpt
 ```
 
 **Worker 为什么必须薄**：它是唯一不能用 Go 写的部分，所以把它压到"落盘 + 通知"
@@ -57,6 +70,42 @@ yuuka 对网络只有两个要求：ingest 端点能被 Worker 访问到，WebUI
 
 **Worker 侧的提交点是第 2 步成功。** 之前任何一步失败都抛错，交给 Cloudflare 让发件方重投。
 Worker 必须给自己设截止时间：R2 写入超过 60 秒就放弃并抛错。
+
+完整时序（Worker 侧失败走 421 重投，Go 侧由 webhook 或 reconcile 两条路之一触发）：
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant S as 发件方 MTA
+  participant MX as CF Email Routing
+  participant W as Email Worker
+  participant R2
+  participant Y as yuuka
+
+  S->>MX: MAIL FROM / RCPT TO / DATA
+  MX->>W: email()，每个 RCPT TO 调用一次
+  alt 两次写入都在截止时间内成功
+    W->>R2: PUT pending/#lt;id#gt;（信封 JSON）
+    W->>R2: PUT raw/YYYY/MM/#lt;id#gt;.eml（metadata 带信封）
+    Note over W,R2: Worker 侧提交点
+    W-->>Y: HMAC webhook（尽力而为）
+    W->>MX: 正常返回
+    MX->>S: 250 2.0.0
+  else 任一步失败或超时
+    W--xMX: 抛错
+    MX->>S: 421 4.3.0
+    Note over S: 稍后重投，Worker 换新 id
+  end
+
+  par 秒级
+    Y->>R2: 收到 webhook，GET raw
+  and 兜底
+    Y->>R2: reconcile 定时 LIST pending/
+  end
+  Y->>Y: 事务：raw_objects + deliveries
+  Note over Y: Go 侧提交点<br/>（含重投去重，§4.1）
+  Y->>R2: DELETE pending/#lt;id#gt;
+```
 
 #### 2.1.1 实测：Worker 的结局如何变成 SMTP 应答
 
@@ -146,6 +195,7 @@ Worker 会被调用两次、产生两份 raw，由 §4.1 的折叠合并成一�
 6. **出口是状态机，不是 fire-and-forget**
    `outbox(held → queued → sending → sent | partial | unknown | failed(n) → dead)`，
    结果按收件人逐个记录（`outbox_recipients`），bounce/suppression 回写到收件人这一层。
+   完整的状态转换见 §4.5。
    **只在确定对方没收下时重试**：连接、认证、`RCPT` 阶段失败或 4xx 可以退避重试；
    正文（`DATA`）已经发出但没等到最终回复，就是 `unknown`——不自动重试，
    先用出口的状态查询或退信事件对账，对不上再交给人决定。盲目重试的代价是对方收到两封。

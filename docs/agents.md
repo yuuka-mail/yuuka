@@ -175,6 +175,24 @@ Resource URI 统一 `yuuka://`，让 agent 能把引用直接递给人。
 **超出授权是降级，不是拒绝**：档位不够、超限额、审核没过，一律停在草稿并通知人。
 agent 的工作不会丢，人也不会被一堆报错淹没。
 
+一次提交的去向：
+
+```mermaid
+flowchart TD
+  submit["submit_draft(draft_id)"] --> owner{"身份属于某个 human，<br/>且提交者不是他本人？"}
+  owner -- 是 --> draft["停在草稿<br/>记 hold_reason，通知人"]
+  owner -- 否 --> policy{"send_policy"}
+  policy -- "none / draft" --> draft
+  policy -- "review / auto" --> limits{"限额 · recipient_scope<br/>熔断 · 邮件循环"}
+  limits -- 超出 --> draft
+  limits -- "通过，auto 档" --> queued(["queued"])
+  limits -- "通过，review 档" --> review{"首次联系 · 外泄检查<br/>· 模型审核（可选）"}
+  review -- 任一项升级 --> draft
+  review -- 通过 --> held["held<br/>撤回窗口 + TG 卡片"]
+  held -- 窗口到期 --> queued
+  held -- 人撤回 --> draft
+```
+
 #### 限额与熔断
 
 每条授权带自己的限额（`max_per_hour`、`max_per_day`、`max_new_recipients_per_day`）

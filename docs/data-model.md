@@ -202,6 +202,33 @@ UI 上就是线程里并列的两条，其中一条标「正文未同步」。
 
 `notify` 策略的账户不走这里：它不建 `messages`，只有 `deliveries` 的幂等桩和 `notifications`。
 
+### 4.5 outbox 状态机
+
+`outbox.state` 的全部转换（规则见 §3 原则 6，`held` 的来历见 §8.9）。
+退信和投诉不改变这里的状态，它们落在 `outbox_recipients` 上，逐个收件人记录：
+
+```mermaid
+stateDiagram-v2
+  [*] --> held: review 档
+  [*] --> queued: auto 档 / 人确认发送
+  held --> queued: 审核通过，撤回窗口到期
+  held --> [*]: 撤回 · 升级（回草稿）
+  queued --> sending
+  sending --> sent: 全部收件人收下
+  sending --> partial: 部分收件人被拒
+  sending --> failed: DATA 前失败 · 4xx
+  sending --> unknown: DATA 后无应答
+  failed --> queued: 指数退避重试
+  failed --> dead: 超过重试上限或 5xx
+  partial --> queued: 只对 4xx 的收件人重试
+  partial --> [*]: 余下的都是 5xx
+  unknown --> sent: 对账确认已送出
+  unknown --> queued: 对账确认未送出
+  unknown --> dead: 对不上账，人决定放弃
+  sent --> [*]
+  dead --> [*]
+```
+
 ---
 
 ---
