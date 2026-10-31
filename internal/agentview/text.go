@@ -65,7 +65,7 @@ func (v View) content() string {
 		fmt.Fprintf(&b, "Snippet: %s\n", c.Snippet)
 	}
 	for _, a := range c.Attachments {
-		fmt.Fprintf(&b, "Attachment: part/%s %s (%s)\n", a.Section, a.Filename, a.MediaType)
+		fmt.Fprintf(&b, "Attachment: %s (%s, MIME section %s; not readable here)\n", a.Filename, a.MediaType, a.Section)
 	}
 	if len(c.Sections) > 0 {
 		b.WriteString("Sections:\n")
