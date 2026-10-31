@@ -1,0 +1,47 @@
+{
+  "trusted": true,
+  "authserv_id": "mx.cloudflare.net",
+  "dmarc": "fail",
+  "results": [
+    {
+      "method": "dkim",
+      "result": "pass",
+      "props": {
+        "header.b": "DDDD",
+        "header.d": "example.org",
+        "header.s": "s1"
+      }
+    },
+    {
+      "method": "dmarc",
+      "result": "fail",
+      "props": {
+        "header.from": "example.org",
+        "policy.dmarc": "none"
+      }
+    },
+    {
+      "method": "spf",
+      "result": "none",
+      "props": {
+        "smtp.helo": "mail.example.net"
+      }
+    },
+    {
+      "method": "spf",
+      "result": "pass",
+      "props": {
+        "smtp.mailfrom": "x@spam.example"
+      }
+    },
+    {
+      "method": "arc",
+      "result": "none",
+      "props": {
+        "smtp.remote-ip": "192.0.2.10"
+      }
+    }
+  ],
+  "remote_ip": "192.0.2.10",
+  "cf_spamh_score": "0"
+}

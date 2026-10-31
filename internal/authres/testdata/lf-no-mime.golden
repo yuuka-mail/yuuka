@@ -1,0 +1,30 @@
+{
+  "trusted": true,
+  "authserv_id": "mx.cloudflare.net",
+  "dmarc": "none",
+  "results": [
+    {
+      "method": "dmarc",
+      "result": "none",
+      "props": {
+        "header.from": "example.net"
+      }
+    },
+    {
+      "method": "spf",
+      "result": "softfail",
+      "props": {
+        "smtp.mailfrom": "cron@example.net"
+      }
+    },
+    {
+      "method": "arc",
+      "result": "none",
+      "props": {
+        "smtp.remote-ip": "192.0.2.30"
+      }
+    }
+  ],
+  "remote_ip": "192.0.2.30",
+  "cf_spamh_score": "3"
+}

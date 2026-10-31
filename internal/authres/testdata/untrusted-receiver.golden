@@ -1,0 +1,4 @@
+{
+  "trusted": false,
+  "reason": "topmost Authentication-Results is not from the trusted receiver"
+}
