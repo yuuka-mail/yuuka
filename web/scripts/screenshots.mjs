@@ -539,6 +539,18 @@ if (enrollURL) {
         await s.goto(base + "/?area=leaks");
         await s.locator("section h1").first().waitFor();
         await shot(s, `area-leaks-${tag}`);
+        // The verdicts and their warnings, said by the UI in its own language.
+        if (flagged) {
+          await s.goto(base + `/?prefix=${encodeURIComponent(flagged)}`);
+          await s.getByRole("list", { name: t.leak_offending_label }).waitFor();
+          await shot(s, `prefix-leaks-${tag}`);
+          for (const [verdict, id] of Object.entries(offending)) {
+            if (!id) continue;
+            await s.goto(base + `/?prefix=${encodeURIComponent(flagged)}&m=${id}`);
+            await s.getByRole("article").getByText(t.facts_prefix, { exact: true }).waitFor();
+            await shot(s, `reading-${verdict}-${tag}`);
+          }
+        }
         await s.goto(base + "/?area=proposals");
         await s.locator("section h1").first().waitFor();
         await shot(s, `area-proposals-${tag}`);

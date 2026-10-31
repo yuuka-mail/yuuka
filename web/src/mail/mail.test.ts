@@ -41,23 +41,62 @@ describe("link targets", () => {
 });
 
 describe("facts", () => {
-  it("splits warnings at their keyword", () => {
-    const w = warnings({
-      warnings: ["dmarc=fail: the From address is probably forged", "downgraded: treat as suspect"],
+  const received = { downgraded: false, quarantined: false } as Message;
+  const passed = { verified: true, dmarc: "pass", line: "" };
+  it("says the warnings from the facts, not from the view's English", () => {
+    const w = warnings(received, {
+      auth: { verified: true, dmarc: "fail", line: "" },
+      downgraded: true,
+      stripped: {},
+      warnings: ["dmarc=fail: the server's words", "downgraded: the server's words"],
     } as View["facts"]);
     expect(w).toEqual([
       { key: "dmarc=fail", text: "the From address is probably forged", tone: "bad" },
-      { key: "downgraded", text: "treat as suspect", tone: "warn" },
+      { key: "downgraded", text: "treat as suspect; hidden from default lists", tone: "warn" },
     ]);
+    // A keyword the UI has no sentence for shows as the server wrote it.
+    expect(
+      warnings(received, {
+        auth: passed,
+        stripped: {},
+        warnings: ["newthing: something to know"],
+      } as View["facts"]),
+    ).toEqual([{ key: "newthing", text: "something to know", tone: "warn" }]);
+    expect(
+      warnings({ ...received, quarantined: true }, {
+        auth: { withheld: true, line: "" },
+        stripped: {},
+      } as View["facts"]).map((x) => x.key),
+    ).toEqual(["quarantined"]);
   });
   it("treats a spoof as an error and a leak as a caution", () => {
-    const w = warnings({
-      warnings: [
-        "spoof: claims to be example.net",
-        "leak: a@example.com was not given to example.org",
+    const w = warnings(received, {
+      auth: passed,
+      stripped: {},
+      leak_checks: [
+        { to: "a@example.com", verdict: "spoof", domain: "example.net" },
+        { to: "b@example.com", verdict: "leak", domain: "example.org" },
+        { to: "c@example.com", verdict: "leak" },
+        { to: "d@example.com", verdict: "ok", domain: "example.org" },
       ],
     } as View["facts"]);
-    expect(w.map((x) => x.tone)).toEqual(["bad", "warn"]);
+    expect(w).toEqual([
+      {
+        key: "spoof",
+        text: "claims to be example.net, whom a@example.com was given to, but DMARC did not prove it",
+        tone: "bad",
+      },
+      {
+        key: "leak",
+        text: "b@example.com was not given to example.org, which sent this",
+        tone: "warn",
+      },
+      {
+        key: "leak",
+        text: "c@example.com was not given to this sender, who is unproven",
+        tone: "warn",
+      },
+    ]);
     expect(leakParts({ to: "a@example.com", verdict: "leak" }).map((p) => p.text)).toEqual([
       "a@example.com",
       "leak",
@@ -77,7 +116,10 @@ describe("facts", () => {
     expect(isQuiet(m, { ...f, auth: { ...auth, verified: false, dmarc: undefined } })).toBe(false);
     expect(isQuiet(m, { ...f, auth: { ...auth, dmarc: "none" } })).toBe(false);
     expect(isQuiet(m, { ...f, auth: { ...auth, withheld: true } })).toBe(false);
-    expect(isQuiet(m, { ...f, warnings: ["unverified: no trusted receiver"] })).toBe(false);
+    expect(isQuiet(m, { ...f, warnings: ["newthing: something to know"] })).toBe(false);
+    expect(isQuiet(m, { ...f, leak_checks: [{ to: "a@example.com", verdict: "leak" }] })).toBe(
+      false,
+    );
     expect(isQuiet({ ...m, quarantined: true }, f)).toBe(false);
   });
   it("counts what was left out", () => {

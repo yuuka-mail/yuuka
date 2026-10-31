@@ -337,7 +337,7 @@ function SystemFacts({
       </button>
     );
   }
-  const warns = warnings(facts);
+  const warns = warnings(m, facts);
   // Quiet facts opened by hand can fold back into their line.
   const fold = isQuiet(m, facts) ? (
     <button

@@ -53,6 +53,13 @@ function authParts(a: Auth): Part[] {
 
 const verdictTone: Record<LeakVerdict, Tone> = { ok: "ok", leak: "warn", spoof: "bad" };
 
+/** A leak check's verdict in words (§3.3): "leak", "泄漏". */
+export function verdictLabel(v: LeakVerdict): string {
+  return { ok: msg.facts_verdict_ok, leak: msg.facts_verdict_leak, spoof: msg.facts_verdict_spoof }[
+    v
+  ]();
+}
+
 /** One delivery's leak check (§3.3), e.g. "github@example.com" "leak" "from example.org". */
 export function leakParts(c: LeakCheck): Part[] {
   const about =
@@ -63,7 +70,7 @@ export function leakParts(c: LeakCheck): Part[] {
         : msg.facts_leak_unproven();
   return [
     { text: c.to, tone: "plain" },
-    { text: c.verdict, tone: verdictTone[c.verdict] },
+    { text: verdictLabel(c.verdict), tone: verdictTone[c.verdict] },
     { text: about, tone: "plain" },
   ];
 }
@@ -101,26 +108,79 @@ export function systemFacts(m: Message, f: Facts | undefined): Fact[] {
 }
 
 export interface Warning {
-  /** The fixed keyword the view starts the warning with, e.g. dmarc=fail. */
+  /** What it is about in a word or two: "dmarc=fail", "leak". */
   key: string;
   text: string;
   tone: "bad" | "warn";
 }
 
 /**
- * The view's warnings, split at their keyword. A forged sender and a
- * broken parse are errors; an unproven sender, a leaked address or a
- * downgrade are cautions.
+ * What to be careful of, said by the UI from the facts it is about, as
+ * the view's warnings say it for agents (§8.1). The view's own sentences
+ * are English for agents; they show only for a keyword this list does not
+ * know yet, and then as the server wrote them (§12.11). A forged sender,
+ * a spoof and a broken parse are errors; an unproven sender, a leaked
+ * address and a downgrade are cautions.
  */
-export function warnings(f: Facts | undefined): Warning[] {
-  return (f?.warnings ?? []).map((w) => {
+export function warnings(m: Message, f: Facts | undefined): Warning[] {
+  if (!f) return [];
+  const out: Warning[] = [];
+  const a = f.auth;
+  if (!a.withheld && !a.not_received) {
+    if (!a.verified)
+      out.push({
+        key: msg.facts_warn_unverified(),
+        text: msg.facts_warn_unverified_text(),
+        tone: "warn",
+      });
+    else if (a.dmarc === "fail")
+      out.push({ key: "dmarc=fail", text: msg.facts_warn_forged(), tone: "bad" });
+  }
+  for (const c of f.leak_checks ?? []) {
+    if (c.verdict === "spoof")
+      out.push({
+        key: verdictLabel("spoof"),
+        text: msg.facts_warn_spoof({ to: c.to, domain: c.domain ?? "" }),
+        tone: "bad",
+      });
+    else if (c.verdict === "leak")
+      out.push({
+        key: verdictLabel("leak"),
+        text: c.domain
+          ? msg.facts_warn_leak({ to: c.to, domain: c.domain })
+          : msg.facts_warn_leak_unproven({ to: c.to }),
+        tone: "warn",
+      });
+  }
+  if (f.downgraded)
+    out.push({
+      key: msg.facts_warn_downgraded(),
+      text: msg.facts_warn_downgraded_text(),
+      tone: "warn",
+    });
+  if (m.quarantined)
+    out.push({
+      key: msg.facts_warn_quarantined(),
+      text: msg.facts_warn_quarantined_text(),
+      tone: "bad",
+    });
+  for (const w of f.warnings ?? []) {
     const i = w.indexOf(": ");
     const key = i > 0 ? w.slice(0, i) : w;
-    return { key, text: i > 0 ? w.slice(i + 2) : "", tone: badWarnings.has(key) ? "bad" : "warn" };
-  });
+    if (!saidAbove.has(key)) out.push({ key, text: i > 0 ? w.slice(i + 2) : "", tone: "warn" });
+  }
+  return out;
 }
 
-const badWarnings = new Set(["dmarc=fail", "quarantined", "spoof"]);
+// The keywords of the view's warnings that warnings() says itself.
+const saidAbove = new Set([
+  "unverified",
+  "dmarc=fail",
+  "spoof",
+  "leak",
+  "downgraded",
+  "quarantined",
+]);
 
 /**
  * Whether the facts say nothing to act on: the trusted receiver passed
@@ -135,7 +195,7 @@ export function isQuiet(m: Message, f: Facts | undefined): boolean {
     m.quarantined ||
     m.downgraded ||
     f.downgraded ||
-    warnings(f).length > 0
+    warnings(m, f).length > 0
   )
     return false;
   // Mail we sent and nobody delivered back: quiet while its outbox state

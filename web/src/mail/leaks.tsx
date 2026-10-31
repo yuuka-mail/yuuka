@@ -10,6 +10,7 @@ import { count, listTime, sender } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages.js";
 
+import { verdictLabel } from "./facts";
 import { ClaimButton, CountedAsNotes, ExpectEditor, UnclaimButton } from "./prefix-actions";
 
 // The leak check of §3.3 as yuuka states it: which claimed prefixes got
@@ -279,7 +280,7 @@ function Offenses({
                 o.verdict === "spoof" ? "text-destructive" : "text-warning",
               )}
             >
-              {o.verdict}
+              {verdictLabel(o.verdict)}
             </span>
             <span className="w-24 shrink-0 truncate text-muted-foreground">
               {o.domain ?? m.leak_unproven()}
