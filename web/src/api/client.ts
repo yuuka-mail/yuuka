@@ -11,10 +11,13 @@ import type { Problem } from "./types";
 export class ApiError extends Error {
   readonly status: number;
   readonly code?: Problem["code"];
-  constructor(status: number, message: string, code?: Problem["code"]) {
+  /** Where in the request body it went wrong, e.g. match.all[1].value (invalid_rule). */
+  readonly path?: string;
+  constructor(status: number, message: string, code?: Problem["code"], path?: string) {
     super(message);
     this.status = status;
     this.code = code;
+    this.path = path;
   }
 }
 
@@ -40,7 +43,7 @@ api.use({
     } catch {
       p = undefined;
     }
-    throw new ApiError(response.status, p?.detail ?? p?.title ?? response.statusText, p?.code);
+    throw new ApiError(response.status, p?.detail ?? p?.title ?? response.statusText, p?.code, p?.path);
   },
 });
 

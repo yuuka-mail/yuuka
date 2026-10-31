@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDownIcon, LogOutIcon } from "lucide-react";
+import { ChevronDownIcon, LogOutIcon, SettingsIcon } from "lucide-react";
 
 import { api } from "@/api/client";
 import { keys } from "@/api/queries";
@@ -23,11 +23,12 @@ import { getLocale, locales, setLocale, type Locale } from "@/paraglide/runtime.
 const autonyms: Record<Locale, string> = { en: "English", zh: "中文" };
 
 /**
- * The top bar's account menu: who is signed in, the UI language (kept in
- * this browser, §12.11) and signing out. Changing the language reloads
- * the page; a draft being written is saved as it is typed (§12.10).
+ * The top bar's account menu: who is signed in, the settings page
+ * (§12.12), the UI language (kept in this browser, §12.11) and signing
+ * out. Changing the language reloads the page; a draft being written is
+ * saved as it is typed (§12.10).
  */
-export function AccountMenu({ session, className, children }: { session: SessionInfo; className?: string; children?: React.ReactNode }) {
+export function AccountMenu({ session, className, onSettings }: { session: SessionInfo; className?: string; onSettings?: () => void }) {
   const qc = useQueryClient();
   return (
     <DropdownMenu>
@@ -45,7 +46,12 @@ export function AccountMenu({ session, className, children }: { session: Session
         <DropdownMenuGroup>
           <DropdownMenuLabel className="truncate font-mono">{session.principal}</DropdownMenuLabel>
         </DropdownMenuGroup>
-        {children}
+        {onSettings && (
+          <DropdownMenuItem onClick={onSettings}>
+            <SettingsIcon aria-hidden />
+            {m.account_settings()}
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuLabel>{m.account_language()}</DropdownMenuLabel>

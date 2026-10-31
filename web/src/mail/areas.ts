@@ -11,8 +11,12 @@ export function areaTitle(a: Area): string {
       return m.area_notifications();
     case "all":
       return m.area_all();
+    case "archived":
+      return m.area_archived();
     case "drafts":
       return m.area_drafts();
+    case "proposals":
+      return m.area_proposals();
     case "outbox":
       return m.area_outbox();
     case "downgraded":

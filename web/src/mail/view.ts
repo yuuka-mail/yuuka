@@ -11,6 +11,8 @@ export interface View {
   area: Area;
   /** prefix@zone: that prefix's mail, whatever its class. */
   prefix?: string;
+  /** A label: the mail carrying it, archived or not (§8.5). */
+  label?: string;
   /** All mail and search: include downgraded mail too. */
   dg: boolean;
   /** Search text; when set, the list shows search hits. */
@@ -32,7 +34,20 @@ export interface View {
   o?: string;
   /** The filter of the drafts or outbox list, in that list's terms. */
   st?: string;
+  /** A proposal picked in the proposals list (§8.5); its mail is m. */
+  p?: string;
+  /**
+   * The settings page and its section (§12.12), entered from the account
+   * menu: the one page that does not follow a message.
+   */
+  settings?: SettingsSection;
+  /** The rule open in the settings page. */
+  rule?: string;
 }
+
+/** The sections of the settings page; credentials, identities and grants join later (§13.10). */
+export type SettingsSection = "rules";
+export const settingsSections: readonly SettingsSection[] = ["rules"];
 
 /**
  * The sidebar's entries (§12.9). Conversations and notifications are the
@@ -40,10 +55,12 @@ export interface View {
  * writes and sends (§12.10); downgraded, unclaimed and leaks are the
  * review group, where the mail and prefixes the zones hide can still be
  * found, and the claimed prefixes whose mail leaked or was spoofed (§3.3).
+ * Archived mail is out of the zones but kept (§8.5); proposals are what
+ * agents suggest and only a person decides.
  */
-export type Area = "conversations" | "notifications" | "all" | "drafts" | "outbox" | "downgraded" | "unclaimed" | "leaks";
+export type Area = "conversations" | "notifications" | "all" | "archived" | "drafts" | "outbox" | "proposals" | "downgraded" | "unclaimed" | "leaks";
 
-export const areas: readonly Area[] = ["conversations", "notifications", "all", "drafts", "outbox", "downgraded", "unclaimed", "leaks"];
+export const areas: readonly Area[] = ["conversations", "notifications", "all", "archived", "drafts", "outbox", "proposals", "downgraded", "unclaimed", "leaks"];
 
 // The anchor grammar of §8.1, without yuuka://message/<id>#.
 const anchorPattern = /^part\/[1-9][0-9]*(\.[1-9][0-9]*)*(\/para\/[1-9][0-9]*)?$/;
@@ -52,9 +69,11 @@ export function parseView(search: URLSearchParams): View {
   const area = search.get("area") as Area | null;
   const m = search.get("m") || undefined;
   const a = search.get("a") ?? "";
+  const settings = search.get("settings") as SettingsSection | null;
   return {
     area: area && areas.includes(area) ? area : "conversations",
     prefix: search.get("prefix") || undefined,
+    label: search.get("label") || undefined,
     dg: search.get("dg") === "include",
     q: search.get("q")?.trim() || undefined,
     m,
@@ -64,6 +83,9 @@ export function parseView(search: URLSearchParams): View {
     reply: search.get("reply") || undefined,
     o: search.get("o") || undefined,
     st: search.get("st") || undefined,
+    p: search.get("p") || undefined,
+    settings: settings && settingsSections.includes(settings) ? settings : undefined,
+    rule: (settings && search.get("rule")) || undefined,
   };
 }
 
@@ -71,6 +93,7 @@ export function viewHref(v: View): string {
   const p = new URLSearchParams();
   if (v.area !== "conversations") p.set("area", v.area);
   if (v.prefix) p.set("prefix", v.prefix);
+  if (v.label) p.set("label", v.label);
   if (v.dg) p.set("dg", "include");
   if (v.q) p.set("q", v.q);
   if (v.m) p.set("m", v.m);
@@ -81,6 +104,9 @@ export function viewHref(v: View): string {
   else if (v.compose) p.set("compose", "1");
   if (v.o) p.set("o", v.o);
   if (v.st) p.set("st", v.st);
+  if (v.p) p.set("p", v.p);
+  if (v.settings) p.set("settings", v.settings);
+  if (v.settings && v.rule) p.set("rule", v.rule);
   const s = p.toString();
   return s ? `/?${s}` : "/";
 }
@@ -94,20 +120,28 @@ export function viewHref(v: View): string {
  * Opening one prefix means wanting all of its mail: a discovered prefix
  * has nothing but downgraded mail, and a hidden DMARC failure inside a
  * claimed one is exactly what to look at.
+ *
+ * Archived mail leaves the two zones and nothing else (§8.5): all mail,
+ * a prefix, a label and search still have it. A label lists everything
+ * carrying it, as its count in the sidebar does.
  */
 export function listParams(v: View): MessageListQuery | undefined {
   if (v.prefix) return { prefix: v.prefix, downgraded: "include" };
+  if (v.label) return { label: v.label, downgraded: "include" };
   switch (v.area) {
     case "conversations":
-      return { class: ["human", "unknown"], downgraded: "hide" };
+      return { class: ["human", "unknown"], downgraded: "hide", archived: false };
     case "notifications":
-      return { class: ["machine"], downgraded: "hide" };
+      return { class: ["machine"], downgraded: "hide", archived: false };
     case "all":
       return { downgraded: v.dg ? "include" : "hide" };
+    case "archived":
+      return { archived: true, downgraded: "hide" };
     case "downgraded":
       return { downgraded: "only" };
     case "drafts":
     case "outbox":
+    case "proposals":
     case "unclaimed":
     case "leaks":
       return undefined;
@@ -121,7 +155,7 @@ export function composing(v: View): boolean {
 
 /** Whether the main column shows something, which on a phone hides the list. */
 export function mainOpen(v: View): boolean {
-  return composing(v) || !!v.o || !!v.m;
+  return composing(v) || !!v.o || !!v.m || !!v.p;
 }
 
 /** What closing the composer changes: back to whatever it opened over. */
@@ -132,7 +166,7 @@ export const closeComposer: Partial<View> = { d: undefined, reply: undefined, co
  * says so; undefined for the zones, which it does not count by class.
  */
 export function knownTotal(v: View, ps: PrefixList | undefined): number | undefined {
-  if (!ps || v.q) return undefined;
+  if (!ps || v.q || v.label) return undefined;
   if (v.prefix) return ps.prefixes.find((p) => p.address === v.prefix)?.messages;
   if (v.area === "downgraded") return ps.downgraded;
   if (v.area === "all") return v.dg ? ps.messages : ps.messages - ps.downgraded;

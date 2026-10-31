@@ -76,13 +76,25 @@ describe("view state", () => {
     expect(viewHref({ ...home, a: "part/1" })).toBe("/");
   });
   it("puts unknown mail with conversations", () => {
-    expect(listParams(home)).toEqual({ class: ["human", "unknown"], downgraded: "hide" });
-    expect(listParams({ ...home, area: "notifications" })).toEqual({ class: ["machine"], downgraded: "hide" });
+    expect(listParams(home)).toEqual({ class: ["human", "unknown"], downgraded: "hide", archived: false });
+    expect(listParams({ ...home, area: "notifications" })).toEqual({ class: ["machine"], downgraded: "hide", archived: false });
     expect(listParams({ ...home, area: "downgraded" })).toEqual({ downgraded: "only" });
     expect(listParams({ ...home, area: "unclaimed" })).toBeUndefined();
   });
   it("shows all of a prefix's mail", () => {
     expect(listParams({ ...home, area: "notifications", prefix: "k3x9q@example.com" })).toEqual({ prefix: "k3x9q@example.com", downgraded: "include" });
+  });
+  it("keeps archived mail out of the zones only", () => {
+    expect(listParams({ ...home, area: "archived" })).toEqual({ archived: true, downgraded: "hide" });
+    expect(listParams({ ...home, area: "all" })).toEqual({ downgraded: "hide" });
+    expect(listParams({ ...home, label: "aws" })).toEqual({ label: "aws", downgraded: "include" });
+    expect(listParams({ ...home, area: "proposals" })).toBeUndefined();
+  });
+  it("round-trips labels, proposals and settings", () => {
+    const v = { ...home, label: "AWS", p: "01P", settings: "rules" as const, rule: "01R" };
+    expect(parseView(new URL(viewHref(v), "http://x").searchParams)).toEqual(v);
+    expect(parseView(new URLSearchParams("rule=01R")).rule).toBeUndefined();
+    expect(parseView(new URLSearchParams("settings=root")).settings).toBeUndefined();
   });
 });
 

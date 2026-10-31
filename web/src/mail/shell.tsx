@@ -19,12 +19,15 @@ import { OutboxList, parseOutboxFilter } from "@/send/outbox-list";
 import { OutboxPane } from "@/send/outbox-pane";
 import { abilities, outboxFilters, type OutboxFilter } from "@/send/outgoing";
 
+import { SettingsPage } from "@/settings/settings-page";
+
 import { AccountMenu } from "./account-menu";
 import { areaTitle } from "./areas";
 
 import { LeakList, PrefixFacts, useFlaggedCount } from "./leaks";
 import { MessageList } from "./message-list";
 import { PrefixPane } from "./prefix-pane";
+import { ProposalList, StandaloneProposal } from "./proposals";
 import { ReadingPane } from "./reading-pane";
 import { UnclaimedList } from "./unclaimed-list";
 import { closeComposer, composing, knownTotal, mainOpen, parseView, viewHref, type Area, type View } from "./view";
@@ -59,7 +62,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
   // so Back from it lands where it was picked.
   const pick = (next: Partial<View>) => {
     setShowPrefixes(false);
-    go({ q: undefined, m: undefined, prefix: undefined, dg: false, o: undefined, st: undefined, ...closeComposer, ...next });
+    go({ q: undefined, m: undefined, prefix: undefined, label: undefined, dg: false, o: undefined, st: undefined, p: undefined, ...closeComposer, ...next });
   };
   const compose = (next: Partial<View>) => go({ ...closeComposer, o: undefined, ...next });
   const startNew = () => {
@@ -68,16 +71,17 @@ export function MailShell({ session }: { session: SessionInfo }) {
   };
 
   const searching = !!view.q;
-  const browsing = !searching && !view.prefix;
+  const browsing = !searching && !view.prefix && !view.label;
   const unclaimed = browsing && view.area === "unclaimed";
   const leaks = browsing && view.area === "leaks";
   const drafts = browsing && view.area === "drafts";
   const outbox = browsing && view.area === "outbox";
+  const proposals = browsing && view.area === "proposals";
   const messages = useMessageList(view, !searching);
   const hits = useSearchList(view.q ?? "", view.dg, searching);
   const list = searching ? hits : messages;
 
-  useKeys(drafts || outbox || unclaimed || leaks ? noList : list, view, go, searchBox, can.compose ? startNew : undefined);
+  useKeys(drafts || outbox || unclaimed || leaks || proposals ? noList : list, view, go, searchBox, can.compose ? startNew : undefined);
 
   return (
     <div className="flex h-full flex-col">
@@ -93,9 +97,12 @@ export function MailShell({ session }: { session: SessionInfo }) {
             <span className="max-sm:sr-only">{msg.shell_compose()}</span>
           </Button>
         )}
-        <AccountMenu session={session} className="ml-auto" />
+        <AccountMenu session={session} className="ml-auto" onSettings={can.rules ? () => go({ settings: "rules", rule: undefined }) : undefined} />
       </header>
 
+      {view.settings ? (
+        <SettingsPage view={view} can={can} go={go} onOpenMessage={(m) => go({ settings: undefined, rule: undefined, m })} />
+      ) : (
       <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[22rem_1fr] lg:grid-cols-[13.5rem_24rem_1fr]">
         <aside className="hidden min-h-0 flex-col border-r bg-sidebar lg:flex">
           <PrefixPane view={view} can={can} onPick={pick} />
@@ -117,6 +124,8 @@ export function MailShell({ session }: { session: SessionInfo }) {
               <DraftsList session={session} states={parseDraftFilter(view.st)} selected={view.d} onSelect={(d) => compose({ d, m: undefined })} />
             ) : outbox ? (
               <OutboxList filter={parseOutboxFilter(view.st)} selected={view.o} onSelect={(o) => go({ ...closeComposer, o, m: undefined }, true)} />
+            ) : proposals ? (
+              <ProposalList selected={view.p} onPick={(p) => go({ ...closeComposer, o: undefined, p: p.id, m: p.message_id, a: undefined }, true)} />
             ) : (
               <MessageList list={list} selected={view.m} markNotifications={searching} onSelect={(m) => go({ m }, true)} />
             )}
@@ -155,10 +164,15 @@ export function MailShell({ session }: { session: SessionInfo }) {
               anchor={view.a}
               onAnchor={(a) => go({ a }, true)}
               onBack={() => go({ m: undefined }, true)}
-              onOpen={(m) => go({ m }, true)}
+              onOpen={(m, a) => go({ m, a }, true)}
               onReply={can.compose ? () => compose({ reply: view.m }) : undefined}
               onOpenOutbox={can.outbox ? (o) => go({ area: "outbox", prefix: undefined, q: undefined, m: undefined, st: undefined, o }) : undefined}
+              can={can}
+              proposal={view.p}
+              onOpenRule={(rule) => go({ settings: "rules", rule })}
             />
+          ) : view.p ? (
+            <StandaloneProposal key={view.p} id={view.p} can={can} onBack={() => go({ p: undefined }, true)} onOpen={(m, a) => go({ m, a })} />
           ) : (
             <div className="m-auto text-center text-small text-muted-foreground">
               {unclaimed || leaks ? (
@@ -167,6 +181,8 @@ export function MailShell({ session }: { session: SessionInfo }) {
                 <p>{msg.shell_no_draft_open()}</p>
               ) : outbox ? (
                 <p>{msg.shell_pick_outbox_row()}</p>
+              ) : proposals ? (
+                <p>{msg.shell_pick_proposal()}</p>
               ) : (
                 <>
                   <p>{msg.shell_no_message()}</p>
@@ -179,6 +195,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
           )}
         </main>
       </div>
+      )}
     </div>
   );
 }
@@ -207,8 +224,8 @@ function ListHeader({
   go: (next: Partial<View>, replace?: boolean) => void;
   pick: (next: Partial<View>) => void;
 }) {
-  const browsing = !view.q && !view.prefix;
-  const title = view.q ? msg.shell_search_title({ q: view.q }) : view.prefix ? view.prefix : areaTitle(view.area);
+  const browsing = !view.q && !view.prefix && !view.label;
+  const title = view.q ? msg.shell_search_title({ q: view.q }) : view.prefix ? view.prefix : view.label ? msg.shell_label_title({ label: view.label }) : areaTitle(view.area);
   const prefixes = usePrefixes();
   const unclaimed = useUnclaimedPrefixes(browsing && view.area === "unclaimed");
   const flagged = useFlaggedCount();
@@ -228,7 +245,7 @@ function ListHeader({
   // in for the title it would repeat.
   const zone = browsing && (view.area === "conversations" || view.area === "notifications");
   // Drafts and the outbox are not mail lists: their own lists, own filters.
-  const sending = browsing && (view.area === "drafts" || view.area === "outbox");
+  const sending = browsing && (view.area === "drafts" || view.area === "outbox" || view.area === "proposals");
   return (
     <div className="flex shrink-0 flex-col gap-1.5 border-b px-3 py-2">
       <div className="flex items-baseline gap-2">

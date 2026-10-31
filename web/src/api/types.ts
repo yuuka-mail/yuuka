@@ -62,6 +62,33 @@ export type RecipientState = S["RecipientState"];
 export type Resolution = S["Resolution"];
 export type Sent = S["Sent"];
 
+// Annotations, rules and proposals (M3, §8.5). A rule's match is typed by
+// hand in rules/match.ts: the contract says only "object" because the
+// tree is recursive.
+export type Annotation = S["Annotation"];
+export type AnnotateKind = S["AnnotateKind"];
+export type AnnotateOutcome = S["AnnotateOutcome"];
+export type AnnotationOutcome = S["AnnotationOutcome"];
+export type AnnotateResult = S["AnnotateResult"];
+export type MessageOutcomes = S["MessageOutcomes"];
+export type AnnotationEntry = S["AnnotationEntry"];
+export type WriterRank = S["WriterRank"];
+export type UndoResult = S["UndoResult"];
+export type LabelCount = S["LabelCount"];
+export type RuleAction = S["RuleAction"];
+export type RuleBody = S["RuleBody"];
+export type Rule = S["Rule"];
+export type SavedRule = S["SavedRule"];
+export type RuleWarning = S["RuleWarning"];
+export type RuleDraft = S["RuleDraft"];
+export type RuleCandidate = S["RuleCandidate"];
+export type RulePreview = S["RulePreview"];
+export type RetroStats = S["RetroStats"];
+export type RevertStats = S["RevertStats"];
+export type Proposal = S["Proposal"];
+export type ProposalState = S["ProposalState"];
+export type AcceptResult = S["AcceptResult"];
+
 // /auth/
 export type SessionInfo = S["SessionInfo"];
 export type RegisterBegin = S["RegisterBegin"];

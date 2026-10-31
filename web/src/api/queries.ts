@@ -1,10 +1,13 @@
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, type QueryClient } from "@tanstack/react-query";
 
 import { listParams, type View } from "@/mail/view";
 import { outboxMoves } from "@/send/outgoing";
 
 import { $api, api, isUnauthenticated } from "./client";
+import type { paths } from "./schema.gen";
 import type { Draft, DraftState, MessageSummary, OutboxEntry, OutboxState, Prefix } from "./types";
+
+type PreviewBody = paths["/api/v1/rules/preview"]["post"]["requestBody"]["content"]["application/json"];
 
 export const keys = {
   /** The key of useSession, which a 401 anywhere sets to null. */
@@ -206,6 +209,55 @@ export function useOutboxEntry(id: string | undefined, enabled = true) {
       refetchInterval: (q) => (q.state.data && outboxMoves(q.state.data) ? 3_000 : false),
     },
   );
+}
+
+// Annotations, rules and proposals (§8.5).
+
+/**
+ * After an annotation, undo, rule run or decision: everything that shows
+ * labels, archived or class, or the proposals, is stale.
+ */
+export function invalidateAnnotated(qc: QueryClient) {
+  const stale = ["/api/v1/messages", "/api/v1/search", "/api/v1/threads", "/api/v1/labels", "/api/v1/proposals", "/api/v1/rules"];
+  void qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[1] === "string" && stale.some((p) => (q.queryKey[1] as string).startsWith(p)) });
+}
+
+/** The labels in use, by name, with how many visible messages carry each. */
+export function useLabels(enabled = true) {
+  return $api.useQuery("get", "/api/v1/labels", {}, { staleTime: 30_000, enabled });
+}
+
+/** Where a message's labels, class and archived state came from, oldest first. */
+export function useAnnotations(id: string, enabled = true) {
+  return $api.useQuery("get", "/api/v1/messages/{id}/annotations", { params: { path: { id } } }, { enabled });
+}
+
+type ProposalQuery = NonNullable<paths["/api/v1/proposals"]["get"]["parameters"]["query"]>;
+
+export function useProposals(query: ProposalQuery, enabled = true) {
+  return $api.useQuery("get", "/api/v1/proposals", { params: { query: { limit: 100, ...query } } }, { staleTime: 15_000, enabled });
+}
+
+export function useRules(deleted: boolean, enabled = true) {
+  return $api.useQuery("get", "/api/v1/rules", { params: { query: { deleted } } }, { enabled });
+}
+
+export function useRule(id: string | undefined) {
+  return $api.useQuery("get", "/api/v1/rules/{id}", { params: { path: { id: id ?? "" } } }, { enabled: !!id });
+}
+
+/** "Mail like this" from message id: the conditions on offer and their counts. */
+export function useRuleDraft(id: string, enabled = true) {
+  return $api.useQuery("post", "/api/v1/rules/draft", { body: { message_id: id } }, { enabled, staleTime: 60_000 });
+}
+
+/**
+ * What a rule would do to the mail the viewer can see: the evaluator
+ * arriving mail runs, read only, the computation of `yuuka rule apply
+ * --dry-run`. Undefined body: nothing to try yet.
+ */
+export function useRulePreview(body: PreviewBody | undefined) {
+  return $api.useQuery("post", "/api/v1/rules/preview", { body: body ?? { match: {}, actions: [] } }, { enabled: !!body, placeholderData: keepPreviousData, staleTime: 30_000 });
 }
 
 export function useThread(id: string | undefined) {

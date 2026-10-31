@@ -69,9 +69,15 @@ describe("outbox states", () => {
 describe("abilities", () => {
   it("offers resolving unknown delivery to a person with submission:send only", () => {
     const s = { principal: "human:operator", credential_id: "c", credential_kind: "session", scopes: ["message:read", "delivery:read", "draft:create", "submission:send"] } as const;
-    expect(abilities({ ...s, scopes: [...s.scopes] })).toEqual({ compose: true, outbox: true, resolve: true });
+    expect(abilities({ ...s, scopes: [...s.scopes] })).toMatchObject({ compose: true, outbox: true, resolve: true });
     expect(abilities({ ...s, principal: "agent:arisu", scopes: [...s.scopes] }).resolve).toBe(false);
-    expect(abilities({ ...s, scopes: ["message:read"] })).toEqual({ compose: false, outbox: false, resolve: false });
+    expect(abilities({ ...s, scopes: ["message:read"] })).toMatchObject({ compose: false, outbox: false, resolve: false });
+  });
+  it("offers rules and decisions to a person only", () => {
+    const s = { principal: "human:operator", credential_id: "c", credential_kind: "session", scopes: ["message:read", "message:annotate", "rule:manage"] } as const;
+    expect(abilities({ ...s, scopes: [...s.scopes] })).toMatchObject({ annotate: true, decide: true, rules: true });
+    expect(abilities({ ...s, principal: "agent:arisu", scopes: [...s.scopes] })).toMatchObject({ annotate: true, decide: false, rules: false });
+    expect(abilities({ ...s, scopes: ["message:read", "message:annotate"] })).toMatchObject({ decide: true, rules: false });
   });
 });
 

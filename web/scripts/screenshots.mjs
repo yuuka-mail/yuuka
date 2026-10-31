@@ -12,10 +12,11 @@
 //
 // Everything is captured in English, the source language, whose
 // accessible names the steps below look for. The main screens are
-// captured again in each other language (§12.11), found by role and
-// structure instead of by name.
+// captured again in each other language (§12.11), found by role or by
+// the accessible names of that language's catalogue.
 
 import { mkdirSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { chromium } from "playwright-core";
@@ -30,7 +31,11 @@ const sizes = { wide: { width: 1440, height: 900 }, narrow: { width: 390, height
 const problems = [];
 
 // The other UI languages; English is the default and needs nothing set.
+// Their screens are found by the accessible names in their own catalogue.
 const translations = ["zh"];
+const catalogues = Object.fromEntries(
+  await Promise.all(translations.map(async (l) => [l, JSON.parse(await readFile(new URL(`../messages/${l}.json`, import.meta.url), "utf8"))])),
+);
 
 async function page(scheme, size, storageState, lang) {
   const ctx = await browser.newContext({ colorScheme: scheme, viewport: sizes[size], deviceScaleFactor: size === "narrow" ? 2 : 1, storageState });
@@ -127,6 +132,14 @@ if (enrollURL) {
   const flagged = prefixes.prefixes.find((x) => x.leaks + x.spoofs > 0)?.address;
   const offenses = flagged ? ((await get(`/api/v1/prefixes/${encodeURIComponent(flagged)}`))?.offenses ?? []) : [];
   const offending = { leak: offenses.find((o) => o.verdict === "leak")?.message.id, spoof: offenses.find((o) => o.verdict === "spoof")?.message.id };
+  // Annotations, rules and proposals (§8.5, §12.12), from whatever the
+  // database has: a labelled message, a label, the rules, the proposals.
+  const labelled = (await get("/api/v1/messages?limit=200"))?.messages.find((x) => x.labels.length > 0);
+  const label = labelled?.labels[0];
+  const rules = (await get("/api/v1/rules"))?.rules ?? [];
+  const proposals = (await get("/api/v1/proposals?state=pending"))?.proposals ?? [];
+  const ruleProposal = proposals.find((x) => x.kind === "rule" && x.message_id);
+  const annotateProposal = proposals.find((x) => x.kind === "annotate" && x.message_id);
   await p.close();
 
   for (const scheme of ["light", "dark"]) {
@@ -251,6 +264,64 @@ if (enrollURL) {
         await s.getByRole("button", { name: "Prefixes" }).click();
         await shot(s, `prefixes-${tag}`);
       }
+      // Labels, archive and where a message's state came from (§8.5).
+      await s.goto(base + "/?area=archived");
+      await s.getByRole("heading", { name: "Archived" }).waitFor();
+      await shot(s, `area-archived-${tag}`);
+      if (label) {
+        await s.goto(base + `/?label=${encodeURIComponent(label)}`);
+        await s.getByRole("listbox", { name: "Messages" }).waitFor();
+        await shot(s, `label-${tag}`);
+      }
+      if (labelled) {
+        await s.goto(base + `/?m=${labelled.id}`);
+        await s.getByRole("button", { name: "Why it is here" }).click();
+        await s.getByRole("region", { name: "Where its labels, zone and archived state came from" }).getByRole("listitem").first().waitFor();
+        await shot(s, `reading-history-${tag}`);
+        await s.getByRole("button", { name: "Label", exact: true }).click();
+        await s.getByRole("textbox", { name: "Label" }).fill(label.slice(0, 2));
+        await shot(s, `reading-label-input-${tag}`);
+      }
+      // Moving a message between zones offers a rule and creates none
+      // (§12.9); the move is undone again afterwards.
+      if (lunch) {
+        await s.goto(base + `/?m=${lunch}`);
+        await s.getByRole("button", { name: "Move to Notifications" }).click();
+        await s.getByRole("button", { name: "Draft a rule" }).waitFor();
+        await shot(s, `reading-reclassified-${tag}`);
+        await s.getByRole("button", { name: "Draft a rule" }).click();
+        await s.getByRole("region", { name: "What the rule would do" }).getByText(/^Matches /).waitFor();
+        await shot(s, `reading-drafter-${tag}`);
+        await s.getByRole("button", { name: "Undo" }).first().click();
+        await s.getByText(/^undone: /).waitFor();
+      }
+      // Proposals: the attention entry, and the card beside the mail.
+      await s.goto(base + "/?area=proposals");
+      await s.getByRole("list", { name: "Proposals" }).waitFor();
+      await shot(s, `area-proposals-${tag}`);
+      if (annotateProposal) {
+        await s.goto(base + `/?area=proposals&p=${annotateProposal.id}&m=${annotateProposal.message_id}`);
+        await s.getByRole("button", { name: "Accept and automate…" }).click();
+        await s.getByRole("region", { name: "Rule draft" }).getByText(/^Matches /).waitFor();
+        await shot(s, `proposal-automate-${tag}`);
+      }
+      if (ruleProposal) {
+        await s.goto(base + `/?area=proposals&p=${ruleProposal.id}&m=${ruleProposal.message_id}`);
+        await s.getByRole("button", { name: "Review rule…" }).click();
+        await s.getByRole("region", { name: "What the rule would do" }).getByText(/^Matches /).waitFor();
+        await shot(s, `proposal-rule-${tag}`);
+      }
+      // Settings and the rules in it (§12.12), from the account menu.
+      await s.goto(base + "/?settings=rules");
+      await s.getByRole("heading", { name: "Rules" }).waitFor();
+      await shot(s, `settings-rules-${tag}`);
+      if (rules[0]) {
+        await s.goto(base + `/?settings=rules&rule=${rules.find((r) => r.match?.all)?.id ?? rules[0].id}`);
+        await s.getByRole("button", { name: "Count past mail…" }).click();
+        await s.getByRole("button", { name: /^Apply to / }).waitFor();
+        await shot(s, `settings-rule-${tag}`);
+      }
+
       // The account menu: who is signed in, the language, signing out.
       await s.goto(base + "/");
       await s.getByRole("button", { name: "Account" }).click();
@@ -265,6 +336,7 @@ if (enrollURL) {
       for (const size of Object.keys(sizes)) {
         const s = await page(scheme, size, state, lang);
         const tag = `${lang}-${scheme}-${size}`;
+        const t = catalogues[lang];
         for (const area of ["conversations", "notifications"]) {
           await s.goto(base + `/?area=${area}`);
           await s.getByRole("listbox").waitFor();
@@ -282,6 +354,38 @@ if (enrollURL) {
         await s.goto(base + "/?area=leaks");
         await s.locator("section h1").first().waitFor();
         await shot(s, `area-leaks-${tag}`);
+        await s.goto(base + "/?area=proposals");
+        await s.locator("section h1").first().waitFor();
+        await shot(s, `area-proposals-${tag}`);
+        if (labelled) {
+          await s.goto(base + `/?m=${labelled.id}`);
+          await s.getByRole("button", { name: t.annotate_why }).click();
+          await s.getByRole("region", { name: t.history_label }).getByRole("listitem").first().waitFor();
+          await shot(s, `reading-history-${tag}`);
+        }
+        if (lunch) {
+          await s.goto(base + `/?m=${lunch}`);
+          await s.getByRole("button", { name: t.annotate_like_this }).click();
+          await s.getByRole("region", { name: t.drafter_label }).getByRole("checkbox").first().waitFor();
+          await s.waitForLoadState("networkidle");
+          await shot(s, `reading-drafter-${tag}`);
+        }
+        if (ruleProposal) {
+          await s.goto(base + `/?area=proposals&p=${ruleProposal.id}&m=${ruleProposal.message_id}`);
+          await s.getByRole("button", { name: t.proposal_review_rule }).click();
+          await s.getByRole("region", { name: t.rule_preview_label }).waitFor();
+          await s.waitForLoadState("networkidle");
+          await shot(s, `proposal-rule-${tag}`);
+        }
+        await s.goto(base + "/?settings=rules");
+        await s.locator("main h2").waitFor();
+        await shot(s, `settings-rules-${tag}`);
+        if (rules[0]) {
+          await s.goto(base + `/?settings=rules&rule=${rules[0].id}`);
+          await s.locator("main h2").waitFor();
+          await s.waitForLoadState("networkidle");
+          await shot(s, `settings-rule-${tag}`);
+        }
         await s.close();
       }
     }

@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { useDrafts, useOutbox, usePrefixes, useUnclaimedPrefixes } from "@/api/queries";
+import { useDrafts, useLabels, useOutbox, usePrefixes, useUnclaimedPrefixes } from "@/api/queries";
 import type { Prefix } from "@/api/types";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,6 +11,7 @@ import type { Abilities } from "@/send/outgoing";
 
 import { LeakDot, leakSummary, leakTone, useFlaggedCount, type LeakTone } from "./leaks";
 import { areaTitle } from "./areas";
+import { usePendingProposals } from "./proposals";
 import type { View } from "./view";
 
 // Past this many claimed prefixes the list gets a filter box: about what
@@ -33,7 +34,9 @@ export function PrefixPane({ view, can, onPick }: { view: View; can: Abilities; 
   const drafts = useDrafts(["draft", "held"]);
   const unknown = useOutbox(["unknown"], can.outbox);
   const flaggedCount = useFlaggedCount();
-  const browsing = !view.prefix && !view.q;
+  // Proposals wait for a person: the one count an agent puts here (§12.9).
+  const pending = usePendingProposals(can.decide);
+  const browsing = !view.prefix && !view.q && !view.label;
   const at = (area: View["area"]) => browsing && view.area === area;
 
   return (
@@ -42,6 +45,7 @@ export function PrefixPane({ view, can, onPick }: { view: View; can: Abilities; 
         <Item active={at("conversations")} label={areaTitle("conversations")} onClick={() => onPick({ area: "conversations" })} />
         <Item active={at("notifications")} label={areaTitle("notifications")} onClick={() => onPick({ area: "notifications" })} />
         <Item active={at("all")} label={areaTitle("all")} onClick={() => onPick({ area: "all" })} />
+        <Item active={at("archived")} label={areaTitle("archived")} onClick={() => onPick({ area: "archived" })} />
         <Item
           active={at("drafts")}
           label={areaTitle("drafts")}
@@ -60,7 +64,19 @@ export function PrefixPane({ view, can, onPick }: { view: View; can: Abilities; 
             onClick={() => onPick({ area: "outbox" })}
           />
         )}
+        {can.decide && (
+          <Item
+            active={at("proposals")}
+            label={areaTitle("proposals")}
+            n={pending.n || undefined}
+            more={pending.more}
+            agent
+            title={pending.n ? m.nav_proposals_title() : undefined}
+            onClick={() => onPick({ area: "proposals" })}
+          />
+        )}
       </div>
+      <Labels active={view.label} onPick={onPick} />
       <Claimed ps={q.data?.prefixes} active={view.prefix} onPick={onPick} />
       <div className="flex shrink-0 flex-col border-t py-2">
         <Heading>{m.nav_review()}</Heading>
@@ -123,6 +139,27 @@ function Claimed({ ps, active, onPick }: { ps?: Prefix[]; active?: string; onPic
   );
 }
 
+/**
+ * The labels in use, by name, each with how many messages carry it.
+ * Picking one lists them, archived or not; a label is a person's or a
+ * rule's filing, not a zone.
+ */
+function Labels({ active, onPick }: { active?: string; onPick: (next: Partial<View>) => void }) {
+  const q = useLabels();
+  const ls = q.data?.labels ?? [];
+  if (!ls.length) return null;
+  return (
+    <div className="flex max-h-48 shrink-0 flex-col border-t">
+      <Heading>{m.nav_labels()}</Heading>
+      <div className="flex min-h-0 flex-col overflow-y-auto pb-2">
+        {ls.map((l) => (
+          <Item key={l.label} active={active === l.label} label={l.label} n={l.messages} onClick={() => onPick({ label: l.label })} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function Heading({ children }: { children: string }) {
   return <h2 className="mt-2 mb-1 px-3 text-meta font-medium tracking-wide text-muted-foreground uppercase">{children}</h2>;
 }
@@ -134,6 +171,8 @@ function Item(props: {
   n?: number;
   more?: boolean;
   warn?: boolean;
+  /** The count is an agent's, waiting for a person (§12.5). */
+  agent?: boolean;
   title?: string;
   mono?: boolean;
   mark?: LeakTone;
@@ -159,7 +198,7 @@ function Item(props: {
         </>
       )}
       {props.n !== undefined && (
-        <span className={cn("shrink-0 text-meta tabular-nums", !props.mark && "ml-auto", props.warn ? "font-medium text-warning" : "text-muted-foreground")}>
+        <span className={cn("shrink-0 text-meta tabular-nums", !props.mark && "ml-auto", props.warn ? "font-medium text-warning" : props.agent ? "font-medium text-agent-foreground" : "text-muted-foreground")}>
           {count(props.n)}
           {props.more && "+"}
         </span>

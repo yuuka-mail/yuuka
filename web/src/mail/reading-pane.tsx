@@ -11,12 +11,15 @@ import { fullTime, listTime, sender } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { m as msg } from "@/paraglide/messages.js";
 import { OutgoingMark, ProblemLine } from "@/send/marks";
-import { problem } from "@/send/outgoing";
+import { problem, type Abilities } from "@/send/outgoing";
+
+import { AnnotateBar } from "./annotate";
 
 import { shownExtraction } from "./extracted";
 import { ExtractedLine } from "./extracted-line";
 import { isQuiet, sentState, systemFacts, warnings, type Tone } from "./facts";
 import { ReadingBody } from "./reading-body";
+import { MessageProposals } from "./proposals";
 import { useMessage, useReading } from "./reading-data";
 
 interface Props {
@@ -25,11 +28,16 @@ interface Props {
   anchor?: string;
   onAnchor: (anchor: string) => void;
   onBack: () => void;
-  onOpen: (id: string) => void;
+  /** Opens another message, at an anchor when given (a cite). */
+  onOpen: (id: string, anchor?: string) => void;
   /** Starts a reply; absent when the session may not write drafts. */
   onReply?: () => void;
   /** Opens an outbox row; absent when the session may not read the outbox. */
   onOpenOutbox?: (id: string) => void;
+  can: Abilities;
+  /** A proposal picked in the proposals list, to mark among this message's. */
+  proposal?: string;
+  onOpenRule: (id: string) => void;
 }
 
 export function ReadingPane({ id, onBack, ...rest }: Props) {
@@ -68,7 +76,7 @@ const toneClass: Record<Tone, string> = {
   plain: "text-foreground",
 };
 
-function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox }: { message: Message } & Omit<Props, "id" | "onBack">) {
+function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox, can, proposal, onOpenRule }: { message: Message } & Omit<Props, "id" | "onBack">) {
   const body = useReading(m.id);
   const facts = body.reading?.facts;
   return (
@@ -106,9 +114,13 @@ function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox }
         </div>
       </header>
 
+      <AnnotateBar message={m} can={can} onOpen={onOpen} onOpenRule={onOpenRule} />
+
       <SystemFacts message={m} facts={facts} onOpenOutbox={onOpenOutbox} />
 
       <ExtractedBox message={m} />
+
+      <MessageProposals id={m.id} highlight={proposal} can={can} onOpen={onOpen} />
 
       <ThreadStrip message={m} onOpen={onOpen} />
 

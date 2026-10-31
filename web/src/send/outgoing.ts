@@ -195,7 +195,11 @@ export function isHuman(s: SessionInfo) {
   return s.principal.startsWith("human:");
 }
 
-/** What the session may do on the sending side; each needs its scope (§13.3). */
+/**
+ * What the session may do; each needs its scope (§13.3), and some only a
+ * person may do whatever the scope says (§8.5, §4.5). The server checks
+ * all of it again: this only decides what is offered.
+ */
 export function abilities(s: SessionInfo) {
   const has = (x: SessionInfo["scopes"][number]) => s.scopes.includes(x) || s.scopes.includes("admin");
   return {
@@ -204,6 +208,12 @@ export function abilities(s: SessionInfo) {
     outbox: has("delivery:read"),
     // §4.5: only a person settles unknown delivery, and resend sends.
     resolve: isHuman(s) && has("submission:send"),
+    // Labels, archive and class (§8.5).
+    annotate: has("message:annotate"),
+    // Deciding a proposal is a person's; creating a rule with it needs rules too.
+    decide: isHuman(s) && has("message:annotate"),
+    // Rules are a standing capability: a person's, with rule:manage.
+    rules: isHuman(s) && has("rule:manage") && has("message:read"),
   };
 }
 export type Abilities = ReturnType<typeof abilities>;
@@ -276,19 +286,23 @@ const problems: Partial<Record<Code, () => string>> = {
   unavailable: () => msg.send_problem_unavailable(),
   unauthenticated: () => msg.send_problem_unauthenticated(),
   body_too_large: () => msg.send_problem_body_too_large(),
+  invalid_rule: () => msg.problem_invalid_rule(),
 };
 
 // The codes whose detail names what is wrong (a field, an address).
-const specific = new Set<Code>(["invalid_body", "invalid_param", "no_identity", "submission_rejected"]);
+const specific = new Set<Code>(["invalid_body", "invalid_param", "no_identity", "submission_rejected", "invalid_rule"]);
 
 /**
  * An error as people read it: a sentence chosen by its stable code, and
- * the server's detail only where the code says it is specific.
+ * the server's detail only where the code says it is specific. A
+ * caller can word a code for its own context: a conflict on a proposal
+ * is not one on a draft.
  */
-export function problem(err: unknown): { text: string; detail?: string; code?: string } {
+export function problem(err: unknown, words: Partial<Record<Code, () => string>> = {}): { text: string; detail?: string; code?: string } {
   if (err instanceof ApiError) {
-    const text = (err.code && problems[err.code]?.()) || msg.send_problem_status({ status: String(err.status) });
-    return { text, detail: err.code && specific.has(err.code) ? err.message : undefined, code: err.code };
+    const text = (err.code && (words[err.code] ?? problems[err.code])?.()) || msg.send_problem_status({ status: String(err.status) });
+    const detail = err.path ? `${err.path}: ${err.message}` : err.message;
+    return { text, detail: err.code && specific.has(err.code) ? detail : undefined, code: err.code };
   }
   return { text: msg.send_problem_unreachable() };
 }
