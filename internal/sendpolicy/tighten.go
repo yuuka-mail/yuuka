@@ -18,16 +18,19 @@ func Applied(in Input) Grant {
 // every submission before it looks at the rest of the grant.
 func (t Tier) Sends() bool { return t.rank() > Draft.rank() }
 
-func (r RecipientScope) rank() int {
-	switch r {
-	case ScopeThread:
-		return 1
-	case ScopeAllowlist:
-		return 2
-	case ScopeAny:
-		return 3
+// within reports whether scope r admits no one that from does not. The
+// scopes are a partial order: any admits everyone; thread (the thread's
+// correspondents, whoever joins later) and allowlist (a fixed list) are
+// not nested, so neither is within the other. An unknown scope admits
+// nobody.
+func (r RecipientScope) within(from RecipientScope) bool {
+	switch {
+	case r == from, from == ScopeAny:
+		return true
+	case r == ScopeThread, r == ScopeAllowlist, r == ScopeAny:
+		return false
 	}
-	return 0 // unknown: admits nobody
+	return true
 }
 
 // The columns of identity_grants that Widenings names.
@@ -47,8 +50,10 @@ const (
 // the owner cap. The orders, tightest first:
 //
 //   - send_policy: none < draft < review < auto
-//   - recipient_scope: thread < allowlist < any. thread is the column's
-//     safe default: replies to people already in the conversation
+//   - recipient_scope: thread < any and allowlist < any; thread and
+//     allowlist are not comparable, so changing one into the other is a
+//     widening either way: thread reaches whoever joins a conversation,
+//     an allowlist reaches people in no conversation yet
 //   - recipient_allowlist: to's entries are a subset of from's (folded),
 //     whatever the scope, so a later raise of the scope cannot bring
 //     back an entry nobody chose
@@ -63,7 +68,7 @@ func Widenings(from, to Grant) []string {
 	if to.Policy.rank() > from.Policy.rank() {
 		out = append(out, FieldPolicy)
 	}
-	if to.RecipientScope.rank() > from.RecipientScope.rank() {
+	if !to.RecipientScope.within(from.RecipientScope) {
 		out = append(out, FieldRecipientScope)
 	}
 	allow := fold(from.Allowlist)

@@ -54,15 +54,30 @@ func TestWidenings(t *testing.T) {
 			}
 		}
 	}
-	for i, from := range scopes {
-		for j, to := range scopes {
-			a, b := base, base
-			a.RecipientScope, b.RecipientScope = from, to
-			got := slices.Contains(Widenings(a, b), FieldRecipientScope)
-			if got != (j > i) {
-				t.Errorf("scope %s -> %s: widening %v", from, to, got)
-			}
+	// Scopes are a partial order: any is widest; thread and allowlist
+	// are not nested, so either into the other widens.
+	for _, tc := range []struct {
+		from, to RecipientScope
+		widens   bool
+	}{
+		{ScopeThread, ScopeThread, false},
+		{ScopeThread, ScopeAllowlist, true},
+		{ScopeThread, ScopeAny, true},
+		{ScopeAllowlist, ScopeThread, true},
+		{ScopeAllowlist, ScopeAllowlist, false},
+		{ScopeAllowlist, ScopeAny, true},
+		{ScopeAny, ScopeThread, false},
+		{ScopeAny, ScopeAllowlist, false},
+		{ScopeAny, ScopeAny, false},
+	} {
+		a, b := base, base
+		a.RecipientScope, b.RecipientScope = tc.from, tc.to
+		if got := slices.Contains(Widenings(a, b), FieldRecipientScope); got != tc.widens {
+			t.Errorf("scope %s -> %s: widening %v", tc.from, tc.to, got)
 		}
+	}
+	if len(scopes) != 3 {
+		t.Fatal("a scope the table above does not cover")
 	}
 
 	for _, tc := range []struct {
@@ -145,6 +160,11 @@ func TestRemovalWidenings(t *testing.T) {
 		// The default is review + thread with default limits.
 		{"agent on its own identity, row auto any", Input{Submitter: agentP, Identity: arisuID, Grant: grant(Auto, ScopeAny)}, nil},
 		{"agent on its own identity, row review thread", Input{Submitter: agentP, Identity: arisuID, Grant: grant(Review, ScopeThread)}, nil},
+		{
+			"agent on its own identity, row auto allowlist: the default's thread is not within it",
+			Input{Submitter: agentP, Identity: arisuID, Grant: grant(Auto, ScopeAllowlist, "a@example.net")},
+			[]string{FieldRecipientScope},
+		},
 		{"agent on its own identity, row draft", Input{Submitter: agentP, Identity: arisuID, Grant: grant(Draft, ScopeThread)}, []string{FieldPolicy}},
 		{"agent on its own identity, row none", Input{Submitter: agentP, Identity: arisuID, Grant: grant(None, ScopeAny)}, []string{FieldPolicy}},
 		{

@@ -57,6 +57,7 @@ func TestTightenGrant(t *testing.T) {
 	}{
 		{"tier up", store.GrantTightening{Policy: tier("auto")}, nil}, // equal is not wider
 		{"scope any", store.GrantTightening{RecipientScope: scope("any")}, []string{"recipient_scope"}},
+		{"allowlist to thread", store.GrantTightening{RecipientScope: scope("thread")}, []string{"recipient_scope"}},
 		{"an allowlist entry added", store.GrantTightening{Allowlist: []string{"a@example.net", "example.org", "b@example.net"}}, []string{"recipient_allowlist"}},
 		{"limit above the default", store.GrantTightening{MaxPerHour: num(11)}, []string{"max_per_hour"}},
 		{"limit above its own", store.GrantTightening{MaxPerDay: num(21)}, []string{"max_per_day"}},

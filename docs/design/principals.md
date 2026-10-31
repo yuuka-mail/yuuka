@@ -566,7 +566,7 @@ CLI 只能记 `system` 加 `host_user`（§13.7）。信任根之外的动作值
   | 列 | 顺序 |
   |---|---|
   | `send_policy` | `none` < `draft` < `review` < `auto` |
-  | `recipient_scope` | `thread` < `allowlist` < `any` |
+  | `recipient_scope` | `thread` < `any`，`allowlist` < `any`；`thread` 和 `allowlist` 互不可比 |
   | `recipient_allowlist` | 新名单是旧名单的子集（大小写不敏感） |
   | 三项限额 | 数字越小越窄；不限（人的默认）比任何数字都宽 |
   | 暂停 | 暂停 < 不暂停 |
@@ -574,8 +574,9 @@ CLI 只能记 `system` 加 `host_user`（§13.7）。信任根之外的动作值
   取舍：
   - 降到 `draft` 时其余各列暂不起作用，仍然逐列比较：此刻存下的 `any`，会在以后有人在主机上把档位调回 `auto` 时
     一起生效，而那个人读到的是那时的授权，不知道这一列是什么时候变宽的。名单不论范围是不是 `allowlist` 都只能删条目，理由相同
-  - `thread` 算最窄，沿用列默认值的判断：只能回给已经在对话里的人。它和名单并不是包含关系，
-    把 `allowlist → thread` 当收紧，接受的代价是对话里新出现的人也能被回复
+  - 范围是偏序，不是一条线：`thread` 能回给一个对话里的任何通信方，包括以后才加进来的人；名单能写给还不在任何对话里的人。
+    两者互不包含，所以 `thread ↔ allowlist` 两个方向都算放宽，只在主机上做（`yuuka grant set … --recipients`）。
+    代价是界面上没法从名单「退回」默认的 `thread`，只能先降档位或暂停
   - `hold_seconds` 在界面上不能改：撤回窗口属于 review 档（§8.9），等自动审核落地再定它怎么收紧
 - **删授权不一定是收紧**：删掉之后适用 §13.5 的默认，可能比这一行宽（agent 自己身份上写的 `draft`，删掉就成了默认的 `review`）。
   所以删除也要比较（[`Grant.RemovalWidenings`](../../internal/store/tighten.go)）：默认不发信（`none` / `draft`）时只比档位——

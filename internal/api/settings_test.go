@@ -207,7 +207,7 @@ func TestSettings(t *testing.T) {
 		t.Fatalf("grants: %+v", list.Grants)
 	}
 	if own.Stored.Limits.MaxPerHour != nil || *own.Applied.Limits.MaxPerHour != 10 || *own.Applied.Limits.MaxPerDay != 20 ||
-		own.Default.SendPolicy != "review" || !slices.Equal(own.RemovalWidens, []string{"max_per_day"}) || own.OwnerCapped ||
+		own.Default.SendPolicy != "review" || !slices.Equal(own.RemovalWidens, []string{"recipient_scope", "max_per_day"}) || own.OwnerCapped ||
 		own.Host != "yuuka grant set --identity arisu@example.com --principal agent:arisu" {
 		t.Errorf("arisu's own grant: %+v", own)
 	}
@@ -230,6 +230,7 @@ func TestSettings(t *testing.T) {
 	base := "yuuka grant set --identity arisu@example.com --principal agent:arisu"
 	refused(send(http.MethodPost, grantPath+"/tighten", `{"send_policy":"auto"}`), base+" --policy auto")
 	refused(send(http.MethodPost, grantPath+"/tighten", `{"recipient_scope":"any"}`), base+" --recipients any")
+	refused(send(http.MethodPost, grantPath+"/tighten", `{"recipient_scope":"thread"}`), base+" --recipients thread")
 	refused(send(http.MethodPost, grantPath+"/tighten", `{"allowlist":["example.org","b@example.net"]}`), base+" --allow example.org,b@example.net")
 	refused(send(http.MethodPost, grantPath+"/tighten", `{"max_per_hour":4,"max_per_day":21}`), base+" --max-per-hour 4 --max-per-day 21")
 	refused(send(http.MethodPost, grantPath+"/tighten", `{"max_new_recipients_per_day":6}`), base+" --max-new-recipients-per-day 6")

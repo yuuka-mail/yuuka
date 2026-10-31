@@ -197,8 +197,9 @@ type GrantParams struct {
 // (limits resolved, the owner cap taken), or nothing is changed and the
 // answer is 403 widening_requires_cli. The orders, tightest first:
 // send_policy none < draft < review < auto; recipient_scope thread <
-// allowlist < any; allowlist a subset of the current one; a smaller
-// limit; suspended.
+// any and allowlist < any, thread and allowlist not comparable (either
+// into the other widens); allowlist a subset of the current one; a
+// smaller limit; suspended.
 type TightenBody struct {
 	SendPolicy     *Tier           `json:"send_policy,omitempty"`
 	RecipientScope *RecipientScope `json:"recipient_scope,omitempty"`
