@@ -1,0 +1,37 @@
+[
+  {
+    "name": "plain",
+    "id": "01M67SX66B38NKRKAYDXR834N3",
+    "received_at": "2026-10-31T01:41:38.123Z",
+    "raw_key": "raw/2026/10/01M67SX66B38NKRKAYDXR834N3.eml",
+    "pending_key": "pending/01M67SX66B38NKRKAYDXR834N3"
+  },
+  {
+    "name": "null-sender-dsn",
+    "id": "01M67TYT801W70T30B184GG1R6",
+    "received_at": "2026-10-31T02:00:00.000Z",
+    "raw_key": "raw/2026/10/01M67TYT801W70T30B184GG1R6.eml",
+    "pending_key": "pending/01M67TYT801W70T30B184GG1R6"
+  },
+  {
+    "name": "smtputf8-addresses",
+    "id": "01M67Z858M008J4CT4ANK7F24S",
+    "received_at": "2026-10-31T03:15:00.500Z",
+    "raw_key": "raw/2026/10/01M67Z858M008J4CT4ANK7F24S.eml",
+    "pending_key": "pending/01M67Z858M008J4CT4ANK7F24S"
+  },
+  {
+    "name": "month-end-utc",
+    "id": "01M6A6FSZZ248H248H248H248H",
+    "received_at": "2026-10-31T23:59:59.999Z",
+    "raw_key": "raw/2026/10/01M6A6FSZZ248H248H248H248H.eml",
+    "pending_key": "pending/01M6A6FSZZ248H248H248H248H"
+  },
+  {
+    "name": "month-start-utc",
+    "id": "01M6A6FT0048H248H248H248H2",
+    "received_at": "2026-11-01T00:00:00.000Z",
+    "raw_key": "raw/2026/11/01M6A6FT0048H248H248H248H2.eml",
+    "pending_key": "pending/01M6A6FT0048H248H248H248H2"
+  }
+]

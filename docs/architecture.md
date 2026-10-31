@@ -71,6 +71,19 @@ yuuka 对网络只有两个要求：ingest 端点能被 Worker 访问到，WebUI
 **Worker 侧的提交点是第 2 步成功。** 之前任何一步失败都抛错，交给 Cloudflare 让发件方重投。
 Worker 必须给自己设截止时间：R2 写入超过 60 秒就放弃并抛错。
 
+**Go 侧的提交点**是一个事务：写 `raw_objects` + `deliveries`（信封从标记或 metadata 读）。
+事务提交后才删除 `pending/<id>`。reconcile 按标记的状态处理：
+
+| 标记 | raw | 处理 |
+|---|---|---|
+| 有 | 有 | 正常 ingest（幂等），提交后删标记 |
+| 有 | 无，标记 < 15 分钟 | Worker 可能还在写，跳过 |
+| 有 | 无，标记 ≥ 15 分钟 | Worker 在第 2 步失败并已抛错，这封由发件方重投、会换新 id。记一条 `orphan_marker` 事件后删标记；短时间内频繁出现就告警 |
+| 无 | 有，库里没有 | 不应出现（标记只在入库后删）。每周一次全量扫 `raw/` 与 `raw_objects` 对账兜底，信封从 metadata 恢复 |
+
+Email Worker 每次调用只有**一个** `RCPT TO`：同一封信发给同域两个前缀，
+Worker 会被调用两次、产生两份 raw，由 §4.1 的折叠合并成一条 message、两条 delivery。
+
 完整时序（Worker 侧失败走 421 重投，Go 侧由 webhook 或 reconcile 两条路之一触发）：
 
 ```mermaid
@@ -132,20 +145,105 @@ sequenceDiagram
 - **新建的路由规则约 30–60 秒后才生效**，此前对该地址回 `550 5.1.1`（永久失败）。
   catch-all 规则建好后不再涉及；但给新域接入时，要先建规则、确认生效，再把 MX 指过来
 - `wrangler email routing rules update … catch-all` 只接受 forward / drop；
-  catch-all 指向 Worker 要在 wrangler 配置里用 `*@<zone>` 路由声明，或在 dashboard 设置
+  catch-all 指向 Worker 要在 wrangler 配置里声明 `addresses = ["*@<zone>"]`（Wrangler ≥ 4.113，只支持顶级域），
+  或在 dashboard 设置
 
-**Go 侧的提交点**是一个事务：写 `raw_objects` + `deliveries`（信封从标记或 metadata 读）。
-事务提交后才删除 `pending/<id>`。reconcile 按标记的状态处理：
+### 2.2 Worker ↔ Go 契约（v1）
 
-| 标记 | raw | 处理 |
+这一节是 Worker 和 Go 之间唯一的约定，按单向门处理（AGENTS.md）：任何改动两侧在同一个提交里改，
+并更新 `testdata/contract/v1/` 下的共享测试向量——两侧的测试读同一份向量，格式漂移会直接让测试失败。
+`v` 字段让将来的格式可以和旧格式并存，而不是原地修改。
+
+#### 标识与时间
+
+- `id`：Worker 为**每次调用**生成的 ULID（26 位 Crockford base32，大写）。
+  发件方重投、Cloudflare 的二次调用都会得到新 id（§2.1.1），所以 id 标识的是「一次 Worker 调用」，不是一封信
+- 时间一律 UTC、RFC 3339、毫秒精度、以 `Z` 结尾，如 `2026-10-31T01:41:38.123Z`
+
+#### 存储：两个 bucket
+
+| bucket | key | 内容 | Worker 的权限 | Go 的权限 |
+|---|---|---|---|---|
+| raw | `raw/YYYY/MM/<id>.eml` | 原始 MIME 字节，写一次永不改 | 写（只在不存在时写） | **只读** |
+| pending | `pending/<id>` | 投递标记 | 写 | 读、列、删 |
+
+`YYYY/MM` 取 `received_at` 的 UTC 年月。分成两个 bucket，是因为 R2 令牌的权限粒度到 bucket 为止：
+分开后 Go 侧凭据对原件只有读权限，「原件不可变」由权限保证，而不是靠 Go 代码自觉。
+key 仍保留 `raw/`、`pending/` 前缀，文档、日志里的引用不用改，将来合回一个 bucket 也不必迁移 key。
+
+#### 投递标记
+
+UTF-8 编码的 JSON 对象：
+
+| 字段 | 类型 | 说明 |
 |---|---|---|
-| 有 | 有 | 正常 ingest（幂等），提交后删标记 |
-| 有 | 无，标记 < 15 分钟 | Worker 可能还在写，跳过 |
-| 有 | 无，标记 ≥ 15 分钟 | Worker 在第 2 步失败并已抛错，这封由发件方重投、会换新 id。记一条 `orphan_marker` 事件后删标记；短时间内频繁出现就告警 |
-| 无 | 有，库里没有 | 不应出现（标记只在入库后删）。每周一次全量扫 `raw/` 与 `raw_objects` 对账兜底，信封从 metadata 恢复 |
+| `v` | 整数 | 固定为 `1` |
+| `id` | 字符串 | 见上 |
+| `received_at` | 字符串 | Worker 收到这次调用的时间 |
+| `envelope_from` | 字符串 | `MAIL FROM`。null sender（退信、DSN 用 `MAIL FROM:<>`）记为空字符串 |
+| `envelope_to` | 字符串 | 这次调用对应的那一个 `RCPT TO` |
+| `raw_key` | 字符串 | 原件在 raw bucket 里的 key |
+| `raw_size` | 整数 | 实际写入的原件字节数（不取 `message.rawSize` 的声明值） |
 
-Email Worker 每次调用只有**一个** `RCPT TO`：同一封信发给同域两个前缀，
-Worker 会被调用两次、产生两份 raw，由 §4.1 的折叠合并成一条 message、两条 delivery。
+- `v` 不认识就拒绝，不猜；认识的版本里出现未知字段则忽略——加字段不算破坏性变更，改字段含义才算
+- 地址原样保存，不做大小写或 IDN 归一；可能含非 ASCII（SMTPUTF8）
+
+#### 原件自带的 metadata
+
+raw 对象带一个 custom metadata：`yuuka-marker` = 投递标记 JSON 的 **base64url（无填充）**。
+整体编码一次，是因为 Go 侧经 S3 API 读 metadata：R2 会把非 ASCII 的值按 RFC 2047 编码后再交出来，
+非 ASCII 的 key 则直接丢掉。编成纯 ASCII 后两条读取路径拿到的字节完全一样；
+而且标记和 metadata 共用同一份 schema，不用为 metadata 另定一套字段规则。
+单个对象的 metadata 上限是 8 KiB，标记最长不过几百字节。
+标记丢了（§2.1 的对账表最后一行），只凭 raw 对象就能恢复全部投递事实。
+
+#### webhook
+
+```
+POST <ingest-url>
+Content-Type: application/json
+Yuuka-Timestamp: <unix 秒>
+Yuuka-Signature: v1=<HMAC-SHA256，小写十六进制>
+
+<投递标记 JSON，与 pending/<id> 的内容逐字节相同>
+```
+
+- **签名输入**：`"v1:" + timestamp + ":" + body`，body 取原始字节，不重新序列化
+- **密钥**：部署时生成的随机串（至少 32 字节），取其 UTF-8 字节作 HMAC key。
+  Go 侧同时接受多把密钥，轮换时新旧并存一段时间
+- **Go 侧校验顺序**：timestamp 与本地时钟相差不超过 300 秒 → 逐把密钥计算并做常数时间比较 →
+  解析标记 → 按标记读 raw、入库
+- **不维护 nonce**：窗口内重放一个合法请求，结果只是再触发一次幂等入库，没有副作用；
+  为它引入一张 nonce 表不值得
+- **应答**：`204` = 已入库或此前已入库；`4xx` = 请求本身有问题（签名、格式），Worker 只记日志；
+  `5xx` 或超时 = 暂时失败，交给 reconcile。Worker 对任何应答都**不重试、不抛错**——
+  webhook 只负责把延迟降到秒级，正确性由 reconcile 保证（§2）
+
+#### Worker 的步骤
+
+1. 生成 `id`，记 `received_at`；`message.from` 为空或为 `<>` 时 `envelope_from` 记空字符串
+2. 把 `message.raw` 整个读进内存。R2 的 `put()` 要求流的长度已知，而入站上限是 25 MiB、
+   Worker 内存是 128 MB，缓冲比 `FixedLengthStream` 简单，也不用信任 `rawSize` 的声明值
+3. 写 `pending/<id>`
+4. 写 raw 对象，带 `yuuka-marker`，并以 `onlyIf` 要求「key 不存在才写」；条件不满足时 `put()` 返回 `null`，
+   视同失败。id 唯一，这道条件只防程序错误，不是常规路径
+5. 第 3、4 步共享一个 **60 秒**截止时间（`Promise.race` 计时器——R2 的 `put()` 不能取消）；
+   任一步失败或超时就抛错（§2.1.1 的 421 路径）。超时的写入之后可能仍然完成，
+   留下一对完整的标记和原件：reconcile 会把它入库，发件方重投的那一份由重投去重合并（§4.1），不丢也不重复
+6. 用 `ctx.waitUntil` 发 webhook，5 秒超时，结果只记日志；Workers 给 `waitUntil` 的上限是返回后 30 秒
+7. 正常返回
+
+Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：入站处理计入 Workers 的 CPU 限额，
+免费档每次 10 ms 的 CPU 不够缓冲一封大信。
+
+**M0 实测项**（文档没写，写实现时在真实 bucket 上确认，结论写回本节）：
+
+- 经 binding 的 `onlyIf` 条件写是否原子：两个并发写同一 key，是否只有一个成功
+- `MAIL FROM:<>` 时 `message.from` 的实际值
+- 在 `waitUntil` 里发 webhook，SMTP 的 `250` 是否在处理函数返回时就发出，而不是等 `waitUntil` 结束
+
+日志只记 `id`、`raw_size` 和步骤结果，**不记地址、主题或正文**：Worker 的日志在 Cloudflare 一侧，不归运维者管。
+
 
 ---
 
@@ -233,6 +331,7 @@ Worker 会被调用两次、产生两份 raw，由 §4.1 的折叠合并成一�
 | DB | `pgx` + 手写 SQL（或 sqlc） | 邮件查询形状怪，ORM 吃亏 |
 | 前端 | 任选，产物 `embed` 进二进制 | 单文件部署 |
 | SPF | `ix64/spf` | 同作者的既有库，直接复用 |
+| R2（S3 API） | `aws-sdk-go-v2/service/s3` | Cloudflare 自己的 Go 示例用它，依赖全在 aws/smithy 内。**`RequestChecksumCalculation` 与 `ResponseChecksumValidation` 都设为 `WhenRequired`**：SDK 自 2025 年起默认附带的校验和 R2 不完全支持。R2 的 LIST 与 PUT/DELETE 强一致，reconcile 可以直接依赖列表结果 |
 
 **关于 JMAP 要诚实说一句**：JMAP 客户端生态非常薄（Fastmail 自家客户端、
 ltt.rs 等，Thunderbird / aerc / iOS Mail 都不支持）。所以"JMAP 就行"实际等于

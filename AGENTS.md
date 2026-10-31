@@ -35,8 +35,9 @@
   `reparse` 也绝不能碰它们。message id 跨 reparse 稳定。
 - **不丢信**（§3.5）。ingest 任何一步失败都必须让上游能重投或 reconcile 能发现；
   解析失败进 quarantine 并保留 raw。宁可重复入库（有幂等兜底），不可静默吞掉。
-- **Worker 与 Go 的契约同步演进**（§2.1、§11.4）：HMAC 签名格式、R2 key 布局与 metadata、
-  `pending` 标记的格式与写入顺序、ack 语义。
+- **Worker 与 Go 的契约同步演进**（§2.1、§2.2、§11.4）：HMAC 签名格式、R2 key 布局与 metadata、
+  `pending` 标记的格式与写入顺序、ack 语义。契约的唯一权威是 §2.2 加
+  `testdata/contract/` 下的共享向量；两侧测试都读这份向量，不各自复制期望值。
   改其中任何一样，两侧必须在同一个提交里一起改，并带共享的测试向量。版本漂移的后果是丢信。
 - **外发按身份授权**（§3 原则 8、§8.9、§13.5）。能不能发、发到哪一步，
   由 scope 加 `identity_grants.send_policy` 在 API 层决定，不是约定。

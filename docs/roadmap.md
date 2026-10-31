@@ -6,7 +6,7 @@
 
 | 阶段 | 内容 | 产出 |
 |---|---|---|
-| **M0** | Worker（pending 标记 + R2 + HMAC webhook + 写入截止时间，§2.1）；重投去重（§4.1）；Go ingest + raw 归档 + 幂等 + reconcile；TG 推送一行摘要 | 一周内可日用：所有信已自持 + 有通知。无 UI |
+| **M0** | Worker（pending 标记 + R2 + HMAC webhook + 写入截止时间，§2.1）；**Worker ↔ Go 契约与共享测试向量**（§2.2）；**最小 Postgres**：只建 `raw_objects` + `deliveries`；重投去重（§4.1）；Go ingest + raw 归档 + 幂等 + reconcile；TG 推送一行摘要 | 一周内可日用：所有信已自持 + 有通知。无 UI |
 | **M1** | go-message 解析入库；**主体/凭据建表**（§13.9）；**`changes` 变更日志建表**（§4）；前缀 claimed/discovered 两态 + 最低垃圾降级（§4.3）；WebUI 内置 passkey 登录（§13.7）+ 列表/阅读/按前缀聚合；trgm 搜索；**agent 读路径**（文本化视图 + MCP 只读 tools） | 替代现有查看方式；agent 已能检索邮箱 |
 | **M2** | outbox 状态机（含 `unknown` / 逐收件人结果）+ 任意前缀发信 + 回复/线程；**CF 出口的字节比对实测**（Message-ID 能否回填，§10.4.1）；草稿可由 agent 起、人确认发出；**SMTP submission 口**（§13.6），其他服务可直接发信 | 不再用 curl 发信 |
 | **M3** | 规则引擎 + machine/human 分区 + 验证码提取 + 前缀注册表/泄漏检测；agent 提案→规则的闭环；**agent 专属身份的 `review` / `auto` 外发**（§8.9，外泄检查依赖本阶段的验证码提取） | 本项目的差异化能力 |
@@ -15,7 +15,10 @@
 | **M4** | JMAP 子集 + 自己的客户端/PWA；SSE 事件流（人和 agent 共用增量游标） | 多端 |
 | **M5（可选）** | go-imap 网关；入口切换到自建 MX 的 driver | 去 Cloudflare 依赖 |
 
-M0 刻意不碰 Postgres 和解析：**先保证信不丢、能通知**，剩下全是可重放的派生物。
+M0 刻意不碰解析：**先保证信不丢、能通知**，剩下全是可重放的派生物。
+Postgres 在 M0 只建两张表：§2.1 的 Go 侧提交点是 `raw_objects` + `deliveries` 的一个事务，
+§4.1 的重投去重也要查它们。这两张表 M1 本来就要，提前建不会产生要扔掉的代码；
+换成 M0 专用的文件或 SQLite 索引，反而要把去重写两遍、再迁移一次。
 
 ---
 

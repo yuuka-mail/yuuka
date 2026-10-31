@@ -1,0 +1,121 @@
+{
+  "window_seconds": 300,
+  "sign": [
+    {
+      "name": "basic",
+      "secret": "test-secret-a-0123456789abcdef0123456789abcdef",
+      "timestamp": 1793410898,
+      "body": "{\"v\":1,\"id\":\"01M67SX66B38NKRKAYDXR834N3\",\"received_at\":\"2026-10-31T01:41:38.123Z\",\"envelope_from\":\"alice@example.net\",\"envelope_to\":\"github@example.com\",\"raw_key\":\"raw/2026/10/01M67SX66B38NKRKAYDXR834N3.eml\",\"raw_size\":2648}",
+      "signature": "v1=037f90cc3360ba887a694d0d8ee44b4c1fb1a447bb6b3cdd6941dc903c934006"
+    },
+    {
+      "name": "utf8-body",
+      "secret": "test-secret-a-0123456789abcdef0123456789abcdef",
+      "timestamp": 1793410898,
+      "body": "{\"v\":1,\"id\":\"01M67Z858M008J4CT4ANK7F24S\",\"received_at\":\"2026-10-31T03:15:00.500Z\",\"envelope_from\":\"用户@例子.广告\",\"envelope_to\":\"收件@example.com\",\"raw_key\":\"raw/2026/10/01M67Z858M008J4CT4ANK7F24S.eml\",\"raw_size\":3001}",
+      "signature": "v1=dec71e0b7a65422ec5f1dc18753bbac4f314891de156908917c8bcba2f5951e0"
+    }
+  ],
+  "verify": [
+    {
+      "name": "ok",
+      "secrets": [
+        "test-secret-a-0123456789abcdef0123456789abcdef"
+      ],
+      "now": 1793410908,
+      "timestamp": 1793410898,
+      "body": "{\"v\":1,\"id\":\"01M67SX66B38NKRKAYDXR834N3\",\"received_at\":\"2026-10-31T01:41:38.123Z\",\"envelope_from\":\"alice@example.net\",\"envelope_to\":\"github@example.com\",\"raw_key\":\"raw/2026/10/01M67SX66B38NKRKAYDXR834N3.eml\",\"raw_size\":2648}",
+      "signature": "v1=037f90cc3360ba887a694d0d8ee44b4c1fb1a447bb6b3cdd6941dc903c934006",
+      "valid": true
+    },
+    {
+      "name": "ok-rotated-old-key",
+      "secrets": [
+        "test-secret-b-fedcba9876543210fedcba9876543210",
+        "test-secret-a-0123456789abcdef0123456789abcdef"
+      ],
+      "now": 1793410898,
+      "timestamp": 1793410898,
+      "body": "{\"v\":1,\"id\":\"01M67SX66B38NKRKAYDXR834N3\",\"received_at\":\"2026-10-31T01:41:38.123Z\",\"envelope_from\":\"alice@example.net\",\"envelope_to\":\"github@example.com\",\"raw_key\":\"raw/2026/10/01M67SX66B38NKRKAYDXR834N3.eml\",\"raw_size\":2648}",
+      "signature": "v1=037f90cc3360ba887a694d0d8ee44b4c1fb1a447bb6b3cdd6941dc903c934006",
+      "valid": true
+    },
+    {
+      "name": "wrong-secret",
+      "secrets": [
+        "test-secret-b-fedcba9876543210fedcba9876543210"
+      ],
+      "now": 1793410898,
+      "timestamp": 1793410898,
+      "body": "{\"v\":1,\"id\":\"01M67SX66B38NKRKAYDXR834N3\",\"received_at\":\"2026-10-31T01:41:38.123Z\",\"envelope_from\":\"alice@example.net\",\"envelope_to\":\"github@example.com\",\"raw_key\":\"raw/2026/10/01M67SX66B38NKRKAYDXR834N3.eml\",\"raw_size\":2648}",
+      "signature": "v1=037f90cc3360ba887a694d0d8ee44b4c1fb1a447bb6b3cdd6941dc903c934006",
+      "valid": false
+    },
+    {
+      "name": "tampered-body",
+      "secrets": [
+        "test-secret-a-0123456789abcdef0123456789abcdef"
+      ],
+      "now": 1793410898,
+      "timestamp": 1793410898,
+      "body": "{\"v\":1,\"id\":\"01M67SX66B38NKRKAYDXR834N3\",\"received_at\":\"2026-10-31T01:41:38.123Z\",\"envelope_from\":\"alice@example.net\",\"envelope_to\":\"github@example.com\",\"raw_key\":\"raw/2026/10/01M67SX66B38NKRKAYDXR834N3.eml\",\"raw_size\":2649}",
+      "signature": "v1=037f90cc3360ba887a694d0d8ee44b4c1fb1a447bb6b3cdd6941dc903c934006",
+      "valid": false
+    },
+    {
+      "name": "edge-of-window",
+      "secrets": [
+        "test-secret-a-0123456789abcdef0123456789abcdef"
+      ],
+      "now": 1793411198,
+      "timestamp": 1793410898,
+      "body": "{\"v\":1,\"id\":\"01M67SX66B38NKRKAYDXR834N3\",\"received_at\":\"2026-10-31T01:41:38.123Z\",\"envelope_from\":\"alice@example.net\",\"envelope_to\":\"github@example.com\",\"raw_key\":\"raw/2026/10/01M67SX66B38NKRKAYDXR834N3.eml\",\"raw_size\":2648}",
+      "signature": "v1=037f90cc3360ba887a694d0d8ee44b4c1fb1a447bb6b3cdd6941dc903c934006",
+      "valid": true
+    },
+    {
+      "name": "expired",
+      "secrets": [
+        "test-secret-a-0123456789abcdef0123456789abcdef"
+      ],
+      "now": 1793411199,
+      "timestamp": 1793410898,
+      "body": "{\"v\":1,\"id\":\"01M67SX66B38NKRKAYDXR834N3\",\"received_at\":\"2026-10-31T01:41:38.123Z\",\"envelope_from\":\"alice@example.net\",\"envelope_to\":\"github@example.com\",\"raw_key\":\"raw/2026/10/01M67SX66B38NKRKAYDXR834N3.eml\",\"raw_size\":2648}",
+      "signature": "v1=037f90cc3360ba887a694d0d8ee44b4c1fb1a447bb6b3cdd6941dc903c934006",
+      "valid": false
+    },
+    {
+      "name": "from-the-future",
+      "secrets": [
+        "test-secret-a-0123456789abcdef0123456789abcdef"
+      ],
+      "now": 1793410597,
+      "timestamp": 1793410898,
+      "body": "{\"v\":1,\"id\":\"01M67SX66B38NKRKAYDXR834N3\",\"received_at\":\"2026-10-31T01:41:38.123Z\",\"envelope_from\":\"alice@example.net\",\"envelope_to\":\"github@example.com\",\"raw_key\":\"raw/2026/10/01M67SX66B38NKRKAYDXR834N3.eml\",\"raw_size\":2648}",
+      "signature": "v1=037f90cc3360ba887a694d0d8ee44b4c1fb1a447bb6b3cdd6941dc903c934006",
+      "valid": false
+    },
+    {
+      "name": "uppercase-hex-rejected",
+      "secrets": [
+        "test-secret-a-0123456789abcdef0123456789abcdef"
+      ],
+      "now": 1793410898,
+      "timestamp": 1793410898,
+      "body": "{\"v\":1,\"id\":\"01M67SX66B38NKRKAYDXR834N3\",\"received_at\":\"2026-10-31T01:41:38.123Z\",\"envelope_from\":\"alice@example.net\",\"envelope_to\":\"github@example.com\",\"raw_key\":\"raw/2026/10/01M67SX66B38NKRKAYDXR834N3.eml\",\"raw_size\":2648}",
+      "signature": "v1=037F90CC3360BA887A694D0D8EE44B4C1FB1A447BB6B3CDD6941DC903C934006",
+      "valid": false
+    },
+    {
+      "name": "missing-version-prefix",
+      "secrets": [
+        "test-secret-a-0123456789abcdef0123456789abcdef"
+      ],
+      "now": 1793410898,
+      "timestamp": 1793410898,
+      "body": "{\"v\":1,\"id\":\"01M67SX66B38NKRKAYDXR834N3\",\"received_at\":\"2026-10-31T01:41:38.123Z\",\"envelope_from\":\"alice@example.net\",\"envelope_to\":\"github@example.com\",\"raw_key\":\"raw/2026/10/01M67SX66B38NKRKAYDXR834N3.eml\",\"raw_size\":2648}",
+      "signature": "037f90cc3360ba887a694d0d8ee44b4c1fb1a447bb6b3cdd6941dc903c934006",
+      "valid": false
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+[
+  {
+    "name": "plain",
+    "marker_json": "{\"v\":1,\"id\":\"01M67SX66B38NKRKAYDXR834N3\",\"received_at\":\"2026-10-31T01:41:38.123Z\",\"envelope_from\":\"alice@example.net\",\"envelope_to\":\"github@example.com\",\"raw_key\":\"raw/2026/10/01M67SX66B38NKRKAYDXR834N3.eml\",\"raw_size\":2648}",
+    "yuuka_marker": "eyJ2IjoxLCJpZCI6IjAxTTY3U1g2NkIzOE5LUktBWURYUjgzNE4zIiwicmVjZWl2ZWRfYXQiOiIyMDI2LTEwLTMxVDAxOjQxOjM4LjEyM1oiLCJlbnZlbG9wZV9mcm9tIjoiYWxpY2VAZXhhbXBsZS5uZXQiLCJlbnZlbG9wZV90byI6ImdpdGh1YkBleGFtcGxlLmNvbSIsInJhd19rZXkiOiJyYXcvMjAyNi8xMC8wMU02N1NYNjZCMzhOS1JLQVlEWFI4MzROMy5lbWwiLCJyYXdfc2l6ZSI6MjY0OH0"
+  },
+  {
+    "name": "null-sender-dsn",
+    "marker_json": "{\"v\":1,\"id\":\"01M67TYT801W70T30B184GG1R6\",\"received_at\":\"2026-10-31T02:00:00.000Z\",\"envelope_from\":\"\",\"envelope_to\":\"bounce+01JBX4@example.com\",\"raw_key\":\"raw/2026/10/01M67TYT801W70T30B184GG1R6.eml\",\"raw_size\":5120}",
+    "yuuka_marker": "eyJ2IjoxLCJpZCI6IjAxTTY3VFlUODAxVzcwVDMwQjE4NEdHMVI2IiwicmVjZWl2ZWRfYXQiOiIyMDI2LTEwLTMxVDAyOjAwOjAwLjAwMFoiLCJlbnZlbG9wZV9mcm9tIjoiIiwiZW52ZWxvcGVfdG8iOiJib3VuY2UrMDFKQlg0QGV4YW1wbGUuY29tIiwicmF3X2tleSI6InJhdy8yMDI2LzEwLzAxTTY3VFlUODAxVzcwVDMwQjE4NEdHMVI2LmVtbCIsInJhd19zaXplIjo1MTIwfQ"
+  },
+  {
+    "name": "smtputf8-addresses",
+    "marker_json": "{\"v\":1,\"id\":\"01M67Z858M008J4CT4ANK7F24S\",\"received_at\":\"2026-10-31T03:15:00.500Z\",\"envelope_from\":\"用户@例子.广告\",\"envelope_to\":\"收件@example.com\",\"raw_key\":\"raw/2026/10/01M67Z858M008J4CT4ANK7F24S.eml\",\"raw_size\":3001}",
+    "yuuka_marker": "eyJ2IjoxLCJpZCI6IjAxTTY3Wjg1OE0wMDhKNENUNEFOSzdGMjRTIiwicmVjZWl2ZWRfYXQiOiIyMDI2LTEwLTMxVDAzOjE1OjAwLjUwMFoiLCJlbnZlbG9wZV9mcm9tIjoi55So5oi3QOS-i-WtkC7lub_lkYoiLCJlbnZlbG9wZV90byI6IuaUtuS7tkBleGFtcGxlLmNvbSIsInJhd19rZXkiOiJyYXcvMjAyNi8xMC8wMU02N1o4NThNMDA4SjRDVDRBTks3RjI0Uy5lbWwiLCJyYXdfc2l6ZSI6MzAwMX0"
+  },
+  {
+    "name": "month-end-utc",
+    "marker_json": "{\"v\":1,\"id\":\"01M6A6FSZZ248H248H248H248H\",\"received_at\":\"2026-10-31T23:59:59.999Z\",\"envelope_from\":\"a@example.net\",\"envelope_to\":\"x@example.com\",\"raw_key\":\"raw/2026/10/01M6A6FSZZ248H248H248H248H.eml\",\"raw_size\":1}",
+    "yuuka_marker": "eyJ2IjoxLCJpZCI6IjAxTTZBNkZTWloyNDhIMjQ4SDI0OEgyNDhIIiwicmVjZWl2ZWRfYXQiOiIyMDI2LTEwLTMxVDIzOjU5OjU5Ljk5OVoiLCJlbnZlbG9wZV9mcm9tIjoiYUBleGFtcGxlLm5ldCIsImVudmVsb3BlX3RvIjoieEBleGFtcGxlLmNvbSIsInJhd19rZXkiOiJyYXcvMjAyNi8xMC8wMU02QTZGU1paMjQ4SDI0OEgyNDhIMjQ4SC5lbWwiLCJyYXdfc2l6ZSI6MX0"
+  },
+  {
+    "name": "month-start-utc",
+    "marker_json": "{\"v\":1,\"id\":\"01M6A6FT0048H248H248H248H2\",\"received_at\":\"2026-11-01T00:00:00.000Z\",\"envelope_from\":\"a@example.net\",\"envelope_to\":\"x@example.com\",\"raw_key\":\"raw/2026/11/01M6A6FT0048H248H248H248H2.eml\",\"raw_size\":1}",
+    "yuuka_marker": "eyJ2IjoxLCJpZCI6IjAxTTZBNkZUMDA0OEgyNDhIMjQ4SDI0OEgyIiwicmVjZWl2ZWRfYXQiOiIyMDI2LTExLTAxVDAwOjAwOjAwLjAwMFoiLCJlbnZlbG9wZV9mcm9tIjoiYUBleGFtcGxlLm5ldCIsImVudmVsb3BlX3RvIjoieEBleGFtcGxlLmNvbSIsInJhd19rZXkiOiJyYXcvMjAyNi8xMS8wMU02QTZGVDAwNDhIMjQ4SDI0OEgyNDhIMi5lbWwiLCJyYXdfc2l6ZSI6MX0"
+  }
+]
