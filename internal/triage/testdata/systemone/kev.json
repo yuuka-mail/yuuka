@@ -1,0 +1,16 @@
+{
+  "model": "kev-latest",
+  "answers": {
+    "kind": {
+      "type": "choice",
+      "choice": "notification",
+      "confidence": 0.81,
+      "probabilities": {"notification": 0.86, "conversation": 0.03, "marketing": 0.06, "spam": 0.05}
+    },
+    "phishing": {"type": "noul", "noul": 0.04},
+    "injection": {"type": "noul", "noul": 0.01},
+    "needs_reply": {"type": "noul", "noul": 0.02}
+  },
+  "usage": {"input_tokens": 412, "output_tokens": 4},
+  "latency_ms": 495
+}

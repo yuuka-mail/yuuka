@@ -66,6 +66,12 @@ func (s Stripped) String() string {
 	return strings.Join(out, ", ")
 }
 
+// ContentText is the untrusted half of the view as Text renders it, not
+// yet fenced: for a reader that sends it on with facts of its own
+// (internal/triage). Whatever the view holds is rendered, so the caller
+// narrows the view first.
+func (v View) ContentText() string { return v.content() }
+
 // content renders the untrusted half of the view.
 func (v View) content() string {
 	var b strings.Builder

@@ -1,0 +1,18 @@
+{
+  "model": "multilingual",
+  "answers": {
+    "kind": {
+      "type": "choice",
+      "choice": "spam",
+      "confidence": 0.62,
+      "x_jev_confidence": 0.7,
+      "probabilities": {"notification": 0.05, "conversation": 0.02, "marketing": 0.13, "spam": 0.8},
+      "answer_confidence": 0.8
+    },
+    "phishing": {"type": "noul", "noul": 0.93, "confidence": 0.86},
+    "injection": {"type": "noul", "noul": 0.3, "confidence": 0.4, "abstention": "abstained", "abstention_threshold": 0.5, "low_confidence": true},
+    "needs_reply": {"type": "noul", "noul": 0.01, "confidence": 0.98}
+  },
+  "usage": {"input_tokens": 380, "output_tokens": 0},
+  "routing": {"model": "multilingual", "repo": "example/laya-multilingual", "reason": "language", "detection": "zh", "workflow": null}
+}
