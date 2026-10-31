@@ -11,8 +11,8 @@
 M0–M2 已完成：Cloudflare 收信、入库与重投去重，MIME 解析、线程与搜索，passkey 登录，
 WebUI，agent 结构化视图与 MCP；发信：outbox 状态机与崩溃恢复、按身份授权（`draft` / `auto` 档）、
 唯一的提交核心、SMTP submission 口、REST/MCP 的草稿与提交、WebUI 撰写。
-下一步是 M3（规则引擎、分区与验证码提取、agent 专属身份的 `review` 外发）。完整设计在 [`docs/`](docs/)
-（中文，节号 §1–§14 全局唯一，索引见 [`docs/README.md`](docs/README.md)），路线见 [`docs/roadmap.md`](docs/roadmap.md)。
+下一步是 M3（规则引擎、分区与验证码提取、agent 专属身份的 `review` 外发）。完整设计在 [`docs/design/`](docs/design/)
+（中文，节号 §1–§14 全局唯一，索引见 [`docs/design/README.md`](docs/design/README.md)），路线见 [`docs/design/roadmap.md`](docs/design/roadmap.md)。
 已实现的部分以代码为准，文档只讲为什么（见下文「文档」）。
 动手前按任务读对应章节，不必通读：
 
@@ -94,7 +94,7 @@ WebUI，agent 结构化视图与 MCP；发信：outbox 状态机与崩溃恢复�
 - 改了 UI 就要**亲眼看**：跑起来截图检查，亮暗两套主题、窄屏都看一遍。没看过不算做完
 
 **文档**
-- 中文；新章节沿用全局 § 编号，在 `docs/README.md` 的索引表登记
+- 中文；新章节沿用全局 § 编号，在 `docs/design/README.md` 的索引表登记
 - 写取舍而不是宣传：说清楚放弃了什么、什么情况下该回头
 - 实现了就以代码为准：代码回答「是什么」，文档回答「为什么」。落地一项设计时，
   在同一个提交里把文档里对应的定义（表结构、接口、环境变量、CLI 参数、端点清单……）

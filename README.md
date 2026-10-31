@@ -50,23 +50,17 @@ agent surface — runs on hardware you control.
 
 ## Documentation
 
-All design documents are in Chinese. The section numbering (§1–§13) is global across
-the set; [`docs/README.md`](docs/README.md) is the index. Deployment with Docker
-Compose (Caddy, Postgres, scheduled backups) is described in
-[`deploy/README.md`](deploy/README.md).
+The documentation is in Chinese and split by what you are doing;
+[`docs/README.md`](docs/README.md) is the entry point.
 
-| Document | Contents |
+| You want to | Start at |
 |---|---|
-| [prior-art.md](docs/prior-art.md) | Why existing Cloudflare mail projects did not fit |
-| [architecture.md](docs/architecture.md) | System architecture, eight design principles, Go stack |
-| [data-model.md](docs/data-model.md) | Postgres schema; the content/delivery split |
-| [drivers.md](docs/drivers.md) | Inbound and outbound driver contracts, capability matrix |
-| [agents.md](docs/agents.md) | The agent surface: anchors, capability tiers, proposals, audit |
-| [accounts.md](docs/accounts.md) | Multi-account integration and retention policy |
-| [frontend.md](docs/frontend.md) | Frontend stack and rendering paths |
-| [principals.md](docs/principals.md) | Principals, credentials, scopes, SMTP submission |
-| [roadmap.md](docs/roadmap.md) | Milestones M0–M5 and known risks |
-| [naming.md](docs/naming.md) | Name, command surface, repository layout |
+| Deploy and run it | [`deploy/README.md`](deploy/README.md) — Docker Compose with Caddy, Postgres and scheduled backups |
+| Work on the code | [`CONTRIBUTING.md`](CONTRIBUTING.md), then the design in [`docs/design/`](docs/design/README.md) |
+
+The design documents explain why the system is shaped the way it is. Their
+section numbers (§1–§14) are global across the set and are what code comments
+refer to. [`docs/design/roadmap.md`](docs/design/roadmap.md) has the milestones.
 
 ## Name
 
@@ -77,7 +71,7 @@ inbox this is meant to hold.
 The mascot also does real work: system messages are attributed to yuuka, while an
 agent's summaries and judgements are attributed to the agent itself. That split is
 not decoration — it keeps an agent's *guesses* from being read as the system's
-*facts*. See [`docs/agents.md`](docs/agents.md).
+*facts*. See [`docs/design/agents.md`](docs/design/agents.md).
 
 ## License
 

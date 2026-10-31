@@ -1,6 +1,6 @@
 # 分期路线与已知风险
 
-> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/README.md](README.md)。
+> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/design/README.md](README.md)。
 
 ## 6. 分期路线
 

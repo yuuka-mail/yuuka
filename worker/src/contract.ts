@@ -1,4 +1,4 @@
-// The Worker side of the Worker <-> Go contract v1 (docs/architecture.md §2.2).
+// The Worker side of the Worker <-> Go contract v1 (docs/design/architecture.md §2.2).
 // Any change here is a one-way door: it must land together with the Go side
 // and the shared vectors in testdata/contract/.
 

@@ -1,6 +1,6 @@
 # 前端技术选型
 
-> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/README.md](README.md)。
+> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/design/README.md](README.md)。
 
 ## 12. 前端技术选型
 
@@ -123,11 +123,11 @@ iframe 里是原信自己的 HTML，我们无法在其中挂稳定 id。所以 a
 
 M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里没写死、实现时定下的几处：
 
-- **REST 只读、按路由声明 scope**。端点和各自要的 scope 写在 [`internal/api/api.go`](../internal/api/api.go)
+- **REST 只读、按路由声明 scope**。端点和各自要的 scope 写在 [`internal/api/api.go`](../../internal/api/api.go)
   的 `routes` 一张表里，ACL 测试和 `openapi.json` 都从这张表来（§5.1），漏一条测试就失败。投递事实（信封、认证结果）另要
   `delivery:read`，没有就不给，结构化视图里的 `facts.delivered_to` 和 `facts.auth` 同理（标 `withheld`，§8.1）。
   消息列表和搜索用 `(received_at, id)` 键集游标而不是 offset，是因为新信到达时 offset 分页会重复或跳行
-- **附件只下载，不渲染**（§8.3、§12.2），实现见 [`internal/api/attachment.go`](../internal/api/attachment.go)。
+- **附件只下载，不渲染**（§8.3、§12.2），实现见 [`internal/api/attachment.go`](../../internal/api/attachment.go)。
   按 Viewer 取信、原件只从可见的投递读（§13.8）；什么算附件只由解析器的判定决定，和视图里列出的同源，
   正文和内嵌图片不算。几条取舍：
   - 字节只解传输编码，不做字符集转换——下载的是发件人附上的原样文件；解不开就报错，而不是给一个悄悄变短的文件
@@ -144,7 +144,7 @@ M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里�
 - **页面壳不需要会话**。`go:embed` 的 `index.html` 对任何非文件路径都返回（`no-store`），
   哈希命名的 `assets/` 缓存一年；壳加载后再同源 `fetch /auth/session`，401 就原地显示登录，
   URL 不变，所以从 TG 链接点进来、登录后直接落在那封信上。视图状态全部在 query string 里
-  （`area` `prefix` `dg` `q` `m`，`a`：打开的信里的锚点，以及 M2 撰写和外发用的几项，见 [`web/src/mail/view.ts`](../web/src/mail/view.ts)），不引路由库
+  （`area` `prefix` `dg` `q` `m`，`a`：打开的信里的锚点，以及 M2 撰写和外发用的几项，见 [`web/src/mail/view.ts`](../../web/src/mail/view.ts)），不引路由库
 - **`web/dist/` 只跟踪 `.gitkeep`**，让新克隆不先构建前端也能编译 Go；这样的二进制对页面请求回 503
   并提示先构建前端。代价是 Vite 不能清空输出目录，改为构建前只删 `dist/assets`
 - **CSP** 是 `default-src 'none'` 加 self 的脚本、样式、图片、连接，`frame-ancestors 'none'`。
@@ -169,15 +169,15 @@ M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里�
   还不支持它；oxlint 不依赖 TS 的 JS API，一个依赖就带齐 React hooks 规则。typescript-eslint
   支持 TS 7 之后可以换回去，规则集不变
 - **开发**：Vite 开发服务器把 `/api`、`/auth` 代理到一个本地的 `yuuka serve`（任务与端口见
-  [`mise.toml`](../mise.toml)）；那个 `serve` 配置的 WebUI origin 要设成 Vite 的地址，WebAuthn 和跨源检查才认。
-  [`internal/devseed`](../internal/devseed/) 把合成语料和生成的变体灌进开发库；
-  [`web/scripts/screenshots.mjs`](../web/scripts/screenshots.mjs) 用 Chrome 的虚拟认证器走完注册和登录，
+  [`mise.toml`](../../mise.toml)）；那个 `serve` 配置的 WebUI origin 要设成 Vite 的地址，WebAuthn 和跨源检查才认。
+  [`internal/devseed`](../../internal/devseed/) 把合成语料和生成的变体灌进开发库；
+  [`web/scripts/screenshots.mjs`](../../web/scripts/screenshots.mjs) 用 Chrome 的虚拟认证器走完注册和登录，
   截亮、暗、窄屏三套图
 
 ### 12.8 设计基线
 
 WebUI 是工具，不是展示面：一天打开几十次，每次几秒——扫一眼列表、看一个码、读一封信。
-基线是为这件事定的几条规则。数值在 [`web/src/index.css`](../web/src/index.css)，这里只写为什么。
+基线是为这件事定的几条规则。数值在 [`web/src/index.css`](../../web/src/index.css)，这里只写为什么。
 
 - **颜色只表意。** 界面框架一律中性灰；屏幕上出现色相，只能是五种意思之一：
   键盘焦点或锚点指到的块（`ring`，蓝）、需要留意（`warning`）、出错（`destructive`）、
@@ -185,7 +185,7 @@ WebUI 是工具，不是展示面：一天打开几十次，每次几秒——�
   而不是浅色强调色——M1 最初的选中色和 `system` 的青挨得太近，打开的信看起来像系统在说话。
   链接靠下划线区分，不另占色相。代价是界面整体偏素，将来要有品牌色也只能留在 logo 上
 - **字号按角色分五档**：meta 11 / small 12 / ui 13 / body 14 / title 18（px）。
-  Tailwind 自带的字号在主题里清空了，[`web/src/design.test.ts`](../web/src/design.test.ts)
+  Tailwind 自带的字号在主题里清空了，[`web/src/design.test.ts`](../../web/src/design.test.ts)
   拦住旧名字和任意值，写新代码时得先想清楚「这段字是什么角色」。
   11px 会被通用的设计检查报成「字太小」，这是有意的：它只给时间、计数、收件前缀、主机名这类
   扫一眼就够的元信息，正文从不低于 14px。层级优先用字重和 `muted-foreground` 拉开，不再加档。
@@ -265,7 +265,7 @@ WebUI 是工具，不是展示面：一天打开几十次，每次几秒——�
 - 可信接收方给出 `dmarc=pass`、没有降级、没有任何警告时，事实框收成信头下的一行，
   仍署 yuuka、带方形标记，例如「yuuka · dmarc=pass example.com · 收到 19:13」，点开是完整的框
 - 有任何错误或警告（`dmarc=fail`、未验证、降级、隔离）时整框展开，排在正文前面。判定在
-  [`web/src/mail/facts.ts`](../web/src/mail/facts.ts) 的 `isQuiet`；结构化视图还没取到时先显示只有接收时间的那一行，
+  [`web/src/mail/facts.ts`](../../web/src/mail/facts.ts) 的 `isQuiet`；结构化视图还没取到时先显示只有接收时间的那一行，
   这样占多数的正常信打开时不会先闪出一个整框
 - 理由：每封信都摆一个同样大的框，读的人很快就学会跳过它，真出事的那次也一起跳过。平时安静，是为了出事时被看见。
   剥掉了什么（tracking pixel 之类）属于展开后才看的细节
@@ -283,22 +283,22 @@ WebUI 是工具，不是展示面：一天打开几十次，每次几秒——�
 
 - **已落地**（M1 的数据够用）：两个区作为视图、侧栏重排、「检查」组和未认领前缀表、
   事实框收起。消息列表的 `class` 参数接受逗号分隔的多个值，服务端不知道「区」这个概念，
-  区只是前端对分类的组合（[`web/src/mail/view.ts`](../web/src/mail/view.ts) 的 `listParams`）
+  区只是前端对分类的组合（[`web/src/mail/view.ts`](../../web/src/mail/view.ts) 的 `listParams`）
 - **M2**：会话区按线程列、已读状态、通知的收起（需要写路径）
 - **M3**：提取值填进码位、改判、在界面上认领前缀、泄漏视图
 
 ### 12.10 M2 的撰写与外发
 
-撰写器、草稿、outbox 三个视图建在这几组端点上，路径、参数、响应以 [`openapi.json`](../internal/api/openapi.json) 为准，
-handler 在 [`internal/api/sending.go`](../internal/api/sending.go)；界面在 [`web/src/send/`](../web/src/send/)，
-措辞和状态到语气的映射集中在 [`outgoing.ts`](../web/src/send/outgoing.ts)（纯函数，有测试）。这里只写为什么是这个形状：
+撰写器、草稿、outbox 三个视图建在这几组端点上，路径、参数、响应以 [`openapi.json`](../../internal/api/openapi.json) 为准，
+handler 在 [`internal/api/sending.go`](../../internal/api/sending.go)；界面在 [`web/src/send/`](../../web/src/send/)，
+措辞和状态到语气的映射集中在 [`outgoing.ts`](../../web/src/send/outgoing.ts)（纯函数，有测试）。这里只写为什么是这个形状：
 
 - **信息架构**（§12.9）：侧栏顶组在「全部」下面加「草稿」「外发」两项，不另开顶层导航。草稿的计数是还能改的草稿数，
   外发的计数只数 `unknown`（警告色）：只有它在等一个人的决定，排队中、已发出都不需要人做什么。
   外发要 `delivery:read`（里面有 Bcc），会话没有这个 scope 就不显示这一项。撰写器占阅读区那一栏，
   和打开一封信是同一个位置；顶栏有「Compose」，阅读区有「Reply」，键盘是 `c` / `r`。
   视图状态仍在 query string 里：`compose=1` 是新信、`reply=<id>` 是回复、`d=<id>` 是草稿、`o=<id>` 是 outbox 行、
-  `st` 是草稿或 outbox 列表的筛选（[`view.ts`](../web/src/mail/view.ts)）
+  `st` 是草稿或 outbox 列表的筛选（[`view.ts`](../../web/src/mail/view.ts)）
 - **自动保存**：第一次有改动时 `POST` 建草稿，之后防抖 `PUT` 整份；保存排成一条链，建草稿之前不会有 `PUT` 抢跑。
   建好以后地址栏换成 `d=<id>`，撰写器不重新挂载（字段已经在里面，正在打字）。只打开一个回复、什么都没改，
   不建草稿——草稿列表里不该出现没人写过一个字的东西。按发送时没有草稿就先建

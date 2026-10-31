@@ -1,6 +1,6 @@
 # 品牌与吉祥物
 
-> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/README.md](README.md)。
+> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/design/README.md](README.md)。
 
 ## 14. 品牌与吉祥物
 
@@ -37,7 +37,7 @@
 | 项 | 定法 |
 |---|---|
 | 发型 | 齐下巴的短发。戴帽后剪影由帽子决定，头发只露两侧，长发在小图里只会变成一团色块 |
-| 发色 | 偏蓝的紫。色相要和 `--agent`（[`web/src/index.css`](../web/src/index.css)）拉开：系统的角色顶着 agent 的颜色，两个 bot 头像并排时就分不清谁在说话，正是 §11.1 要避免的 |
+| 发色 | 偏蓝的紫。色相要和 `--agent`（[`web/src/index.css`](../../web/src/index.css)）拉开：系统的角色顶着 agent 的颜色，两个 bot 头像并排时就分不清谁在说话，正是 §11.1 要避免的 |
 | 眼色 | 和帽檐同一个青，少一个色相 |
 | 配色 | 藏青、青、奶油白三色为主，加发色。青只取一个值，帽檐、徽章、logo、服装上的小块都用它 |
 
@@ -61,7 +61,7 @@
 
 README 横幅、GitHub 社交预览、登录与 passkey 注册页、404、空收件箱，以及 yuuka 的 Telegram bot 头像。
 **三栏工作界面里不放**——那是一天打开几十次、每次几秒的工具（§12.8），角色在那里只是噪音。
-logo 只出现在顶栏左上角、登录页和 favicon（[`web/src/components/logo.tsx`](../web/src/components/logo.tsx)）。
+logo 只出现在顶栏左上角、登录页和 favicon（[`web/src/components/logo.tsx`](../../web/src/components/logo.tsx)）。
 
 ### 14.7 交付物
 

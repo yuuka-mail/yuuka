@@ -1,6 +1,6 @@
 # 命名、命令面与仓库布局
 
-> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/README.md](README.md)。
+> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/design/README.md](README.md)。
 
 ## 11. 命名与命令面
 
@@ -9,7 +9,7 @@
 邮件只是第一个入口形态，§9 的设计迟早会接 IM / webhook / RSS，名字不该锁死在 mail。
 
 下面是命令面的名字登记：子命令名是对外标识（AGENTS.md 的单向门），新增要先在这里登记。
-已实现的子命令以 [`cmd/yuuka`](../cmd/yuuka/main.go) 为准，参数不在这里重复。
+已实现的子命令以 [`cmd/yuuka`](../../cmd/yuuka/main.go) 为准，参数不在这里重复。
 
 ```
 github.com/yuuka-mail/yuuka             # module
@@ -77,7 +77,8 @@ yuuka-mail/yuuka
 ├─ internal/       # Go 包；怎么分包是双向门，以代码为准
 ├─ worker/         # Cloudflare Email Worker（TS）
 ├─ web/            # 前端，产物 embed 进二进制
-├─ docs/           # 设计文档，按 § 拆分，索引见 docs/README.md
+├─ docs/           # design/ 设计（按 § 拆分）、operate/ 运维、integrate/ 接入
+├─ deploy/         # Docker Compose 部署
 └─ testdata/       # .eml 语料（§10.5）与 Worker ↔ Go 契约向量（§2.2）
 ```
 

@@ -1,6 +1,6 @@
 # Worker ↔ Go contract vectors
 
-Shared test vectors for the contract in [docs/architecture.md §2.2](../../docs/architecture.md).
+Shared test vectors for the contract in [docs/design/architecture.md §2.2](../../docs/design/architecture.md).
 Both the Go tests and the Worker tests load these files; neither side may keep its own copy
 of the expected values. A format change is a one-way door (see AGENTS.md): bump the version
 directory (`v2/`) instead of editing `v1/` in place, and keep `v1/` passing for as long as

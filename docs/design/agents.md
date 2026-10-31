@@ -1,6 +1,6 @@
 # Agent 面：人机同屏，权限分级
 
-> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/README.md](README.md)。
+> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/design/README.md](README.md)。
 
 ## 8. Agent 面：人机同屏，权限分级
 
@@ -217,7 +217,7 @@ M1 的落法（`internal/mcp`）：
   HTTP 形态放进 `Authorization: Bearer`，stdio 形态放进上面那个环境变量。
   `yuuka token revoke` 收回，下一次调用起失效。WebUI 入口还没有
 
-M2 的写工具（[`internal/mcp/drafts.go`](../internal/mcp/drafts.go)），四件都要 `draft:create`：
+M2 的写工具（[`internal/mcp/drafts.go`](../../internal/mcp/drafts.go)），四件都要 `draft:create`：
 
 - `list_identities`：调用方能用哪些发信地址、每个地址提交后是「会发出」还是「一律停在草稿」以及原因。
   算法是 store 的 `Standings`：对每个身份用不带收件人的输入跑一遍 `sendpolicy.Decide`，
@@ -228,7 +228,7 @@ M2 的写工具（[`internal/mcp/drafts.go`](../internal/mcp/drafts.go)），四
   新线程则必须给。`update_draft` 整体替换内容，不给 `from` 就保留原来的；只能改自己写的、还没进 outbox 的草稿
   （`visibleDraft`，§13.8：别的 agent 的草稿和不存在的一样）。结果里附上 `list_identities` 的那个预览，
   agent 写完就知道交上去会怎样。审计只记地址、收件人个数和 cites 个数，不记主题和正文：审计日志不是信的副本
-- `submit_draft(draft_id)`：经 [`internal/submit`](../internal/submit/submit.go) 的 `SubmitDraft`，
+- `submit_draft(draft_id)`：经 [`internal/submit`](../../internal/submit/submit.go) 的 `SubmitDraft`，
   和 REST、SMTP 提交口是同一个入口。结果是 `queued`（带 outbox id）或 `held`（`hold_reason` + `hold_detail`），
   两种都是成功；描述和返回文本都写明「停在草稿是正常结果，不要换条路再发」。
   **这个工具不要求 `submission:send`**：缺它的凭据提交照样成功，结果是 `policy` 原因的草稿（§8.9 规则 4），
@@ -239,7 +239,7 @@ M2 的写工具（[`internal/mcp/drafts.go`](../internal/mcp/drafts.go)），四
 
 ### 8.8 审计与回放
 
-`actions`（表定义见 [`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)，主体模型见 §13.2）
+`actions`（表定义见 [`0003_identity.sql`](../../internal/store/migrations/0003_identity.sql)，主体模型见 §13.2）
 记录每一次动作：谁（`actor`）、用哪一把凭据（`credential_id`）、做了什么、结果、撤销用的 `undo_token`。
 `credential_id` 回答「是哪一把凭据干的」——一个主体可以有多把（§13.3）。
 认证事件也写在这里（登录、登出、注册 passkey、恢复码、越权被拒）；
@@ -280,11 +280,11 @@ M2 的写工具（[`internal/mcp/drafts.go`](../internal/mcp/drafts.go)），四
 agent 的工作不会丢，人也不会被一堆报错淹没。凭据缺 `submission:send` 也是降级（`hold_reason = policy`），
 不是报错，调用方没有理由换一条路重试。唯一的拒绝在 SMTP 提交口：对 `From` 毫无授权（档位 `none`）时拒收（§13.6）。
 
-**实现**：[`internal/sendpolicy`](../internal/sendpolicy/sendpolicy.go) 的 `Decide`，一个纯函数，表驱动测试覆盖每条规则，
+**实现**：[`internal/sendpolicy`](../../internal/sendpolicy/sendpolicy.go) 的 `Decide`，一个纯函数，表驱动测试覆盖每条规则，
 另有一个穷举测试断言「人的身份 × 任何非本人提交者 × 任何授权 × 任何确认者」都出不了 outbox；
-[`internal/submit`](../internal/submit/submit.go) 在两个入口（SMTP 的 `SubmitRaw`、草稿的 `SubmitDraft`）上把同一件事再穷举一遍。
+[`internal/submit`](../../internal/submit/submit.go) 在两个入口（SMTP 的 `SubmitRaw`、草稿的 `SubmitDraft`）上把同一件事再穷举一遍。
 
-**没有绕过 `Decide` 的入队路径，这一点由结构保证，不靠约定**（[`store/policytx.go`](../internal/store/policytx.go)）：
+**没有绕过 `Decide` 的入队路径，这一点由结构保证，不靠约定**（[`store/policytx.go`](../../internal/store/policytx.go)）：
 
 - 建 outbox 行的 SQL 只有一条（`enqueueOutbox`，不导出），唯一的调用者是 `(*PolicyTx).Enqueue`
 - `PolicyTx` 只由 `store.WithDecision` 构造：它在持有授权锁的事务里重读事实、**自己**调用 `Decide`，
@@ -327,7 +327,7 @@ agent 的工作不会丢，人也不会被一堆报错淹没。凭据缺 `submis
 | Reply-To | 有一条投递没被降级，**而且** DMARC 是 pass；我们自己发的信上的 Reply-To 不算 |
 
 再加上我们在这个线程里发过信的全部收件人（`outbox_recipients`，含 Bcc）。地址按 `store.FoldAddr` 折叠后比较，
-实现见 [`ReplyFacts`](../internal/store/policyfacts.go)。取舍：
+实现见 [`ReplyFacts`](../../internal/store/policyfacts.go)。取舍：
 
 - **只被抄送的人也算**。回复全部是线程里最常见的回信，只认发件人会把它一律停成草稿，
   `thread` 档就只剩「回给发件人」这一种用法
@@ -343,7 +343,7 @@ agent 的工作不会丢，人也不会被一堆报错淹没。凭据缺 `submis
 - **Bcc 只有我们自己知道**：收到的信里看不到别人的 Bcc；我们发的信的 Bcc 在 `outbox_recipients` 里，从那里算
 - 通信方只来自查询者看得见的信和投递（§13.8）：看不见的信的收件人是头部数据，不能经授权决定泄露出去；
   看不见的投递也不能让一封看得见的信的头部变得可信
-- 存的是 `messages.to_addrs` / `cc_addrs` / `reply_to_addrs`（[0007](../internal/store/migrations/0007_message_recipients.sql)，派生列）。
+- 存的是 `messages.to_addrs` / `cc_addrs` / `reply_to_addrs`（[0007](../../internal/store/migrations/0007_message_recipients.sql)，派生列）。
   0007 之前入库的信上它们是 NULL，补跑（§4.2）填上之前这些信只贡献发件人，即 0007 之前的规则——宁可停在草稿
 
 一次提交的去向：
@@ -411,7 +411,7 @@ agent 专属身份的默认值是 `review` + `thread`。各类主体的默认档
 - 同一线程、同一收件人的自动外发另有一个小上限，超了降级
 
 落地（M2）：被回复的信「带 `Auto-Submitted` / `Precedence`」由它的分类表达——
-[`classify`](../internal/classify/classify.go) 已把这两个头算作 machine 信号，所以 `class = machine` 覆盖了它们，
+[`classify`](../../internal/classify/classify.go) 已把这两个头算作 machine 信号，所以 `class = machine` 覆盖了它们，
 不必再读原件。人工改判为 human **不**解除这条：agent 能改分类（§8.2 的标注层），改判若能打开循环规则，
 被注入的 agent 先改判、再自动回复就绕过去了；改判为 machine 则照样生效。
 每线程每收件人的上限是最近 24 小时内 3 封自动外发（`approved_by = system`，不论是谁发的），

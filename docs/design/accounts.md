@@ -1,6 +1,6 @@
 # 多账户整合
 
-> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/README.md](README.md)。
+> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/design/README.md](README.md)。
 
 ## 9. 多账户整合：统一视图，分级归属
 
@@ -44,7 +44,7 @@ identity → 出口必须是硬绑定：
 
 - 回复时**默认身份 = 这封信是从哪个投递进来的**（`deliveries.zone/prefix`
   或 account），不是全局默认。这是"多账户串身份"最常见的事故，在数据模型里就堵掉。
-  实现见 [`store.ReplyIdentities`](../internal/store/identities.go)：每条可见投递在它自己的账户里按精确地址、
+  实现见 [`store.ReplyIdentities`](../../internal/store/identities.go)：每条可见投递在它自己的账户里按精确地址、
   再按 `*@zone` 解析；我们自己发出的信取它发出时的身份。一封信投到了我们的好几个地址时（To 一个、Cc 另一个），
   候选按「提交者自己拥有的身份 → 精确身份先于 `*@zone` → 最早的投递 → 地址」排序：
   和运维者一起被抄送的 agent 用自己的身份回，运维者用自己的，而不是落到对方的地址上、再被硬上限压成草稿。
@@ -56,7 +56,7 @@ identity → 出口必须是硬绑定：
 - 出口按名字定义在进程配置里（主机、端口、caps、凭据文件路径；变量形状见 §10.2），`identities.transport` 只存名字，
   不建 `transports` 表（理由见 §4 的迁移说明）。传输链也在配置里按名字定义，identity 照样只引用一个名字。
 - identity 是精确地址或 `*@zone`。精确地址压过同 zone 的通配：给服务的授权应当落在精确地址上，
-  `*@zone` 上的授权碰不到别人单独拥有的地址（表见 [0005](../internal/store/migrations/0005_sending.sql)）。
+  `*@zone` 上的授权碰不到别人单独拥有的地址（表见 [0005](../../internal/store/migrations/0005_sending.sql)）。
 - 每个自有域都要单独在 Cloudflare onboard Email Sending + 配 DNS；
   注意域名 30/zone（Routing+Sending 合计）、destination 200/account 的限制。
 
@@ -80,7 +80,7 @@ identity → 出口必须是硬绑定：
 OAuth 续期、限速）会掩盖核心链路的问题，不适合早做。
 数据模型的**形状**从一开始就是多账户的：内容 / 投递两层拆分、`deliveries` 带账户维度、
 幂等键是 `(账户, source_key)`，catch-all 只是其中一组账户。
-但 `accounts` / `identities` 两张表在 **M2** 建（[0005](../internal/store/migrations/0005_sending.sql)）：
+但 `accounts` / `identities` 两张表在 **M2** 建（[0005](../../internal/store/migrations/0005_sending.sql)）：
 M0、M1 只有一个 Cloudflare 账户，用进程配置的 `account_key` 代替；
 M2 发信时要按 identity 选出口、按 `identity_grants` 放行，这两张表才有了真正的读者。
 0005 把每个 `account_key` 变成一个 `cf_catchall` 账户，`deliveries` 改用外键，幂等键改为 `(account_id, source_key)`。

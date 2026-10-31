@@ -1,5 +1,5 @@
 // Names for the schemas of openapi.json (schema.gen.ts, generated from
-// the Go types; see docs/architecture.md §5.1). Only aliases: a shape
+// the Go types; see docs/design/architecture.md §5.1). Only aliases: a shape
 // that is not in the contract does not belong here.
 
 import type { components, paths } from "./schema.gen";

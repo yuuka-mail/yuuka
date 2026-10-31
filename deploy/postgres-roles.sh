@@ -6,7 +6,7 @@
 #
 #   docker compose exec postgres sh /docker-entrypoint-initdb.d/10-yuuka-roles.sh
 #
-# Three login roles, none a superuser (docs/data-model.md, "数据库角色"):
+# Three login roles, none a superuser (docs/design/data-model.md, "数据库角色"):
 #
 #   yuuka_owner   owns the database and its public schema; only the
 #                 one-shot migrate service connects as it, to run

@@ -1,6 +1,6 @@
 # 总体架构与设计原则
 
-> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/README.md](README.md)。
+> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/design/README.md](README.md)。
 
 ## 2. 总体架构
 
@@ -171,7 +171,7 @@ sequenceDiagram
 | pending | `pending/<id>` | 投递标记 | 写 | 读、列、删 |
 
 `raw/` 的 `YYYY/MM` 取 `received_at` 的 UTC 年月。`sent/` 不属于 Worker 的契约，列在这里是因为它和 `raw/` 共用一个 bucket、
-一把 Go 侧凭据：`<id>` 是 Go 生成的 ULID，`YYYY/MM` 取提交时间的 UTC 年月，key 函数是 [`r2.SentKey`](../internal/r2/r2.go)。
+一把 Go 侧凭据：`<id>` 是 Go 生成的 ULID，`YYYY/MM` 取提交时间的 UTC 年月，key 函数是 [`r2.SentKey`](../../internal/r2/r2.go)。
 Worker 不读、不写、不列 `sent/`，它的行为和 `testdata/contract/v1/` 的向量都不因 `sent/` 改变。
 `sent/` 里的字节在越过发送的提交点之前就写下（§4.5），所以它收的是每一份为外发准备的字节，
 包括停在草稿的 SMTP 提交和最终撤回、作废、从未发出的信：**发没发出看 outbox 的状态，不看前缀**（§4.6）。
@@ -184,7 +184,7 @@ key 仍保留 `raw/`、`pending/` 前缀，文档、日志里的引用不用改�
 少一把令牌，收发两类原件在同一处归档、用同一套保管方式。代价是 Go 侧的 raw 令牌必须是 Object Read & Write，
 「`raw/` 不可变」不再由权限保证，改由下面几条保证：
 
-- 读写 raw bucket 的类型 [`r2.RawBucket`](../internal/r2/r2.go) 没有删除方法，唯一的写方法 `PutSent` 先用 `r2.CheckSentKey`
+- 读写 raw bucket 的类型 [`r2.RawBucket`](../../internal/r2/r2.go) 没有删除方法，唯一的写方法 `PutSent` 先用 `r2.CheckSentKey`
   核对整个 key 的形状（`sent/` + 四位年 + 两位月 + ULID + `.eml`），不符就在发请求之前拒绝，`raw/` 下的 key 永远到不了 R2
 - 每次写都带 `If-None-Match: *`。R2 的 S3 API 把条件头和写入放在同一步原子判定，并发写同一 key 至多一个成功，
   其余得到 `412 PreconditionFailed`（[R2 S3 API 兼容性：Conditional operations](https://developers.cloudflare.com/r2/api/s3/api/)）。
@@ -396,7 +396,7 @@ ltt.rs 等，Thunderbird / aerc / iOS Mail 都不支持）。所以"JMAP 就行"
 
 ### 5.1 API 契约：OpenAPI 3.1，从 Go 类型生成
 
-REST 的契约是 [`internal/api/openapi.json`](../internal/api/openapi.json)，由 Go 类型和路由表生成、提交进仓库，
+REST 的契约是 [`internal/api/openapi.json`](../../internal/api/openapi.json)，由 Go 类型和路由表生成、提交进仓库，
 二进制在 `/api/v1/openapi.json` 免认证提供。WebUI 的类型和客户端从它生成。
 
 M1 手写的 REST 有四处会悄悄漂移，这次迁移就是为了消掉它们：
@@ -455,17 +455,17 @@ internal/api/openapi.json（go generate ./internal/api）
 web/src/api/schema.gen.ts → openapi-fetch + openapi-react-query（web/src/api/client.ts）
 ```
 
-- **路由表是唯一来源**。[`internal/api/api.go`](../internal/api/api.go) 的 `routes` 每条记方法、路径、scope、
+- **路由表是唯一来源**。[`internal/api/api.go`](../../internal/api/api.go) 的 `routes` 每条记方法、路径、scope、
   参数类型和响应类型；服务请求、ACL 测试（§13.8）和生成器都遍历它。`/auth/*` 是
-  [`internal/authn/handler.go`](../internal/authn/handler.go) 的 `endpoints`，`Handler` 和 `Ops` 都从它来，
+  [`internal/authn/handler.go`](../../internal/authn/handler.go) 的 `endpoints`，`Handler` 和 `Ops` 都从它来，
   WebAuthn 的选项和凭据只描述成对象（形状归库管）。`/mcp` 和 JMAP 不进：它们各自描述自己
 - **加一个端点是一条表项加一个有类型的 handler**，形状是 `func(*API, ctx, *auth.Viewer, P) (R, error)`，
-  见 [`internal/api/route.go`](../internal/api/route.go)。`P` 的字段按 `path:` / `query:` 标签绑定，
+  见 [`internal/api/route.go`](../../internal/api/route.go)。`P` 的字段按 `path:` / `query:` 标签绑定，
   带 `body:"json"` 的字段是请求体；`R` 是 `struct{}` 时回 204，`withStatus` 改成功状态码。
   附件这类 HTTP 原生端点用 `rawRoute`，参数照样绑定，响应自己写，在文档里照样有描述
 - **约束只声明一次**。枚举是类型上的 `Enum()` 方法，范围、正则、默认值是字段上的
   `minimum` / `maximum` / `pattern` / `default` 标签；读这些标签的只有
-  [`internal/openapi/schema.go`](../internal/openapi/schema.go) 的 `Constrain`（写进 schema）和 `Check`（运行时校验），
+  [`internal/openapi/schema.go`](../../internal/openapi/schema.go) 的 `Constrain`（写进 schema）和 `Check`（运行时校验），
   文档和服务端不会各说各话。请求体解码时拒绝未知字段，再把每个值过一遍 `Check`；
   `omitempty` 字段的零值算缺省、不校验。必填只到 JSON 解码这一步——缺了必填字段得到零值，由 handler 判断
 - **MCP 和 REST 共用类型，也共用推导**。`Class`、`Level`、`Kind` 等在 agentview 里各声明一次取值，
@@ -485,17 +485,17 @@ web/src/api/schema.gen.ts → openapi-fetch + openapi-react-query（web/src/api/
 - **它把切片和指针都推成可空**。线上从不发 `null`（下一节），生成器就把 `null` 从所有 schema 里去掉；
   这句承诺由 ACL 测试兑现：每个端点的成功响应里出现任何 `null` 都算失败
 - **openapi-typescript 要 TypeScript 5 的编译器 API**，仓库用的 TypeScript 7 不再导出它。
-  [`.pnpmfile.cjs`](../.pnpmfile.cjs) 给它单独装一份 TypeScript 5，别处看不到；它支持 7 之后删掉
+  [`.pnpmfile.cjs`](../../.pnpmfile.cjs) 给它单独装一份 TypeScript 5，别处看不到；它支持 7 之后删掉
 
 #### 趁还没发布一并定下的约定
 
 以下几点发布之后再改就是破坏性变更，所以已经定下：
 
-- **错误用 RFC 9457 的 `application/problem+json`**（[`internal/openapi/problem.go`](../internal/openapi/problem.go)），
+- **错误用 RFC 9457 的 `application/problem+json`**（[`internal/openapi/problem.go`](../../internal/openapi/problem.go)），
   `/api/` 和 `/auth/` 都是。扩展成员 `code` 是稳定的机器可读码，取值在 schema 里列全；`detail` 给人读，
   客户端只按 `code` 分支。`type` 一律缺省（`about:blank`），所以 `title` 就是状态码的文字。
   §8.9 的"超出授权降级为草稿"不算错误：照常返回成功，结果里说明原因。
-  store 和提交核心的哨兵错误只在 [`api.go`](../internal/api/api.go) 的 `fail` 一处映射成 code，handler 不各自翻译：
+  store 和提交核心的哨兵错误只在 [`api.go`](../../internal/api/api.go) 的 `fail` 一处映射成 code，handler 不各自翻译：
   对象已不在可改的状态（草稿已进 outbox、outbox 行不是 `unknown`）是 `409 conflict`，
   `from` 没有身份覆盖是 `422 no_identity`，提交核心直接拒收是 `403 submission_rejected`
 - **写端点**：创建回 `201` 和新对象，删除回 `204`。修改是 `PUT` 整体替换，不做 `PATCH`：

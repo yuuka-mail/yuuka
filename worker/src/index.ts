@@ -1,6 +1,6 @@
 // Email Worker: persist the envelope and the raw message to R2, then nudge
 // yuuka with a signed webhook. It deliberately knows nothing about MIME; see
-// docs/architecture.md §2.1 and §2.2 for the protocol this implements.
+// docs/design/architecture.md §2.1 and §2.2 for the protocol this implements.
 
 import {
   type Marker,

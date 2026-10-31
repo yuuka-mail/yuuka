@@ -1,6 +1,6 @@
 # 多主体：一个邮箱宇宙，多个主体
 
-> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/README.md](README.md)。
+> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/design/README.md](README.md)。
 
 ## 13. 主体、凭据与权限
 
@@ -28,7 +28,7 @@ per-user 配额、角色（role）层。权限只用扁平 scope 表达，不要
 ### 13.2 principals
 
 `actions.actor`（§8.8）此前是字符串，现在升为一等实体，`actor` 变成外键。
-表定义见 [`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)：`kind` 是 human / agent / service / rule / system 五种之一；
+表定义见 [`0003_identity.sql`](../../internal/store/migrations/0003_identity.sql)：`kind` 是 human / agent / service / rule / system 五种之一；
 `owner_id` 让服务凭据归属于某个 human，构成可撤销链。
 
 实际会有的主体：
@@ -48,7 +48,7 @@ per-user 配额、角色（role）层。权限只用扁平 scope 表达，不要
 ### 13.3 credentials：和主体分离
 
 一个主体可以有多把凭据，各自独立撤销。`kind` 分 session / token / smtp_password / oauth 四种，
-表定义见 [`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)。
+表定义见 [`0003_identity.sql`](../../internal/store/migrations/0003_identity.sql)。
 
 分离的好处很具体：给某台机器发一把只能发信的 SMTP 密码，换机器时撤销这一把，
 不影响同一主体的其他凭据，也不用改 principal 本身。
@@ -61,7 +61,7 @@ per-user 配额、角色（role）层。权限只用扁平 scope 表达，不要
 
 可校验的三类秘密都由服务端生成，从不接受人选的值，所以 `secret_hash` 用 SHA-256 而不是慢哈希：
 256 位的随机串没有可穷举的空间，慢哈希只会拖慢每个请求。交给持有者的字符串是
-`<前缀>_<凭据 id>_<秘密>`，每类凭据一个前缀（格式见 [`internal/auth/secret.go`](../internal/auth/secret.go)）：
+`<前缀>_<凭据 id>_<秘密>`，每类凭据一个前缀（格式见 [`internal/auth/secret.go`](../../internal/auth/secret.go)）：
 明文里带 id，按主键取行再做常量时间比较，而不是按哈希搜索；前缀让泄漏的串能被认出来，
 也让一类凭据不会被当成另一类接受。
 
@@ -70,7 +70,7 @@ passkey 不是 `credentials` 的一行：它是产生 `session` 凭据的登录�
 （公钥、签名计数、AAGUID、BE/BS 标志），不把任何库的序列化格式冻结进库里。
 
 **`token` 的签发（M1）**：只有主机上的 CLI 能签发（`yuuka token issue` / `ls` / `revoke`，
-参数见 [`cmd/yuuka/token.go`](../cmd/yuuka/token.go)），WebUI 入口还没有（§13.7 的 CLI 规则）。
+参数见 [`cmd/yuuka/token.go`](../../cmd/yuuka/token.go)），WebUI 入口还没有（§13.7 的 CLI 规则）。
 
 - 只发给 `agent` 和 `service`。`human` 的凭据只有 passkey 登录产生的 `session`，
   `issue` 遇到 human 直接拒绝并指向 `admin enroll`：给人发一把长期 token，等于在 passkey 旁边开一扇不防钓鱼的后门。
@@ -87,7 +87,7 @@ passkey 不是 `credentials` 的一行：它是产生 `session` 凭据的登录�
 
 - 交给持有者的密码是 `ykp_<凭据 id>_<秘密>`，**SMTP 用户名就是凭据 id**（命令单独打印出来）。
   提交口解析密码、要求其中的 id 等于用户名，再按 id 取行做常量时间比较
-  （[`authn.Bearer.AuthenticateSMTP`](../internal/authn/bearer.go)），和 token 完全一样；用户名和密码对不上一律拒绝，
+  （[`authn.Bearer.AuthenticateSMTP`](../../internal/authn/bearer.go)），和 token 完全一样；用户名和密码对不上一律拒绝，
   一把密码不能挂在另一把凭据的名下用。另一种做法是用户名写主体名（`service:monitoring`），
   但那样查找要么按哈希搜索，要么一个主体只能有一把密码；凭据 id 两个问题都没有。
   密码带前缀，泄漏时能被认出来，也不会被当成 bearer token 接受（反之亦然）
@@ -97,8 +97,8 @@ passkey 不是 `credentials` 的一行：它是产生 `session` 凭据的登录�
 
 ### 13.4 scope 是唯一的权限语言
 
-scope 是一张封闭的扁平列表，定义在 [`internal/auth/auth.go`](../internal/auth/auth.go)，
-库里 `credentials` 上的约束是同一份（[`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)）：加一个 scope 要写迁移，这正是目的。
+scope 是一张封闭的扁平列表，定义在 [`internal/auth/auth.go`](../../internal/auth/auth.go)，
+库里 `credentials` 上的约束是同一份（[`0003_identity.sql`](../../internal/store/migrations/0003_identity.sql)）：加一个 scope 要写迁移，这正是目的。
 
 每把凭据持有一个 scope 子集。§8.2 的能力分级在这里落地：
 
@@ -121,19 +121,19 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 §9.3 已经把 identity 硬绑到 transport。现在再加一层：谁可以用这个 identity 发信。
 
 `identity_grants` 每行是一个（身份, 主体）对：档位 `send_policy`（§8.9）、收件人范围、各项限额、
-`review` 档的撤回窗口和熔断时间。表见 [`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)，
+`review` 档的撤回窗口和熔断时间。表见 [`0003_identity.sql`](../../internal/store/migrations/0003_identity.sql)，
 列的默认值取安全的一端（`none` + `thread`）。由 `yuuka grant set|ls|rm` 管理（参数见
-[`cmd/yuuka/grant.go`](../cmd/yuuka/grant.go)）：`set` 只改给出的参数，其余保持原值，新行从列默认值起步；
+[`cmd/yuuka/grant.go`](../../cmd/yuuka/grant.go)）：`set` 只改给出的参数，其余保持原值，新行从列默认值起步；
 `rm` 之后适用的是下面的默认，不一定是「什么都不能做」，命令会把它打印出来。
 
-执行全在一个纯函数里：[`sendpolicy.Decide`](../internal/sendpolicy/sendpolicy.go)，没有时钟、不碰数据库，
-输入由 store 的 [`PolicyInput`](../internal/store/policyfacts.go) 一次备齐。所有提交路径（REST / MCP 的
-`submit_draft`、WebUI 的发送、SMTP 提交口）都经 [`internal/submit`](../internal/submit/submit.go) 进入
-[`store.WithDecision`](../internal/store/policytx.go)：在持有授权锁的事务里读事实、调 `Decide`，再经同一个事务写 outbox 行或草稿，
+执行全在一个纯函数里：[`sendpolicy.Decide`](../../internal/sendpolicy/sendpolicy.go)，没有时钟、不碰数据库，
+输入由 store 的 [`PolicyInput`](../../internal/store/policyfacts.go) 一次备齐。所有提交路径（REST / MCP 的
+`submit_draft`、WebUI 的发送、SMTP 提交口）都经 [`internal/submit`](../../internal/submit/submit.go) 进入
+[`store.WithDecision`](../../internal/store/policytx.go)：在持有授权锁的事务里读事实、调 `Decide`，再经同一个事务写 outbox 行或草稿，
 并发提交不会一起越过最后一个名额。没有第二条路径，测试辅助和 CLI 也不例外——这由结构保证，见 §8.9。
 
 **各项限额的默认值由授权代码决定，不写在库里**：库里的空值只表示「这条授权没有自己的数」，
-值见 [`sendpolicy.DefaultLimits`](../internal/sendpolicy/sendpolicy.go)，改默认值不需要迁移。按提交主体的类型：
+值见 [`sendpolicy.DefaultLimits`](../../internal/sendpolicy/sendpolicy.go)，改默认值不需要迁移。按提交主体的类型：
 
 | 主体 | 每小时 | 每天 | 每天新收件人 |
 |---|---|---|---|
@@ -147,7 +147,7 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 「新收件人」是此前没有任何处于已发出或在途状态（`queued`…`failed`）的 outbox 行发往过的地址，按 `addr_fold` 比较。
 
 **硬上限在两处成立**：`Decide` 里身份属于某个 human、提交者不是他时一律压回 `draft`，不看授权表；
-`yuuka grant set`（[`store.SetGrant`](../internal/store/grants.go)）拒绝写入这种组合下高于 `draft` 的档位，
+`yuuka grant set`（[`store.SetGrant`](../../internal/store/grants.go)）拒绝写入这种组合下高于 `draft` 的档位，
 而不是存下来再在执行时压低——表里写着一个永远不会生效的 `auto`，只会误导下一个读它的人。
 后者只是提示，前者才是保证：即使表被手改，`Decide` 照样压回去。
 
@@ -155,7 +155,7 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 服务凭据泄露的后果因此被限制在一个前缀内——这对 catch-all 尤其要紧，
 因为域级 onboard 意味着"能发信"默认等于"能以任意前缀发信"（§9.3）。
 
-档位和限额对所有主体是同一套机制，区别只在默认值。没有授权行时（[`sendpolicy.Effective`](../internal/sendpolicy/sendpolicy.go)）：
+档位和限额对所有主体是同一套机制，区别只在默认值。没有授权行时（[`sendpolicy.Effective`](../../internal/sendpolicy/sendpolicy.go)）：
 
 | 主体 → 身份 | 没有授权行时的档位 |
 |---|---|
@@ -190,8 +190,8 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 2. 规范化 MIME（按出口 caps 去掉不允许的头，§10.2），写 Sent 副本
 3. 入 outbox 状态机，由 §10.2 的 transport 真正投递
 
-落到代码上是 [`submit.SubmitRaw`](../internal/submit/submit.go)（规范化在 [`raw.go`](../internal/submit/raw.go)）：
-信头 `From` 经 [`store.ResolveIdentity`](../internal/store/identities.go) 找到 identity（找不到就拒收，`ErrNoIdentity`），
+落到代码上是 [`submit.SubmitRaw`](../../internal/submit/submit.go)（规范化在 [`raw.go`](../../internal/submit/raw.go)）：
+信头 `From` 经 [`store.ResolveIdentity`](../../internal/store/identities.go) 找到 identity（找不到就拒收，`ErrNoIdentity`），
 `Sender` 同样解析，且提交者对它的档位不能是 `none`；然后在 `store.WithDecision` 里决定：
 档位 `none` 拒收（`ErrRejected`，550），否则一律 `250`——`Queue` 入 outbox，否则规范化后的字节写进 `sent/`、
 以 `drafts.raw_id` 停在草稿，`hold_reason` 记原因。每次拒收也记一条 `submission.raw` 审计，只有地址和原因，不含正文。
@@ -209,9 +209,9 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
   （`outbox.raw_id = drafts.raw_id`），变了（比如服务自己重提、这次要加 `Auto-Submitted`）就另存一份新的 Sent 副本。
   代价：停了很久的信，`Date` 是提交时补的，不是确认时的
 
-**协议层**在 [`internal/smtpd`](../internal/smtpd/smtpd.go)，只管协议；上面那些关于信的规则全在提交核心里，
+**协议层**在 [`internal/smtpd`](../../internal/smtpd/smtpd.go)，只管协议；上面那些关于信的规则全在提交核心里，
 协议层一条也不重复。它和核心之间是一个在消费方定义的小接口（`smtpd.Submitter`），`serve` 用
-[`submitPort`](../cmd/yuuka/submission.go) 把 `submit.Service` 接上去：核心的 `ErrRejected` / `ErrNoIdentity`
+[`submitPort`](../../cmd/yuuka/submission.go) 把 `submit.Service` 接上去：核心的 `ErrRejected` / `ErrNoIdentity`
 转成 `smtpd.ErrRefused`（550），其余错误都是暂时的（451）。实现时定下的几处：
 
 - **只有 AUTH PLAIN**。LOGIN 从没走出草案，`go-sasl` 也不再带它的 server 侧；会说 SMTP 的服务端软件都会 PLAIN。
@@ -241,7 +241,7 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
   按地址算它每次都能换个新桶），超了回 `421` 断开；AUTH 失败每个客户端先放几次、之后按固定间隔放一次，
   超了不查库直接 `454`。密码是 256 位随机串，限速保护的不是密码，而是一个客户端能引起的查库次数和审计条目数。
   每条命令最多等 5 分钟（RFC 5321 的下限；`go-smtp` 按命令行设读超时，所以它也是整个 `DATA` 的上限），
-  一行最长 2000 字节。数字按「同一部署环境里几台服务」定，见 [`limit.go`](../internal/smtpd/limit.go)。
+  一行最长 2000 字节。数字按「同一部署环境里几台服务」定，见 [`limit.go`](../../internal/smtpd/limit.go)。
   连接计数挂在原始 TCP 连接上：`go-smtp` 只对 `*tls.Conn` 开放 AUTH，交给它的连接不能再包一层
 - **审计**：AUTH 成功（`smtp.auth`）、失败（`smtp.auth.reject`，带原因）、每次提交（`smtp.submit`：
   信封发件人、收件人数、字节数、回复码、outbox / 草稿 id）都进 `actions`，带 `via: "smtp"`、
@@ -249,12 +249,12 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
   被限速的尝试每个客户端十分钟只记一条
 - **停机**时等进行中的会话做完，和 HTTP 共用 30 秒宽限，超时才断。在 `DATA` 中途被断的会话没拿到 `250`，信仍在客户端手里
 - **配置**：`YUUKA_SUBMISSION_LISTEN` 不设就不监听；`YUUKA_SUBMISSION_TLS_CERT_FILE` / `_KEY_FILE` 让 yuuka 自己终结 TLS，
-  不给就必须有 `YUUKA_SUBMISSION_PROXIES`。证书文件变化后一分钟内换上新证书（[`mailnet.CertFiles`](../internal/mailnet/certfile.go)），
-  续期不用重启；新文件读不出来时继续用旧的，下一次检查再试。清单见 [`cmd/yuuka/main.go`](../cmd/yuuka/main.go) 的头注释，
-  部署方式见 [`deploy/README.md`](../deploy/README.md)
+  不给就必须有 `YUUKA_SUBMISSION_PROXIES`。证书文件变化后一分钟内换上新证书（[`mailnet.CertFiles`](../../internal/mailnet/certfile.go)），
+  续期不用重启；新文件读不出来时继续用旧的，下一次检查再试。清单见 [`cmd/yuuka/main.go`](../../cmd/yuuka/main.go) 的头注释，
+  部署方式见 [`deploy/README.md`](../../deploy/README.md)
 
 **监听方式**（对 yuuka 所有的邮件协议监听器都成立，包括 M5 可能加的 IMAP 网关）。
-实现在 [`internal/mailnet`](../internal/mailnet/mailnet.go)：它包住一个 TCP listener，
+实现在 [`internal/mailnet`](../../internal/mailnet/mailnet.go)：它包住一个 TCP listener，
 `Accept` 只交出已经过检查的连接，`RemoteAddr` 是真实客户端，`mailnet.Proxy` 告诉审计它经过了哪个代理。
 
 - **只做隐式 TLS**：提交口用 465，IMAP 用 993（RFC 8314 推荐的形式），**不做 STARTTLS**。
@@ -335,7 +335,7 @@ Web 和 webhook 靠 Cloudflare 得到的那层保护随之失效；连接上限�
 防不住流量型攻击。所以按发信方在哪里选：都在自己的私有网络里，就只在那里监听；有发信方在外面，
 就让一台独立的中转机承受公网，经私有链路加 PROXY 头转给 yuuka，最好原样转发 TLS、不在中转机上解开。
 直接开在同一台机器上只适合本来就没有 CDN 要保护的部署。三种做法的配置与取舍见
-[部署指南的「先选暴露范围」](../deploy/README.md#先选暴露范围)。被打期间不丢信：收信由 Worker 落 R2、reconcile 补齐（§2.1）。
+[部署指南的「先选暴露范围」](../../deploy/README.md#先选暴露范围)。被打期间不丢信：收信由 Worker 落 R2、reconcile 补齐（§2.1）。
 
 **`/healthz` 为什么可以不认证**：反向代理的主动健康检查拿不出任何凭据，给它发一个 token
 就得在代理配置里存一份长期凭据，比开放一个只答一位的端点更糟。它能开放，是因为它只回答
@@ -344,7 +344,7 @@ Web 和 webhook 靠 Cloudflare 得到的那层保护随之失效；连接上限�
 刷它占不住连接池。代价是外人能知道这里跑着一个服务、它此刻是否连得上库——端口开着本来就暴露了前者，
 后者对攻击没有增量。这几条约束一旦放松（比如想加版本号或依赖细节），它就不再是一个可以不认证的端点，
 该改成带凭据的独立端点。路由清单与各自的认证方式在
-[`cmd/yuuka/main.go`](../cmd/yuuka/main.go) 的 `routes`，清单测试保证新端点不会无意中漏掉认证。
+[`cmd/yuuka/main.go`](../../cmd/yuuka/main.go) 的 `routes`，清单测试保证新端点不会无意中漏掉认证。
 WebUI 的页面壳（静态资源）同样不需要会话，但它不含数据，数据全走 `/api/`。
 `/api/v1/openapi.json` 也不需要：它是接口描述，和公开仓库里的那份一样（§5.1）。TG 容易被当成纯输出而漏掉，但它上面有「确认发送」按钮，
 就是 `submission:send` 的入口之一。把 REST / MCP 放在只认浏览器 cookie 的身份代理后面是个常见错误——
@@ -375,11 +375,11 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
   恢复码换一个短时效的一次性注册令牌（和 `admin enroll` 签发的是同一种，表 `enrollment_tokens`），
   令牌换一次 passkey 注册，之后照常用新 passkey 登录。链路只有一条，「恢复码不等于登录」由结构保证
 - 注册链接是 `<origin>/enroll#<token>`：放在片段里，不进服务器和代理的访问日志，
-  由 WebUI 页面读出后提交给注册接口（路由见 [`internal/authn/handler.go`](../internal/authn/handler.go)）。令牌在 begin 时校验、
+  由 WebUI 页面读出后提交给注册接口（路由见 [`internal/authn/handler.go`](../../internal/authn/handler.go)）。令牌在 begin 时校验、
   在 finish 时与写入 passkey 同一事务里原子地消耗，所以并发的两次注册只有一次成功
 - 会话：不透明随机串，库里只存哈希；cookie 用 `__Host-` 前缀、`HttpOnly`、`SameSite=Strict`，
   有绝对有效期、不滑动续期（再登录只是摸一下验证器）；登出即撤销那一行。
-  cookie 属性、有效期和 `last_used_at` 的写入节流见 [`internal/authn`](../internal/authn/authn.go)
+  cookie 属性、有效期和 `last_used_at` 的写入节流见 [`internal/authn`](../../internal/authn/authn.go)
 - **CSRF**：`SameSite=Strict` 让跨站页面根本带不上 cookie；第二层是 `net/http` 的
   `CrossOriginProtection`（先看 `Sec-Fetch-Site`，再看 `Origin` 对 `Host` 或配置的 origin），
   作用于 `/auth/` 下所有写请求和所有以 cookie 认证的写请求；第三层是 POST 一律要求
@@ -393,7 +393,7 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
   代价是在代理之后所有人共用代理的地址：按地址的限速退化成一个桶，刷爆它就能把运维者挡在登录外，
   审计也只记到代理。所以可以用 `YUUKA_TRUSTED_PROXIES` 显式列出代理的网段：只有对端在其中时才读这个头，
   并且**从右往左**跳过可信的代理，取第一个不可信的地址——最左边那项是客户端自己写的，从不直接采信；
-  遇到格式不对的项就退回对端地址，免得客户端靠发垃圾给自己换桶（[`internal/clientip`](../internal/clientip/clientip.go)）。
+  遇到格式不对的项就退回对端地址，免得客户端靠发垃圾给自己换桶（[`internal/clientip`](../../internal/clientip/clientip.go)）。
   这只在代理自己也按同样规则写这个头时成立：代理前面若还有 CDN，代理要把 CDN 的网段配成它的可信代理。
   恢复入口始终全局限速，被刷爆时运维者仍有 CLI
 - 进行中的 WebAuthn 仪式（challenge）放在内存里，键是一个 `HttpOnly` cookie，用一次即删。
@@ -403,14 +403,14 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
   `actor` 是 `system`、`credential_id` 为空；管理命令（`prefix`、`token`）还在 `args` 里带 `via: "cli"`
   和执行它的系统用户名 `host_user`。
   记成 `human:<operator>` 会凭空制造一次没有发生过的登录；多人共用一台主机时，`host_user` 才是真实可查的那一条线索
-- WebAuthn 的 RP ID 与 origin 来自配置（[`cmd/yuuka/config.go`](../cmd/yuuka/config.go)），
+- WebAuthn 的 RP ID 与 origin 来自配置（[`cmd/yuuka/config.go`](../../cmd/yuuka/config.go)），
   不从请求里推断：origin 必须是 https，或 http://localhost
 
 ### 13.8 ACL 的粒度到账户为止
 
 如果某些内容不该让某个主体看到（例如受合规约束的账户不该进 agent 的上下文，§9.4），
 用**账户级**开关表达，不要下沉到单封信：`account_access` 每行是（账户, 主体, `can_read`）。
-表已建（[`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)），按它过滤读路径随多账户（M3.5）一起做。
+表已建（[`0003_identity.sql`](../../internal/store/migrations/0003_identity.sql)），按它过滤读路径随多账户（M3.5）一起做。
 
 **单封信级别的 ACL 一律不做。** 一旦允许"这封信某主体看不到"，
 就得在每个查询、每个聚合、每次搜索上带 ACL 过滤，复杂度跳一个台阶，
@@ -428,7 +428,7 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
   我们发出的信没有投递，按发信 identity 所属的账户算：Sent 副本所在 outbox 的 identity 的账户可读，这封信就可读（§4.6）；
   同一内容既投递到不可读的账户、又从可读账户的身份发出时，只经 Sent 副本可见，投递、收件前缀、认证都不给。
   三条（投递、outbox、消息）都由「账户可读」这一个条件推出来，写在
-  [`read.go`](../internal/store/read.go) 的同一处
+  [`read.go`](../../internal/store/read.go) 的同一处
 - **store 层强制**：每个读查询函数都要求一个 `Viewer` 参数，没有它就调不了。
   过滤靠类型系统保证存在，不靠每个调用点记得加 `WHERE`
 - **所有读路径都过这一道**：
@@ -446,9 +446,9 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 
 测试上用一个「含受限账户」的固定夹具，表驱动地把上表每条读路径跑一遍，断言没有泄漏。
 新增读路径就是往这张表加一行。store 层的这张表是
-[`TestVisibility`](../internal/store/sent_test.go)：过滤在 M2 默认关着，测试里打开，
+[`TestVisibility`](../../internal/store/sent_test.go)：过滤在 M2 默认关着，测试里打开，
 用可读、不可读两个账户下的收信和 Sent 副本跑列表、搜索、详情、线程和前缀视图。
-REST 层的 [`TestACL`](../internal/api/api_test.go) 管的是另一半：它遍历路由表（§5.1），每个端点要认证、要 scope、把认证出的主体交给 store。
+REST 层的 [`TestACL`](../../internal/api/api_test.go) 管的是另一半：它遍历路由表（§5.1），每个端点要认证、要 scope、把认证出的主体交给 store。
 
 发信授权读的事实也走同一个条件：回复的默认身份（`ReplyIdentities`）和线程参与者（`ReplyFacts`）
 只来自可见的投递、可见的消息和可见的 outbox 行，同在 `TestVisibility` 里。
@@ -456,7 +456,7 @@ REST 层的 [`TestACL`](../internal/api/api_test.go) 管的是另一半：它遍
 （「这个收件人放不放行」）透露给受限主体，测试里专门断言了这一条；判断头部可不可信也只看可见的投递。
 outbox 本身的读路径（`OutboxList`、`OutboxByID`，REST 的 `/api/v1/outbox`）也按这一条过滤：发信身份的账户可读才可见；行上的主题取自它的 Sent 副本，同一个条件保证读得到这条副本。
 TestACL 对草稿类端点另断言：别的 agent 即使持有全部 scope，拿到的也是和「不存在」一样的 404。
-草稿行另有一条 M2 规则（[`drafts.go`](../internal/store/drafts.go) 的 `visibleDraft`，唯一的一处）：
+草稿行另有一条 M2 规则（[`drafts.go`](../../internal/store/drafts.go) 的 `visibleDraft`，唯一的一处）：
 human 看全部，其他主体只看自己写的。草稿是没发出去的字，常常是替人写的，比信件收得更窄。
 
 **随 M3.5 再定的两件事**（M2 不过滤读路径，所以现在不必定）：
@@ -489,7 +489,7 @@ human 看全部，其他主体只看自己写的。草稿是没发出去的字�
 | 阶段 | 内容 |
 |---|---|
 | M1 | **`principals` / `credentials` / `identity_grants` / `account_access` / `actions` 建表**，WebUI 内置 passkey 登录、走 session 凭据（M1 只有 JSON 端点，页面在第二阶段）；只读 MCP 与 REST 的 bearer token，由 `yuuka token` 签发 |
-| M2 | SMTP submission 口（跟发信能力一起做）；`accounts` / `identities` 建表（§9.5），`identity_grants`、`account_access` 补外键（已落地：[0005](../internal/store/migrations/0005_sending.sql)） |
+| M2 | SMTP submission 口（跟发信能力一起做）；`accounts` / `identities` 建表（§9.5），`identity_grants`、`account_access` 补外键（已落地：[0005](../../internal/store/migrations/0005_sending.sql)） |
 | M3.5 | `account_access` 生效：读路径按 §13.8 过滤（跟多账户一起做） |
 
 `identity_grants` 和 `account_access` 在 M1 只建表、不读：外键指向的 `identities`、`accounts`

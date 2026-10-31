@@ -1,6 +1,6 @@
 # 收发 Driver 契约与能力矩阵
 
-> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/README.md](README.md)。
+> yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/design/README.md](README.md)。
 
 ## 10. Driver 契约与能力矩阵
 
@@ -16,8 +16,8 @@ driver **一律不解析 MIME**——这是契约里最重要的一条。
 ### 10.1 收：Push 和 Pull 两种形状，一个产出
 
 **实现现状**：下面的 driver 接口还没有落成代码。目前只有 Cloudflare 一个 push 来源，
-它直接实现在 [`internal/ingest`](../internal/ingest/ingest.go)（§2.1 的 Go 侧），
-写库入口是 [`store.CommitIngest`](../internal/store/store.go)，`source_key` 由 `store.PushSourceKey` 算出。
+它直接实现在 [`internal/ingest`](../../internal/ingest/ingest.go)（§2.1 的 Go 侧），
+写库入口是 [`store.CommitIngest`](../../internal/store/store.go)，`source_key` 由 `store.PushSourceKey` 算出。
 接口和 `InboundRef` 仍是设计，等第二种来源（IMAP，M3.5）接入时再从现有代码里抽出来。
 
 ```go
@@ -129,7 +129,7 @@ type Expunger interface {
 
 `Authentication-Results`、`Received`、`Received-SPF` 都是普通的头，
 **发件人可以在信里预先写好任意一份**。catch-all 下这不是理论风险。所以认证事实不由 driver 上报，
-而由 Go 侧 ingest 按账户配置的可信接收方提取（实现见 [`internal/authres`](../internal/authres/authres.go)）：
+而由 Go 侧 ingest 按账户配置的可信接收方提取（实现见 [`internal/authres`](../../internal/authres/authres.go)）：
 
 - 每个账户配 `trusted_authserv_id`（Cloudflare Email Routing 的、`mx.google.com`、工作邮箱服务器的），
   外部账户的取值是 M3.5 接入时的实测项
@@ -146,7 +146,7 @@ type Expunger interface {
 - `X-CF-SpamH-Score` 只从原件最顶上那一段接收方字段里取（`Received` 只算第一条，
   其余是 `ARC-*`、`Received-SPF`、`Authentication-Results`、它自己）；同名字段出现在更下面就是发件人写的，忽略。
   Cloudflare 没加而发件人恰好把它写在自己头部第一行时分辨不出，它只是信号、不单独决定任何事，可以接受
-- M1 还没有 `accounts` 表，`trusted_authserv_id` 暂时是进程配置（见 [`cmd/yuuka/config.go`](../cmd/yuuka/config.go)，
+- M1 还没有 `accounts` 表，`trusted_authserv_id` 暂时是进程配置（见 [`cmd/yuuka/config.go`](../../cmd/yuuka/config.go)，
   默认是下文实测的 Cloudflare 取值），一个进程对应一个账户。`spf_recheck` 在 M1 恒为空，二次 SPF 判定还没接
 
 这些都是头部解析，在 Go 侧做，不违反「driver 不解析 MIME」。
@@ -175,10 +175,10 @@ Worker 原样写入，不去掉——`raw/` 的含义是「Cloudflare 交给 Wor
 
 ### 10.2 发：SMTP 是通用货币，所以只需要两个 driver
 
-SMTP 出口实现在 [`internal/transport`](../internal/transport/smtp.go)：`SMTP.Send(ctx, Envelope, raw, commit)`
+SMTP 出口实现在 [`internal/transport`](../../internal/transport/smtp.go)：`SMTP.Send(ctx, Envelope, raw, commit)`
 返回 `SendResult`（`Outcome`、逐收件人结果、`Committed`、最终回复原文、`ProviderID`、`MessageID`），
-出口能力是配置里的 [`Caps`](../internal/transport/transport.go)。目前只有这一个实现，
-所以没有 `Transport` 接口；outbox 在消费方按它用到的方法（`Caps`、`Send`）定义一个小接口（[`outbox.Transport`](../internal/outbox/outbox.go)），
+出口能力是配置里的 [`Caps`](../../internal/transport/transport.go)。目前只有这一个实现，
+所以没有 `Transport` 接口；outbox 在消费方按它用到的方法（`Caps`、`Send`）定义一个小接口（[`outbox.Transport`](../../internal/outbox/outbox.go)），
 第二个 driver（API 型出口）出现时形状不变。
 
 **提交点**。`commit` 恰好调用一次，时机是正文全部写完并 flush 到连接之后、正文结束符 `<CRLF>.<CRLF>` 之前；
@@ -216,7 +216,7 @@ SMTP 出口实现在 [`internal/transport`](../internal/transport/smtp.go)：`SM
 
 **出口的配置**在进程环境里，按名字一组变量（`YUUKA_TRANSPORTS` 列名字，每个名字有
 `_HOST`、`_PORT`、`_USERNAME`、`_PASSWORD_FILE`、`_CAPS`，清单和默认值见
-[`cmd/yuuka/main.go`](../cmd/yuuka/main.go) 的头注释，解析在 [`transports.go`](../cmd/yuuka/transports.go)）。
+[`cmd/yuuka/main.go`](../../cmd/yuuka/main.go) 的头注释，解析在 [`transports.go`](../../cmd/yuuka/transports.go)）。
 密码只能放在文件里、变量里写文件路径：环境会出现在 `docker inspect`、`/proc/<pid>/environ` 和配置转储里，
 文件可以单独设权限、单独挂载。文件只在启动时读一次，换密码要重启。
 `_CAPS` 必填，可选预设 `cloudflare`（全部 false）、`standard`（`message-id,return-path`）、`none`，或显式列出；
@@ -228,7 +228,7 @@ envelope 的反向路径用 outbox 的 `from_addr`；VERP（§10.4.2）还没做
 不通过就 rejected，不替组装方修。8-bit 内容同理：头部有非 ASCII 要求服务器支持 `SMTPUTF8`（RFC 6532），
 正文有非 ASCII 要求 `8BITMIME`，只在需要时带上对应参数。
 
-**去掉出口不允许的头**由 [`StripHeaders`](../internal/transport/message.go) 做：
+**去掉出口不允许的头**由 [`StripHeaders`](../../internal/transport/message.go) 做：
 `Return-Path` 总是去掉（它由最终投递方按信封加），`CallerMessageID=false` 去掉 `Message-ID`，
 `CallerDKIM=false` 去掉 `DKIM-Signature`。它放在 transport 包里，因为规则是出口的；
 放在组装器里不够，submission 口（§13.6）收进来的 raw MIME 不经过组装器。
@@ -245,7 +245,7 @@ envelope 的反向路径用 outbox 的 `from_addr`；VERP（§10.4.2）还没做
 目前只有 Cloudflare 这一种，而且只在出口自己生成 Message-ID（`CallerMessageID=false`）时才填；
 其余一律留空，不去猜——猜错的 Message-ID 会让回信静默地拼不上线程。
 
-**关键决策：MIME 由我们自己组装（[`internal/compose`](../internal/compose/compose.go)），transport 只投递字节。**
+**关键决策：MIME 由我们自己组装（[`internal/compose`](../../internal/compose/compose.go)），transport 只投递字节。**
 好处是线程头（`In-Reply-To` / `References`）完全可控，Sent 副本就是我们提交的字节。
 但它**不一定等于收件人收到的字节**：有的出口会加上或替换 `Message-ID`、`DKIM-Signature`、
 信封发件人（Cloudflare 三样都动，正文和其余的头原样，§10.4.1）。这些差异用 `SendResult` 回填，而不是假装不存在。
@@ -262,7 +262,7 @@ envelope 的反向路径用 outbox 的 `from_addr`；VERP（§10.4.2）还没做
 #### 10.2.1 Markdown → MIME
 
 撰写用 Markdown（§12.1），所以组装规则要定死。实现在
-[`internal/compose`](../internal/compose/compose.go)：输入一封信的描述，输出交给 transport 的完整字节，
+[`internal/compose`](../../internal/compose/compose.go)：输入一封信的描述，输出交给 transport 的完整字节，
 不碰数据库和网络。渲染器用 **goldmark**（Go 生态标准、CommonMark 合规、可扩展），
 这是组装唯一的第三方依赖；头部编码、折行、quoted-printable / base64 都用标准库。
 

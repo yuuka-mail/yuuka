@@ -1,5 +1,5 @@
 // Package contract implements the Go side of the Worker <-> Go contract v1
-// (docs/architecture.md §2.2): the delivery marker, the R2 key layout, the
+// (docs/design/architecture.md §2.2): the delivery marker, the R2 key layout, the
 // yuuka-marker object metadata and the webhook signature.
 //
 // The shared vectors under testdata/contract/v1 are the authority; this
