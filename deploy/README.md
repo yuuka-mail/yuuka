@@ -112,7 +112,81 @@ docker compose run --rm yuuka outbox resolve <id> --sent    # 或 --resend / --a
 
 让同一部署环境里的服务（监控、告警、定时任务）不改代码、用 SMTP 直接发信（§13.6）。默认关闭，
 `YUUKA_SUBMISSION_LISTEN` 打开它。只做隐式 TLS（465 的形式），不做 STARTTLS。
-端口自己认证（§13.7），但通常只应从内网或 tailnet 可达：用它的只有这几台服务，没有理由放在公网上。
+
+### 先选暴露范围
+
+提交口自己认证（§13.7），放在哪里可达是部署的选择。先弄清两件事：
+
+- **Cloudflare 的代理保护不了它**。橙色云只代理 HTTP(S)，任意 TCP 端口要 Spectrum（付费）。
+  给提交口配的主机名只能是灰云记录，直接解析到接收连接的那台机器
+- **在 yuuka 这台机器上开公网提交口，等于公开这台机器的 IP**。如果 Web 和 webhook 靠 Cloudflare 代理藏住源站，
+  这个 IP 一公开，攻击者就能绕过 Cloudflare 直接打它的 443。yuuka 的连接上限和认证失败限速挡得住暴力破解，
+  挡不住把带宽打满的流量型攻击——那时同一台机器上的所有端口一起受影响
+
+所以按发信方在哪里，三选一：
+
+| 做法 | 适合 | 代价 |
+|---|---|---|
+| **只在私有网络可达**（推荐的默认） | 发信方都是自己的服务，能进同一个内网、tailnet 或 WireGuard | 发信方得能加入那个私有网络 |
+| **公网经独立中转机** | 有发信方在私有网络外（第三方云服务、不归你管的机器） | 多一台机器；它的 IP 公开，被打时只有提交口受影响 |
+| **公网、同一台机器** | 这台机器本来就直接暴露在公网、没有 CDN 在前面要保护 | 源站 IP 公开；流量攻击连带 Web 和 webhook |
+
+被打期间不会丢信：webhook 连不上时 Cloudflare 照常收，Worker 把原件写进 R2、留下待处理标记，
+恢复后 reconcile 补进来（§2.1），只是推迟；已进 outbox 的信照常按状态机重试（§4.5）。
+
+不论哪种，下面的「yuuka 自己终结 TLS」「代理终结 TLS」都适用，区别只在端口发布在哪个地址、PROXY 头由谁加。
+
+**只在私有网络可达**：端口只发布在内网 / tailnet / WireGuard 网卡的地址上，不建公网 DNS 记录。
+客户端用的主机名解析到这个私有地址即可（tailnet 的 MagicDNS、内网 DNS，或客户端的 hosts）。
+
+**公网经独立中转机**：一台小 VPS 只做 TCP 转发，经 WireGuard 等私有链路把连接交给 yuuka，并加 PROXY v2 头。
+建议中转机**不终结 TLS**，原样转发密文、由 yuuka 终结：证书私钥和客户端的 SMTP 密码都不经过这台最暴露、
+最容易被替换的机器，它被攻破也只能看到密文。提交口的主机名（如 `submit.example.com`）解析到中转机的公网 IP；
+它的证书要用 DNS-01 签——这个名字的 HTTP-01 验证打到的是中转机，不是 yuuka。
+
+```
+# 中转机上的 HAProxy：只转发，不解 TLS
+frontend submission
+    mode tcp
+    bind :465
+    maxconn 256                     # 中转机自己的上限，先于 yuuka 的连接上限挡掉洪峰
+    timeout client 5m
+    default_backend yuuka_submission
+
+backend yuuka_submission
+    mode tcp
+    timeout server 5m
+    server yuuka 10.8.0.1:31465 send-proxy-v2   # yuuka 在私有链路上的地址
+```
+
+```bash
+# yuuka.env：yuuka 终结 TLS，只认中转机发来的 PROXY 头
+YUUKA_SUBMISSION_LISTEN=0.0.0.0:31465
+YUUKA_SUBMISSION_TLS_CERT_FILE=/certs-src/live/submit.example.com/fullchain.pem
+YUUKA_SUBMISSION_TLS_KEY_FILE=/certs-src/live/submit.example.com/privkey.pem
+YUUKA_SUBMISSION_PROXIES=10.8.0.2/32   # 中转机在私有链路上的地址
+```
+
+```yaml
+# compose.override.yaml：只发布在私有链路的地址上
+services:
+  yuuka:
+    ports:
+      - "10.8.0.1:31465:31465"
+```
+
+`YUUKA_SUBMISSION_PROXIES` 写的是 **yuuka 看到的**来源地址。经 Docker 的端口发布进来时，外部网卡上的连接通常保留源地址，
+经回环进来时看到的是 Compose 网络的网关（见下文「代理终结 TLS」的例子）；拿不准就先启动、试连一次，
+在日志或 `actions` 的 `smtp.auth.reject` 里看 yuuka 记下的地址。中转机被打或被封，换一台、改 DNS 即可，yuuka 这边只改这一行。
+
+**公网、同一台机器**：端口发布在公网网卡上（`"465:31465"`），主机名直接解析到这台机器。只在上表的前提下这样做；
+如果这台机器的 Web 本来靠 Cloudflare 代理，选前两种之一。
+
+顺带一提，靠 Cloudflare 代理保护 Web 时，源站的 443 最好只放行 Cloudflare 的 IP 段（<https://www.cloudflare.com/ips/>），
+或改用 cloudflared tunnel 完全不开入站端口；否则源站 IP 一旦被扫到或从历史 DNS 记录里查到，
+Cloudflare 那一层就被绕过了。这和提交口无关，但前面那张表的取舍以它为前提。
+
+### 凭据与客户端
 
 每个服务一把 SMTP 密码，用户名是命令单独打印的凭据 id；用哪个发件地址、发到哪一步由 `yuuka identity` 和 `yuuka grant` 决定（§13.5）：
 
@@ -126,8 +200,10 @@ docker compose run --rm yuuka token issue --kind smtp --principal service:monito
 客户端配置：主机名是证书上的名字（如 `mail.example.com`），端口 465，「SSL/TLS」或「implicit TLS」（不是 STARTTLS），
 AUTH PLAIN。停在草稿或待审核的信同样回 `250`，回复里带 outbox / 草稿 id；被策略拒绝回 `550 5.7.1` 和原因。
 
+### TLS 由谁终结
+
 容器里 yuuka 以非 root 运行、没有任何 capability，所以在容器里监听 31465，由 Compose 或代理映射到 465。
-两种方式二选一。
+两种方式二选一；下面的例子按「只在私有网络可达」写，端口发布的地址按上文所选的暴露范围改。
 
 **yuuka 自己终结 TLS**：给它证书和私钥的 PEM 文件。来源随意（certbot、宿主机 Caddy 的证书目录……）；
 文件变了 yuuka 一分钟内换上新证书，续期不用重启。挂载**目录**而不是单个文件：续期多半是换文件或改符号链接，
@@ -188,6 +264,8 @@ Caddy 要带 [caddy-l4](https://github.com/mholt/caddy-l4) 模块的构建（官
 `proxy` 的 `proxy_protocol v2` 转给 `127.0.0.1:31465`；Traefik 的 TCP router 加 `tls` 和服务上的 `proxyProtocol`。
 无论哪种，代理健康检查用 PROXY v2 的 `LOCAL` 或 v1 的 `UNKNOWN`。代价：从代理那个地址直连 31465 的其他进程
 （比如同一台宿主机上的服务）不带 PROXY 头会被断开，它们也要经过代理。
+
+### 审计
 
 在 `actions` 里看提交口：`smtp.auth`、`smtp.auth.reject`（带原因）、`smtp.submit`（回复码与 outbox / 草稿 id），
 都带客户端地址和经过的代理。撤销一把密码（`yuuka token revoke <凭据 id>`）对开着的会话也立即生效。
@@ -360,7 +438,7 @@ Caddy、Postgres 的镜像 digest 写在 `compose.yaml` 里，随仓库更新。
 | 出站 | 53 | DNS |
 | 出站 | 123/udp | NTP：webhook 签名带时间窗口（§2.2），时钟必须准 |
 | 出站（M2 起） | 465/tcp | 经 Cloudflare Email Sending 发信 |
-| 入站（可选，仅内网） | 465/tcp | SMTP 提交口（见上文），只发布在内网 / tailnet 地址上 |
+| 入站（可选） | 465/tcp | SMTP 提交口：默认只发布在内网 / tailnet 地址上；公网可达时经独立中转机（见「先选暴露范围」） |
 | 无 | 25 | 收信由 Cloudflare Email Routing 完成，MX 不指向这台机器 |
 
 ## 本地试跑
