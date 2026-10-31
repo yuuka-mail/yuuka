@@ -48,7 +48,9 @@ agent surface — runs on hardware you control.
 ## Documentation
 
 All design documents are in Chinese. The section numbering (§1–§13) is global across
-the set; [`docs/README.md`](docs/README.md) is the index.
+the set; [`docs/README.md`](docs/README.md) is the index. Deployment with Docker
+Compose (Caddy, Postgres, scheduled backups) is described in
+[`deploy/README.md`](deploy/README.md).
 
 | Document | Contents |
 |---|---|

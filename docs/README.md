@@ -27,3 +27,4 @@
 
 初次了解：[architecture.md](architecture.md) → [data-model.md](data-model.md) →
 [agents.md](agents.md)。想知道能不能换掉 Cloudflare：[drivers.md](drivers.md)。
+要部署：[deploy/README.md](../deploy/README.md)（Docker Compose：Caddy、Postgres、定时备份）。
