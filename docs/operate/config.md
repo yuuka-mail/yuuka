@@ -16,6 +16,8 @@ Compose 自己的 `.env`（镜像、密码、备份策略）见 [deploy/README.m
 | `yuuka reconcile`、`yuuka reparse` | 数据库、R2、`YUUKA_DATA_DIR` |
 | `yuuka admin enroll` | 数据库、`YUUKA_WEB_ORIGIN` |
 | `yuuka prefix` / `token` / `outbox` / `identity` / `grant` | 只要数据库 |
+| `yuuka triage status` / `report` | 数据库、`YUUKA_TRIAGE_*` |
+| `yuuka triage rescore` | 数据库、R2、`YUUKA_DATA_DIR`、`YUUKA_TRIAGE_*` |
 | `yuuka mcp --stdio` | 数据库、R2、`YUUKA_DATA_DIR`、`YUUKA_MCP_TOKEN` |
 
 ## 数据库
@@ -130,6 +132,34 @@ YUUKA_TRANSPORT_CLOUDFLARE_CAPS=cloudflare
 
 `YUUKA_SUBMISSION_PROXIES` 和 `YUUKA_TRUSTED_PROXIES` 是两份名单：同一个代理两边都用时把地址写两遍。
 既没有证书文件也没有代理名单时 `serve` 拒绝启动。
+
+## 分诊评分器
+
+给每封新信打分的决策模型（[§15](../design/triage.md)）。默认关闭：不设 `YUUKA_TRIAGE_URL`，
+一切照旧，只是没有评分。v1 只观测：分数存下来、显示出来，不隐藏任何信，不改推送。
+评分器是单独跑的服务（Laya、Kev 一类，说 System One 协议，`POST /v1/systemone`），yuuka 只是它的客户端。
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `YUUKA_TRIAGE_URL` | 空（关闭） | 评分器的基础 URL，如 `http://127.0.0.1:31490`，yuuka 在后面加 `/v1/systemone`。没有下一项时只接受回环和私网地址，连接时按实际连到的地址再查一遍，主机名解析到公网也会被拒 |
+| `YUUKA_TRIAGE_HOSTED` | 空 | 设为 `1` 才允许第三方托管的评分器（如 Jev）。只接受 `https`，并且要有 token 文件。**见下文：信的内容会离开部署环境** |
+| `YUUKA_TRIAGE_NAME` | 有 URL 时必填 | 评分器的名字，写进每一条评分，如 `laya-ml-1`（小写字母、数字、`.`、`-`，最多 32 个）。**换模型就换名字**：只有当前名字的评分算数，新名字下的信会被重新评分，旧评分留着 |
+| `YUUKA_TRIAGE_MODEL` | 空 | 请求里带的 `model`，如 Laya 的 `multilingual`。空就让后端自己选。实际用的模型以后端回报的为准，记在每条评分里 |
+| `YUUKA_TRIAGE_TOKEN_FILE` | 空 | 放评分器 bearer token 的文件路径，只在启动时读。token 不写在环境变量里 |
+| `YUUKA_TRIAGE_LOOKBACK` | `30d` | `serve` 补评多久以内的信。可以写天数（`30d`）或 Go 的时长。更早的信用 `yuuka triage rescore` 显式补 |
+
+`serve` 在新信入库后立即把它排进评分队列，另外每十分钟扫一遍回溯期内还没有当前评分的信。
+同时最多两个请求、每秒最多四个；只评逃过 §4.3 降级的信（投到已认领前缀、DMARC 没失败），
+被降级的信本来就藏着，不发出去评。评分器连续失败时暂停调用、隔一阵试一次，恢复后由扫描补上；
+它挂着不影响收信、推送和其他任何功能。日志里记消息 id 和 HTTP 状态，从不记信的内容。
+
+评分器看到的是：认证结论那一行、是否投到已认领前缀、同域以前是否给这个前缀来过信、Reply-To 是否换了域、
+有没有 List-Id、machine / human 分类、有没有验证码和登录链接（只说有没有，不给值），
+加上 From、主题和正文的前若干千字（包在不可信内容的边界里）。笔记、标签、提案、草稿、同线程的其他信和附件都不给。
+
+**托管评分器的隐私代价**：设了 `YUUKA_TRIAGE_HOSTED=1`，每封被评分的信的发件人、主题和正文都会发给那个第三方，
+包括验证码和登录链接所在的正文。每条评分记下 `endpoint`（`local` 或 `hosted`），哪些信发出去过随时查得到；
+关掉托管之后已经发出去的收不回来。不确定就用本地的评分器。
 
 ## MCP（stdio）
 

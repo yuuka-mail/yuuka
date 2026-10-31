@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/clientip"
 	"github.com/yuuka-mail/yuuka/internal/r2"
+	"github.com/yuuka-mail/yuuka/internal/triage"
 )
 
 // minSecretLen is the §2.2 minimum for a webhook secret.
@@ -36,6 +38,7 @@ type config struct {
 	Proxies            clientip.Proxies
 	Outbox             outboxConfig
 	Submission         submissionConfig
+	Triage             triage.Config
 }
 
 // webConfig is the WebUI login, shared by serve and admin. An empty
@@ -151,6 +154,9 @@ func loadConfig(getenv func(string) string, needSecrets bool) (config, error) {
 		errs = append(errs, err)
 	}
 	if c.Submission, err = loadSubmissionConfig(getenv); err != nil {
+		errs = append(errs, err)
+	}
+	if c.Triage, err = triage.LoadConfig(getenv, os.ReadFile); err != nil {
 		errs = append(errs, err)
 	}
 

@@ -66,6 +66,10 @@ type Config struct {
 	Log      *slog.Logger
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
+	// NewMessage, if set, is told the id of each message the content
+	// step creates, after its commit: the scorer queues it (§15.6). It
+	// must not block.
+	NewMessage func(id string)
 }
 
 // notifyConcurrency caps in-flight notifications. Beyond it summaries are

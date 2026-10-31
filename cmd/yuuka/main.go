@@ -44,6 +44,12 @@
 //	                         rules that label, classify, archive and set the
 //	                         notification of arriving mail (§8.5); apply and
 //	                         revert run one over past mail
+//	yuuka triage status      the scorer's configuration, how much mail it has
+//	                         scored, and whether it answers a probe (§15)
+//	yuuka triage rescore --since T
+//	                         score mail received since T again, beside the old scores
+//	yuuka triage report [--since T]
+//	                         how the latest scores answer, per question
 //	yuuka mcp --stdio       read-only MCP server on stdin/stdout, acting as the
 //	                         bearer token in YUUKA_MCP_TOKEN (§8.7)
 //	yuuka version
@@ -113,9 +119,22 @@
 //	                                    YUUKA_TRUSTED_PROXIES (§13.6)
 //	YUUKA_SUBMISSION_HOSTNAME           name in the port's greeting (default: the first DNS name on
 //	                                    the TLS certificate, else the WebUI's host)
+//	YUUKA_TRIAGE_URL                    base URL of a System One scorer (§15.6); serve then scores
+//	                                    new mail (default: off). Loopback or private addresses only,
+//	                                    unless the next is set
+//	YUUKA_TRIAGE_HOSTED                 1: the scorer is a third party's; mail content leaves the
+//	                                    deployment. https only, and needs the token file
+//	YUUKA_TRIAGE_NAME                   the scorer's name in every score, e.g. laya-ml-1 (required
+//	                                    with the URL); change it whenever the model changes
+//	YUUKA_TRIAGE_MODEL                  model to ask the backend for (default: its choice)
+//	YUUKA_TRIAGE_TOKEN_FILE             file holding the scorer's bearer token (optional)
+//	YUUKA_TRIAGE_LOOKBACK               how far back serve scores unscored mail (default 30d)
+//	                                    See internal/triage.
 //
 // `yuuka migrate`, `yuuka prefix`, `yuuka token`, `yuuka outbox`,
 // `yuuka identity`, `yuuka grant` and `yuuka rule` only need the database URLs;
+// `yuuka triage status` and `report` those and YUUKA_TRIAGE_*, `rescore`
+// serve's configuration;
 // `yuuka admin` the database URLs and YUUKA_WEB_ORIGIN. All but migrate
 // run on the host without a login; host.go says how their actions are
 // recorded.
@@ -158,6 +177,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/r2"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/submit"
+	"github.com/yuuka-mail/yuuka/internal/triage"
 	"github.com/yuuka-mail/yuuka/web"
 )
 
@@ -177,7 +197,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka identity add|ls|rm | yuuka grant set|ls|rm | yuuka rule ls|show|add|set|rm|apply|revert | yuuka mcp --stdio | yuuka version")
+	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka identity add|ls|rm | yuuka grant set|ls|rm | yuuka rule ls|show|add|set|rm|apply|revert | yuuka triage status|rescore|report | yuuka mcp --stdio | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -257,6 +277,8 @@ func run(args []string, log *slog.Logger) error {
 		return withHost(ctx, func(h *host) error { return h.grantCmd(ctx, args[1:]) })
 	case "rule":
 		return withHost(ctx, func(h *host) error { return h.ruleCmd(ctx, args[1:]) })
+	case "triage":
+		return triageCmd(ctx, log, args[1:])
 	}
 	return usage()
 }
@@ -306,6 +328,16 @@ type app struct {
 	// submit is the only way mail enters the outbox (§8.9): the SMTP
 	// submission port, REST and MCP go through it. serve only.
 	submit *submit.Service
+	// triage scores new mail (§15); serve only, nil without a scorer.
+	// Set before anything ingests.
+	triage *triage.Runner
+}
+
+// newMessage queues a message the content step created for scoring.
+func (a *app) newMessage(id string) {
+	if a.triage != nil {
+		a.triage.Kick(id)
+	}
 }
 
 // openOutbox builds the outbox from the configured transports, reading
@@ -354,7 +386,8 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 		notifier, alerter = tg, tg
 		cards = &notify.Cards{TG: tg, Origin: cfg.Web.Origin, Recall: cfg.TelegramOperatorID != 0}
 	}
-	in := ingest.New(ingest.Config{
+	a := &app{cfg: cfg, pool: pool, db: db, alerter: alerter, cards: cards}
+	a.in = ingest.New(ingest.Config{
 		Raw:      r2.NewRawBucket(cfg.Raw),
 		Pending:  r2.NewPendingBucket(cfg.Pending),
 		Local:    localraw.Dir{Root: cfg.DataDir},
@@ -365,8 +398,9 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 		// the Cloudflare account is the only one that receives.
 		TrustedAuthservID: cfg.TrustedAuthservID,
 		Log:               log,
+		NewMessage:        a.newMessage,
 	})
-	return &app{cfg: cfg, pool: pool, db: db, in: in, alerter: alerter, cards: cards}, nil
+	return a, nil
 }
 
 func (a *app) mcp() *mcp.Server {
@@ -527,6 +561,9 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		}
 	}
 
+	// The scorer starts before reconcile, which may fold new mail.
+	triageDone := make(chan struct{})
+	a.startTriage(ctx, log, triageDone)
 	loopDone := make(chan struct{})
 	go func() {
 		defer close(loopDone)
@@ -573,9 +610,34 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	go func() { subDone <- stopSub(shutdownCtx) }()
 	err = errors.Join(failed, srv.Shutdown(shutdownCtx), <-subDone)
 	<-loopDone
+	<-triageDone
 	<-outboxDone
 	<-pollDone
 	return err
+}
+
+// startTriage runs the scorer when one is configured (§15.6), closing
+// done when it stops. Without one, mail is not scored and nothing else
+// changes.
+func (a *app) startTriage(ctx context.Context, log *slog.Logger, done chan struct{}) {
+	tc := a.cfg.Triage
+	if !tc.On() {
+		log.Info("YUUKA_TRIAGE_URL not set; mail is not scored")
+		close(done)
+		return
+	}
+	if tc.Hosted {
+		log.Warn("triage: the scorer is hosted; the content of scored mail is sent to a third party", "endpoint", tc.Endpoint)
+	}
+	a.triage = triage.NewRunner(triage.RunnerConfig{
+		Profile: tc.Profile(), Endpoint: tc.EndpointKind(), Scorer: tc.Client(),
+		Store: a.db, Raw: a.in, Lookback: tc.Lookback, Log: log,
+	})
+	log.Info("triage: scoring mail", "scorer", tc.Name, "endpoint", tc.EndpointKind())
+	go func() {
+		defer close(done)
+		a.triage.Run(ctx)
+	}()
 }
 
 // domain is the name the submission port greets with: the WebUI's host

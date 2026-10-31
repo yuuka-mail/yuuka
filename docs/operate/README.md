@@ -6,7 +6,7 @@
 |---|---|
 | [cloudflare.md](cloudflare.md) | R2 的 bucket 与令牌、Email Worker、发信出口 |
 | [config.md](config.md) | 全部环境变量 |
-| [cli.md](cli.md) | 管理命令：登录、前缀、发信地址与授权、凭据、发件队列、维护 |
+| [cli.md](cli.md) | 管理命令：登录、前缀、发信地址与授权、凭据、发件队列、分诊评分、维护 |
 | [submission.md](submission.md) | SMTP 提交口的暴露范围与 TLS |
 | [troubleshooting.md](troubleshooting.md) | 按现象排障 |
 
