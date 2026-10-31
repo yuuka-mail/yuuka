@@ -345,7 +345,7 @@ function Editor({
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <div className="flex flex-col gap-2 px-4 pt-3 empty:hidden md:px-6">
+        <div className="flex flex-col gap-2 px-4 pt-3 pb-2 empty:hidden md:px-6">
           {d && d.author.kind !== "human" && <AgentNote draft={d} onOpenMessage={onOpenMessage} />}
           {held && (
             <HeldNote
@@ -427,8 +427,10 @@ function Editor({
             }}
             className={cn(
               "min-h-64 w-full flex-1 resize-none bg-transparent px-4 py-3 text-body outline-none placeholder:text-muted-foreground md:px-6",
-              // Text an agent wrote keeps the agent's colour at its edge (§12.5).
-              d && d.author.kind !== "human" && "border-l-2 border-agent-border",
+              // Text an agent wrote keeps the agent's colour at its edge
+              // (§12.5), inset to the text's column: at the pane's edge it
+              // would read as the pane divider.
+              d && d.author.kind !== "human" && "ml-2 w-auto border-l-2 border-agent-border pl-2 md:ml-4 md:pl-2",
             )}
           />
         )}
