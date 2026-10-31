@@ -1,6 +1,6 @@
 # 第三方机密
 
-yuuka 拿去向第三方证明身份的凭据（现在是出口的 SMTP 密码）存在库里，用一把主机上的钥匙（KEK）加密。
+yuuka 拿去向第三方证明身份的凭据（现在是出口的 SMTP 密码和 Telegram 的 bot token）存在库里，用一把主机上的钥匙（KEK）加密。
 库和它的备份里只有密文；KEK 留在主机上，不进库、不进备份卷、不写进环境变量的值
 （[为什么](../design/secrets.md#171-进库的和留在主机的)）。
 
@@ -79,6 +79,36 @@ chown 65532:65532 secrets/yuuka-kek && chmod 400 secrets/yuuka-kek   # 镜像以
 之后改出口一律用 [`yuuka transport`](cli.md#出口与第三方机密)：换密码是 `transport set <名字> --password-file -`，
 下一封信就用新的，不用重启。
 
+## Telegram 从环境变量升级
+
+Telegram 以前也是环境变量：`YUUKA_TELEGRAM_BOT_TOKEN`、`YUUKA_TELEGRAM_CHAT_ID`、`YUUKA_TELEGRAM_OPERATOR_ID`、
+`YUUKA_TELEGRAM_OPERATOR`。它们和出口的变量一样**已弃用**，下一个版本删掉。现在渠道、绑定和订阅在库里，
+bot token 用 KEK 加密（[`yuuka channel`](cli.md#通知渠道)）。步骤和上面的出口一起做：
+
+1. 挂好 KEK、设 `YUUKA_KEK_FILE`，四个 Telegram 变量先**留着**，`docker compose up -d`
+2. `serve` 启动时把它们导入一次：一个叫 `telegram` 的渠道（先用 `getMe` 问 Telegram 拿 bot 的用户名，连不上 Telegram 时只缺用户名，照样导入），
+   一条绑定：chat 是 `YUUKA_TELEGRAM_CHAT_ID`，属于 `YUUKA_TELEGRAM_OPERATOR` 指定的人（没设时是库里唯一的那个人），
+   设了 `YUUKA_TELEGRAM_OPERATOR_ID` 时这个用户的撤回按钮算数，订阅全部四类事件，也就是以前那个 chat 收到的。
+   日志里有 `imported YUUKA_TELEGRAM_* as channel telegram`，审计记一条 `config.import`（`via: env`）。
+   这是唯一不经过 `/start` 确认的绑定：环境变量本身就是主机上的确认。之后每次启动都不再导入，几个 `serve` 同时启动也只导入一次
+   - 导入不了时（库里有好几个人又没设 `YUUKA_TELEGRAM_OPERATOR`，或者还一个人都没有）日志会说为什么，变量照旧工作；
+     先 `admin enroll`，或设上 `YUUKA_TELEGRAM_OPERATOR`，再重启一次
+   - 同一个 bot 已经是库里的一个渠道（比如用 `channel add` 加过），不导入，直接用库里的
+3. 核实：
+
+   ```bash
+   docker compose run --rm yuuka channel ls          # 渠道 telegram，一条绑定，四个事件
+   docker compose run --rm yuuka secret check        # bot token 那一行是 ok
+   docker compose run --rm yuuka channel test telegram
+   ```
+
+4. 从 `yuuka.env` 删掉四个 `YUUKA_TELEGRAM_*`，`docker compose up -d`。不删的话每次启动报 WARN，说它们被忽略
+
+**没设 KEK** 时这四个变量照旧工作，和以前完全一样，启动时报一条 WARN。库里的渠道这时都上锁，不轮询也不发送，
+每 10 分钟报一次 ERROR。
+
+以后加人、加 chat 都用 `channel bind`，不再手敲 chat id 和用户 id。
+
 ## 换 KEK
 
 KEK 怀疑泄露、或者按周期轮换时。换的只是包装每条机密的钥匙，密文本身不动：
@@ -100,6 +130,7 @@ KEK 怀疑泄露、或者按周期轮换时。换的只是包装每条机密的�
 
 ```bash
 docker compose run --rm -T yuuka transport set cloudflare --password-file - < cloudflare-password
+docker compose run --rm -T yuuka channel add telegram --token-file - < bot-token   # 同一个 bot：换 token，绑定都还在
 ```
 
 信、投递记录、授权都不依赖 KEK，什么都不丢。

@@ -179,7 +179,21 @@ agent 做摘要和提取，人在手机上一点就完成审批/标注，确认�
 
 #### 渠道、绑定与订阅
 
-> 状态：已定，未实现（§17）。现在是一组环境变量：一个 bot、一个 chat、一个运维者。
+> 状态：已实现（§17）。表在 [0018](../../internal/store/migrations/0018_channels.sql)，分发器和每个 bot 的轮询者在
+> [`internal/notify`](../../internal/notify/dispatch.go)，主机上用 `yuuka channel` 管理。
+> 没有 KEK、或环境变量里的 bot 还没导入时，仍是原来那组环境变量：一个 bot、一个 chat、一个运维者（§17.7）。
+
+落地时定下的：
+
+- `mail.new` 的可见性按**这次投递**算，不按信算（[`store.DeliveryVisible`](../../internal/store/channels.go)）：
+  摘要里有前缀，同一封信可能经另一个账户的投递对这个人可见，而这次的前缀对他是隐藏的。
+  扣留卡片按 outbox 行（`OutboxByID`），升级卡片按草稿（`DraftByID`），熔断卡片按身份所在账户（`IdentityMailVisible`）；
+  四条都在 ACL 测试表里
+- 撤回按钮只在设了按钮用户的绑定上出现；撤回以绑定的人记入审计，`args` 带 `via: telegram`、Telegram 用户 id 和 `binding_id`
+- `security` 告警的收件人在 [`store.SecurityBindings`](../../internal/store/channels.go) 里算：启用中的人（今天的管理员）加当事人，
+  去掉调用方指定的那条（刚建的绑定）。登录、WebUI 放宽的告警（`authn.Alerter`）还不带当事人，发给全部管理员：
+  今天每个人都是管理员，当事人一定在里面；有了非管理员的人之后，这些调用点要改成带上当事人
+- 出口机密被篡改的告警（outbox 的 `SecurityAlerter`）也走分发器，发给管理员，后台发送不阻塞发信的 worker
 
 渠道是审批通道，所以「推到哪、谁的按钮算数」和发信授权一样是权限，不是偏好。环境变量里的一个 chat 撑不住两件事：
 不止一个人，以及不止一个地方（私聊、和家人共用的群、以后的 webhook）。拆成三层：

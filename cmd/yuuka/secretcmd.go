@@ -70,6 +70,20 @@ func (h *host) secretOwners(ctx context.Context) (map[string]secretOwner, error)
 			audience: func() (string, error) { return secret.SMTPS(t.Username, t.Host, t.Port) },
 		}
 	}
+	chs, err := h.db.Channels(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range chs {
+		if c.SecretID == "" {
+			continue
+		}
+		out[c.SecretID] = secretOwner{
+			what:     "channel " + c.Name,
+			kind:     store.SecretTelegramBotToken,
+			audience: c.Audience, // telegram:bot<id>, from the row
+		}
+	}
 	return out, nil
 }
 

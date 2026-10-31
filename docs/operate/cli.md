@@ -100,7 +100,7 @@ yuuka secret check
 yuuka secret rewrap
 ```
 
-- `ls` 列出库里每一条第三方机密：id、类型、属于谁（OWNER，如 `transport cloudflare`）、audience（它只能交给哪个目的地）、
+- `ls` 列出库里每一条第三方机密：id、类型、属于谁（OWNER，如 `transport cloudflare`、`channel telegram`）、audience（它只能交给哪个目的地）、
   包装器、钥匙引用（KEY）、加密时间。不需要 KEK
 - `check` 逐条按「属于谁」重算目的地再解密，只报结果，不打印任何机密。RESULT 是 `ok`、
   `locked`（解不开它的钥匙没配：没设 `YUUKA_KEK_FILE`，或者旧 KEK 文件拿掉得太早）、
@@ -108,6 +108,46 @@ yuuka secret rewrap
   `tampered`（密文对不上：被改过或损坏，当作安全事件查），以及少见的 `wrong kind`、`no owner`（库被绕过 yuuka 改过）。有任何一条不是 `ok` 时命令以非零退出
 - `rewrap` 把每条机密的数据钥匙改用当前的 KEK 重新包装，密文本身不动；已经在当前 KEK 下的跳过。
   每改一条记一条审计（`secret.rewrap`，带新旧钥匙引用）。换 KEK 的步骤见[第三方机密](secrets.md#换-kek)
+
+## 通知渠道
+
+通知渠道现在只有 Telegram：一个渠道就是一个 bot。渠道上的**绑定**是某个人的一个 chat（私聊或群），
+加上「谁按的按钮算数」；**订阅**是一个绑定收哪些事件。bot token 和出口密码一样用 KEK 加密存在库里
+（[为什么](../design/secrets.md#174-表的形状为什么是这样)）。从 `YUUKA_TELEGRAM_*` 升级上来见[第三方机密](secrets.md#telegram-从环境变量升级)。
+
+```bash
+yuuka channel add tg --token-file /path/to/bot-token     # 或 --token-file - 从标准输入读
+yuuka channel ls [--all]
+yuuka channel bind tg [--principal human:<operator>] [--events mail.new,send.held] [--label 手机]
+yuuka channel test tg [--binding <绑定 id>]
+yuuka channel subscribe <绑定 id> grant.suspended
+yuuka channel unsubscribe <绑定 id> mail.new
+yuuka channel unbind <绑定 id>
+yuuka channel rm tg
+```
+
+- `add`：token 从 [@BotFather](https://t.me/BotFather) 拿，**只从文件或标准输入读**，命令不接受写在参数里的 token。
+  命令先用 `getMe` 问 Telegram 这是哪个 bot，记下它的数字 id 和用户名，再加密写入。要 `YUUKA_KEK_FILE`。
+  名字已有的渠道再 `add` 一次是换 token（同一个 bot），或者重新启用 `rm` 过的渠道；一个启用中的渠道不能换成另一个 bot，
+  先 `rm` 再 `add`。一个 bot 同时只能属于一个启用中的渠道（Telegram 只允许一个轮询者）。`serve` 15 秒内开始轮询新渠道
+- `bind`：打印一个链接 `https://t.me/<bot>?start=<码>`（群用 `startgroup=`），在要收通知的 Telegram 账号里打开它、按 Start。
+  码 10 分钟有效、只能用一次，库里只存哈希。`/start` 由正在运行的 `serve` 收（它要有 `YUUKA_KEK_FILE`），
+  命令在终端上等着，收到后显示 **Telegram 报来的是谁**：名字、用户 id、chat id、私聊还是群，问你 `[y/N]`。
+  不是你本人（链接被别人先点了）就答 N，什么都不会绑，码作废。答 y 才建绑定：
+  那个用户在这个 chat 里按的撤回按钮算作 `--principal` 那个人的，bot 在 chat 里回一句已绑定，
+  同时向这个人的其他绑定和管理员推一条安全告警。`--principal` 缺省时用库里唯一的那个人，只能是人（`human:`）；
+  `--events` 缺省是全部四类；`--label` 缺省是 Telegram 报来的名字
+- 事件：`mail.new`（新信摘要，只推这个人看得到的信）、`send.held`（扣留中的信，带撤回按钮）、`send.escalated`（被审核升级为草稿）、
+  `grant.suspended`（授权被熔断）。`security`（新 passkey、恢复码、放宽、机密被篡改……）不能订阅也不能退订，
+  总是发给每个管理员（现在是每个启用中的人）和事情有关的那个人的全部绑定
+- `test` 往渠道的每个绑定（或 `--binding` 指定的一个）发一条测试消息，要 `YUUKA_KEK_FILE`
+- `unbind` 立即生效：下一条通知就不再发过去，那个 chat 里已有卡片上的按钮也不再算数
+- `rm` 停用渠道、抹掉 token、撤销它上面所有绑定。渠道名不能改
+
+`ls` 列出渠道（bot、状态、版本）和绑定（id、渠道、人、chat、按钮用户、订阅、最后一次按按钮的时间）。
+每次 `add` 记 `channel.add`（bot id、用户名、audience、包装器、钥匙引用，从不含 token），
+`bind` 记 `channel.bind.begin` 和 `channel.bind.confirm`（chat、按钮用户），其余记 `channel.unbind`、`channel.subscribe`、
+`channel.unsubscribe`、`channel.rm`。没有 `YUUKA_KEK_FILE` 时 `add`、`bind` 的安全告警发不出去，命令会说
 
 ## 发信地址与授权
 

@@ -6,12 +6,15 @@
 
 > 状态：已定，部分实现。P1（[`internal/secret`](../../internal/secret/secret.go)）和 P2 已合入：
 > [0017](../../internal/store/migrations/0017_transports.sql) 建了机密、出口、身份的出口链，
-> 读写在 [`internal/store/transports.go`](../../internal/store/transports.go)。0018（通知渠道）的形状在 §4 的设计块里；
+> 读写在 [`internal/store/transports.go`](../../internal/store/transports.go)。
 > WebUI 上的放宽动作依赖 §13.10 的当场再验证（0015）。分期见 §17.9。
+> P5 已合入：[0018](../../internal/store/migrations/0018_channels.sql) 建了渠道、绑定、绑定码、订阅
+> （[`internal/store/channels.go`](../../internal/store/channels.go)），分发器和渠道管理协程在
+> [`internal/notify`](../../internal/notify/dispatch.go)，`yuuka channel` 和 Telegram 的导入在 [`cmd/yuuka`](../../cmd/yuuka/channel.go)。
 > P4 已合入：主机上的 `transport`、`identity set`、`secret` 命令和环境变量里出口的导入在 [`cmd/yuuka`](../../cmd/yuuka/transportcmd.go)，
 > 用法在[运维文档](../operate/cli.md#出口与第三方机密)。
 > P3 已合入：发信从库里解析出口（[`internal/outbox/route.go`](../../internal/outbox/route.go)），
-> 环境变量里的出口只在弃用期内顶替同名的占位（§17.7）；Telegram 仍按 §8.4 写的现状从环境变量读。
+> 环境变量里的出口只在弃用期内顶替同名的占位（§17.7）。没有 KEK、或环境变量里的 bot 还没导入时，Telegram 仍按 §8.4 原来的样子从环境变量读。
 
 M2 把出口当作部署事实：按名字定义在环境变量里，`identities.transport` 只存名字（§4 的原注）；
 Telegram 也是一组环境变量，一个 bot、一个 chat、一个人。当时写下的回头条件是「出现需要在运行时增删出口的场景」。
@@ -134,7 +137,7 @@ KEK 丢了（或 Vault 里的钥匙被删）要重新输入所有第三方机密
 
 ### 17.4 表的形状为什么是这样
 
-列和约束在 [0017](../../internal/store/migrations/0017_transports.sql)（渠道的在 §4 的设计块里），这里只写取舍。
+列和约束在 [0017](../../internal/store/migrations/0017_transports.sql) 和 [0018](../../internal/store/migrations/0018_channels.sql)，这里只写取舍。
 
 - **一张通用 `secrets` 表**，出口、渠道、以后的拉取来源各自用一个唯一外键引用它，而不是每张表各放一列密文。
   封装、解封、重新包装、`secret ls` / `check` / `rewrap` 都只有一条路径，包装器和钥匙引用集中在一处
@@ -159,7 +162,14 @@ KEK 丢了（或 Vault 里的钥匙被删）要重新输入所有第三方机密
   所以「启用中的渠道里 `(类型, bot id)` 唯一」由部分唯一索引守住，不靠约定
 - **绑定是可撤销的独立行**，带 chat id 和「谁按的按钮算数」的 Telegram 用户 id。一个 bot 下的多个 chat、多个人靠绑定区分。
   绑定只属于 human：推送只发给人（§13.8），这条在 Go 里查
-- **绑定码只存哈希**，并记下 Telegram 在 `/start <码>` 时报来的 chat、用户和名字，供确认时展示（§13.7）
+- **绑定码只存哈希**，并记下 Telegram 在 `/start <码>` 时报来的 chat、用户、名字和 chat 的类型（私聊、群、超级群），供确认时展示（§13.7）。
+  类型单独一列（`seen_chat_kind`），没从 chat id 的正负去猜：确认的人要看到的是 Telegram 说的，而不是 yuuka 推的。
+  码是 16 个随机字节，所以哈希用一次 SHA-256 就够，不需要慢哈希。`/start` 和确认都要在 10 分钟内；
+  确认之后码这一行留着（`binding_id` 指向绑定），记下当时 Telegram 报来的是谁。拒绝或放弃的码直接删掉：什么都没授予，不需要痕迹
+- **删渠道 = 停用、抹掉 token、撤销它上面的全部绑定**。再 `add` 同名渠道是重新启用，绑定不会回来；
+  启用中的渠道不能换成另一个 bot（`ErrChannelBot`）：绑定是和那个 bot 的 chat，换了 bot 它们就指向别人的对话
+- **事件订阅是一张表而不是绑定上的数组**：分发器按事件查「谁订阅了它」，主键就是这条查询的索引；
+  `security` 不在 CHECK 里，库里写不进去
 
 ### 17.5 运行时：不热加载，每次现查
 
@@ -180,6 +190,18 @@ KEK 丢了（或 Vault 里的钥匙被删）要重新输入所有第三方机密
 **渠道**：一个管理协程每 15 秒读一次渠道表，每个启用的 Telegram 渠道跑一个轮询者，revision 变了就重启它。
 分发器对每个事件现查绑定和订阅，不缓存，所以撤销绑定立即生效。15 秒是加渠道、换 token 的最长生效时间，
 渠道变动以天计，这点延迟不值得一套通知机制。
+
+落地时定下的几处（[`internal/notify`](../../internal/notify/dispatch.go)）：
+
+- **bot 客户端按（渠道 revision，机密 revision）缓存**，和出口一样是唯一的缓存；解不开的结果也按 revision 记住，
+  所以一条被篡改的 token 只告警一次（经其他渠道），换了 token 才再试。token 解开后以字符串存在 HTTP 客户端里：
+  Bot API 的 URL 里就带着它，§17.2 的内存卫生到 HTTP 客户端为止，和 SMTP 一样
+- **每次按按钮现查**：`BindingForPress` 按（渠道，chat，按的人）找一条未撤销、渠道启用、属于启用中的人的绑定，
+  同一条语句里记下 `last_used_at`；找不到就不回应。`/start <码>` 也由这个轮询者收，只记下报来的身份，什么都不授予
+- **CLI 的 `channel bind` 不轮询 Telegram**，等库里的码被兑现（一个 bot 只能有一个轮询者）。所以绑定要 `serve` 在跑、且有 KEK
+- **安全告警从 CLI 也能发**：主机上的 `channel add`、`channel bind` 有 KEK 时自己建一个分发器推告警；
+  没有 KEK 时命令会说告警没发出去。出口的 CLI（P4）目前只写审计行，接上告警只要在那几个命令里同样建一个分发器调 `Security`
+- **没有 KEK 时什么都不跑**：管理协程只在有启用的渠道时每 10 分钟报一次 ERROR
 
 ### 17.6 谁能改，怎么改
 
@@ -238,7 +260,15 @@ KEK 丢了（或 Vault 里的钥匙被删）要重新输入所有第三方机密
 - **没设 KEK**：环境变量里的出口和 Telegram 照旧在内存里工作，报 WARN。升级永远不会让发信停摆。
   这期间启动时仍为环境变量里每个出口名 upsert 一行占位（占位不含机密，不需要 KEK），
   这样 `identity add --transport` 引用一个只在环境变量里的出口时有行可指；`identity add` 本身只接受库里已有的出口名，打错的名字不会变成占位
-- 升级的具体步骤（生成 KEK、挂载、核实、删掉旧变量）见[运维文档](../operate/secrets.md#从环境变量升级)
+- Telegram 的导入在 [`cmd/yuuka/telegram_import.go`](../../cmd/yuuka/telegram_import.go)：插渠道时 `ON CONFLICT DO NOTHING`
+  （名字和「启用中的 bot」两个唯一键），没插进去就整个事务回滚，连同刚封好的 token，所以并发启动只写一次。
+  bot id 取 token 冒号前的数字，再用 `getMe` 核对并拿用户名；连不上 Telegram 时没有用户名照样导入，升级不等 Telegram。
+  决定不了 chat 属于谁（库里没有人，或有几个人又没设 `YUUKA_TELEGRAM_OPERATOR`）时不导入，变量照旧工作，下次启动再试：
+  只建渠道不建绑定的话，下次启动会因为渠道已存在而不再补绑定
+- 有 KEK 时，环境变量里的 bot 一旦是库里一个启用的渠道（导入的，或手动 `channel add` 的），通知就全部从库里走，变量被忽略并报 WARN；
+  否则照旧用变量，库里的渠道不跑。两者从不同时运行：同一个 bot 两个轮询者会互相 409
+- 升级的具体步骤（生成 KEK、挂载、核实、删掉旧变量）见[运维文档](../operate/secrets.md#从环境变量升级)，Telegram 的见
+  [同一页](../operate/secrets.md#telegram-从环境变量升级)
 
 ### 17.8 M3.5 的形状
 

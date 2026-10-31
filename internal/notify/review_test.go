@@ -155,17 +155,14 @@ func TestPoller(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	p := &Poller{
-		TG: tg, OperatorID: operator, ChatID: chat, Cards: &Cards{TG: tg}, Timeout: 1,
-		Recall: func(_ context.Context, got string, from int64) (string, bool, *SuspendedCard, error) {
+		TG: tg, Suspended: (&Cards{TG: tg}).Suspended, Timeout: 1,
+		Authorize: Operator(operator, chat, func(_ context.Context, got string) (string, bool, *SuspendedCard, error) {
 			recalls = append(recalls, got)
-			if from != operator {
-				t.Errorf("recall from %d", from)
-			}
 			if len(recalls) == 1 {
 				return "Recalled.", true, &SuspendedCard{Identity: "arisu@example.com", Principal: "agent:arisu", Recalls: 2}, nil
 			}
 			return "Already recalled.", true, nil, nil
-		},
+		}),
 	}
 	done := make(chan struct{})
 	go func() {
@@ -203,7 +200,7 @@ func TestPollerConflict(t *testing.T) {
 	srv := httptest.NewServer(bot)
 	defer srv.Close()
 	tg := &Telegram{Token: "TOKEN", ChatID: "42", BaseURL: srv.URL}
-	if _, err := tg.Updates(t.Context(), 0, 1); !errors.Is(err, ErrConflict) {
+	if _, err := tg.Updates(t.Context(), 0, 1, []string{"callback_query"}); !errors.Is(err, ErrConflict) {
 		t.Errorf("409: %v", err)
 	}
 }

@@ -30,10 +30,14 @@ type recordingNotifier struct {
 	lines []string
 }
 
-func (n *recordingNotifier) Notify(_ context.Context, text string) error {
+func (n *recordingNotifier) NewMail(_ context.Context, m notify.Mail) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
-	n.lines = append(n.lines, text)
+	// The dispatcher decides who may be told by the delivery (§13.8).
+	if !ulid.Valid(m.DeliveryID) || !ulid.Valid(m.MessageID) {
+		panic(fmt.Sprintf("new mail without its delivery or message: %+v", m))
+	}
+	n.lines = append(n.lines, m.Text)
 	return nil
 }
 

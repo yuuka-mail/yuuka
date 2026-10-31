@@ -357,7 +357,7 @@ yuuka 不假设自己部署在什么网络里（§2）。所以**每个端点都
 | ingest（Worker → yuuka）| HMAC + 时间戳（§2） | Cloudflare |
 | SMTP submission | SASL → `smtp_password` 凭据 | 发信的服务；默认只在私有网络可达，发信方在私有网络外时经独立中转机（见下） |
 | REST / MCP | Bearer → `token` 凭据 | 调用它的 agent 和服务 |
-| TG 回调按钮（§8.4） | 长轮询，没有入站端点。校验 `callback_query.from.id`、`chat.id` 和回调数据 `w:<ULID>` → 记为 `YUUKA_TELEGRAM_OPERATOR` 指定的人，`credential_id` 为空、`via: telegram`。**设计（§17）**：每次按都重新读库，必须同时对上 bot、`chat.id`、`from.id`、一条未撤销的绑定和一个启用中的人 → 记为**绑定的那个人**，`credential_id` 为空、`via: telegram`、带 `binding_id` | 只能撤回扣留中的信；见下 |
+| TG 回调按钮（§8.4） | 长轮询，没有入站端点。校验 `callback_query.from.id`、`chat.id` 和回调数据 `w:<ULID>` → 记为 `YUUKA_TELEGRAM_OPERATOR` 指定的人，`credential_id` 为空、`via: telegram`。**渠道进库之后（§17，[`notify.Manager`](../../internal/notify/manager.go)）**：每次按都重新读库，必须同时对上 bot、`chat.id`、`from.id`、一条未撤销的绑定和一个启用中的人 → 记为**绑定的那个人**，`credential_id` 为空、`via: telegram`、带 `binding_id` | 只能撤回扣留中的信；见下 |
 | `GET /healthz` | **不认证**（唯一的例外） | 反向代理的健康检查 |
 
 这几个端点各自认证，不要混。
@@ -383,7 +383,7 @@ WebUI 的页面壳（静态资源）同样不需要会话，但它不含数据�
 M3 的按钮只有撤回（§8.4）：最坏的后果是信发不出去，所以记作配置里的人、不发凭据就够了，
 和 CLI 一样不冒充登录；将来出现「确认发送」按钮时它就是 `submission:send` 的入口之一，那时再给它一种可吊销的 `session` 类凭据。
 
-**渠道进库之后（§17，已定，未实现），「谁按的按钮算数」由绑定决定，而绑定只能经 `/start` 码加双向确认建立，不手敲 id。**
+**渠道进库之后（§17，已实现；CLI 一侧是 `yuuka channel bind`，WebUI 一侧随 P6），「谁按的按钮算数」由绑定决定，而绑定只能经 `/start` 码加双向确认建立，不手敲 id。**
 手敲的 chat id 和用户 id 没人核对：打错一位，撤回按钮就交给了一个陌生人。流程：
 
 1. CLI 或带再验证的 WebUI 会话生成一个绑定码（16 个随机字节、10 分钟有效、库里只存哈希），
@@ -506,7 +506,7 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 | 规则预览、草拟（`PreviewRule`、`FactsFor`、`CountMatches`） | 只在可见投递上求值和计数；只经 Sent 副本可见的信没有投递，不能拿来草拟 |
 | 审核结论里指向的信的主题（`Subjects`，草稿和 outbox 行的 `review`） | 结论只存 message id；主题只在那封信对读者可见时给，看不见的只剩 id |
 | 侧栏计数（`Counts`，REST `/counts`） | 每个数和它对应的列表同一个条件：outbox 行按发信身份的账户、提案按 `proposalVisible`、草稿按 `visibleDraft`；outbox 的数另要 `delivery:read` |
-| 推送通知 | 只发给 human，不经过受限主体。渠道进库之后（§17）绑定属于某个 human，`mail.new` 只在这封信对**绑定的那个人**可见时才推（同一个可见性函数）；扣留、升级、熔断的卡片按 outbox 行的可见性 |
+| 推送通知 | 只发给 human，不经过受限主体。渠道进库之后（§17）绑定属于某个 human，`mail.new` 只在这次投递对**绑定的那个人**可见时才推（`DeliveryVisible`）；扣留卡片按 outbox 行、升级卡片按草稿、熔断卡片按身份所在账户的可见性（§8.4） |
 
 测试上用一个「含受限账户」的固定夹具，表驱动地把上表每条读路径跑一遍，断言没有泄漏。
 新增读路径就是往这张表加一行。store 层的这张表是
@@ -688,7 +688,7 @@ CLI 只能记 `system` 加 `host_user`（§13.7）。信任根之外的动作值
 
 #### 出口、渠道与机密的权限
 
-> 状态：已定，未实现（§17）。WebUI 上的放宽依赖上文「当场再做一次 passkey 断言」（0015）；在它合入之前，放宽只在主机上。
+> 状态：已定（§17）。主机上的命令已实现（`transport`、`secret`、`channel`），REST 与 WebUI 随 P6。WebUI 上的放宽依赖上文「当场再做一次 passkey 断言」（0015）；在它合入之前，放宽只在主机上。
 
 出口、身份的出口链、通知渠道和绑定进库之后（§17），它们也是「改变谁能做什么」的配置：
 改了出口的主机，信和密码就交给了另一台服务器；多一条绑定，摘要和撤回按钮就多了一个去处。

@@ -37,16 +37,11 @@ type MarkerStore interface {
 	Delete(ctx context.Context, key string) error
 }
 
-// Notifier delivers a one-line summary somewhere a human will see it.
+// Notifier delivers a one-line summary of new mail somewhere a human
+// will see it: a Telegram chat, or every binding whose person may see
+// the delivery (notify.Dispatcher, §8.4).
 type Notifier interface {
-	Notify(ctx context.Context, text string) error
-}
-
-// SilentNotifier is a Notifier that can also deliver without sound, for
-// mail a rule asked to notify silently. A Notifier without it notifies
-// normally.
-type SilentNotifier interface {
-	NotifySilently(ctx context.Context, text string) error
+	NewMail(ctx context.Context, m notify.Mail) error
 }
 
 // Config holds an Ingester's dependencies.
@@ -169,7 +164,9 @@ func (in *Ingester) commit(ctx context.Context, m contract.Marker, body []byte) 
 		return out, nil
 	}
 	if f.Notify {
-		in.notify(ctx, notify.Summary(zone, prefix, body), f.Silent)
+		in.notify(ctx, notify.Mail{
+			MessageID: f.MessageID, DeliveryID: rec.DeliveryID, Text: notify.Summary(zone, prefix, body), Silent: f.Silent,
+		})
 	}
 	return out, nil
 }
@@ -192,7 +189,7 @@ func (in *Ingester) account(ctx context.Context) (string, error) {
 
 // notify runs best effort in the background: it never blocks or fails
 // the ingest that triggered it.
-func (in *Ingester) notify(ctx context.Context, text string, silent bool) {
+func (in *Ingester) notify(ctx context.Context, m notify.Mail) {
 	if in.cfg.Notifier == nil {
 		return
 	}
@@ -206,11 +203,7 @@ func (in *Ingester) notify(ctx context.Context, text string, silent bool) {
 		defer func() { <-in.notifySem }()
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), notifyTimeout)
 		defer cancel()
-		send := in.cfg.Notifier.Notify
-		if sn, ok := in.cfg.Notifier.(SilentNotifier); ok && silent {
-			send = sn.NotifySilently
-		}
-		if err := send(ctx, text); err != nil {
+		if err := in.cfg.Notifier.NewMail(ctx, m); err != nil {
 			in.cfg.Log.Warn("notify", "err", err)
 		}
 	})

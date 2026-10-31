@@ -80,7 +80,7 @@ func TestConfigDocumented(t *testing.T) {
 
 func TestCommandsDocumented(t *testing.T) {
 	want := map[string]bool{}
-	usages := []string{usage().Error(), prefixUsage, tokenUsage, outboxUsage, identityUsage, transportUsage, secretUsage, grantUsage, ruleUsage, triageUsage}
+	usages := []string{usage().Error(), prefixUsage, tokenUsage, outboxUsage, identityUsage, transportUsage, secretUsage, grantUsage, ruleUsage, channelUsage, triageUsage}
 	cmd := regexp.MustCompile(`yuuka ([a-z]+)(?: ([a-z]+(?:\|[a-z]+)*))?`)
 	for _, u := range usages {
 		for _, m := range cmd.FindAllStringSubmatch(u, -1) {

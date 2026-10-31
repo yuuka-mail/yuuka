@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
+	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
@@ -59,8 +60,9 @@ func TestRecaller(t *testing.T) {
 	held := enqueue(arisu, "arisu@example.com", store.Submission{Content: &store.ReviewInput{}},
 		&store.Draft{FromAddr: "arisu@example.com", To: []store.Recipient{{Addr: "bob@example.net"}}})
 
-	recall := recaller(e.db, &auth.Viewer{PrincipalID: op.PrincipalID, PrincipalKind: "human", PrincipalName: "operator"})
-	answer, done, suspended, err := recall(ctx, held, 12345)
+	recall := notify.Recaller(e.db, &auth.Viewer{PrincipalID: op.PrincipalID, PrincipalKind: "human", PrincipalName: "operator"},
+		map[string]any{"via": "telegram", "telegram_user_id": 12345})
+	answer, done, suspended, err := recall(ctx, held)
 	if err != nil || !done || suspended != nil || answer != "Recalled. It is a draft again." {
 		t.Fatalf("recall: %q %v %v %v", answer, done, suspended, err)
 	}
@@ -73,10 +75,10 @@ func TestRecaller(t *testing.T) {
 	if actor != op.PrincipalID || cred != nil || !strings.Contains(args, `"via": "telegram"`) || !strings.Contains(args, `"telegram_user_id": 12345`) {
 		t.Errorf("audit: %s %v %s", actor, cred, args)
 	}
-	if answer, done, _, err := recall(ctx, held, 12345); err != nil || !done || answer != "Already recalled." {
+	if answer, done, _, err := recall(ctx, held); err != nil || !done || answer != "Already recalled." {
 		t.Errorf("replay: %q %v %v", answer, done, err)
 	}
-	if answer, done, _, err := recall(ctx, ulid.New(time.Now()), 12345); err != nil || !done || answer != "No such message." {
+	if answer, done, _, err := recall(ctx, ulid.New(time.Now())); err != nil || !done || answer != "No such message." {
 		t.Errorf("unknown: %q %v %v", answer, done, err)
 	}
 }

@@ -57,6 +57,10 @@
 //	                         rules that label, classify, archive and set the
 //	                         notification of arriving mail (§8.5); apply and
 //	                         revert run one over past mail
+//	yuuka channel add|ls|rm|test NAME ...
+//	yuuka channel bind NAME | unbind|subscribe|unsubscribe BINDING ...
+//	                         notification channels, the chats bound to people,
+//	                         and what each receives (§17, §8.4); channel.go
 //	yuuka triage status      the scorer's configuration, how much mail it has
 //	                         scored, and whether it answers a probe (§15)
 //	yuuka triage rescore --since T
@@ -92,6 +96,8 @@
 //	                                    ingest (default "cloudflare"). Redelivery dedupe is per account:
 //	                                    renaming it starts a new account rather than renaming the old one
 //	YUUKA_TRUSTED_AUTHSERV_ID           authserv-id of the account's trusted receiver (default "mx.cloudflare.net")
+//	YUUKA_TELEGRAM_*                    deprecated: with YUUKA_KEK_FILE, serve imports them as the
+//	                                    channel "telegram" once and ignores them after (§17.7)
 //	YUUKA_TELEGRAM_BOT_TOKEN            Telegram bot token (optional; set together with the chat id)
 //	YUUKA_TELEGRAM_CHAT_ID              Telegram chat id
 //	YUUKA_TELEGRAM_OPERATOR_ID          numeric Telegram user id whose presses of the recall button on
@@ -154,6 +160,8 @@
 // `yuuka transport` and `yuuka secret` those and YUUKA_KEK_FILE to seal or open;
 // `yuuka triage status` and `report` those and YUUKA_TRIAGE_*, `rescore`
 // serve's configuration;
+// `yuuka channel` the database URLs, and YUUKA_KEK_FILE to add a channel,
+// test it, or tell a chat it was bound;
 // `yuuka admin` the database URLs and YUUKA_WEB_ORIGIN. All but migrate
 // run on the host without a login; host.go says how their actions are
 // recorded.
@@ -191,7 +199,6 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/ingest"
 	"github.com/yuuka-mail/yuuka/internal/localraw"
 	"github.com/yuuka-mail/yuuka/internal/mcp"
-	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/outbox"
 	"github.com/yuuka-mail/yuuka/internal/r2"
 	"github.com/yuuka-mail/yuuka/internal/secret"
@@ -217,7 +224,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka identity add|set|ls|rm | yuuka transport add|set|ls|rm|test | yuuka secret ls|check|rewrap | yuuka grant set|ls|rm | yuuka rule ls|show|add|set|rm|apply|revert | yuuka triage status|rescore|report | yuuka mcp --stdio | yuuka version")
+	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka identity add|set|ls|rm | yuuka transport add|set|ls|rm|test | yuuka secret ls|check|rewrap | yuuka grant set|ls|rm | yuuka rule ls|show|add|set|rm|apply|revert | yuuka channel add|ls|rm|test|bind|unbind|subscribe|unsubscribe | yuuka triage status|rescore|report | yuuka mcp --stdio | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -301,6 +308,8 @@ func run(args []string, log *slog.Logger) error {
 		return withHost(ctx, func(h *host) error { return h.grantCmd(ctx, args[1:]) })
 	case "rule":
 		return withHost(ctx, func(h *host) error { return h.ruleCmd(ctx, args[1:]) })
+	case "channel":
+		return withHost(ctx, func(h *host) error { return h.channelCmd(ctx, args[1:]) })
 	case "triage":
 		return triageCmd(ctx, log, args[1:])
 	}
@@ -347,8 +356,12 @@ type app struct {
 	in      *ingest.Ingester
 	alerter authn.Alerter // nil without Telegram
 	// cards are the review tier's Telegram cards; nil without Telegram.
-	cards  *notify.Cards
-	outbox *outbox.Service // serve only; see openOutbox
+	cards cardSender
+	// mail is told of new mail (NewMail); nil without Telegram.
+	mail ingest.Notifier
+	// notifyRun polls Telegram (review.go); serve only, nil for nothing.
+	notifyRun func(context.Context)
+	outbox    *outbox.Service // serve only; see openOutbox
 	// submit is the only way mail enters the outbox (§8.9): the SMTP
 	// submission port, REST and MCP go through it. serve only.
 	submit *submit.Service
@@ -392,6 +405,7 @@ func (a *app) openOutbox(ctx context.Context, log *slog.Logger, sealer *secret.S
 		IndexSent:    a.in.IndexSent,
 		Workers:      a.cfg.Outbox.Workers,
 		PollInterval: a.cfg.Outbox.PollInterval,
+		Alerter:      a.secretAlerter(),
 		Log:          log,
 	})
 	sc := submit.Config{DB: a.db, Outbox: a.outbox, Log: log}
@@ -411,22 +425,21 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 	if err != nil {
 		return nil, err
 	}
-	var notifier ingest.Notifier
-	var alerter authn.Alerter
-	var cards *notify.Cards
-	if cfg.TelegramToken != "" {
-		tg := &notify.Telegram{Token: cfg.TelegramToken, ChatID: cfg.TelegramChat, Client: &http.Client{Timeout: 15 * time.Second}}
-		notifier, alerter = tg, tg
-		cards = &notify.Cards{TG: tg, Origin: cfg.Web.Origin, Recall: cfg.TelegramOperatorID != 0}
+	a := &app{cfg: cfg, pool: pool, db: db}
+	// serve decides after its imports (serve, openNotify).
+	if !needSecrets {
+		if err := a.openNotify(ctx, log, nil, false); err != nil {
+			pool.Close()
+			return nil, err
+		}
 	}
-	a := &app{cfg: cfg, pool: pool, db: db, alerter: alerter, cards: cards}
 	a.in = ingest.New(ingest.Config{
 		Raw:      r2.NewRawBucket(cfg.Raw),
 		Pending:  r2.NewPendingBucket(cfg.Pending),
 		Local:    localraw.Dir{Root: cfg.DataDir},
 		DB:       db,
 		Account:  cfg.Account,
-		Notifier: notifier,
+		Notifier: a,
 		// Per account in the design (§10.1.1); process configuration while
 		// the Cloudflare account is the only one that receives.
 		TrustedAuthservID: cfg.TrustedAuthservID,
@@ -576,14 +589,16 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		return err
 	}
 	importEnvTransports(ctx, log, a.db, a.cfg.Outbox.Transports, sealer, os.ReadFile)
+	a.importEnvTelegram(ctx, log, sealer)
+	// Before the outbox, which hands it the review cards and the
+	// security alert of a tampered transport secret.
+	if err := a.openNotify(ctx, log, sealer, true); err != nil {
+		return err
+	}
 	if err := a.openOutbox(ctx, log, sealer); err != nil {
 		return err
 	}
 	defer a.submit.Wait()
-	poller, err := a.recallPoller(ctx, log)
-	if err != nil {
-		return err
-	}
 	rs, err := a.routes(log)
 	if err != nil {
 		return err
@@ -628,14 +643,13 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		defer close(outboxDone)
 		a.outbox.Run(ctx)
 	}()
-	// The recall button of held mail, by long polling: nothing listens
-	// for Telegram, so nothing is exposed for it (§13.7).
+	// The recall button of held mail and /start, by long polling:
+	// nothing listens for Telegram, so nothing is exposed for it (§13.7).
 	pollDone := make(chan struct{})
 	go func() {
 		defer close(pollDone)
-		if poller != nil {
-			log.Info("telegram: answering the recall button of held mail", "operator", a.cfg.TelegramOperator)
-			poller.Run(ctx)
+		if a.notifyRun != nil {
+			a.notifyRun(ctx)
 		}
 	}()
 

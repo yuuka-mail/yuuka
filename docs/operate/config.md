@@ -16,6 +16,7 @@ Compose 自己的 `.env`（镜像、密码、备份策略）见 [deploy/README.m
 | `yuuka reconcile`、`yuuka reparse` | 数据库、R2、`YUUKA_DATA_DIR` |
 | `yuuka admin enroll` | 数据库、`YUUKA_WEB_ORIGIN` |
 | `yuuka prefix` / `token` / `outbox` / `identity` / `grant` | 只要数据库 |
+| `yuuka channel` | 数据库；`add`、`test` 还要 `YUUKA_KEK_FILE`，`bind` 有它时才能回复 chat、推安全告警 |
 | `yuuka transport` / `secret` | 数据库；写入或解开密码的（`transport add` / `set` / `test`、`secret check` / `rewrap`）还要 `YUUKA_KEK_FILE`，轮换期间加 `YUUKA_KEK_PREVIOUS_FILES` |
 | `yuuka triage status` / `report` | 数据库、`YUUKA_TRIAGE_*` |
 | `yuuka triage rescore` | 数据库、R2、`YUUKA_DATA_DIR`、`YUUKA_TRIAGE_*` |
@@ -57,14 +58,19 @@ Compose 自己的 `.env`（镜像、密码、备份策略）见 [deploy/README.m
 
 ## 通知
 
+通知渠道（Telegram bot）、绑定和订阅存在库里，用 [`yuuka channel`](cli.md#通知渠道) 管理，不再读环境变量。
+下面四个变量**已弃用**，只在这一个版本里还有效，下一个版本删掉：设了 `YUUKA_KEK_FILE` 时，`serve` 启动时把它们导入成一个叫
+`telegram` 的渠道和一条绑定，之后忽略它们并报 WARN；没设 KEK 时它们照旧工作，同样报 WARN。升级步骤见
+[第三方机密](secrets.md#telegram-从环境变量升级)。
+
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `YUUKA_TELEGRAM_BOT_TOKEN` | 空 | 新信推一行摘要到 Telegram。和下一项一起设或都不设 |
+| `YUUKA_TELEGRAM_BOT_TOKEN` | 空 | 已弃用。新信推一行摘要到 Telegram。和下一项一起设或都不设 |
 | `YUUKA_TELEGRAM_CHAT_ID` | 空 | |
 | `YUUKA_TELEGRAM_OPERATOR_ID` | 空 | 运维者的 Telegram 数字用户 ID。设了它，`review` 档扣留中的信的卡片带「撤回」按钮，只认这个人在上面那个 chat 里按的。和下一项一起设或都不设，且 chat ID 必须是数字 |
 | `YUUKA_TELEGRAM_OPERATOR` | 空 | `human:<name>`：Telegram 上的撤回以这个人记入审计（`via: telegram`，没有凭据），必须是已有的、没停用的人 |
 
-配了 bot，`review` 档的信被扣留或被升级为草稿时都会推一张卡片，内容由系统从发件行渲染：
+下面几段对库里的渠道同样成立。配了 bot，`review` 档的信被扣留或被升级为草稿时都会推一张卡片，内容由系统从发件行渲染：
 发信身份、收件人、提交者、主题、附件、正文开头三行（这几行会经过 Telegram 的服务器）。
 卡片发不出去只记日志，撤回窗口照常计时，不会因此延长。
 

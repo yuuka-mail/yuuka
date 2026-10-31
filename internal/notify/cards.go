@@ -77,10 +77,12 @@ type EscalatedCard struct {
 
 // SuspendedCard is a grant the circuit breaker suspended.
 type SuspendedCard struct {
-	Identity  string
-	Principal string
-	Recalls   int
-	Withdrawn int
+	// IdentityID decides who may see the card (§13.8); it is not shown.
+	IdentityID string
+	Identity   string
+	Principal  string
+	Recalls    int
+	Withdrawn  int
 }
 
 // Excerpt lines and characters on a held card (§8.4: the start of the
