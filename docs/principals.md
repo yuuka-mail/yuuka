@@ -144,6 +144,16 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 2. 规范化 MIME（按出口 caps 去掉不允许的头，§10.2），写 Sent 副本
 3. 入 outbox 状态机，由 §10.2 的 transport 真正投递
 
+**监听方式**（对 yuuka 所有的邮件协议监听器都成立，包括 M5 可能加的 IMAP 网关）：
+
+- **只做隐式 TLS**：提交口用 465，IMAP 用 993（RFC 8314 推荐的形式），**不做 STARTTLS**。
+  隐式 TLS 一建连就是 TLS，任何 TCP 层的 TLS 代理（Caddy layer4、Traefik、HAProxy）都能终结它，
+  证书可以和 HTTPS 一起由代理统一管理；STARTTLS 要在协议内部升级，通用代理处理不了，只能由 yuuka 自己做。
+  yuuka 也可以自己终结 TLS，两种部署都支持
+- **支持 PROXY protocol**（v1 / v2）：放在代理后面时，yuuka 只看得到代理的地址，
+  提交口的限速、审计和 `actions` 里的来源就全失真了。只接受配置里列出的代理地址发来的 PROXY 头，
+  其他来源带 PROXY 头一律断开——否则任何人都能伪造自己的来源地址
+
 好处是**不用改任何现有软件**：监控、告警、定时任务，几乎所有服务端软件都会说 SMTP。
 配一个账号密码就行。
 
@@ -283,11 +293,11 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 | 阶段 | 内容 |
 |---|---|
 | M1 | **`principals` / `credentials` / `identity_grants` / `account_access` / `actions` 建表**，WebUI 内置 passkey 登录、走 session 凭据（M1 只有 JSON 端点，页面在第二阶段）；只读 MCP 与 REST 的 bearer token，由 `yuuka token` 签发 |
-| M2 | SMTP submission 口（跟发信能力一起做）；`identities` 建表后给 `identity_grants` 补外键 |
-| M3.5 | `account_access` 生效：读路径按 §13.8 过滤（跟多账户一起做）；`accounts` 建表后补外键 |
+| M2 | SMTP submission 口（跟发信能力一起做）；`accounts` / `identities` 建表（§9.5）后给 `identity_grants`、`account_access` 补外键 |
+| M3.5 | `account_access` 生效：读路径按 §13.8 过滤（跟多账户一起做） |
 
 `identity_grants` 和 `account_access` 在 M1 只建表、不读：外键指向的 `identities`、`accounts`
 还不存在，所以这两列暂时是不带外键的文本，迁移里以 `M1:` 注明。
 
-和 §9.5 同样的理由：**表从 M1 就建**，因为主体模型是改起来最贵的部分。
+主体与凭据的表从 M1 就建，因为主体模型是改起来最贵的部分。
 M0 不需要这一层——那时只有一个人和一个脚本。

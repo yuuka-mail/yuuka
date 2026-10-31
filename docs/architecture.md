@@ -314,9 +314,10 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
    Sending 是域级 onboard，所以 `任意@example.com` 都能发），签名/显示名按前缀配置。
 
 7. **入口是多实例的 driver，不是一个管道**
-   `ingest driver` 是接口，而且**从第一天起就有多个实例并存**：Cloudflare
-   Email Worker（各 catch-all 域）、IMAP 拉取（Gmail / 工作邮箱）、
-   将来可能的自建 MX。出口同理：SMTP 口是通用货币，`smtpTransport` 一个实现
+   `ingest driver` 的契约（§10.1）按多实例设计：Cloudflare Email Worker（各 catch-all 域）、
+   IMAP 拉取（Gmail / 工作邮箱）、将来可能的自建 MX。代码里的接口**等第二个 driver（M3.5 的 IMAP）
+   出现时再抽**——只有一个实现时抽出来的接口多半不对；在那之前，Cloudflare 这一条路径
+   照样遵守 §10.1 的契约：driver 不解析 MIME，产出原件引用和稳定标识。出口同理：SMTP 口是通用货币，`smtpTransport` 一个实现
    就覆盖 CF / Resend / SES / Gmail / 工作邮箱（§10）。上层不动。
    这条保证系统不被 Cloudflare 的 beta 功能和配额锁死。
 
@@ -355,7 +356,7 @@ ltt.rs 等，Thunderbird / aerc / iOS Mail 都不支持）。所以"JMAP 就行"
 - 内部 API 自己定（REST，贴着 UI 需求走，不受 JMAP 束缚）
 - 对外暴露 **JMAP 子集**：`Core/echo`、`Mailbox/get`、`Email/query`、`Email/get`、
   `Email/set`、`EmailSubmission/set`、`Email/queryChanges`（增量同步）
-- 真的想用 Thunderbird/iOS Mail 的那天，加 `go-imap` 网关，一两周的活，
+- 真的想用 Thunderbird/iOS Mail 的那天，加 `go-imap` 网关（监听方式同 §13.6：只做 993 隐式 TLS、支持 PROXY protocol），一两周的活，
   后端模型已经就绪
 
 ---

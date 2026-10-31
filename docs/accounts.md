@@ -69,9 +69,12 @@ accounts(kind, sync_policy, writeback_policy)
 放在 **M3.5**（§6）：等解析、存储、规则引擎稳定后再接外部账户。
 原因是 IMAP 拉取的脏活（UIDVALIDITY 变化、Gmail All Mail 重复、
 OAuth 续期、限速）会掩盖核心链路的问题，不适合早做。
-但**数据模型从现在就按多账户写**（`accounts/identities/deliveries` 从 M1 就建表，
-catch-all 只是其中 kind 为 `cf_catchall` 的一组账户）——
-这是改起来最贵的部分，不能等。
+数据模型的**形状**从一开始就是多账户的：内容 / 投递两层拆分、`deliveries` 带账户维度、
+幂等键是 `(账户, source_key)`，catch-all 只是其中一组账户。
+但 `accounts` / `identities` 两张表在 **M2** 建：M0、M1 只有一个 Cloudflare 账户，
+用进程配置的 `account_key` 代替（迁移里以 `M0:` / `M1:` 注明）；
+M2 发信时要按 identity 选出口、按 `identity_grants` 放行，那时这两张表才有真正的读者，
+建表时把 `account_key` 换成外键。
 
 ### 9.6 归档卸载：yuuka 作为外部邮箱的容量外置
 
@@ -119,6 +122,6 @@ UI 据此告诉用户"容量什么时候真正回来"，而不是假装都一样
 反向（把 yuuka 里的信推回远端）**不做**——那是另一套同步系统。
 
 落地放 **M3.5 之后**，等 IMAP 拉取跑稳一个周期再开；
-但 `offload_policy`、`deliveries.remote_state` 两个字段 M1 建表时一并建好。
+`offload_policy`、`deliveries.remote_state` / `offloaded_at` 随 M3.5 的 IMAP 拉取一起建：只有外部账户才会被卸载。
 
 ---
