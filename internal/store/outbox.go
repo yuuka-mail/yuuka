@@ -20,7 +20,8 @@ import (
 // point, recording the result, lease recovery and the human resolution
 // of unknown. Every transaction that writes a change
 // takes contentLock first, like the content writers, so changes.seq stays
-// in commit order and the lock order is always content lock, then rows.
+// in commit order and the lock order is content lock, then rows (the
+// order with grants and drafts, and why it is safe, is in held.go).
 // The two statements that run during an attempt (CommitAttempt and
 // RenewLease) write no change and take no lock beyond their row.
 //

@@ -22,6 +22,32 @@ import (
 // release that came first leaves the recall a clean "already released",
 // a recall that came first leaves the release nothing to match. Neither
 // ever touches hold_until or the verdict, so a window is never shortened.
+//
+// Lock order of everything that sends (TestHeldLockOrder runs the paths
+// against each other):
+//
+//	grant lock → draft row → content lock → outbox rows → drafts of held rows
+//
+//   - WithDecision takes the grant's advisory lock, then the submitted
+//     draft (LockDraft), and the content lock last, in Enqueue or the
+//     draft writes; the outbox row it inserts is new, and its foreign
+//     key's share lock is on a draft it already holds or just created.
+//   - Draft writers (UpdateDraft, DeleteDraft, holdDraft) lock their
+//     draft, then the content lock when they log the change.
+//   - ClaimOutbox, FinishAttempt and recovery take the content lock,
+//     then outbox rows; they touch no draft.
+//   - WithdrawOutbox takes the grant lock, the content lock, the outbox
+//     row, then its draft; PromoteHeld the content lock, the rows, then
+//     the drafts of the rows it withdraws.
+//
+// The last two lock a draft after the content lock, the reverse of the
+// draft writers. That cannot close a cycle: they only lock the draft of
+// a held row, and such a draft is in flight. Every draft writer checks
+// that (notInFlight, or the outbox history for a delete) right after
+// locking the draft and gives up before it asks for the content lock;
+// and a draft only becomes in flight in the transaction that holds its
+// row lock (WithDecision). Nothing that holds a draft row ever waits for
+// an outbox row.
 
 // ErrNotYours: an agent or a service may withdraw only mail it
 // submitted; a human may withdraw any mail they can see (§8.9).
