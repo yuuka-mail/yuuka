@@ -1,0 +1,26 @@
+Received: from mail.example.net (192.0.2.15)
+	by cloudflare-email.net (cloudflare) id tx0005 for <svc-shop@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.net header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.net;
+	spf=pass smtp.mailfrom=bounce@example.net;
+	arc=none smtp.remote-ip=192.0.2.15
+From: Example Store <orders@example.net>
+To: svc-shop@example.com
+Subject: Your order #4417283 has shipped
+Date: Sat, 31 Oct 2026 01:37:00 +0000
+Message-ID: <ship-4417283@example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Hi Alex,
+
+Good news! Your order #4417283 has shipped on 2026-10-30.
+Order number: 114-2208761-5530417
+Tracking number: 1Z999AA10123456784
+Total: $129.99 (3 items)
+Estimated delivery: Nov 3, 2026
+
+Questions? Call 800-555-0199 or +1 (555) 123-4567.
+Example Store, 1600 Example Ave, Mountain View, CA 94043

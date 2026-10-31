@@ -1,0 +1,22 @@
+Received: from mail.news.example.net (192.0.2.20)
+	by cloudflare-email.net (cloudflare) id tx0010 for <newsletter-7@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=news.example.net header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=news.example.net;
+	spf=pass smtp.mailfrom=bounce@news.example.net;
+	arc=none smtp.remote-ip=192.0.2.20
+From: Example Deals <deals@news.example.net>
+To: newsletter-7@example.com
+Subject: 20% off this weekend
+Date: Sat, 31 Oct 2026 01:32:00 +0000
+Message-ID: <deals-44@news.example.net>
+List-Unsubscribe: <https://news.example.net/u?id=9>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<h1>This weekend only</h1>
+<p>Use promo code SAVE2026 at checkout.</p>
+<p>Your coupon code: WELCOME10</p>
+<p>Get 20% off orders over $50. Offer valid for 7 days.</p>
+<p><a href="https://news.example.net/shop?utm_source=mail">Shop now</a> &middot; <a href="https://news.example.net/u?id=9">Unsubscribe</a></p>

@@ -1,0 +1,19 @@
+Received: from mail.example.jp (192.0.2.22)
+	by cloudflare-email.net (cloudflare) id tx0012 for <me@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.jp header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.jp;
+	spf=pass smtp.mailfrom=bounce@example.jp;
+	arc=none smtp.remote-ip=192.0.2.22
+From: =?iso-2022-jp?b?GyRCJTUlcyVXJWsbKEI=?= <no-reply@example.jp>
+To: me@example.com
+Subject: =?iso-2022-jp?b?GyRCRyc+WiUzITwlSSROJCpDTiRpJDsbKEI=?=
+Date: Sat, 31 Oct 2026 10:30:00 +0900
+Message-ID: <auth-482019@example.jp>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=ISO-2022-JP
+Content-Transfer-Encoding: 7bit
+
+認証コード：482019
+このコードの有効期限は10分です。10分以内に入力してください。

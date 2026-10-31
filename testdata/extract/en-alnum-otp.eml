@@ -1,0 +1,19 @@
+Received: from mail.example.org (192.0.2.23)
+	by cloudflare-email.net (cloudflare) id tx0013 for <github@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.org header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.org;
+	spf=pass smtp.mailfrom=bounce@example.org;
+	arc=none smtp.remote-ip=192.0.2.23
+From: Example Security <security@example.org>
+To: github@example.com
+Subject: Example security code
+Date: Sat, 31 Oct 2026 01:29:00 +0000
+Message-ID: <alnum-1@example.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Your verification code is: H7K2QX
+
+It expires in 5 minutes.

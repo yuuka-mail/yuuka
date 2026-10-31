@@ -1,0 +1,12 @@
+Received: from mail.example.net (192.0.2.25)
+	by cloudflare-email.net (cloudflare) id tx0015 for <alice@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+From: Example <login@example.net>
+To: alice@example.com
+Subject: Your Example login code is 771204
+Date: Sat, 31 Oct 2026 01:27:00 +0000
+Message-ID: <login-771204@example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Use 771204 to log in. Code expires in 10 minutes.

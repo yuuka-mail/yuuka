@@ -1,0 +1,21 @@
+Received: from mail.example.cn (192.0.2.18)
+	by cloudflare-email.net (cloudflare) id tx0008 for <svc-shop@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.cn header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.cn;
+	spf=pass smtp.mailfrom=bounce@example.cn;
+	arc=none smtp.remote-ip=192.0.2.18
+From: =?utf-8?b?56S65L6L5ZWG5Z+O?= <service@example.cn>
+To: svc-shop@example.com
+Subject: =?utf-8?b?5oKo55qE6K6i5Y2V5bey5Y+R6LSn?=
+Date: Sat, 31 Oct 2026 09:34:00 +0800
+Message-ID: <order-202611011234@example.cn>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+亲爱的用户：
+您的订单号 202611011234 已发货，快递单号 SF1234567890，实付金额 ¥128.00。
+取件码 5821，请于 3 天内到驿站取件。
+客服电话 400-820-1234。

@@ -1,0 +1,38 @@
+Received: from mail.example.com (192.0.2.13)
+	by cloudflare-email.net (cloudflare) id tx0003 for <me@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.com header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.com;
+	spf=pass smtp.mailfrom=bounce@example.com;
+	arc=none smtp.remote-ip=192.0.2.13
+From: Example App <login@app.example.com>
+To: me@example.com
+Subject: Sign in to Example
+Date: Sat, 31 Oct 2026 01:39:00 +0000
+Message-ID: <magic-1@app.example.com>
+List-Unsubscribe: <https://mail.example.com/unsubscribe?u=1>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b3"
+
+--b3
+Content-Type: text/plain; charset=utf-8
+
+Hi,
+
+Click the link below to sign in to Example:
+
+https://app.example.com/auth/magic?token=7f3a9c1e5b&email=me%40example.com
+
+This link expires in 24 hours and can only be used once.
+
+View this email in your browser: https://mail.example.com/view/abc
+Unsubscribe: https://mail.example.com/unsubscribe?u=1
+--b3
+Content-Type: text/html; charset=utf-8
+
+<p>Click the button below to sign in to Example.</p>
+<p><a href="https://app.example.com/auth/magic?token=7f3a9c1e5b&amp;email=me%40example.com" style="padding:8px">Sign in to Example</a></p>
+<p>This link expires in 24 hours and can only be used once.</p>
+<p><a href="https://mail.example.com/view/abc">View in browser</a> | <a href="https://mail.example.com/unsubscribe?u=1">Unsubscribe</a> | <a href="https://example.com">Example</a></p>
+--b3--

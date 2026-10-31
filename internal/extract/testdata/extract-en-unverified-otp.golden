@@ -1,0 +1,15 @@
+[
+  {
+    "kind": "otp",
+    "value": "771204",
+    "confidence": 95,
+    "source": "subject"
+  },
+  {
+    "kind": "expiry",
+    "value": "PT10M",
+    "confidence": 85,
+    "source": "body",
+    "expires": "2026-10-31T01:37:00Z"
+  }
+]

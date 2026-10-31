@@ -1,0 +1,24 @@
+Received: from mail.example.org (192.0.2.12)
+	by cloudflare-email.net (cloudflare) id tx0002 for <me@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.org header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.org;
+	spf=pass smtp.mailfrom=bounce@example.org;
+	arc=none smtp.remote-ip=192.0.2.12
+From: Example Accounts <accounts@example.org>
+To: me@example.com
+Subject: Example: verify your new device
+Date: Sat, 31 Oct 2026 01:40:12 +0000
+Message-ID: <device-1@example.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Hi,
+
+Enter this code to finish signing in:
+
+594 216
+
+The code is valid for 10 minutes.
+Requested from 203.0.113.7 at 01:40 UTC on 31 Oct 2026.

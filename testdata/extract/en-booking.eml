@@ -1,0 +1,20 @@
+Received: from mail.air.example.com (192.0.2.21)
+	by cloudflare-email.net (cloudflare) id tx0011 for <me@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=air.example.com header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=air.example.com;
+	spf=pass smtp.mailfrom=bounce@air.example.com;
+	arc=none smtp.remote-ip=192.0.2.21
+From: Example Air <bookings@air.example.com>
+To: me@example.com
+Subject: Your trip to Example City
+Date: Sat, 31 Oct 2026 01:31:00 +0000
+Message-ID: <trip-k7qx2p@air.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Confirmation code: K7QX2P
+Flight EX 1234 departs SFO at 10:35 on Nov 2, 2026.
+Seat 14C. Booking reference K7QX2P.
+Check in opens 24 hours before departure.

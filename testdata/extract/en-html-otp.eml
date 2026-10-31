@@ -1,0 +1,35 @@
+Received: from mail.example.net (192.0.2.11)
+	by cloudflare-email.net (cloudflare) id tx0001 for <github@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.net header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.net;
+	spf=pass smtp.mailfrom=bounce@example.net;
+	arc=none smtp.remote-ip=192.0.2.11
+From: Example <no-reply@example.net>
+To: github@example.com
+Subject: Your Example sign-in code
+Date: Sat, 31 Oct 2026 01:41:30 +0000
+Message-ID: <signin-305817@example.net>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset=utf-8
+
+Your Example sign-in code
+
+305817
+
+This code expires in 15 minutes. If you didn't try to sign in, you can ignore this email.
+
+Example Inc., 100 Main St, Springfield, CA 94043
+--b1
+Content-Type: text/html; charset=utf-8
+
+<html><body><table><tr><td><h1>Your Example sign-in code</h1></td></tr>
+<tr><td style="font-size:32px;letter-spacing:4px"><b>305817</b></td></tr>
+<tr><td>This code expires in 15 minutes. If you didn't try to sign in, you can ignore this email.</td></tr>
+<tr><td style="color:#999">Example Inc., 100 Main St, Springfield, CA 94043 &middot; <a href="https://example.net/privacy">Privacy</a></td></tr>
+</table></body></html>
+--b1--

@@ -1,0 +1,18 @@
+Received: from mail.example.cn (192.0.2.19)
+	by cloudflare-email.net (cloudflare) id tx0009 for <me@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.cn header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.cn;
+	spf=pass smtp.mailfrom=bounce@example.cn;
+	arc=none smtp.remote-ip=192.0.2.19
+From: =?utf-8?b?56S65L6L?= <noreply@example.cn>
+To: me@example.com
+Subject: =?utf-8?b?6aqM6K+B56CB77yaNjE4MjA077yINeWIhumSn+WGheacieaViO+8iQ==?=
+Date: Sat, 31 Oct 2026 09:33:00 +0800
+Message-ID: <sms-618204@example.cn>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: 8bit
+
+【示例】您的验证码：618204，5分钟内有效，请勿泄露。

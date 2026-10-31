@@ -1,0 +1,19 @@
+Received: from mail.example.com (192.0.2.24)
+	by cloudflare-email.net (cloudflare) id tx0014 for <me@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.com header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.com;
+	spf=pass smtp.mailfrom=bounce@example.com;
+	arc=none smtp.remote-ip=192.0.2.24
+From: Example <security@example.com>
+To: me@example.com
+Subject: New sign-in to your Example account
+Date: Sat, 31 Oct 2026 01:28:00 +0000
+Message-ID: <alert-1@example.com>
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+
+<p>We noticed a new sign-in from Chrome on Linux on Oct 31, 2026 at 01:40 UTC.</p>
+<p>If this was you, you don't need to do anything. If not, <a href="https://example.com/security/review">review your activity</a>.</p>
+<p>Example, 1600 Example Ave, Mountain View, CA 94043</p>

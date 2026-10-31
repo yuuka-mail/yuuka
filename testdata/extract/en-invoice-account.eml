@@ -1,0 +1,23 @@
+Received: from mail.example.org (192.0.2.16)
+	by cloudflare-email.net (cloudflare) id tx0006 for <bank@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.org header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.org;
+	spf=pass smtp.mailfrom=bounce@example.org;
+	arc=none smtp.remote-ip=192.0.2.16
+From: Example Bank <statements@example.org>
+To: bank@example.com
+Subject: Your invoice 20261101 is ready
+Date: Sat, 31 Oct 2026 01:36:00 +0000
+Message-ID: <inv-20261101@example.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Invoice number: 20261101
+Account number: 12345678
+Amount due: USD 4500 by Nov 30.
+Use discount code 4420 next time.
+Your customer ID is 55102938.
+
+Please don't share your verification codes with anyone; our staff will never ask for them.

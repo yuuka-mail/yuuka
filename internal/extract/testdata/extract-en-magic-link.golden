@@ -1,0 +1,15 @@
+[
+  {
+    "kind": "link",
+    "value": "https://app.example.com/auth/magic?token=7f3a9c1e5b\u0026email=me%40example.com",
+    "confidence": 90,
+    "source": "html"
+  },
+  {
+    "kind": "expiry",
+    "value": "PT24H",
+    "confidence": 85,
+    "source": "body",
+    "expires": "2026-11-01T01:39:00Z"
+  }
+]

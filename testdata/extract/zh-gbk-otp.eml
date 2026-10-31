@@ -1,0 +1,20 @@
+Received: from mail.bank.example.com (192.0.2.17)
+	by cloudflare-email.net (cloudflare) id tx0007 for <bank@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=bank.example.com header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=bank.example.com;
+	spf=pass smtp.mailfrom=bounce@bank.example.com;
+	arc=none smtp.remote-ip=192.0.2.17
+From: =?gbk?b?yr7A/dL40NA=?= <notice@bank.example.com>
+To: bank@example.com
+Subject: =?gbk?b?ob7KvsD90vjQ0KG/tq/MrMLrzajWqg==?=
+Date: Sat, 31 Oct 2026 09:35:00 +0800
+Message-ID: <dyn-573920@bank.example.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=GBK
+Content-Transfer-Encoding: base64
+
+1/C+tLXEv827p6O6DQoNCsT61f3U2r340NDN+MnP0vjQ0LXHwryjrLavzKzC686qIDU3MzkyMKOs
+MTC31tbTxNrT0NCnoaPH687wvau2r8yswuu45taqy/vIy6GjDQrI57fHsb7Iy7LZ1/ejrMfr1sK1
+5yA5NTU1NSC78rXHwrwgd3d3LmJhbmsuZXhhbXBsZS5jb20gsunRr6GjDQo=
