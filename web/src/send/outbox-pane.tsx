@@ -13,7 +13,7 @@ import { m } from "@/paraglide/messages.js";
 
 import { ProblemLine } from "./marks";
 import { OutboxFacts } from "./outbox-facts";
-import { outboxState, principal, problem, recallable, type Abilities } from "./outgoing";
+import { outboxState, problem, recallable, type Abilities } from "./outgoing";
 import { HoldUntil, Recall, ReviewVerdict } from "./review";
 
 /** One outbox row: its facts, its sent copy, and for unknown delivery the decision (§4.5). */
@@ -147,13 +147,7 @@ function Held({
         )}
         {e.review && <ReviewVerdict review={e.review} onOpenMessage={onOpenMessage} />}
         {canRecall ? (
-          <Recall
-            id={e.id}
-            identity={e.identity}
-            submitter={principal(e.submitted_by)}
-            onRecalled={onRecalled}
-            onOpenDraft={onOpenDraft}
-          />
+          <Recall id={e.id} onRecalled={onRecalled} onOpenDraft={onOpenDraft} />
         ) : (
           <p className="text-muted-foreground">
             {m.review_recall_not_yours({ scope: "submission:send" })}
@@ -197,6 +191,7 @@ function Unknown({ e, canResolve }: { e: OutboxEntry; canResolve: boolean }) {
       void qc.invalidateQueries({ queryKey: ["get", "/api/v1/outbox"] });
       void qc.invalidateQueries({ queryKey: ["get", "/api/v1/outbox/{id}"] });
       void qc.invalidateQueries({ queryKey: ["get", "/api/v1/drafts"] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/v1/counts"] });
       void qc.invalidateQueries({ queryKey: ["get", "/api/v1/messages"] });
     } catch (x) {
       setErr(x);

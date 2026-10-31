@@ -1,3 +1,4 @@
+import { ParaglideMessage } from "@inlang/paraglide-js-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { CheckIcon, TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
@@ -5,6 +6,7 @@ import { useState } from "react";
 import { api, data } from "@/api/client";
 import type { Review, ReviewCheck, Withdrawal } from "@/api/types";
 import { HostCommand } from "@/components/cli";
+import { markup } from "@/components/markup";
 import { Button } from "@/components/ui/button";
 import { fullTime, listTime } from "@/lib/format";
 import { useNow } from "@/lib/now";
@@ -12,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages.js";
 
 import { ProblemLine } from "./marks";
-import { checkLabel, problem, resumeCommand } from "./outgoing";
+import { checkLabel, principal, problem, resumeCommand } from "./outgoing";
 
 // The review tier as yuuka reports it (§8.9): what each check found, how
 // long held mail waits, and recalling it. All of it is the system
@@ -76,18 +78,30 @@ export function ReviewVerdict({
 
 /** What one failed check found, in the one list that fits it. */
 function Findings({ c, onOpenMessage }: { c: ReviewCheck; onOpenMessage?: (id: string) => void }) {
-  const open = (id: string) =>
-    onOpenMessage ? (
+  // The mail by its subject when the viewer may see it (the sender's
+  // words, shown as text), else by its id.
+  const open = (id: string, subject?: string) => {
+    const name =
+      subject === undefined ? (
+        <span className="font-mono">{id}</span>
+      ) : subject ? (
+        <ParaglideMessage message={m.review_subject} inputs={{ subject }} markup={markup} />
+      ) : (
+        m.no_subject()
+      );
+    return onOpenMessage ? (
       <button
         type="button"
-        className="font-mono underline underline-offset-2 hover:text-foreground"
+        title={id}
+        className="underline underline-offset-2 hover:text-foreground"
         onClick={() => onOpenMessage(id)}
       >
-        {id}
+        {name}
       </button>
     ) : (
-      <span className="font-mono">{id}</span>
+      <span title={id}>{name}</span>
     );
+  };
   const items: React.ReactNode[] = [];
   for (const r of c.recipients ?? []) {
     items.push(
@@ -102,7 +116,7 @@ function Findings({ c, onOpenMessage }: { c: ReviewCheck; onOpenMessage?: (id: s
         {x.kind === "link"
           ? m.review_found_link({ where: x.where })
           : m.review_found_code({ where: x.where })}{" "}
-        {open(x.message_id)} <span className="text-muted-foreground">({x.source})</span>
+        {open(x.message_id, x.subject)} <span className="text-muted-foreground">({x.source})</span>
       </>,
     );
   }
@@ -113,7 +127,7 @@ function Findings({ c, onOpenMessage }: { c: ReviewCheck; onOpenMessage?: (id: s
         <span className="text-muted-foreground">({r.where})</span>{" "}
         {r.message_id ? (
           <>
-            {m.review_ref_other_thread()} {open(r.message_id)}
+            {m.review_ref_other_thread()} {open(r.message_id, r.subject)}
           </>
         ) : (
           m.review_ref_unknown()
@@ -200,15 +214,10 @@ export function HoldUntil({ until }: { until: string }) {
  */
 export function Recall({
   id,
-  identity,
-  submitter,
   onRecalled,
   onOpenDraft,
 }: {
   id: string;
-  /** The identity's address and the submitter (kind:name): whose grant a recall counts against. */
-  identity: string;
-  submitter: string;
   onRecalled?: (w: Withdrawal) => void;
   onOpenDraft?: (id: string) => void;
 }) {
@@ -233,6 +242,7 @@ export function Recall({
         "/api/v1/outbox",
         "/api/v1/outbox/{id}",
         "/api/v1/drafts",
+        "/api/v1/counts",
         "/api/v1/drafts/{id}",
         "/api/v1/messages",
         "/api/v1/threads/{id}",
@@ -241,10 +251,7 @@ export function Recall({
       }
     }
   };
-  if (done)
-    return (
-      <Recalled w={done} identity={identity} submitter={submitter} onOpenDraft={onOpenDraft} />
-    );
+  if (done) return <Recalled w={done} onOpenDraft={onOpenDraft} />;
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -271,19 +278,20 @@ export function Recall({
   );
 }
 
-/** What a recall did: back to the draft, and the grant suspended if it tripped. */
+/**
+ * What a recall did: back to the draft, and the grant suspended if it
+ * tripped. The withdrawal names the grant (its identity, *@zone for a
+ * pattern, and principal), which may not be the one in view.
+ */
 export function Recalled({
   w,
-  identity,
-  submitter,
   onOpenDraft,
 }: {
   w: Withdrawal;
-  identity: string;
-  submitter: string;
   onOpenDraft?: (id: string) => void;
 }) {
   const s = w.suspended;
+  const who = s && principal(s.principal);
   return (
     <div className="flex flex-col gap-1.5">
       <p className="flex flex-wrap items-baseline gap-x-2">
@@ -304,13 +312,13 @@ export function Recalled({
           why={
             <>
               <span className="font-medium text-warning">
-                {m.review_suspended({ who: submitter, identity })}
+                {m.review_suspended({ who: who ?? "", identity: s.identity })}
               </span>{" "}
               {s.withdrawn.length > 0 && m.review_suspended_others({ n: s.withdrawn.length })}{" "}
               {m.review_resume_on_host()}
             </>
           }
-          command={resumeCommand(identity, submitter)}
+          command={resumeCommand(s.identity, who ?? "")}
         />
       )}
     </div>

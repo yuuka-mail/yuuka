@@ -214,6 +214,7 @@
   "list_messages": "邮件",
   "list_notification_tag": "通知",
   "list_quarantined": "已隔离",
+  "nav_drafts_title": "{open} 封在写，{held} 封停着等人",
   "nav_filter": "筛选",
   "nav_filter_prefixes": "筛选前缀",
   "nav_labels": "标签",
@@ -222,7 +223,24 @@
   "nav_mailboxes": "邮箱",
   "nav_no_claimed": "还没有已认领的前缀。",
   "nav_no_match": "没有匹配项。",
-  "nav_outbox_unknown": "可能已发出：等人决定",
+  "nav_outbox_attention": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{count} 封要看一眼：投递未知、失败或部分送达"
+      }
+    }
+  ],
+  "nav_outbox_held": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{count} 封扣着：撤回窗口一过就发出"
+      }
+    }
+  ],
   "nav_proposals_title": "agent 的建议，等你决定",
   "nav_review": "检查",
   "no_subject": "（无主题）",
@@ -355,6 +373,7 @@
   "review_sends_in_min": "{n} 分钟后发出",
   "review_sends_in_s": "{n} 秒后发出",
   "review_sends_now": "正在发出",
+  "review_subject": "「{#mail}{subject}{/mail}」",
   "review_suspended": "一天内撤回了两次：{who} 在 {identity} 上的授权已暂停。",
   "review_suspended_others": "它其余在撤回窗口里的信（{n} 封）也一并撤回了。",
   "review_title": "审核",

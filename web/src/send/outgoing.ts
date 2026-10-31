@@ -168,16 +168,21 @@ export function duration(seconds: number): string {
   return msg.duration_min({ n: Math.round(seconds / 60) });
 }
 
-/** Whether a submission as i goes to the review's checks: the server gives the window only then. */
-export function goesToReview(i: Pick<SendingIdentity, "hold_reason" | "hold_seconds">): boolean {
-  return i.hold_reason === "review" && i.hold_seconds !== undefined;
+/** Whether a submission as i goes to the review's checks, and from them to the recall window. */
+export function goesToReview(i: Pick<SendingIdentity, "outcome">): boolean {
+  return i.outcome === "held_after_review";
+}
+
+/** Whether a submission as i goes out, now or after the review: the server's outcome says so. */
+export function goesOut(i: Pick<SendingIdentity, "outcome">): boolean {
+  return i.outcome === "sends" || i.outcome === "held_after_review";
 }
 
 /** What the From picker says beside identity i: "sends (auto)", "review, 10 min to recall", "held: drafts only". */
 export function identityNote(i: SendingIdentity): string {
   if (goesToReview(i))
     return msg.send_opt_review({ window: duration(i.hold_seconds ?? defaultHoldSeconds) });
-  return i.sends
+  return i.outcome === "sends"
     ? msg.send_opt_sends({ tier: i.tier })
     : msg.send_note_held({ reason: holdLabel(i.hold_reason) });
 }
@@ -196,13 +201,14 @@ export function reviewText(holdSeconds: number | undefined): string {
  * submitted. sends is a preview: recipients and limits are checked on
  * submission, so a "queues" can still come back held, never the reverse.
  * On the review tier it goes to the checks, and from them to the recall
- * window or back to a person (§8.9): the server says so with hold_reason
- * review and the window in hold_seconds, and sends false, since nothing
- * goes out on the press itself. Here that counts as sending.
+ * window or back to a person (§8.9): the server says so with the outcome
+ * held_after_review (its sends is false, since nothing goes out on the
+ * press itself, and kept only for older clients). Here that counts as
+ * sending.
  */
 export function standing(i: SendingIdentity): { sends: boolean; headline: string; detail: string } {
   const review = goesToReview(i);
-  if (!i.sends && !review)
+  if (!goesOut(i))
     return {
       sends: false,
       headline: msg.send_held_as_draft({ reason: holdLabel(i.hold_reason) }),

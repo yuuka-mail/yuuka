@@ -153,15 +153,14 @@ if (enrollURL) {
   const discovered = prefixes.prefixes.find((x) => !x.claimed)?.address;
   // Sending (§12.10), from whatever the database has: none of it is
   // required. The held shot presses Send only as an identity that holds
-  // every submission (sends=false), so nothing ever reaches the outbox.
+  // every submission (outcome draft_only), so nothing ever reaches the outbox.
   const get = (path) =>
     p.evaluate(async (u) => {
       const r = await fetch(u);
       return r.ok ? r.json() : undefined;
     }, path);
-  // Not one that goes to the review: sends is false there too, and Send would hold real mail.
   const heldFrom = (await get("/api/v1/identities"))?.identities.find(
-    (i) => !i.sends && i.hold_reason !== "review" && !i.address.startsWith("*@"),
+    (i) => i.outcome === "draft_only" && !i.address.startsWith("*@"),
   )?.address;
   const agentDraft = (await get("/api/v1/drafts"))?.drafts.find(
     (d) => d.author.kind !== "human",
@@ -198,8 +197,7 @@ if (enrollURL) {
     (d) => d.hold_reason === "review" && d.review,
   )?.id;
   const reviewFrom = (await get("/api/v1/identities"))?.identities.find(
-    (i) =>
-      i.hold_reason === "review" && i.hold_seconds !== undefined && !i.address.startsWith("*@"),
+    (i) => i.outcome === "held_after_review" && !i.address.startsWith("*@"),
   )?.address;
   // Notes (§8.10): the first of these messages that has any.
   let noted;

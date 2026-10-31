@@ -259,6 +259,7 @@
   "list_messages": "Messages",
   "list_notification_tag": "notification",
   "list_quarantined": "quarantined",
+  "nav_drafts_title": "{open} being written, {held} held for a person",
   "nav_filter": "Filter",
   "nav_filter_prefixes": "Filter prefixes",
   "nav_labels": "Labels",
@@ -267,7 +268,26 @@
   "nav_mailboxes": "Mailboxes",
   "nav_no_claimed": "No claimed prefixes yet.",
   "nav_no_match": "No match.",
-  "nav_outbox_unknown": "may have been sent: waiting for a decision",
+  "nav_outbox_attention": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} wants a look: delivery unknown, failed or partly delivered",
+        "countPlural=other": "{count} want a look: delivery unknown, failed or partly delivered"
+      }
+    }
+  ],
+  "nav_outbox_held": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} held: goes out when its recall window ends",
+        "countPlural=other": "{count} held: each goes out when its recall window ends"
+      }
+    }
+  ],
   "nav_proposals_title": "suggested by agents, waiting for your decision",
   "nav_review": "Review",
   "no_subject": "(no subject)",
@@ -445,6 +465,7 @@
   "review_sends_in_min": "sends in {n} min",
   "review_sends_in_s": "sends in {n} s",
   "review_sends_now": "Sending now",
+  "review_subject": "“{#mail}{subject}{/mail}”",
   "review_suspended": "Recalled twice within a day: {who}'s grant on {identity} is suspended.",
   "review_suspended_others": "Its other held mail ({n}) was recalled too.",
   "review_title": "Review",

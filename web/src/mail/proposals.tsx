@@ -378,12 +378,6 @@ function ProposalRow({
   );
 }
 
-/** The pending count for the sidebar; more than a page reads as "100+". */
-export function usePendingProposals(enabled: boolean): { n?: number; more: boolean } {
-  const q = useProposals({ state: "pending" }, enabled);
-  return { n: q.data?.proposals.length, more: !!q.data?.next_cursor };
-}
-
 /** A proposal about no message, alone in the main column. */
 export function StandaloneProposal({
   id,

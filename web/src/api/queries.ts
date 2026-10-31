@@ -166,6 +166,17 @@ export function useSearchList(
 // Sending (§12.10). Drafts and the outbox change under the viewer's own
 // hands and the outbox executor's, so they are never cached for long.
 
+/**
+ * What waits for someone, for the sidebar (§12.9): open and held drafts,
+ * the outbox rows held or gone wrong (without delivery:read there are
+ * none to count), pending proposals. Counted by the server, so a long
+ * list is a number and not "100+". The executor and agents change these
+ * without the viewer acting, so they are polled.
+ */
+export function useCounts() {
+  return $api.useQuery("get", "/api/v1/counts", {}, { staleTime: 5_000, refetchInterval: 30_000 });
+}
+
 /** The identities the viewer may send as, with how a submission would go. */
 export function useIdentities(enabled = true) {
   return $api.useQuery("get", "/api/v1/identities", {}, { staleTime: 30_000, enabled });
@@ -255,6 +266,7 @@ export function invalidateAnnotated(qc: QueryClient) {
     "/api/v1/labels",
     "/api/v1/proposals",
     "/api/v1/rules",
+    "/api/v1/counts",
   ];
   void qc.invalidateQueries({
     predicate: (q) =>

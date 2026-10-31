@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { HourglassIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
 
-import { useDrafts, useLabels, useOutbox, usePrefixes, useUnclaimedPrefixes } from "@/api/queries";
+import { useCounts, useLabels, usePrefixes, useUnclaimedPrefixes } from "@/api/queries";
 import type { Prefix } from "@/api/types";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,7 +13,6 @@ import type { Abilities } from "@/send/outgoing";
 
 import { LeakDot, leakSummary, leakTone, useFlaggedCount, type LeakTone } from "./leaks";
 import { areaTitle } from "./areas";
-import { usePendingProposals } from "./proposals";
 import type { View } from "./view";
 
 // Past this many claimed prefixes the list gets a filter box: about what
@@ -41,13 +41,13 @@ export function PrefixPane({
 }) {
   const q = usePrefixes();
   const unclaimed = useUnclaimedPrefixes();
-  // Counts only for what asks for action (§12.9): open drafts, and outbox
-  // rows only a person can settle.
-  const drafts = useDrafts(["draft", "held"]);
-  const unknown = useOutbox(["unknown"], can.outbox);
+  // Counts only for what waits for someone (§12.9): open drafts, outbox
+  // rows held in their recall window or gone wrong, proposals. The server
+  // counts them; an outbox it may not list has no counts.
+  const counts = useCounts().data;
+  const drafts = counts && counts.drafts.open + counts.drafts.held;
+  const outbox = counts?.outbox;
   const flaggedCount = useFlaggedCount();
-  // Proposals wait for a person: the one count an agent puts here (§12.9).
-  const pending = usePendingProposals(can.decide);
   const browsing = !view.prefix && !view.q && !view.label;
   const at = (area: View["area"]) => browsing && view.area === area;
 
@@ -73,18 +73,19 @@ export function PrefixPane({
         <Item
           active={at("drafts")}
           label={areaTitle("drafts")}
-          n={drafts.items.length || undefined}
-          more={drafts.hasMore}
+          n={drafts || undefined}
+          title={
+            counts?.drafts.held
+              ? m.nav_drafts_title({ open: counts.drafts.open, held: counts.drafts.held })
+              : undefined
+          }
           onClick={() => onPick({ area: "drafts" })}
         />
         {can.outbox && (
           <Item
             active={at("outbox")}
             label={areaTitle("outbox")}
-            n={unknown.items.length || undefined}
-            more={unknown.hasMore}
-            warn
-            title={unknown.items.length ? m.nav_outbox_unknown() : undefined}
+            counts={outbox && <OutboxCounts held={outbox.held} attention={outbox.attention} />}
             onClick={() => onPick({ area: "outbox" })}
           />
         )}
@@ -92,10 +93,9 @@ export function PrefixPane({
           <Item
             active={at("proposals")}
             label={areaTitle("proposals")}
-            n={pending.n || undefined}
-            more={pending.more}
+            n={counts?.proposals || undefined}
             agent
-            title={pending.n ? m.nav_proposals_title() : undefined}
+            title={counts?.proposals ? m.nav_proposals_title() : undefined}
             onClick={() => onPick({ area: "proposals" })}
           />
         )}
@@ -228,6 +228,38 @@ function Labels({ active, onPick }: { active?: string; onPick: (next: Partial<Vi
   );
 }
 
+/**
+ * The outbox's two kinds of waiting, apart: held mail goes out by itself
+ * when its recall window ends; attention (delivery unknown, failed,
+ * partly delivered) wants a person to look.
+ */
+function OutboxCounts({ held, attention }: { held: number; attention: number }) {
+  if (!held && !attention) return null;
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-2 text-meta tabular-nums">
+      {held > 0 && (
+        <span
+          title={m.nav_outbox_held({ count: held })}
+          className="inline-flex items-center gap-0.5 text-muted-foreground"
+        >
+          <HourglassIcon aria-hidden className="size-3" />
+          {count(held)}
+          <span className="sr-only">{m.nav_outbox_held({ count: held })}</span>
+        </span>
+      )}
+      {attention > 0 && (
+        <span
+          title={m.nav_outbox_attention({ count: attention })}
+          className="font-medium text-warning"
+        >
+          {count(attention)}
+          <span className="sr-only">{m.nav_outbox_attention({ count: attention })}</span>
+        </span>
+      )}
+    </span>
+  );
+}
+
 function Heading({ children }: { children: string }) {
   return (
     <h2 className="mt-2 mb-1 px-3 text-meta font-medium tracking-wide text-muted-foreground uppercase">
@@ -250,6 +282,8 @@ function Item(props: {
   mark?: LeakTone;
   /** A scorer's estimates are behind it (§12.5): the observation mark. */
   observation?: boolean;
+  /** Counts of their own, in place of n. */
+  counts?: ReactNode;
   onClick: () => void;
 }) {
   return (
@@ -276,6 +310,7 @@ function Item(props: {
         </>
       )}
       {props.observation && <Mark kind="observation" className="ml-auto" />}
+      {props.counts}
       {props.n !== undefined && (
         <span
           className={cn(

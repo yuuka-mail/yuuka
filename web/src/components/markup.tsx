@@ -23,6 +23,18 @@ function Mono({ children }: Props) {
   return <span className="font-mono">{children}</span>;
 }
 
+/**
+ * Words a sender wrote (a subject), in no known language: the UI's
+ * language must not pick their glyphs (§12.11).
+ */
+function Mail({ children }: Props) {
+  return (
+    <span lang="" className="wrap-anywhere">
+      {children}
+    </span>
+  );
+}
+
 function RecoverLink({ children }: Props) {
   return (
     <a className="underline" href="/recover">
@@ -31,4 +43,11 @@ function RecoverLink({ children }: Props) {
   );
 }
 
-export const markup = { code: Code, b: Strong, k: Key, mono: Mono, recover: RecoverLink };
+export const markup = {
+  code: Code,
+  b: Strong,
+  k: Key,
+  mono: Mono,
+  mail: Mail,
+  recover: RecoverLink,
+};

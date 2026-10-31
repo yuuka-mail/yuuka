@@ -32,12 +32,11 @@ import {
   abilities,
   badAddrs,
   draftBody,
-  goesToReview,
+  goesOut,
   holdLabel,
   identityNote,
   isMine,
   onlyConfirmer,
-  principal,
   problem,
   replyBody,
   replySubject,
@@ -158,7 +157,7 @@ const isPattern = (a: string) => a.startsWith("*@");
 
 function defaultFrom(ids: SendingIdentity[]): string {
   const concrete = ids.filter((i) => !isPattern(i.address));
-  return (concrete.find((i) => i.sends || goesToReview(i)) ?? concrete[0])?.address ?? "";
+  return (concrete.find(goesOut) ?? concrete[0])?.address ?? "";
 }
 
 /**
@@ -228,7 +227,7 @@ function Editor({
   const [sendErr, setSendErr] = useState<unknown>();
   const [showCc, setShowCc] = useState(!!(initial.cc || initial.bcc));
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [recalled, setRecalled] = useState<{ w: Withdrawal; identity: string }>();
+  const [recalled, setRecalled] = useState<Withdrawal>();
 
   // Saving is a chain: each save waits for the one before, so a create
   // is never raced by a PUT, and the newest fields always win.
@@ -244,6 +243,8 @@ function Editor({
 
   const refresh = () => {
     void qc.invalidateQueries({ queryKey: ["get", "/api/v1/drafts"] });
+    // The sidebar counts open drafts, and what the outbox holds after a submission.
+    void qc.invalidateQueries({ queryKey: ["get", "/api/v1/counts"] });
   };
 
   // Saves the newest fields if anything changed since the last save.
@@ -458,7 +459,7 @@ function Editor({
           {d && d.author.kind !== "human" && <AgentNote draft={d} onOpenMessage={onOpenMessage} />}
           {recalled && (
             <Voice speaker={system} title={msg.review_title()}>
-              <Recalled w={recalled.w} identity={recalled.identity} submitter={session.principal} />
+              <Recalled w={recalled} />
             </Voice>
           )}
           {held && (
@@ -477,13 +478,11 @@ function Editor({
               holdUntil={result?.hold_until}
               canSeeOutbox={can.outbox}
               canRecall={can.recall}
-              from={f.from}
-              submitter={session.principal}
               onOpenOutbox={onOpenOutbox}
-              onRecalled={(w, grantIdentity) => {
+              onRecalled={(w) => {
                 // Back to a draft that can be edited and sent again; a
                 // suspension it tripped stays said above the form.
-                if (w.suspended) setRecalled({ w, identity: grantIdentity });
+                if (w.suspended) setRecalled(w);
                 setResult(undefined);
                 void qc.invalidateQueries({ queryKey: ["get", "/api/v1/drafts/{id}"] });
               }}
@@ -918,8 +917,6 @@ function QueuedNote({
   holdUntil,
   canSeeOutbox,
   canRecall,
-  from,
-  submitter,
   onOpenOutbox,
   onRecalled,
 }: {
@@ -929,12 +926,8 @@ function QueuedNote({
   holdUntil?: string;
   canSeeOutbox: boolean;
   canRecall: boolean;
-  /** The From and the submitter, for when the outbox row is not in view. */
-  from: string;
-  submitter: string;
   onOpenOutbox: (id: string) => void;
-  /** identity is the address of the identity the grant is on, *@zone for a pattern. */
-  onRecalled: (w: Withdrawal, identity: string) => void;
+  onRecalled: (w: Withdrawal) => void;
 }) {
   const e = useOutboxEntry(outboxId, canSeeOutbox);
   const state = e.data?.state ?? fallback ?? "queued";
@@ -968,14 +961,7 @@ function QueuedNote({
             <OutgoingMark state={state} /> {msg.send_outbox_id({ id: outboxId })}
           </p>
         )}
-        {state === "held" && canRecall && (
-          <Recall
-            id={outboxId}
-            identity={e.data?.identity ?? from}
-            submitter={e.data ? principal(e.data.submitted_by) : submitter}
-            onRecalled={(w) => onRecalled(w, e.data?.identity ?? from)}
-          />
-        )}
+        {state === "held" && canRecall && <Recall id={outboxId} onRecalled={onRecalled} />}
       </div>
     </Voice>
   );
