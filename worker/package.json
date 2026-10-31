@@ -3,12 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "tsc --noEmit && vitest run",
+    "check": "tsc --noEmit && oxfmt --check && vitest run",
+    "fmt": "oxfmt",
     "test": "vitest run"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.4",
     "@cloudflare/workers-types": "5.20261016.1",
+    "oxfmt": "0.73.0",
     "typescript": "7.0.2",
     "vitest": "5.0.5",
     "wrangler": "4.151.1"

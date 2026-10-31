@@ -170,6 +170,10 @@ M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里�
 - **lint 用 oxlint 而不是 ESLint**：仓库固定 TypeScript 7（与 Worker 一致），typescript-eslint
   还不支持它；oxlint 不依赖 TS 的 JS API，一个依赖就带齐 React hooks 规则。typescript-eslint
   支持 TS 7 之后可以换回去，规则集不变
+- **格式化用 oxfmt 而不是 Prettier**：和 oxlint 同属 oxc、同步发版，输出对齐 Prettier，
+  将来要换回 Prettier 只多一次格式化 diff。Worker 用同一个工具。配置只排除生成的
+  `schema.gen.ts`（它由 `gen --check` 逐字比对），其余全用默认值（宽 100）：没有要坚持的风格，
+  少一份配置就少一处要维护
 - **开发**：Vite 开发服务器把 `/api`、`/auth` 代理到一个本地的 `yuuka serve`（任务与端口见
   [`mise.toml`](../../mise.toml)）；那个 `serve` 配置的 WebUI origin 要设成 Vite 的地址，WebAuthn 和跨源检查才认。
   [`internal/devseed`](../../internal/devseed/) 把合成语料和生成的变体灌进开发库；

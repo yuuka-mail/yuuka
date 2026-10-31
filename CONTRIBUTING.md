@@ -11,7 +11,7 @@
 ```bash
 mise install        # 首次：装好固定版本的 Go、golangci-lint、Node、pnpm
 mise run check      # lint（含 vet 与格式检查）+ go test -race + WebUI 与 Worker 检查
-mise run fmt        # 就地格式化
+mise run fmt        # 就地格式化：Go 用 golangci-lint，web/ 与 worker/ 用 oxfmt
 mise run db:down    # 用完后删掉测试用的 Postgres 容器（test 会自动拉起）
 ```
 
@@ -26,6 +26,10 @@ mise run db:down    # 用完后删掉测试用的 Postgres 容器（test 会自�
 - 不要绕过 mise 直接用系统里别的版本；需要新工具时加进 `mise.toml` 并固定版本。
   只被 `go generate` 调用的 Go 工具（sqlc 等）用 `go.mod` 的 `tool` 指令固定
 - lint 规则在 [`.golangci.yml`](.golangci.yml)。`//nolint` 必须指明 linter 并写理由
+- `check` 也检查格式，没格式化的代码过不了；提交前跑一次 `mise run fmt`。
+  前端的 lint 规则在 [`web/.oxlintrc.json`](web/.oxlintrc.json)，格式化配置在各自目录的 `.oxfmtrc.json`。
+  整体重新格式化的提交登记在 [`.git-blame-ignore-revs`](.git-blame-ignore-revs)，
+  本地 `git config blame.ignoreRevsFile .git-blame-ignore-revs` 后 blame 会跳过它们
 - 新的检查（Worker 测试、前端检查等）随对应代码一起加进 `check`，不提前加
 
 ## 本地开发环境

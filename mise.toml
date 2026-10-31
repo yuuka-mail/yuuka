@@ -14,8 +14,9 @@ watchexec = "2.8.0"
 idiomatic_version_file_enable_tools = ["node"]
 
 [tasks.fmt]
-description = "Format Go code in place"
-run = "golangci-lint fmt"
+description = "Format Go, the WebUI and the Email Worker in place"
+depends = ["js:install"]
+run = ["golangci-lint fmt", "pnpm -r run fmt"]
 
 [tasks.lint]
 description = "Lint, vet and check formatting"

@@ -7,7 +7,8 @@
     "build": "vite build",
     "gen": "openapi-typescript ../internal/api/openapi.json -o src/api/schema.gen.ts",
     "i18n": "node scripts/paraglide.mjs",
-    "check": "pnpm run gen --check && pnpm run i18n && tsc --noEmit && oxlint --deny-warnings src scripts && vitest run",
+    "check": "pnpm run gen --check && pnpm run i18n && tsc --noEmit && oxlint --deny-warnings src scripts && oxfmt --check && vitest run",
+    "fmt": "oxfmt",
     "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
@@ -33,6 +34,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
     "openapi-typescript": "7.13.0",
+    "oxfmt": "0.73.0",
     "oxlint": "1.88.0",
     "playwright-core": "1.64.1",
     "tailwindcss": "4.3.3",
