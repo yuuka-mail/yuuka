@@ -103,7 +103,12 @@ run = [
 [tasks."dev:serve"]
 description = "yuuka serve on 127.0.0.1:31480 against yuuka_dev (use with mise watch … --restart)"
 depends = ["dev:db"]
+# sources is what `mise watch` watches. With sources alone, mise also skips
+# the task while they are older than its last run, and a server's run ends
+# only when it is stopped: a fresh watch would then start nothing. No
+# outputs means never up to date.
 sources = ["cmd/**/*.go", "internal/**/*.go", "go.mod", "go.sum"]
+outputs = []
 env = { YUUKA_DATABASE_URL = "postgres://postgres:yuuka@127.0.0.1:31432/yuuka_dev?sslmode=disable", YUUKA_DATA_DIR = "{{config_root}}/local/dev/data", YUUKA_LISTEN = "127.0.0.1:31480", YUUKA_WEB_ORIGIN = "http://localhost:31473", YUUKA_WEBHOOK_SECRETS = "dev-only-webhook-secret-never-use-in-production", YUUKA_RECONCILE_INTERVAL = "1h" }
 run = "go run ./cmd/yuuka serve"
 
