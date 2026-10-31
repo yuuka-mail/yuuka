@@ -158,6 +158,21 @@ proposals(id, source(agent|rule), kind, target_message/thread/prefix,
 - 从提案沉淀的规则要能回溯到提案（`rules.proposal_id`），
   这样「这条规则是谁在什么证据下建议的」在 §8.8 的审计里能查到
 
+规则的匹配语言、校验、求值和「从示例信生成候选条件」在 [`internal/rules`](../../internal/rules/doc.go)，
+是不碰数据库的纯函数；存储、ingest 时运行和回溯运行随 store 一起落地。这里只记不变量：
+
+- **存储格式 v1 是单向门**：`{"v":1,"match":{…},"actions":[…]}`，匹配树是 `all` / `any` / `not` /
+  叶子 `{field, op, value}`，字段和运算符是封闭集合。存下的规则含义不随版本变：加字段、运算符、动作不升版本，
+  旧版本遇到不认识的就让整条规则「不匹配并报 unsupported」（在 `not` 下也一样，否则会变成永远匹配）；
+  改已有含义才出 v2，v1 求值器永久保留。含义由 [`testdata/v1`](../../internal/rules/testdata/v1/) 的
+  golden 用例锁住，只增不改。上限（深度、叶子数、值长度、正则预算）只在保存时查，以后只放宽不收紧
+- **对不可信邮件有界**：正则是 RE2，保存和加载时都按编译后的指令数封顶，只看每个文本字段的前 64 KiB；
+  每封信有截止时间，过时剩下的规则不匹配。`contains` / `eq` 两边 `strings.ToLower`，不做 Unicode 归一
+- **只有 `from.verified` 能证明 From**：规则用 `from.*` 而不要求 `from.verified = true`、
+  动作又含标签或推送时，保存给警告。从示例信泛化时默认 `from.addr` 加（示例过了 DMARC 时）
+  `from.verified = true`，有 List-Id 时改用 `list.id`；**永不从主题或正文泛化**，那是发件人写的
+- 多条规则按 `(priority, id)` 对同一份快照求值、不链式触发：分类、归档、推送级别第一条命中的赢，标签取并集
+
 ### 8.6 事件流和游标
 
 长期在跑的 agent 不能靠轮询全表。给一条 SSE 流 + `since_state` 游标，

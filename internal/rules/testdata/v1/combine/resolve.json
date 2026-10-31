@@ -1,0 +1,96 @@
+{"cases": [
+  {"name": "lower priority runs first and wins single-valued outcomes",
+   "rules": [
+     {"id": "01JC000000000000000000000A", "priority": 0,
+      "match": {"field": "to.prefix", "op": "eq", "value": "shop"},
+      "actions": [{"kind": "classify", "class": "machine"}, {"kind": "notify", "level": "normal"}]},
+     {"id": "01JC000000000000000000000B", "priority": -1,
+      "match": {"field": "to.prefix", "op": "eq", "value": "shop"},
+      "actions": [{"kind": "classify", "class": "human"}]}],
+   "facts": {"to.prefix": "shop", "to.zone": "example.com"},
+   "want": {
+     "effects": [
+       {"rule": "01JC000000000000000000000B", "action": {"kind": "classify", "class": "human"}},
+       {"rule": "01JC000000000000000000000A", "action": {"kind": "notify", "level": "normal"}}],
+     "hits": [{"rule": "01JC000000000000000000000B", "error": ""},
+              {"rule": "01JC000000000000000000000A", "error": ""}]}},
+  {"name": "equal priority is ordered by id",
+   "rules": [
+     {"id": "01JC000000000000000000000B", "priority": 5,
+      "match": {"field": "attachment", "op": "eq", "value": true},
+      "actions": [{"kind": "notify", "level": "off"}]},
+     {"id": "01JC000000000000000000000A", "priority": 5,
+      "match": {"field": "attachment", "op": "eq", "value": true},
+      "actions": [{"kind": "notify", "level": "silent"}, {"kind": "archive"}]}],
+   "facts": {"attachment": true},
+   "want": {
+     "effects": [
+       {"rule": "01JC000000000000000000000A", "action": {"kind": "notify", "level": "silent"}},
+       {"rule": "01JC000000000000000000000A", "action": {"kind": "archive"}}],
+     "hits": [{"rule": "01JC000000000000000000000A", "error": ""},
+              {"rule": "01JC000000000000000000000B", "error": ""}]}},
+  {"name": "labels are the union, each credited to the first rule adding it",
+   "rules": [
+     {"id": "01JC000000000000000000000A", "priority": 0,
+      "match": {"field": "to.zone", "op": "eq", "value": "example.com"},
+      "actions": [{"kind": "label", "label": "aws"}, {"kind": "label", "label": "Billing"}]},
+     {"id": "01JC000000000000000000000B", "priority": 1,
+      "match": {"field": "to.zone", "op": "eq", "value": "example.com"},
+      "actions": [{"kind": "label", "label": "aws"}, {"kind": "label", "label": "billing"}]}],
+   "facts": {"to.prefix": "svc-aws", "to.zone": "example.com"},
+   "want": {
+     "effects": [
+       {"rule": "01JC000000000000000000000A", "action": {"kind": "label", "label": "aws"}},
+       {"rule": "01JC000000000000000000000A", "action": {"kind": "label", "label": "Billing"}},
+       {"rule": "01JC000000000000000000000B", "action": {"kind": "label", "label": "billing"}}],
+     "hits": [{"rule": "01JC000000000000000000000A", "error": ""},
+              {"rule": "01JC000000000000000000000B", "error": ""}]}},
+  {"name": "rules see the snapshot, not each other's effects",
+   "rules": [
+     {"id": "01JC000000000000000000000A", "priority": 0,
+      "match": {"field": "class", "op": "eq", "value": "unknown"},
+      "actions": [{"kind": "classify", "class": "machine"}]},
+     {"id": "01JC000000000000000000000B", "priority": 1,
+      "match": {"field": "class", "op": "eq", "value": "machine"},
+      "actions": [{"kind": "archive"}]}],
+   "facts": {},
+   "want": {
+     "effects": [
+       {"rule": "01JC000000000000000000000A", "action": {"kind": "classify", "class": "machine"}}],
+     "hits": [{"rule": "01JC000000000000000000000A", "error": ""}]}},
+  {"name": "an unsupported rule is reported and does not stop the others",
+   "rules": [
+     {"id": "01JC000000000000000000000A", "priority": 0,
+      "match": {"field": "size", "op": "gt", "value": 1},
+      "actions": [{"kind": "archive"}]},
+     {"id": "01JC000000000000000000000B", "priority": 1,
+      "match": {"field": "to.zone", "op": "eq", "value": "example.com"},
+      "actions": [{"kind": "archive"}]},
+     {"id": "01JC000000000000000000000C", "priority": 2,
+      "match": {"field": "to.zone", "op": "eq", "value": "example.com"},
+      "actions": [{"kind": "forward", "to": "someone@example.org"}]}],
+   "facts": {"to.prefix": "x", "to.zone": "example.com"},
+   "want": {
+     "effects": [
+       {"rule": "01JC000000000000000000000B", "action": {"kind": "archive"}}],
+     "hits": [{"rule": "01JC000000000000000000000A", "error": "unsupported"},
+              {"rule": "01JC000000000000000000000B", "error": ""},
+              {"rule": "01JC000000000000000000000C", "error": "unsupported"}]}},
+  {"name": "a rule whose actions all lost is still a hit",
+   "rules": [
+     {"id": "01JC000000000000000000000A", "priority": 0,
+      "match": {"field": "to.zone", "op": "eq", "value": "example.com"},
+      "actions": [{"kind": "archive"}]},
+     {"id": "01JC000000000000000000000B", "priority": 1,
+      "match": {"field": "to.zone", "op": "eq", "value": "example.com"},
+      "actions": [{"kind": "archive"}]},
+     {"id": "01JC000000000000000000000C", "priority": 2,
+      "match": {"field": "to.zone", "op": "eq", "value": "example.org"},
+      "actions": [{"kind": "notify", "level": "off"}]}],
+   "facts": {"to.prefix": "x", "to.zone": "example.com"},
+   "want": {
+     "effects": [
+       {"rule": "01JC000000000000000000000A", "action": {"kind": "archive"}}],
+     "hits": [{"rule": "01JC000000000000000000000A", "error": ""},
+              {"rule": "01JC000000000000000000000B", "error": ""}]}}
+]}
