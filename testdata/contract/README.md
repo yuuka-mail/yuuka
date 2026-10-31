@@ -11,7 +11,7 @@ The JSON files are the source of truth and are edited by hand. All strings are U
 
 | File | What it pins down | How a test uses it |
 |---|---|---|
-| `v1/markers.json` | The delivery marker (`pending/<id>`, webhook body) | `valid[].json` must parse to `valid[].marker`; a marker serialized by the Worker must equal `json` byte for byte (field order as listed, no whitespace). `invalid[].json` must be rejected; `reason` is for humans |
+| `v1/markers.json` | The delivery marker (`pending/<id>`, webhook body) | Parsers: every `valid[].json` must parse to `valid[].marker`, and every `invalid[].json` must be rejected (`reason` is for humans). Writers: serializing `valid[].marker` must equal `json` byte for byte (field order as listed, no whitespace) — except cases whose `json` carries fields the marker doesn't have (e.g. `unknown-field-ignored`), which exist only to test that parsers ignore unknown fields |
 | `v1/keys.json` | R2 key layout | `received_at` + `id` must produce `raw_key` and `pending_key` (UTC year/month) |
 | `v1/metadata.json` | The `yuuka-marker` custom metadata on raw objects | base64url without padding of `marker_json` must equal `yuuka_marker`, and decode back |
 | `v1/hmac.json` | Webhook signature | `sign[]`: signing `body` with `secret` at `timestamp` gives `signature`. `verify[]`: with the given `secrets` and clock at `now`, verifying `signature` over `body` must return `valid`. The window is `window_seconds` |

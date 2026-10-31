@@ -180,7 +180,7 @@ UTF-8 编码的 JSON 对象：
 | `v` | 整数 | 固定为 `1` |
 | `id` | 字符串 | 见上 |
 | `received_at` | 字符串 | Worker 收到这次调用的时间 |
-| `envelope_from` | 字符串 | `MAIL FROM`。null sender（退信、DSN 用 `MAIL FROM:<>`）记为空字符串 |
+| `envelope_from` | 字符串 | `MAIL FROM`。值为空或 `<>` 时记空字符串；但 Cloudflare 不会给出这两种（见下方实测），退信不能靠它识别 |
 | `envelope_to` | 字符串 | 这次调用对应的那一个 `RCPT TO` |
 | `raw_key` | 字符串 | 原件在 raw bucket 里的 key |
 | `raw_size` | 整数 | 实际写入的原件字节数（不取 `message.rawSize` 的声明值） |
@@ -230,17 +230,23 @@ Yuuka-Signature: v1=<HMAC-SHA256，小写十六进制>
 5. 第 3、4 步共享一个 **60 秒**截止时间（`Promise.race` 计时器——R2 的 `put()` 不能取消）；
    任一步失败或超时就抛错（§2.1.1 的 421 路径）。超时的写入之后可能仍然完成，
    留下一对完整的标记和原件：reconcile 会把它入库，发件方重投的那一份由重投去重合并（§4.1），不丢也不重复
-6. 用 `ctx.waitUntil` 发 webhook，5 秒超时，结果只记日志；Workers 给 `waitUntil` 的上限是返回后 30 秒
+6. 用 `ctx.waitUntil` 发 webhook，5 秒超时，结果只记日志。Cloudflare 要等 `waitUntil` 结束才回 SMTP `250`（见下方实测），
+   所以这 5 秒直接加在发件方的等待上；Go 侧因此不把入库绑在请求上，Worker 放弃等待也不打断进行中的入库
 7. 正常返回
 
 Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：入站处理计入 Workers 的 CPU 限额，
 免费档每次 10 ms 的 CPU 不够缓冲一封大信。
 
-**M0 实测项**（文档没写，写实现时在真实 bucket 上确认，结论写回本节）：
+**M0 实测结论**（2026-10，真实 bucket 与真实投递；文档都没写）：
 
-- 经 binding 的 `onlyIf` 条件写是否原子：两个并发写同一 key，是否只有一个成功
-- `MAIL FROM:<>` 时 `message.from` 的实际值
-- 在 `waitUntil` 里发 webhook，SMTP 的 `250` 是否在处理函数返回时就发出，而不是等 `waitUntil` 结束
+| 问题 | 结论 | 影响 |
+|---|---|---|
+| 经 binding 的 `onlyIf`（`If-None-Match: *`）条件写是否原子 | 是。5 轮、每轮 8 个并发写同一 key，每轮恰好 1 个成功，其余 7 个返回 `null`，无报错 | 第 4 步的「不存在才写」可以依赖 |
+| `MAIL FROM:<>` 时 `message.from` 是什么 | `postmaster@<HELO 域>`：Cloudflare 按 SPF 对 null sender 的约定（RFC 7208）替换了它 | Worker 拿不到 null sender，和真的 `postmaster@` 发件人无从区分。退信识别只能看内容（`multipart/report`，§10.4.2）。第 1 步的归一化无害，留给会给出空值的其他来源 |
+| SMTP `250` 是否等 `waitUntil` 结束 | 等。webhook 目标睡 6 秒时，`250` 在约 6 秒后才到，Worker 日志里 webhook 在 5 秒超时 | webhook 的超时就是加给发件方的最大延迟，保持在几秒以内；Go 侧把入库从请求上下文中脱开（第 6 步） |
+
+端到端也按设计跑通：单收件人、一笔事务两个收件人（两条投递、同一 `content_hash`）、
+发件方重投（两份原件、一条投递、第二份 `duplicate_of` 第一份），webhook 不可达时全部由 reconcile 在一分钟内入库。
 
 日志只记 `id`、`raw_size` 和步骤结果，**不记地址、主题或正文**：Worker 的日志在 Cloudflare 一侧，不归运维者管。
 
@@ -338,6 +344,7 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 | DB | `pgx` + 手写 SQL（或 sqlc） | 邮件查询形状怪，ORM 吃亏 |
 | 前端 | 任选，产物 `embed` 进二进制 | 单文件部署 |
 | SPF | `ix64/spf` | 同作者的既有库，直接复用 |
+| 旧字符集解码 | `golang.org/x/text` | 通知里的主题常是 GB2312/GBK 等旧编码，标准库的 `mime.WordDecoder` 只认 UTF-8 和 ISO-8859-1；pgx 本来就间接依赖它 |
 | R2（S3 API） | `aws-sdk-go-v2/service/s3` | Cloudflare 自己的 Go 示例用它，依赖全在 aws/smithy 内。**`RequestChecksumCalculation` 与 `ResponseChecksumValidation` 都设为 `WhenRequired`**：SDK 自 2025 年起默认附带的校验和 R2 不完全支持。R2 的 LIST 与 PUT/DELETE 强一致，reconcile 可以直接依赖列表结果 |
 
 **关于 JMAP 要诚实说一句**：JMAP 客户端生态非常薄（Fastmail 自家客户端、

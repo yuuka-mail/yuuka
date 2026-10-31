@@ -21,7 +21,7 @@ transports(id, kind, config_ref)   -- cf_smtp | gmail_smtp | m365 | ...
 zones(zone pk, account_id, catchall bool, sending_onboarded bool)
 
 -- 原始件（不可变）
-raw_objects(id ulid pk, r2_key, local_path, size, sha256 unique, received_at, ingest_state,
+raw_objects(id ulid pk, r2_key unique, local_path, size, sha256, received_at, ingest_state,
             completeness smallint,  -- full | header_only（§4.4）；原件不可变，补全正文是另一份 raw
             content_hash bytea,     -- 去掉传输头后的字节哈希：折叠与重投去重的键（§4.1）。
                                     --   和 sha256 一样是原件的字节属性，ingest 时算一次；header_only 时为空
@@ -157,8 +157,11 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
   所以 M0 没有解析也能用它去重，reparse 也不会改变折叠结果。
   算法定为 v1，用 golden 测试锁住；将来要改剔除列表就是 v2，只对新入库的原件生效，旧行不重算——
   最坏的结果是同一封信显示两次
-- raw 的 sha256（`raw_objects.sha256 unique`）只负责**字节完全相同的重复**（IMAP 重扫、
-  reconcile 重跑）。**发件方重投不在其列**：Cloudflare 每次接收都加一行带新事务 id 和时间戳的
+- **raw 的 sha256 不唯一**：原件存储里的每个对象都有自己的一行，哪怕另一次 Worker 调用存下了
+  一模一样的字节。同一个对象被 webhook 和 reconcile 各处理一次，撞的是 `id`；
+  是不是一次新的投递，由下面 `deliveries.source_key` 的唯一约束决定。
+  若 sha256 唯一，两个收件人恰好拿到字节相同的原件时，第二个收件人的投递会被静默丢掉。
+  sha256 也认不出发件方重投：Cloudflare 每次接收都加一行带新事务 id 和时间戳的
   `Received`，重投的原件 sha256 必然不同（§2.1.1 实测）。跨路径折叠同理也不能靠它
 - **重投去重由唯一约束保证，不是先查后插**。push 来源（Cloudflare Worker 等）的
   `deliveries.source_key` 由 `(envelope_to, content_hash)` 构成，同一账户内唯一（§10.1）。
