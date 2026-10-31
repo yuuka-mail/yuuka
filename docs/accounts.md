@@ -44,6 +44,11 @@ identity → 出口必须是硬绑定：
 
 - 回复时**默认身份 = 这封信是从哪个投递进来的**（`deliveries.zone/prefix`
   或 account），不是全局默认。这是"多账户串身份"最常见的事故，在数据模型里就堵掉。
+  实现见 [`store.ReplyIdentities`](../internal/store/identities.go)：每条可见投递在它自己的账户里按精确地址、
+  再按 `*@zone` 解析；我们自己发出的信取它发出时的身份。一封信投到了我们的好几个地址时（To 一个、Cc 另一个），
+  候选按「提交者自己拥有的身份 → 精确身份先于 `*@zone` → 最早的投递 → 地址」排序：
+  和运维者一起被抄送的 agent 用自己的身份回，运维者用自己的，而不是落到对方的地址上、再被硬上限压成草稿。
+  草稿的 `identity_id` 总由 `from_addr` 解析得出，不由调用方指定，地址和身份不会对不上。
 - 谁能用哪个 identity 发信由 `identity_grants` 决定（§13.5），
   服务主体无法冒用运维者的地址。
 - outbox 每条带 `identity_id`，路由由 identity 决定，不给调用方选 transport 的机会；

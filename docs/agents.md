@@ -250,7 +250,32 @@ M1 的落法（`internal/mcp`）：
 不能自动以人的名义发信。
 
 **超出授权是降级，不是拒绝**：档位不够、超限额、审核没过，一律停在草稿并通知人。
-agent 的工作不会丢，人也不会被一堆报错淹没。
+agent 的工作不会丢，人也不会被一堆报错淹没。凭据缺 `submission:send` 也是降级（`hold_reason = policy`），
+不是报错，调用方没有理由换一条路重试。唯一的拒绝在 SMTP 提交口：对 `From` 毫无授权（档位 `none`）时拒收（§13.6）。
+
+**实现**：[`internal/sendpolicy`](../internal/sendpolicy/sendpolicy.go) 的 `Decide`，一个纯函数，表驱动测试覆盖每条规则，
+另有一个穷举测试断言「人的身份 × 任何非本人提交者 × 任何授权 × 任何确认者」都出不了 outbox。
+规则按下面的顺序，第一条拦下的决定 `hold_reason`：
+
+1. 身份已停用，或草稿创建后有别的身份接管了它的地址 → `policy`
+2. 人确认一封停着的草稿：确认者必须是 human，人的身份只有 owner 本人能确认（`owner`）；
+   其余放行，`approved_by` 是这个人。人的决定代替档位、限额、收件人范围、熔断和循环检查——
+   它们存在就是为了把信交到人眼前
+3. 硬上限 → `owner`
+4. 凭据缺 `submission:send` → `policy`
+5. 档位 `none` / `draft` → `policy`
+6. 授权被熔断 → `suspended`
+7. 没有收件人，或有人不在 `recipient_scope` 内 → `recipients`
+8. 邮件循环（只对自动提交，见下）→ `loop`
+9. 每小时、每天、每天新收件人限额 → `limit`
+10. `review` 档：**M2 没有自动审核**，一律停在草稿（`review`，`hold_detail` 说明审核尚未实现），绝不当成 `auto`
+11. `auto` 档 → `queued`；人提交时 `approved_by` 是本人，agent / service 提交时是 `system`，
+    并且 `Decision.AutoSubmitted` 要求信带 `Auto-Submitted: auto-generated`
+
+「自动」指提交者不是 human。确认路径里 agent 写的信由人放行，是人的信，不加 `Auto-Submitted`。
+`recipient_scope = allowlist` 的条目是地址（精确）或域（精确，不含子域），大小写不敏感。
+`thread` 的「既有参与者」是线程里可见消息的发件人，加上我们在这个线程里发过信的收件人；
+收信的 To / Cc 没有入库（`messages` 只有 `from_addr`），只被抄送过、自己没写过信的人不算——宁可停在草稿。
 
 一次提交的去向：
 
@@ -279,7 +304,9 @@ flowchart TD
 - `allowlist`：收件人在 `recipient_allowlist`（地址或域）里
 - `any`：不限
 
-agent 专属身份的默认值是 `review` + `thread`。
+agent 专属身份的默认值是 `review` + `thread`。各类主体的默认档位和默认限额见 §13.5。
+
+熔断目前只有手动的一半：`yuuka grant set --suspend / --resume`。按退信率、投诉率自动熔断要等 DSN 回收（§10.4.2）有了数据再接。
 
 熔断是全局的：某条授权的退信率或投诉率超阈值、或短时间内被人撤回 / 驳回过多次，
 该授权自动 `suspended`，期间所有提交降级为草稿，等人看过再恢复。
@@ -313,6 +340,13 @@ agent 专属身份的默认值是 `review` + `thread`。
 - agent 的自动回复不回应带 `Auto-Submitted`（值不为 `no`）、`Precedence: bulk|list`
   或 `class=machine` 的信，这类回复一律降级为草稿
 - 同一线程、同一收件人的自动外发另有一个小上限，超了降级
+
+落地（M2）：被回复的信「带 `Auto-Submitted` / `Precedence`」由它的分类表达——
+[`classify`](../internal/classify/classify.go) 已把这两个头算作 machine 信号，所以 `class = machine` 覆盖了它们，
+不必再读原件。人工改判为 human **不**解除这条：agent 能改分类（§8.2 的标注层），改判若能打开循环规则，
+被注入的 agent 先改判、再自动回复就绕过去了；改判为 machine 则照样生效。
+每线程每收件人的上限是最近 24 小时内 3 封自动外发（`approved_by = system`，不论是谁发的），
+值见 `sendpolicy.MaxAutoPerThreadRecipient`：两个漏过头部规则的自动回复器一天最多来回三轮。
 
 ---
 

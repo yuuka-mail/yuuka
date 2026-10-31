@@ -380,6 +380,14 @@ func TestVisibility(t *testing.T) {
 		t.Fatalf("sent copy did not fold into the delivered message: %+v", f)
 	}
 
+	// Someone only the hidden reply went to.
+	if _, err := pool.Exec(ctx, `INSERT INTO outbox_recipients (outbox_id, addr, addr_fold, kind)
+		SELECT so.id, 'hidden@example.org', 'hidden@example.org', 'to'
+		FROM outbox so JOIN raw_objects r ON r.id = so.raw_id JOIN messages m ON m.content_hash = r.content_hash
+		WHERE m.id = $1`, msgs["sent-closed"]); err != nil {
+		t.Fatal(err)
+	}
+
 	visibleTo := map[*auth.Viewer][]string{
 		everyone:   {"both", "in-closed", "in-open", "sent-closed", "sent-open"},
 		restricted: {"both", "in-open", "sent-open"},
@@ -465,6 +473,29 @@ func TestVisibility(t *testing.T) {
 				}
 				if got := names(ids); err != nil || !slices.Equal(got, wantThread) {
 					t.Errorf("ThreadByID %q %v, want %q", got, err, wantThread)
+				}
+			}
+
+			// The facts a reply is decided on (sendpolicy): the message
+			// and the identities it came through only if visible, and
+			// the thread's participants from visible mail only.
+			for n, id := range msgs {
+				_, err := db.ReplyFacts(ctx, v, id)
+				if slices.Contains(want, n) != (err == nil) || err != nil && !errors.Is(err, store.ErrNotFound) {
+					t.Errorf("ReplyFacts %s: %v", n, err)
+				}
+				_, err = db.ReplyIdentities(ctx, v, id)
+				if slices.Contains(want, n) != (err == nil) || err != nil && !errors.Is(err, store.ErrNotFound) {
+					t.Errorf("ReplyIdentities %s: %v", n, err)
+				}
+			}
+			if slices.Contains(want, "in-open") {
+				rf, err := db.ReplyFacts(ctx, v, msgs["in-open"])
+				if err != nil {
+					t.Fatal(err)
+				}
+				if slices.Contains(rf.Participants, "hidden@example.org") != slices.Contains(want, "sent-closed") {
+					t.Errorf("participants of in-open's thread: %q", rf.Participants)
 				}
 			}
 
