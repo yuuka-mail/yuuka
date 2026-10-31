@@ -114,6 +114,17 @@ var cases = map[string]*Message{
 			"1. Open the page\n2. Submit:\n\n       curl -d 'u=admin*' https://example.com/login\n\n" +
 			"> quoted line\n> second line\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n" +
 			"Regards,  \nOperator\n",
+		Signature: "**Operator**\n[example.com](https://example.com)",
+	},
+	"signature": {
+		From:      Address{Name: "Operator", Addr: "operator@example.com"},
+		To:        []Address{{Addr: "alice@example.com"}},
+		Subject:   "Signed",
+		Date:      date,
+		MessageID: "01JBXM0000000000000000000G@example.com",
+		Body:      "See you on Friday.\n\n\n",
+		// Written with its own delimiter, as people do: it is not doubled.
+		Signature: "-- \r\nOperator\r\nsent from example.com\r\n",
 	},
 	"no-message-id": {
 		From:    Address{Addr: "operator@example.com"},
@@ -250,6 +261,16 @@ func TestRoundTrip(t *testing.T) {
 			if m.StripMarkup {
 				wantPlain = plainText(parse(wantPlain))
 			}
+			if m.Signature != "" {
+				// The body, a blank line, the delimiter; the signature
+				// itself is in the golden files.
+				wantPlain = strings.TrimRight(wantPlain, "\n") + "\n\n" + sigDelim
+				before, _, ok := strings.Cut(strings.ReplaceAll(plain, "\r\n", "\n"), "\n"+sigDelim)
+				if !ok {
+					t.Errorf("text/plain has no signature delimiter: %q", plain)
+				}
+				plain = before + "\n" + sigDelim
+			}
 			if strings.ReplaceAll(plain, "\r\n", "\n") != wantPlain {
 				t.Errorf("text/plain = %q, want %q", plain, wantPlain)
 			}
@@ -286,8 +307,7 @@ func walk(e mimeparse.Entity, f func(mimeparse.Entity)) {
 // javascript: URLs.
 func TestHTMLIsInert(t *testing.T) {
 	for name, m := range cases {
-		doc, src := parse(normalize(m.Body))
-		out, err := renderHTML(doc, src)
+		_, out, err := render(m.Body, m.Signature, m.StripMarkup)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -318,10 +338,54 @@ func TestHTMLIsInert(t *testing.T) {
 		}
 	}
 	// The hostile text is shown, not dropped.
-	doc, src := parse(cases["hostile"].Body)
-	out, _ := renderHTML(doc, src)
+	_, out, _ := render(cases["hostile"].Body, "", false)
 	if !strings.Contains(out, "&lt;script&gt;") || !strings.Contains(out, "&lt;img src=x onerror=") {
 		t.Errorf("raw HTML not shown as text:\n%s", out)
+	}
+	// A signature is Markdown under the same rules.
+	_, out, _ = render("Hi", "<script>alert(1)</script>", false)
+	if !strings.Contains(out, "&lt;script&gt;") {
+		t.Errorf("raw HTML in the signature not shown as text:\n%s", out)
+	}
+}
+
+// However the stored signature is written, the delimiter appears once,
+// as its own line, in both parts.
+func TestSignature(t *testing.T) {
+	for _, sig := range []string{
+		"Operator\nexample.com",
+		"-- \nOperator\nexample.com",
+		"--\nOperator\nexample.com\n\n",
+		"\n\n--  \r\n\r\nOperator\r\nexample.com",
+	} {
+		plain, html, err := render("Hello.\n", sig, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := "Hello.\n\n-- \nOperator\nexample.com\n"; plain != want {
+			t.Errorf("signature %q: text/plain = %q, want %q", sig, plain, want)
+		}
+		// One block: the delimiter is the first line of the paragraph.
+		if want := `<div style="color:#6a737d"><p style="margin-top:0">--<br>` + "\nOperator<br>\nexample.com</p>\n</div>\n"; !strings.Contains(html, want) {
+			t.Errorf("signature %q: text/html lacks %q:\n%s", sig, want, html)
+		}
+	}
+	// A signature that does not start with a paragraph, or whose first
+	// line would make the delimiter a heading, keeps it as its own line.
+	for sig, want := range map[string]string{
+		"- one\n- two": `<div style="color:#6a737d">-- <br>` + "\n" + `<ul style="margin-top:0">`,
+		"===\nfooter":  `<div style="color:#6a737d">-- <br>` + "\n" + `<p style="margin-top:0">===<br>`,
+	} {
+		plain, html, _ := render("Hello.\n", sig, false)
+		if !strings.Contains(html, want) || !strings.HasPrefix(plain, "Hello.\n\n-- \n") {
+			t.Errorf("signature %q: %q\n%s", sig, plain, html)
+		}
+	}
+	for _, sig := range []string{"", "\n", "-- \n", "--\n\n"} {
+		plain, html, _ := render("Hello.\n", sig, false)
+		if plain != "Hello.\n" || strings.Contains(html, "--") {
+			t.Errorf("empty signature %q written: %q", sig, plain)
+		}
 	}
 }
 

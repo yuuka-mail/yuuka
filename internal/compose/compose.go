@@ -83,6 +83,11 @@ type Message struct {
 	// markup removed instead of using the source (the per-identity
 	// option of §10.2.1).
 	StripMarkup bool
+	// Signature is the identity's signature, Markdown like the body. It
+	// goes below the RFC 3676 §4.3 delimiter "-- " in the plain part and
+	// into a muted block in the HTML part. A delimiter line it already
+	// starts with is dropped rather than written twice.
+	Signature   string
 	Attachments []Attachment
 }
 
@@ -136,13 +141,7 @@ func Compose(m *Message) ([]byte, error) {
 	if err := m.validate(); err != nil {
 		return nil, err
 	}
-	body := normalize(m.Body)
-	doc, src := parse(body)
-	plain := body
-	if m.StripMarkup {
-		plain = plainText(doc, src)
-	}
-	html, err := renderHTML(doc, src)
+	plain, html, err := render(m.Body, m.Signature, m.StripMarkup)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +180,7 @@ func (m *Message) validate() error {
 	if err := checkAddr(m.From.Addr); err != nil {
 		return fmt.Errorf("from: %w", err)
 	}
-	texts := []string{m.Subject, m.Body, m.From.Name}
+	texts := []string{m.Subject, m.Body, m.Signature, m.From.Name}
 	for _, l := range []struct {
 		name  string
 		addrs []Address
@@ -357,6 +356,24 @@ func oneLine(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// signature returns sig without a leading delimiter line ("-- ", or "--"
+// as people type it) and without the blank lines around it, so the
+// delimiter render writes is the only one. Empty means no signature.
+func signature(sig string) string {
+	lines := strings.Split(strings.TrimRight(normalize(sig), "\n"), "\n")
+	blank := func() bool { return len(lines) > 0 && strings.TrimSpace(lines[0]) == "" }
+	for blank() {
+		lines = lines[1:]
+	}
+	if len(lines) > 0 && strings.TrimRight(lines[0], " \t") == "--" {
+		lines = lines[1:]
+	}
+	for blank() {
+		lines = lines[1:]
+	}
+	return normalize(strings.Join(lines, "\n"))
 }
 
 // normalize gives the body LF line endings and a final newline; the

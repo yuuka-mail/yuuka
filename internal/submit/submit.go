@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/mail"
-	"strings"
 	"time"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
@@ -369,7 +368,8 @@ func (s *Service) queueComposed(ctx context.Context, p *store.PolicyTx, d store.
 		Subject:       d.Subject,
 		Date:          now,
 		AutoSubmitted: dec.AutoSubmitted,
-		Body:          withSignature(d.BodyMD, f.Identity.Signature),
+		Body:          d.BodyMD,
+		Signature:     f.Identity.Signature,
 		StripMarkup:   f.Identity.PlainStripMarkup,
 	}
 	// A transport that sets its own (CallerMessageID=false) gets none,
@@ -418,16 +418,6 @@ func (s *Service) queueHeld(ctx context.Context, p *store.PolicyTx, d store.Draf
 		sub.RawID = d.RawID
 	}
 	return s.cfg.Outbox.Enqueue(ctx, p, sub)
-}
-
-// withSignature appends the identity's signature below the RFC 3676
-// §4.3 delimiter "-- ". The blank line before it keeps Markdown from
-// reading the delimiter as a heading underline.
-func withSignature(body, sig string) string {
-	if sig == "" {
-		return body
-	}
-	return strings.TrimRight(body, "\n") + "\n\n-- \n" + sig
 }
 
 func addresses(addrs []string) []compose.Address {

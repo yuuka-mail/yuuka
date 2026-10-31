@@ -152,3 +152,17 @@ func TestHTMLToText(t *testing.T) {
 		}
 	}
 }
+
+func TestSnippet(t *testing.T) {
+	cases := map[string]string{
+		"Hi Bob\n\n-- \nOperator\n":            "Hi Bob",
+		"> quoted\nNew text\r\n-- \r\nSig\r\n": "New text",
+		"-- \nOnly a signature\n":              "-- Only a signature",
+		"Dashes -- in text\n--\nnot a delim\n": "Dashes -- in text -- not a delim",
+	}
+	for in, want := range cases {
+		if got := snippet(in); got != want {
+			t.Errorf("snippet(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

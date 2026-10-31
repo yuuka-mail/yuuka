@@ -571,10 +571,15 @@ func clean(s string) string {
 }
 
 // snippet is the first snippetLen characters of the body, skipping quoted
-// lines so a reply shows what is new in it.
+// lines so a reply shows what is new in it, and stopping at the RFC 3676
+// §4.3 signature delimiter so a short message does not end in the
+// sender's signature. A body that is only a signature keeps it.
 func snippet(body string) string {
 	var b strings.Builder
 	for line := range strings.Lines(body) {
+		if strings.TrimRight(line, "\r\n") == "-- " && strings.TrimSpace(b.String()) != "" {
+			break
+		}
 		if strings.HasPrefix(strings.TrimSpace(line), ">") {
 			continue
 		}

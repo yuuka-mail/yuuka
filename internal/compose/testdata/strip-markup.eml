@@ -4,9 +4,9 @@ To: <security@example.com>
 Subject: Vulnerability report
 Message-ID: <01JBXM0000000000000000000F@example.com>
 MIME-Version: 1.0
-Content-Type: multipart/alternative; boundary="=_a334516385fc8a5397c45a5a"
+Content-Type: multipart/alternative; boundary="=_f184e615e92c86ea0714935f"
 
---=_a334516385fc8a5397c45a5a
+--=_f184e615e92c86ea0714935f
 Content-Type: text/plain; charset=utf-8
 Content-Transfer-Encoding: quoted-printable
 
@@ -30,7 +30,11 @@ a | b
 Regards,
 Operator
 
---=_a334516385fc8a5397c45a5a
+--=20
+Operator
+example.com <https://example.com>
+
+--=_f184e615e92c86ea0714935f
 Content-Type: text/html; charset=utf-8
 Content-Transfer-Encoding: quoted-printable
 
@@ -78,7 +82,11 @@ lapse:collapse">
 </table>
 <p>Regards,<br>
 Operator</p>
+<div style=3D"color:#6a737d"><p style=3D"margin-top:0">--<br>
+<strong>Operator</strong><br>
+<a href=3D"https://example.com">example.com</a></p>
+</div>
 </body>
 </html>
 
---=_a334516385fc8a5397c45a5a--
+--=_f184e615e92c86ea0714935f--

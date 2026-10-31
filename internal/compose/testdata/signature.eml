@@ -1,0 +1,37 @@
+Date: Sat, 31 Oct 2026 09:30:00 +0800
+From: "Operator" <operator@example.com>
+To: <alice@example.com>
+Subject: Signed
+Message-ID: <01JBXM0000000000000000000G@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="=_517e25b89e2b14eedde477c7"
+
+--=_517e25b89e2b14eedde477c7
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+See you on Friday.
+
+--=20
+Operator
+sent from example.com
+
+--=_517e25b89e2b14eedde477c7
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8">
+</head>
+<body>
+<p>See you on Friday.</p>
+<div style=3D"color:#6a737d"><p style=3D"margin-top:0">--<br>
+Operator<br>
+sent from example.com</p>
+</div>
+</body>
+</html>
+
+--=_517e25b89e2b14eedde477c7--

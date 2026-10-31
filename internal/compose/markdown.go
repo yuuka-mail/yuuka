@@ -3,6 +3,7 @@ package compose
 import (
 	"bytes"
 	"fmt"
+	"strings"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -30,7 +31,14 @@ const (
 	styleImg   = "max-width:100%"
 	styleHR    = "border:none;border-top:1px solid #ccc"
 	styleRaw   = "white-space:pre-wrap"
+	// The signature block is muted, and its first block loses its top
+	// margin so it sits right under the delimiter line.
+	styleSignature = "color:#6a737d"
+	styleSigFirst  = "margin-top:0"
 )
+
+// sigDelim is the RFC 3676 §4.3 signature delimiter line.
+const sigDelim = "-- \n"
 
 // md is the one Markdown dialect of drafts: CommonMark plus the GFM parts
 // that make sense in mail (tables, strikethrough, bare links). Task lists
@@ -64,17 +72,68 @@ func parse(body string) (ast.Node, []byte) {
 	return md.Parser().Parse(text.NewReader(src)), src
 }
 
-// renderHTML renders doc as a complete HTML document.
-func renderHTML(doc ast.Node, src []byte) (string, error) {
+// render returns the text/plain part and the complete text/html document
+// of a message whose body and signature are Markdown. The signature
+// follows RFC 3676 §4.3 in both: a "-- " line, then the signature. In
+// HTML they are one muted block whose first paragraph starts with the
+// delimiter and a line break, so "--" never reads as a paragraph of its
+// own (in a mail client, or in a reader that turns HTML into blocks).
+func render(body, sig string, strip bool) (plain, html string, err error) {
+	body, sig = normalize(body), signature(sig)
+	doc, src := parse(body)
+	plain = body
+	if strip {
+		plain = plainText(doc, src)
+	}
 	var b bytes.Buffer
 	b.WriteString("<!DOCTYPE html>\n<html>\n<head>\n" +
 		`<meta http-equiv="Content-Type" content="text/html; charset=utf-8">` +
 		"\n</head>\n<body>\n")
 	if err := md.Renderer().Render(&b, src, doc); err != nil {
-		return "", fmt.Errorf("render markdown: %w", err)
+		return "", "", fmt.Errorf("render markdown: %w", err)
+	}
+	if sig != "" {
+		sdoc, ssrc := parse(sig)
+		s := sig
+		if strip {
+			s = plainText(sdoc, ssrc)
+		}
+		if plain = strings.TrimRight(plain, "\n"); plain != "" {
+			plain += "\n\n"
+		}
+		plain += sigDelim + s
+		// The delimiter joins the signature's first paragraph; hard
+		// wraps make its newline a <br>. Where the signature starts with
+		// something else (a list, a heading), or its first line would
+		// turn the two into a heading, it stays a line of its own.
+		lead := "-- <br>\n"
+		if isParagraph(sdoc.FirstChild()) {
+			if jdoc, jsrc := parse(sigDelim + sig); isParagraph(jdoc.FirstChild()) {
+				sdoc, ssrc, lead = jdoc, jsrc, ""
+			}
+		}
+		if first := sdoc.FirstChild(); first != nil {
+			style := styleSigFirst
+			if v, ok := first.AttributeString("style"); ok {
+				if prev, ok := v.([]byte); ok {
+					style = string(prev) + ";" + style
+				}
+			}
+			first.SetAttributeString("style", []byte(style))
+		}
+		b.WriteString(`<div style="` + styleSignature + `">` + lead)
+		if err := md.Renderer().Render(&b, ssrc, sdoc); err != nil {
+			return "", "", fmt.Errorf("render signature: %w", err)
+		}
+		b.WriteString("</div>\n")
 	}
 	b.WriteString("</body>\n</html>\n")
-	return b.String(), nil
+	return plain, b.String(), nil
+}
+
+func isParagraph(n ast.Node) bool {
+	_, ok := n.(*ast.Paragraph)
+	return ok
 }
 
 // styler sets the inline styles, and the table attributes old clients
