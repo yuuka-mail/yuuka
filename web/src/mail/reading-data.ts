@@ -1,9 +1,5 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
-
-import type { Facts, Content as ViewContent, Part as ViewPart, View as MessageView } from "@/api/agentview.gen";
-import { getJSON } from "@/api/client";
-import { keys } from "@/api/queries";
-import type { Message } from "@/api/types.gen";
+import { $api } from "@/api/client";
+import type { Facts, Content as ViewContent, Part as ViewPart, View as MessageView } from "@/api/types";
 
 // The reading pane's data access, kept in this one module on purpose.
 // The header and thread strip read the parsed fields of
@@ -13,12 +9,8 @@ import type { Message } from "@/api/types.gen";
 // the same anchors.
 
 export function useMessage(id: string) {
-  return useQuery({
-    queryKey: keys.message(id),
-    queryFn: () => getJSON<Message>(`/api/v1/messages/${encodeURIComponent(id)}`),
-    // Derived content changes only on reparse; no need to refetch.
-    staleTime: 5 * 60_000,
-  });
+  // Derived content changes only on reparse; no need to refetch.
+  return $api.useQuery("get", "/api/v1/messages/{id}", { params: { path: { id } } }, { staleTime: 5 * 60_000 });
 }
 
 /**
@@ -46,17 +38,17 @@ export interface Reading {
  * loadMore fetches the next stretch, which continues into later parts.
  */
 export function useReading(id: string) {
-  const q = useInfiniteQuery({
-    queryKey: keys.reading(id),
-    queryFn: ({ pageParam }) => {
-      const p = new URLSearchParams({ level: "part" });
-      if (pageParam) p.set("anchor", pageParam);
-      return getJSON<MessageView>(`/api/v1/messages/${encodeURIComponent(id)}/view?${p}`);
+  const q = $api.useInfiniteQuery(
+    "get",
+    "/api/v1/messages/{id}/view",
+    { params: { path: { id }, query: { level: "part" } } },
+    {
+      pageParamName: "anchor",
+      initialPageParam: "",
+      getNextPageParam: (last) => last.content.more || undefined,
+      staleTime: 5 * 60_000,
     },
-    initialPageParam: "",
-    getNextPageParam: (last) => last.content.more || undefined,
-    staleTime: 5 * 60_000,
-  });
+  );
   return {
     reading: q.data?.pages[0] ? merge(q.data.pages[0], q.data.pages.slice(1)) : undefined,
     error: q.error,

@@ -60,13 +60,13 @@ describe("view state", () => {
     expect(viewHref({ ...home, a: "part/1" })).toBe("/");
   });
   it("puts unknown mail with conversations", () => {
-    expect(listParams(home)?.toString()).toBe("class=human%2Cunknown&downgraded=hide");
-    expect(listParams({ ...home, area: "notifications" })?.toString()).toBe("class=machine&downgraded=hide");
-    expect(listParams({ ...home, area: "downgraded" })?.toString()).toBe("downgraded=only");
+    expect(listParams(home)).toEqual({ class: ["human", "unknown"], downgraded: "hide" });
+    expect(listParams({ ...home, area: "notifications" })).toEqual({ class: ["machine"], downgraded: "hide" });
+    expect(listParams({ ...home, area: "downgraded" })).toEqual({ downgraded: "only" });
     expect(listParams({ ...home, area: "unclaimed" })).toBeUndefined();
   });
   it("shows all of a prefix's mail", () => {
-    expect(listParams({ ...home, area: "notifications", prefix: "k3x9q@example.com" })?.toString()).toBe("prefix=k3x9q%40example.com&downgraded=include");
+    expect(listParams({ ...home, area: "notifications", prefix: "k3x9q@example.com" })).toEqual({ prefix: "k3x9q@example.com", downgraded: "include" });
   });
 });
 

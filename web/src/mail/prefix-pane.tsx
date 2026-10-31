@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { usePrefixes, useUnclaimedPrefixes } from "@/api/queries";
-import type { Prefix } from "@/api/types.gen";
+import type { Prefix } from "@/api/types";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { count } from "@/lib/format";

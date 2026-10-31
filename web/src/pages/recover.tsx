@@ -1,7 +1,6 @@
 import { useState } from "react";
 
-import type { RecoveryGrant } from "@/api/auth.gen";
-import { ApiError, postJSON } from "@/api/client";
+import { ApiError, api, data } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { navigate } from "@/lib/router";
@@ -23,7 +22,7 @@ export function RecoverPage() {
     setBusy(true);
     setFailure("");
     try {
-      const g = await postJSON<RecoveryGrant>("/auth/recovery", { code: code.trim() });
+      const g = await data(api.POST("/auth/recovery", { body: { code: code.trim() } }));
       navigate(`/enroll#${encodeURIComponent(g.enrollment_token)}`, { replace: true });
     } catch (err) {
       setFailure(err instanceof ApiError ? err.message : String(err));

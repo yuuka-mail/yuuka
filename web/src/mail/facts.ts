@@ -1,5 +1,4 @@
-import type { Auth, Facts, Stripped } from "@/api/agentview.gen";
-import type { Message } from "@/api/types.gen";
+import type { Auth, Facts, Message, Stripped } from "@/api/types";
 
 import { fullTime } from "@/lib/format";
 

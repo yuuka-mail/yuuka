@@ -1,4 +1,4 @@
-import type { PrefixList } from "@/api/types.gen";
+import type { MessageListQuery, PrefixList } from "@/api/types";
 
 /**
  * What the mail screen shows, kept entirely in the query string so that a
@@ -63,7 +63,7 @@ export function viewHref(v: View): string {
 }
 
 /**
- * The query string of GET /api/v1/messages for v, without a cursor;
+ * The query of GET /api/v1/messages for v, without a cursor;
  * undefined when the list column shows something else. Unknown mail goes
  * with conversations: a person's first mail is unknown, and missing it
  * costs more than a stray notification among conversations (§12.9).
@@ -72,17 +72,17 @@ export function viewHref(v: View): string {
  * has nothing but downgraded mail, and a hidden DMARC failure inside a
  * claimed one is exactly what to look at.
  */
-export function listParams(v: View): URLSearchParams | undefined {
-  if (v.prefix) return new URLSearchParams({ prefix: v.prefix, downgraded: "include" });
+export function listParams(v: View): MessageListQuery | undefined {
+  if (v.prefix) return { prefix: v.prefix, downgraded: "include" };
   switch (v.area) {
     case "conversations":
-      return new URLSearchParams({ class: "human,unknown", downgraded: "hide" });
+      return { class: ["human", "unknown"], downgraded: "hide" };
     case "notifications":
-      return new URLSearchParams({ class: "machine", downgraded: "hide" });
+      return { class: ["machine"], downgraded: "hide" };
     case "all":
-      return new URLSearchParams({ downgraded: v.dg ? "include" : "hide" });
+      return { downgraded: v.dg ? "include" : "hide" };
     case "downgraded":
-      return new URLSearchParams({ downgraded: "only" });
+      return { downgraded: "only" };
     case "unclaimed":
       return undefined;
   }

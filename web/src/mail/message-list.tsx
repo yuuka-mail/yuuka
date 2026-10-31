@@ -3,7 +3,7 @@ import { PaperclipIcon, TriangleAlertIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import type { MailList } from "@/api/queries";
-import type { MessageSummary } from "@/api/types.gen";
+import type { MessageSummary } from "@/api/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listTime, localPart, sender } from "@/lib/format";
 import { cn } from "@/lib/utils";

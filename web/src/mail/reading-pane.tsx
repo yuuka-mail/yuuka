@@ -1,10 +1,8 @@
 import { ArrowLeftIcon, ChevronDownIcon, ChevronUpIcon, OctagonAlertIcon, PaperclipIcon, TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
 
-import type { Facts } from "@/api/agentview.gen";
-
 import { useThread } from "@/api/queries";
-import type { Message, MessageSummary } from "@/api/types.gen";
+import type { Facts, Message, MessageSummary } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";

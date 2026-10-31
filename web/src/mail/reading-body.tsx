@@ -1,7 +1,7 @@
 import { DownloadIcon, ExternalLinkIcon, PaperclipIcon, QuoteIcon } from "lucide-react";
 import { useEffect, useRef } from "react";
 
-import type { Attachment, Block, Span } from "@/api/agentview.gen";
+import type { Attachment, Block, Span } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 

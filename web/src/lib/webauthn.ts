@@ -1,8 +1,9 @@
-import type { LoginResult, RegisterResult } from "@/api/auth.gen";
-import { postJSON } from "@/api/client";
+import { api, data } from "@/api/client";
+import type { LoginResult, RegisterBegin, RegisterResult } from "@/api/types";
 
 // The WebAuthn ceremonies against internal/authn. The server speaks the
-// JSON form of the options and credentials (binary fields as base64url);
+// JSON form of the options and credentials (binary fields as base64url),
+// whose shape the server's WebAuthn library defines, not openapi.json;
 // the browser API wants ArrayBuffers. PublicKeyCredential.parse*FromJSON
 // and toJSON() do this natively, but not in every browser an operator's
 // phone may run, so the few fields are converted by hand.
@@ -92,10 +93,10 @@ export function supported() {
 
 /** Signs in with a discoverable passkey; the session arrives as a cookie. */
 export async function login(): Promise<LoginResult> {
-  const opts = await postJSON<JSONRequest>("/auth/passkey/login/begin");
+  const opts = (await data(api.POST("/auth/passkey/login/begin", { body: {} }))) as unknown as JSONRequest;
   const cred = (await navigator.credentials.get({ publicKey: requestOptions(opts) })) as PublicKeyCredential | null;
   if (!cred) throw new Error("No passkey was chosen.");
-  return postJSON<LoginResult>("/auth/passkey/login/finish", credentialJSON(cred));
+  return data(api.POST("/auth/passkey/login/finish", { body: credentialJSON(cred) }));
 }
 
 /**
@@ -103,12 +104,12 @@ export async function login(): Promise<LoginResult> {
  * current session when token is empty. It never logs in.
  */
 export async function register(token: string, label: string): Promise<RegisterResult> {
-  const body: Record<string, string> = { label };
+  const body: RegisterBegin = { label };
   if (token) body.enrollment_token = token;
-  const opts = await postJSON<JSONCreation>("/auth/passkey/register/begin", body);
+  const opts = (await data(api.POST("/auth/passkey/register/begin", { body }))) as unknown as JSONCreation;
   const cred = (await navigator.credentials.create({ publicKey: creationOptions(opts) })) as PublicKeyCredential | null;
   if (!cred) throw new Error("No passkey was created.");
-  return postJSON<RegisterResult>("/auth/passkey/register/finish", credentialJSON(cred));
+  return data(api.POST("/auth/passkey/register/finish", { body: credentialJSON(cred) }));
 }
 
 /** A readable message for a failed ceremony. */

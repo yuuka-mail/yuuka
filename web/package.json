@@ -5,7 +5,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "check": "tsc --noEmit && oxlint --deny-warnings src scripts && vitest run",
+    "gen": "openapi-typescript ../internal/api/openapi.json -o src/api/schema.gen.ts",
+    "check": "pnpm run gen --check && tsc --noEmit && oxlint --deny-warnings src scripts && vitest run",
     "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
@@ -15,6 +16,8 @@
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "lucide-react": "1.57.0",
+    "openapi-fetch": "0.17.0",
+    "openapi-react-query": "0.5.4",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "tailwind-merge": "3.7.0"
@@ -25,6 +28,7 @@
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.2",
+    "openapi-typescript": "7.13.0",
     "oxlint": "1.88.0",
     "playwright-core": "1.64.1",
     "tailwindcss": "4.3.3",

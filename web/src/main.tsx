@@ -20,7 +20,7 @@ const queryClient = new QueryClient({
 
 // Any API call that finds the session gone sends the shell back to login.
 queryClient.getQueryCache().subscribe((e) => {
-  if (e.type === "updated" && e.query.queryKey[0] !== keys.session[0] && isUnauthenticated(e.query.state.error)) {
+  if (e.type === "updated" && e.query.queryKey[1] !== keys.session[1] && isUnauthenticated(e.query.state.error)) {
     queryClient.setQueryData(keys.session, null);
   }
 });

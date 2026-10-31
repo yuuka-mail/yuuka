@@ -13,8 +13,9 @@ FROM --platform=$BUILDPLATFORM node:24.22.2-trixie-slim@sha256:54f84b4cf8432b21a
 WORKDIR /src
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 npm_config_update_notifier=false
 # pnpm-workspace.yaml carries the minimumReleaseAge and allowBuilds rules,
-# so the install below obeys them exactly as `mise run js:install` does.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .node-version ./
+# so the install below obeys them exactly as `mise run js:install` does;
+# the lockfile was resolved with .pnpmfile.cjs and is checked against it.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .pnpmfile.cjs .node-version ./
 COPY web/package.json web/
 COPY worker/package.json worker/
 # .node-version is the single source of the Node version; fail on drift

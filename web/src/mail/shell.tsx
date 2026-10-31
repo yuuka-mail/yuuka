@@ -2,8 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { LogOutIcon, PanelLeftIcon, SearchIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import type { SessionInfo } from "@/api/auth.gen";
-import { postJSON } from "@/api/client";
+import type { SessionInfo } from "@/api/types";
+import { api } from "@/api/client";
 import { keys, useMessageList, usePrefixes, useSearchList, useUnclaimedPrefixes, type MailList } from "@/api/queries";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
@@ -255,7 +255,7 @@ function Logout() {
       aria-label="Sign out"
       title="Sign out"
       onClick={async () => {
-        await postJSON("/auth/logout").catch(() => undefined);
+        await api.POST("/auth/logout").catch(() => undefined);
         qc.clear();
         qc.setQueryData(keys.session, null);
       }}

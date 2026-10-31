@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { View } from "@/api/agentview.gen";
-import type { Message } from "@/api/types.gen";
+import type { Message, View } from "@/api/types";
 
 import { isQuiet, strippedText, warnings } from "./facts";
 import { claimedHost, linkTarget } from "./links";

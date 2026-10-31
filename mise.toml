@@ -51,15 +51,19 @@ depends = ["js:install"]
 dir = "worker"
 run = "pnpm run check"
 
+# The API contract (§5.1): Go types → internal/api/openapi.json →
+# web/src/api/schema.gen.ts. Both files are committed; `check` fails
+# while either is stale (TestOpenAPI in test, `gen --check` in web:check).
 [tasks.generate]
-description = "Regenerate generated code (the WebUI's TypeScript types from Go)"
-run = "go generate ./..."
+description = "Regenerate generated code: openapi.json from the Go types, the WebUI's types from it"
+depends = ["js:install"]
+run = ["go generate ./...", "pnpm --dir web run gen"]
 
 [tasks."web:check"]
-description = "Regenerate API types, then type-check, lint and test the WebUI"
+description = "Check the WebUI's API types are current, then type-check, lint and test it"
 dir = "web"
 depends = ["js:install"]
-run = ["go generate ../internal/api", "pnpm run check"]
+run = "pnpm run check"
 
 [tasks."web:build"]
 description = "Build the WebUI into web/dist, which go:embed puts into the yuuka binary"

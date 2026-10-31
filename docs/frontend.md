@@ -81,7 +81,7 @@ iframe 里是原信自己的 HTML，我们无法在其中挂稳定 id。所以 a
 | 列表 | **TanStack Virtual** | catch-all 的机器邮件是几万条量级，虚拟滚动不是优化而是前提 |
 | 服务器状态 | **TanStack Query** | 缓存失效/重试这些坑别自己踩 |
 | 实时增量 | 原生 `EventSource` + `since_state` 游标（§8.6） | 收到事件后 invalidate 对应 query key，不全量重拉 |
-| 类型同源 | **OpenAPI 3.1**（从 Go 类型生成，§5.1）→ `openapi-typescript` + `openapi-fetch` | 手写 TS 类型必然和 Go 漂移，漂移在邮件这种字段多的模型里尤其痛；请求参数和端点配对也要进契约，光生成响应类型不够 |
+| 类型同源 | **OpenAPI 3.1**（从 Go 类型生成，§5.1）→ `openapi-typescript` + `openapi-fetch` + `openapi-react-query` | 手写 TS 类型必然和 Go 漂移，漂移在邮件这种字段多的模型里尤其痛；请求参数和端点配对也要进契约，光生成响应类型不够 |
 | 产物 | `go:embed web/dist` | dev 时 Vite dev server，API 走 Vite proxy 到 Go |
 
 组件库的边界要认清：邮件客户端 UI 高度特化（三栏布局、虚拟列表、线程视图、
@@ -124,9 +124,9 @@ iframe 里是原信自己的 HTML，我们无法在其中挂稳定 id。所以 a
 M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里没写死、实现时定下的几处：
 
 - **REST 只读、按路由声明 scope**。端点和各自要的 scope 写在 [`internal/api/api.go`](../internal/api/api.go)
-  的 `routes` 一张表里，ACL 测试遍历这张表，漏一条测试就失败。投递事实（信封、认证结果）另要
+  的 `routes` 一张表里，ACL 测试和 `openapi.json` 都从这张表来（§5.1），漏一条测试就失败。投递事实（信封、认证结果）另要
   `delivery:read`，没有就不给，结构化视图里的 `facts.delivered_to` 和 `facts.auth` 同理（标 `withheld`，§8.1）。
-  列表用 `(received_at, id)` 键集游标而不是 offset，是因为新信到达时 offset 分页会重复或跳行
+  消息列表和搜索用 `(received_at, id)` 键集游标而不是 offset，是因为新信到达时 offset 分页会重复或跳行
 - **附件只下载，不渲染**（§8.3、§12.2），实现见 [`internal/api/attachment.go`](../internal/api/attachment.go)。
   按 Viewer 取信、原件只从可见的投递读（§13.8）；什么算附件只由解析器的判定决定，和视图里列出的同源，
   正文和内嵌图片不算。几条取舍：
@@ -137,9 +137,10 @@ M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里�
     类型只影响保存下来的文件被系统认成什么；HTML、SVG、XML、脚本和 `text/*`（声明的字符集可能是错的）都不在内
   - 每次下载记一条 `actions`（谁、哪封、哪个 part、字节数；不记内容和文件名），记不下来就不给下载
   agent 侧还没有对应的 MCP 工具，`get_message` 里附件仍标「此处不可读」
-- **类型由 `tygo` 生成**，覆盖哪些 Go 文件见 [`internal/api/tygo.yaml`](../internal/api/tygo.yaml)；
-  前端检查先 `go generate` 再类型检查，Go 侧改了字段 TS 立刻报错。它只管响应类型，请求参数和端点配对仍是手写的，
-  M2 前换成 §5.1 的 OpenAPI 契约
+- **API 层是生成的**（§5.1）：`web/src/api/schema.gen.ts` 由 `openapi.json` 生成，`client.ts` 在它上面建
+  openapi-fetch 客户端和 openapi-react-query 的 hook，路径、参数和响应都有类型；`types.ts` 只给 schema 起名字。
+  非 2xx 一律在中间件里变成 `ApiError`（`detail` 当消息，`code` 供分支），TanStack Query 只看到这一种错误。
+  查询键是 `[method, path, init]`，401 时把会话查询置空、回到登录页
 - **页面壳不需要会话**。`go:embed` 的 `index.html` 对任何非文件路径都返回（`no-store`），
   哈希命名的 `assets/` 缓存一年；壳加载后再同源 `fetch /auth/session`，401 就原地显示登录，
   URL 不变，所以从 TG 链接点进来、登录后直接落在那封信上。视图状态全部在 query string 里
