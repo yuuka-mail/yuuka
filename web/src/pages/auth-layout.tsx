@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { Logo } from "@/components/logo";
+import type { Failure } from "@/lib/webauthn";
 
 /** The narrow column the login, enrollment and recovery pages share. */
 export function AuthLayout({ title, children }: { title: string; children: ReactNode }) {
@@ -21,5 +22,16 @@ export function ErrorText({ children }: { children: ReactNode }) {
     <p role="alert" className="text-body text-destructive">
       {children}
     </p>
+  );
+}
+
+/** A failure in our words, with what the browser or server said as a note (§12.11). */
+export function FailureText({ f }: { f?: Failure }) {
+  if (!f) return null;
+  return (
+    <ErrorText>
+      {f.text}
+      {f.detail && <span className="text-small text-foreground/80"> · {f.detail}</span>}
+    </ErrorText>
   );
 }

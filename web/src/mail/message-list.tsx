@@ -6,7 +6,9 @@ import type { MailList } from "@/api/queries";
 import type { MessageSummary } from "@/api/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listTime, localPart, sender } from "@/lib/format";
-import { OutgoingMark } from "@/send/marks";
+import { m as msg } from "@/paraglide/messages.js";
+import { OutgoingMark, ProblemLine } from "@/send/marks";
+import { problem } from "@/send/outgoing";
 import { cn } from "@/lib/utils";
 
 import { shownExtraction } from "./extracted";
@@ -65,14 +67,18 @@ export function MessageList({
     );
   }
   if (list.error) {
-    return <p className="p-4 text-destructive">{list.error instanceof Error ? list.error.message : "Could not load mail."}</p>;
+    return (
+      <p className="p-4">
+        <ProblemLine p={problem(list.error)} />
+      </p>
+    );
   }
   if (list.items.length === 0) {
-    return <p className="p-4 text-muted-foreground">No mail here.</p>;
+    return <p className="p-4 text-muted-foreground">{msg.list_empty()}</p>;
   }
 
   return (
-    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto" role="listbox" aria-label="Messages">
+    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto" role="listbox" aria-label={msg.list_messages()}>
       <div className="relative w-full" style={{ height: v.getTotalSize() }}>
         {items.map((it) => {
           const m = list.items[it.index];
@@ -81,7 +87,7 @@ export function MessageList({
               {m ? (
                 <Row m={m} selected={m.id === selected} tag={markNotifications && m.class === "machine"} onSelect={onSelect} />
               ) : (
-                <div className="flex h-full items-center px-3 text-small text-muted-foreground">Loading more…</div>
+                <div className="flex h-full items-center px-3 text-small text-muted-foreground">{msg.list_loading_more()}</div>
               )}
             </div>
           );
@@ -118,12 +124,12 @@ function Row({ m, selected, tag, onSelect }: { m: MessageSummary; selected: bool
         {m.recipients.length > 0 && (
           <span className="shrink-0 truncate font-mono text-meta text-muted-foreground">→ {m.recipients.map(localPart).join(", ")}</span>
         )}
-        {tag && <span className="shrink-0 rounded-sm bg-muted px-1 text-meta text-muted-foreground">notification</span>}
+        {tag && <span className="shrink-0 rounded-sm bg-muted px-1 text-meta text-muted-foreground">{msg.list_notification_tag()}</span>}
         <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-meta text-muted-foreground tabular-nums">
           {/* Mail we sent says where it stands: its existence is not delivery (§12.10). */}
           {m.outgoing && <OutgoingMark state={m.outgoing.state} className="mr-1" />}
-          {m.quarantined && <TriangleAlertIcon aria-label="quarantined" className="size-3 text-warning" />}
-          {m.has_attach && <PaperclipIcon aria-label="attachment" className="size-3" />}
+          {m.quarantined && <TriangleAlertIcon aria-label={msg.list_quarantined()} className="size-3 text-warning" />}
+          {m.has_attach && <PaperclipIcon aria-label={msg.list_attachment()} className="size-3" />}
           {listTime(m.received_at)}
         </span>
       </span>
@@ -131,7 +137,7 @@ function Row({ m, selected, tag, onSelect }: { m: MessageSummary; selected: bool
         <ExtractedLine x={x} verified={m.sender_verified} subject={m.subject} />
       ) : (
         <span className="truncate text-ui">
-          {m.subject || <span className="text-muted-foreground">(no subject)</span>}
+          {m.subject || <span className="text-muted-foreground">{msg.no_subject()}</span>}
           {m.snippet && <span className="text-muted-foreground"> — {m.snippet}</span>}
         </span>
       )}

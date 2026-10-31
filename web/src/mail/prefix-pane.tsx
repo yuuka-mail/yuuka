@@ -6,9 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { count } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages.js";
 import type { Abilities } from "@/send/outgoing";
 
 import { LeakDot, leakSummary, leakTone, useFlaggedCount, type LeakTone } from "./leaks";
+import { areaTitle } from "./areas";
 import type { View } from "./view";
 
 // Past this many claimed prefixes the list gets a filter box: about what
@@ -35,14 +37,14 @@ export function PrefixPane({ view, can, onPick }: { view: View; can: Abilities; 
   const at = (area: View["area"]) => browsing && view.area === area;
 
   return (
-    <nav aria-label="Mailboxes" className="flex min-h-0 flex-1 flex-col text-ui">
+    <nav aria-label={m.nav_mailboxes()} className="flex min-h-0 flex-1 flex-col text-ui">
       <div className="flex shrink-0 flex-col py-2">
-        <Item active={at("conversations")} label="Conversations" onClick={() => onPick({ area: "conversations" })} />
-        <Item active={at("notifications")} label="Notifications" onClick={() => onPick({ area: "notifications" })} />
-        <Item active={at("all")} label="All mail" onClick={() => onPick({ area: "all" })} />
+        <Item active={at("conversations")} label={areaTitle("conversations")} onClick={() => onPick({ area: "conversations" })} />
+        <Item active={at("notifications")} label={areaTitle("notifications")} onClick={() => onPick({ area: "notifications" })} />
+        <Item active={at("all")} label={areaTitle("all")} onClick={() => onPick({ area: "all" })} />
         <Item
           active={at("drafts")}
-          label="Drafts"
+          label={areaTitle("drafts")}
           n={drafts.items.length || undefined}
           more={drafts.hasMore}
           onClick={() => onPick({ area: "drafts" })}
@@ -50,26 +52,26 @@ export function PrefixPane({ view, can, onPick }: { view: View; can: Abilities; 
         {can.outbox && (
           <Item
             active={at("outbox")}
-            label="Outbox"
+            label={areaTitle("outbox")}
             n={unknown.items.length || undefined}
             more={unknown.hasMore}
             warn
-            title={unknown.items.length ? "may have been sent: waiting for a decision" : undefined}
+            title={unknown.items.length ? m.nav_outbox_unknown() : undefined}
             onClick={() => onPick({ area: "outbox" })}
           />
         )}
       </div>
       <Claimed ps={q.data?.prefixes} active={view.prefix} onPick={onPick} />
       <div className="flex shrink-0 flex-col border-t py-2">
-        <Heading>Review</Heading>
-        <Item active={at("downgraded")} label="Downgraded" n={q.data?.downgraded} onClick={() => onPick({ area: "downgraded" })} />
-        <Item active={at("unclaimed")} label="Unclaimed prefixes" n={unclaimed.total} onClick={() => onPick({ area: "unclaimed" })} />
+        <Heading>{m.nav_review()}</Heading>
+        <Item active={at("downgraded")} label={areaTitle("downgraded")} n={q.data?.downgraded} onClick={() => onPick({ area: "downgraded" })} />
+        <Item active={at("unclaimed")} label={areaTitle("unclaimed")} n={unclaimed.total} onClick={() => onPick({ area: "unclaimed" })} />
         <Item
           active={at("leaks")}
-          label="Leaks & spoofs"
+          label={areaTitle("leaks")}
           n={flaggedCount || undefined}
           warn
-          title={flaggedCount ? "claimed prefixes that got mail from senders they were not given to" : undefined}
+          title={flaggedCount ? m.nav_leaks_title() : undefined}
           onClick={() => onPick({ area: "leaks" })}
         />
       </div>
@@ -95,10 +97,10 @@ function Claimed({ ps, active, onPick }: { ps?: Prefix[]; active?: string; onPic
     .toSorted((a, b) => a.prefix.localeCompare(b.prefix) || a.zone.localeCompare(b.zone));
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <Heading>Prefixes</Heading>
+      <Heading>{m.shell_prefixes()}</Heading>
       {ps.length > filterFrom && (
         <div className="px-1.5 pb-1">
-          <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter" aria-label="Filter prefixes" className="h-7" />
+          <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={m.nav_filter()} aria-label={m.nav_filter_prefixes()} className="h-7" />
         </div>
       )}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-2">
@@ -115,7 +117,7 @@ function Claimed({ ps, active, onPick }: { ps?: Prefix[]; active?: string; onPic
             onClick={() => onPick({ prefix: p.address })}
           />
         ))}
-        {shown.length === 0 && <p className="px-3 text-small text-muted-foreground">{ps.length ? "No match." : "No claimed prefixes yet."}</p>}
+        {shown.length === 0 && <p className="px-3 text-small text-muted-foreground">{ps.length ? m.nav_no_match() : m.nav_no_claimed()}</p>}
       </div>
     </div>
   );

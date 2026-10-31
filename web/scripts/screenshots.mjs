@@ -9,6 +9,11 @@
 //
 // Without ENROLL_URL only the signed-out pages are captured. Nothing here
 // is committed output; the PNGs are for looking at.
+//
+// Everything is captured in English, the source language, whose
+// accessible names the steps below look for. The main screens are
+// captured again in each other language (§12.11), found by role and
+// structure instead of by name.
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -24,8 +29,13 @@ const browser = await chromium.launch({ executablePath: process.env.CHROME ?? "/
 const sizes = { wide: { width: 1440, height: 900 }, narrow: { width: 390, height: 844 } };
 const problems = [];
 
-async function page(scheme, size, storageState) {
+// The other UI languages; English is the default and needs nothing set.
+const translations = ["zh"];
+
+async function page(scheme, size, storageState, lang) {
   const ctx = await browser.newContext({ colorScheme: scheme, viewport: sizes[size], deviceScaleFactor: size === "narrow" ? 2 : 1, storageState });
+  // The language choice the account menu stores (Paraglide's localStorage strategy).
+  if (lang) await ctx.addInitScript((l) => localStorage.setItem("PARAGLIDE_LOCALE", l), lang);
   // The copy button of an extracted code writes to the clipboard.
   await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(base).origin });
   const p = await ctx.newPage();
@@ -241,7 +251,39 @@ if (enrollURL) {
         await s.getByRole("button", { name: "Prefixes" }).click();
         await shot(s, `prefixes-${tag}`);
       }
+      // The account menu: who is signed in, the language, signing out.
+      await s.goto(base + "/");
+      await s.getByRole("button", { name: "Account" }).click();
+      await s.getByRole("menu").waitFor();
+      await shot(s, `account-menu-${tag}`);
       await s.close();
+    }
+  }
+
+  for (const lang of translations) {
+    for (const scheme of ["light", "dark"]) {
+      for (const size of Object.keys(sizes)) {
+        const s = await page(scheme, size, state, lang);
+        const tag = `${lang}-${scheme}-${size}`;
+        for (const area of ["conversations", "notifications"]) {
+          await s.goto(base + `/?area=${area}`);
+          await s.getByRole("listbox").waitFor();
+          await shot(s, `list-${area}-${tag}`);
+        }
+        for (const [name, id] of Object.entries({ reading: lunch, "reading-otp": otp, "reading-attachments": invoice })) {
+          if (!id) continue;
+          await s.goto(base + `/?m=${id}`);
+          await s.locator("article h1").waitFor();
+          await shot(s, `${name}-${tag}`);
+        }
+        await s.goto(base + "/?compose=1");
+        await s.locator("textarea").waitFor();
+        await shot(s, `compose-${tag}`);
+        await s.goto(base + "/?area=leaks");
+        await s.locator("section h1").first().waitFor();
+        await shot(s, `area-leaks-${tag}`);
+        await s.close();
+      }
     }
   }
 }

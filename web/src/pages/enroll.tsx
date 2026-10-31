@@ -1,13 +1,16 @@
+import { ParaglideMessage } from "@inlang/paraglide-js-react";
 import { KeyRoundIcon } from "lucide-react";
 import { useState } from "react";
 
+import { markup } from "@/components/markup";
 import { useSession } from "@/api/queries";
 import { system, Voice } from "@/components/voice";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ceremonyError, register, supported } from "@/lib/webauthn";
+import { ceremonyError, register, supported, type Failure } from "@/lib/webauthn";
+import { m } from "@/paraglide/messages.js";
 
-import { AuthLayout, ErrorText } from "./auth-layout";
+import { AuthLayout, ErrorText, FailureText } from "./auth-layout";
 
 // The token travels in the fragment so that it never reaches a server or
 // proxy log (§13.7). It is moved out of the address bar on first read, so
@@ -33,7 +36,7 @@ export function EnrollPage() {
   const session = useSession();
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState("");
+  const [failure, setFailure] = useState<Failure>();
   const [done, setDone] = useState(false);
 
   const viaSession = !token && !!session.data;
@@ -42,7 +45,7 @@ export function EnrollPage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    setFailure("");
+    setFailure(undefined);
     try {
       await register(token, label.trim());
       setDone(true);
@@ -55,46 +58,41 @@ export function EnrollPage() {
 
   if (done) {
     return (
-      <AuthLayout title="Passkey registered">
+      <AuthLayout title={m.auth_enroll_done_title()}>
         <Voice speaker={system}>
-          <p className="text-body text-foreground">
-            The passkey is stored. {viaSession ? "It works from the next sign-in." : "The link is used up; sign in with the new passkey."}
-          </p>
+          <p className="text-body text-foreground">{viaSession ? m.auth_enroll_done_session() : m.auth_enroll_done_link()}</p>
         </Voice>
         <Button render={<a href={viaSession ? "/" : "/login"} />} nativeButton={false} className="self-start">
-          {viaSession ? "Back to mail" : "Sign in"}
+          {viaSession ? m.auth_back_to_mail() : m.auth_sign_in()}
         </Button>
       </AuthLayout>
     );
   }
 
   return (
-    <AuthLayout title={viaSession ? "Add a passkey" : "Register a passkey"}>
+    <AuthLayout title={viaSession ? m.auth_enroll_add_title() : m.auth_enroll_title()}>
       {!usable && !session.isPending ? (
         <ErrorText>
-          This page needs a one-time enrollment link. Run <code className="font-mono">yuuka admin enroll</code> on the server, or use a recovery code at{" "}
-          <a className="underline" href="/recover">
-            /recover
-          </a>
-          .
+          <ParaglideMessage
+            message={m.auth_enroll_needs_link}
+            markup={markup}
+          />
         </ErrorText>
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-4">
           <p className="text-body text-muted-foreground">
-            {viaSession
-              ? `Adds another passkey for ${session.data?.principal}.`
-              : "This link registers one passkey and then expires. Registering does not sign you in."}
+            {viaSession ? m.auth_enroll_adds_for({ principal: session.data?.principal ?? "" }) : m.auth_enroll_link_once()}
           </p>
           <label className="flex flex-col gap-1.5 text-body">
-            <span className="font-medium">Name for this passkey</span>
-            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder="e.g. laptop, phone" maxLength={100} />
+            <span className="font-medium">{m.auth_passkey_name()}</span>
+            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={m.auth_passkey_name_hint()} maxLength={100} />
           </label>
           <Button type="submit" size="lg" disabled={busy || !supported()} className="self-start">
             <KeyRoundIcon data-icon="inline-start" />
-            {busy ? "Waiting for authenticator…" : "Register passkey"}
+            {busy ? m.auth_waiting_authenticator() : m.auth_register_passkey()}
           </Button>
-          {!supported() && <ErrorText>This browser does not support passkeys.</ErrorText>}
-          <ErrorText>{failure}</ErrorText>
+          {!supported() && <ErrorText>{m.auth_unsupported()}</ErrorText>}
+          <FailureText f={failure} />
         </form>
       )}
     </AuthLayout>

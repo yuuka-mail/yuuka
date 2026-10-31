@@ -1,0 +1,447 @@
+{
+  "$schema": "https://inlang.com/schema/inlang-message-format",
+  "account_language": "Language",
+  "account_menu": "Account",
+  "account_sign_out": "Sign out",
+  "area_all": "All mail",
+  "area_conversations": "Conversations",
+  "area_downgraded": "Downgraded",
+  "area_downgraded_hint": "Mail to unclaimed prefixes, or that failed DMARC. Hidden everywhere else.",
+  "area_drafts": "Drafts",
+  "area_leaks": "Leaks & spoofs",
+  "area_leaks_hint": "Claimed prefixes that got mail from senders they were not given to, or mail pretending to be one of those senders. Set who a prefix was given to with {#code}yuuka prefix expect{/code}.",
+  "area_notifications": "Notifications",
+  "area_outbox": "Outbox",
+  "area_unclaimed": "Unclaimed prefixes",
+  "area_unclaimed_hint": "Addresses that got mail without being claimed. Claim one with {#code}yuuka prefix claim{/code}.",
+  "auth_back_to_mail": "Back to mail",
+  "auth_enroll_add_title": "Add a passkey",
+  "auth_enroll_adds_for": "Adds another passkey for {principal}.",
+  "auth_enroll_done_link": "The passkey is stored. The link is used up; sign in with the new passkey.",
+  "auth_enroll_done_session": "The passkey is stored. It works from the next sign-in.",
+  "auth_enroll_done_title": "Passkey registered",
+  "auth_enroll_link_once": "This link registers one passkey and then expires. Registering does not sign you in.",
+  "auth_enroll_needs_link": "This page needs a one-time enrollment link. Run {#code}yuuka admin enroll{/code} on the server, or use a recovery code at {#recover}/recover{/recover}.",
+  "auth_enroll_title": "Register a passkey",
+  "auth_err_ceremony": "The passkey prompt failed.",
+  "auth_err_invalid_state": "This authenticator already holds a passkey for yuuka.",
+  "auth_err_not_allowed": "The passkey prompt was cancelled or timed out.",
+  "auth_err_refused": "yuuka refused the request.",
+  "auth_err_security": "This page's origin does not match the configured WebUI origin.",
+  "auth_err_too_many": "Too many attempts. Wait a moment and try again.",
+  "auth_err_unreachable": "Could not reach yuuka.",
+  "auth_login_hint": "Use a passkey registered for this mailbox.",
+  "auth_login_no_passkey": "No passkey yet? Run {#code}yuuka admin enroll{/code} on the server for a one-time link.",
+  "auth_no_passkey_chosen": "No passkey was chosen.",
+  "auth_no_passkey_created": "No passkey was created.",
+  "auth_passkey_name": "Name for this passkey",
+  "auth_passkey_name_hint": "e.g. laptop, phone",
+  "auth_recover_bad_code": "That code did not work. Check it and try again; each code works once.",
+  "auth_recover_checking": "Checking…",
+  "auth_recover_code": "Recovery code",
+  "auth_recover_continue": "Continue to passkey registration",
+  "auth_recover_hint": "A recovery code lets you register one new passkey. It does not sign you in, works once, and the operator is alerted when it is used.",
+  "auth_recover_title": "Recover access",
+  "auth_register_passkey": "Register passkey",
+  "auth_sign_in": "Sign in",
+  "auth_sign_in_passkey": "Sign in with passkey",
+  "auth_unsupported": "This browser does not support passkeys.",
+  "auth_waiting_authenticator": "Waiting for authenticator…",
+  "auth_waiting_passkey": "Waiting for passkey…",
+  "facts_auth": "Auth",
+  "facts_auth_for": "for {domain}",
+  "facts_auth_not_received": "none: sent by this system, never received",
+  "facts_auth_unverified": "unverified",
+  "facts_auth_unverified_because": "unverified ({reason})",
+  "facts_auth_withheld": "withheld: this session lacks delivery:read",
+  "facts_class": "Class",
+  "facts_leak_claims": "claims {domain} unproven",
+  "facts_leak_from": "from {domain}",
+  "facts_leak_unproven": "from an unproven sender",
+  "facts_left_out": "Left out",
+  "facts_parse_error": "Parse error",
+  "facts_prefix": "Prefix",
+  "facts_received": "Received",
+  "facts_sent": "Sent",
+  "facts_sent_as": "by this system as {from}",
+  "facts_stripped_hidden": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} hidden element",
+        "countPlural=other": "{count} hidden elements"
+      }
+    }
+  ],
+  "facts_stripped_images": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} image without alt text",
+        "countPlural=other": "{count} images without alt text"
+      }
+    }
+  ],
+  "facts_stripped_links": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} unsafe link target",
+        "countPlural=other": "{count} unsafe link targets"
+      }
+    }
+  ],
+  "facts_stripped_pixels": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} tracking pixel",
+        "countPlural=other": "{count} tracking pixels"
+      }
+    }
+  ],
+  "facts_stripped_quoted": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} quoted line",
+        "countPlural=other": "{count} quoted lines"
+      }
+    }
+  ],
+  "facts_submitted": "Submitted",
+  "leak_facts_label": "Prefix facts",
+  "leak_from": "from {domains}",
+  "leak_given_to": "given to {#b}{domains}{/b}",
+  "leak_given_to_nobody": "given to nobody yet: {#code}yuuka prefix expect{/code}",
+  "leak_leaked": "{n} leaked",
+  "leak_leaked_unproven": "{n} leaked ({unproven} unproven)",
+  "leak_list_label": "Leaked prefixes",
+  "leak_loading_more": "Loading more…",
+  "leak_more_below": "{n} more in the list below",
+  "leak_no_unclaimed": "No unclaimed prefixes.",
+  "leak_none": "No claimed prefix got mail it should not have.",
+  "leak_offending_label": "Offending mail",
+  "leak_proven_senders": "proven senders",
+  "leak_spoofed": "{n} spoofed",
+  "leak_unclaimed_label": "Unclaimed prefixes",
+  "leak_unproven": "unproven",
+  "list_attachment": "attachment",
+  "list_empty": "No mail here.",
+  "list_loading_more": "Loading more…",
+  "list_messages": "Messages",
+  "list_notification_tag": "notification",
+  "list_quarantined": "quarantined",
+  "nav_filter": "Filter",
+  "nav_filter_prefixes": "Filter prefixes",
+  "nav_leaks_title": "claimed prefixes that got mail from senders they were not given to",
+  "nav_mailboxes": "Mailboxes",
+  "nav_no_claimed": "No claimed prefixes yet.",
+  "nav_no_match": "No match.",
+  "nav_outbox_unknown": "may have been sent: waiting for a decision",
+  "nav_review": "Review",
+  "no_subject": "(no subject)",
+  "read_attachments": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} attachment",
+        "countPlural=other": "{count} attachments"
+      }
+    }
+  ],
+  "read_download": "Download {name}",
+  "read_download_part": "Download part {section}",
+  "read_lines_collapsed": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} line collapsed",
+        "countPlural=other": "{count} lines collapsed"
+      }
+    }
+  ],
+  "read_link_goes": "Goes to {host}",
+  "read_link_mismatch": "The text names another site; this link goes to {host}",
+  "read_link_to": "Link to {anchor}",
+  "read_load_rest": "Load the rest",
+  "read_loading": "Loading…",
+  "read_no_anchor": "There is no {anchor} in this message; it may have been cited from an older view.",
+  "read_no_body": "No text body.",
+  "read_no_filename": "(no file name, part {section})",
+  "read_part": "Part {section}",
+  "read_quoted": "Quoted text",
+  "reading_attachment": "attachment",
+  "reading_back": "Back",
+  "reading_cc": "Cc",
+  "reading_dated": "dated {when}",
+  "reading_delivered_to": "delivered to",
+  "reading_expected_sender": "expected sender",
+  "reading_extracted_label": "Extracted by yuuka",
+  "reading_fold_facts": "Fold the facts into one line",
+  "reading_more": "+{count} more",
+  "reading_n_messages": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} message",
+        "countPlural=other": "{count} messages"
+      }
+    }
+  ],
+  "reading_n_participants": [
+    {
+      "declarations": [
+        "input count",
+        "local countPlural = count: plural"
+      ],
+      "selectors": [
+        "countPlural"
+      ],
+      "match": {
+        "countPlural=one": "{count} participant",
+        "countPlural=other": "{count} participants"
+      }
+    }
+  ],
+  "reading_open_in_outbox": "Open in outbox",
+  "reading_received_at": "received {when}",
+  "reading_reply": "Reply",
+  "reading_reply_to": "Reply-To",
+  "reading_sent_as": "sent as {from}",
+  "reading_submitted_at": "submitted {when}",
+  "reading_thread": "Thread · {messages} · {participants}",
+  "reading_to": "To",
+  "send_add_recipient": "Add a recipient to send.",
+  "send_addr_placeholder": "name@example.org, …",
+  "send_agent_drafted": "drafted this {time}",
+  "send_back": "Back",
+  "send_body_placeholder": "Write in Markdown. > quotes, a blank line starts a paragraph.",
+  "send_cc_bcc": "Cc Bcc",
+  "send_choose_one": "Choose one",
+  "send_cite_message": "message",
+  "send_cites": "cites",
+  "send_close": "Close",
+  "send_close_composer": "Close composer",
+  "send_close_composer_title": "Close (saved as a draft)",
+  "send_compose_label": "Compose",
+  "send_confirm_and_send": "Confirm and send",
+  "send_confirm_detail": "it is queued with you as the approver (§8.9)",
+  "send_confirms_draft": "Send confirms {name}'s draft",
+  "send_delete_draft": "Delete draft",
+  "send_draft_smtp_snippet": "(submitted over SMTP)",
+  "send_drafts_empty": "No drafts here.",
+  "send_drafts_list_label": "Drafts",
+  "send_fact_approved_by": "Approved by",
+  "send_fact_attempts": "Attempts",
+  "send_fact_attempts_last": "{n}, last {outcome}",
+  "send_fact_attempts_none": "none yet",
+  "send_fact_error": "Error",
+  "send_fact_from": "From",
+  "send_fact_next_try": "Next try",
+  "send_fact_recipients": "Recipients",
+  "send_fact_state": "State",
+  "send_fact_submitted": "Submitted",
+  "send_fact_submitted_by": "{time} by {who}",
+  "send_field_bcc": "Bcc",
+  "send_field_body": "Body",
+  "send_field_cc": "Cc",
+  "send_field_from": "From",
+  "send_field_subject": "Subject",
+  "send_field_to": "To",
+  "send_filter_all": "All",
+  "send_filter_attention": "Needs attention",
+  "send_filter_moving": "In flight",
+  "send_filter_sent": "Sent",
+  "send_held_as_draft": "Held as a draft: {reason}",
+  "send_held_no_grant": "Held as a draft: no grant",
+  "send_held_nothing_sent": "Nothing was sent. The draft stays in Drafts; a person can confirm it there.",
+  "send_held_nothing_sent_owner": "Nothing was sent. The draft stays in Drafts; only {name} can confirm it.",
+  "send_held_title": "held as a draft",
+  "send_hold_limit": "over the sending limit",
+  "send_hold_loop": "mail loop guard",
+  "send_hold_owner": "owner cap",
+  "send_hold_policy": "drafts only",
+  "send_hold_recipients": "recipient outside the grant",
+  "send_hold_review": "review not available yet",
+  "send_hold_suspended": "grant suspended",
+  "send_hold_unknown": "held",
+  "send_hold_withdrawn": "withdrawn",
+  "send_keep": "Keep",
+  "send_limit_day": "{n}/day",
+  "send_limit_hour": "{n}/hour",
+  "send_load_more": "Load more",
+  "send_loading": "Loading…",
+  "send_local_part": "Local part",
+  "send_local_part_placeholder": "name",
+  "send_mark_held": "held · {reason}",
+  "send_mark_outbox_title": "outbox: {state}",
+  "send_no_cites": "No cites given.",
+  "send_no_draft_scope": "This session may not write drafts ({scope}).",
+  "send_no_grant_theirs": "the address is {owner}'s, and you have no grant to send as it",
+  "send_no_grant_yours": "the address is yours, and you have no grant to send as it",
+  "send_no_identities": "No identity to send as. Add one with {#code}yuuka identity add{/code} and {#code}yuuka grant set{/code}.",
+  "send_no_identity_detail": "the draft is kept, but it cannot be sent as it is",
+  "send_no_identity_headline": "No identity covers this address",
+  "send_no_recipients": "(no recipients)",
+  "send_no_subject": "(no subject)",
+  "send_not_an_address": "Not an address: {list}",
+  "send_not_saved": "Not saved: {reason}",
+  "send_note_held": "held: {reason}",
+  "send_note_no_grant": "held: no grant",
+  "send_only_owner_confirms": "Held: only {name} can confirm mail as this address",
+  "send_only_owner_sends": "Held: only {name} can send as this address",
+  "send_only_owner_sends_detail": "it is {name}'s, and you cannot send as it (§8.9)",
+  "send_open_draft": "Open the draft",
+  "send_open_in_outbox": "Open in outbox",
+  "send_open_sent_copy": "Open the sent copy",
+  "send_opt_no_identity": "no identity",
+  "send_opt_sends": "sends ({tier})",
+  "send_outbox_empty": "Nothing in the outbox here.",
+  "send_outbox_id": "outbox {id}",
+  "send_outbox_list_label": "Outbox",
+  "send_outbox_row_title": "Outbox {id}",
+  "send_outbox_voice_title": "outbox",
+  "send_owner_cap_detail": "owner cap (§8.9)",
+  "send_problem_body_too_large": "The draft is too large",
+  "send_problem_conflict": "Already submitted: the draft has gone to the outbox",
+  "send_problem_forbidden": "Not allowed",
+  "send_problem_invalid_body": "Something in the draft is not valid",
+  "send_problem_invalid_param": "The request was not valid",
+  "send_problem_no_identity": "No identity covers this From address",
+  "send_problem_not_found": "Not found: it may have been deleted",
+  "send_problem_rate_limited": "Too many requests; try again in a moment",
+  "send_problem_scope_required": "This session is not allowed to do that",
+  "send_problem_status": "Request failed ({status})",
+  "send_problem_submission_rejected": "yuuka refused the submission",
+  "send_problem_unauthenticated": "The session has ended; sign in again",
+  "send_problem_unavailable": "yuuka is busy; try again in a moment",
+  "send_problem_unreachable": "Could not reach yuuka",
+  "send_queues_it": "Send queues it",
+  "send_rcpt_accepted": "accepted",
+  "send_rcpt_deferred": "deferred",
+  "send_rcpt_pending": "pending",
+  "send_rcpt_rejected": "rejected",
+  "send_rcpt_unknown": "unknown",
+  "send_recording": "Recording…",
+  "send_resend_twice": "They may receive it twice.",
+  "send_resolve_abandon": "Give up",
+  "send_resolve_abandon_risk": "Records it as not sent. Nothing more is sent; if the first attempt did arrive, it stays arrived.",
+  "send_resolve_resend": "Send it again",
+  "send_resolve_resend_risk": "Queues it again for the unknown recipients. If the first attempt did arrive, they get the message twice.",
+  "send_resolve_sent": "It was sent",
+  "send_resolve_sent_risk": "Records the unknown recipients as having received it. Choose this when you know it arrived: a reply, or the exit's own log.",
+  "send_saved": "Saved {time}",
+  "send_saving": "Saving…",
+  "send_scope_allowlist": "allowlisted recipients",
+  "send_scope_allowlist_some": "allowlisted recipients ({list})",
+  "send_scope_any": "any recipient",
+  "send_scope_thread": "the thread's participants",
+  "send_send": "Send",
+  "send_sending": "Sending…",
+  "send_smtp_note": "Submitted over SMTP: the message is kept as the client sent it and is not edited here. Send it as it is, or delete it.",
+  "send_state_dead": "not sent",
+  "send_state_failed": "failed, will retry",
+  "send_state_held": "held for review",
+  "send_state_partial": "partly sent",
+  "send_state_queued": "queued",
+  "send_state_sending": "sending",
+  "send_state_sent": "sent",
+  "send_state_unknown": "may have been sent",
+  "send_state_withdrawn": "withdrawn",
+  "send_submitted_title": "submitted to the outbox",
+  "send_tier_auto": "auto",
+  "send_tier_draft": "drafts only",
+  "send_tier_none": "no use",
+  "send_tier_review": "review",
+  "send_title_draft": "Draft",
+  "send_title_in_outbox": "In the outbox",
+  "send_title_new": "New message",
+  "send_title_reply": "Reply",
+  "send_to_scope": "to {scope}",
+  "send_unknown_body": "The exit was handed the whole message, then the answer was lost. It may have been delivered or not; yuuka cannot tell, so it does not retry on its own.",
+  "send_unknown_decide": "Decide",
+  "send_unknown_label": "Delivery unknown",
+  "send_unknown_only_person": "Only a person signed in with {scope} can decide this.",
+  "send_unknown_title": "May have been sent",
+  "shell_compose": "Compose",
+  "shell_compose_title": "New message (c)",
+  "shell_drafts_draft": "Drafts",
+  "shell_drafts_held": "Held",
+  "shell_drafts_outbox": "In outbox",
+  "shell_include_downgraded": "downgraded",
+  "shell_keys": "{#k}j{/k} {#k}k{/k} move · {#k}/{/k} search · {#k}r{/k} reply · {#k}c{/k} compose · {#k}Esc{/k} close",
+  "shell_no_draft_open": "No draft open.",
+  "shell_no_message": "No message selected.",
+  "shell_pick_outbox_row": "Pick a row to see each recipient and the attempts.",
+  "shell_pick_prefix": "Pick a prefix to list its mail.",
+  "shell_prefixes": "Prefixes",
+  "shell_search_clear": "Clear search",
+  "shell_search_label": "Search mail",
+  "shell_search_placeholder": "Search subject, sender, body",
+  "shell_search_title": "“{q}”",
+  "shell_show_drafts": "Show drafts",
+  "shell_show_outbox": "Show outbox rows",
+  "shell_zone": "Zone",
+  "x_code_title": "Code found by yuuka in the {source} (confidence {confidence})",
+  "x_copied": "Copied",
+  "x_copy_title": "Copy the code",
+  "x_copy_value": "Copy {value}",
+  "x_expired": "expired",
+  "x_left_d": "{n} d left",
+  "x_left_h": "{n} h left",
+  "x_left_min": "{n} min left",
+  "x_left_s": "{n} s left",
+  "x_open": "open",
+  "x_open_title": "Open {href} in a new tab",
+  "x_unverified": "unverified",
+  "x_unverified_title": "No DMARC pass from the trusted receiver: the sender is unproven"
+}

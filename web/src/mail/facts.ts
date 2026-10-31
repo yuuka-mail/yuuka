@@ -1,6 +1,7 @@
 import type { Auth, Facts, LeakCheck, LeakVerdict, Message, Sent, Stripped } from "@/api/types";
 
 import { fullTime } from "@/lib/format";
+import { m as msg } from "@/paraglide/messages.js";
 import { outboxState } from "@/send/outgoing";
 
 // What the system knows about a message, as opposed to what the message
@@ -21,11 +22,12 @@ export interface Fact {
 const resultTone = (r: string): Tone => (r === "pass" ? "ok" : r === "fail" || r === "softfail" || r === "permerror" ? "bad" : "plain");
 
 function authParts(a: Auth): Part[] {
-  if (a.withheld) return [{ text: "withheld: this session lacks delivery:read", tone: "plain" }];
+  if (a.withheld) return [{ text: msg.facts_auth_withheld(), tone: "plain" }];
   // Our own bytes never passed a receiver: no verdict, and nothing
   // suspect about that either (§4.6).
-  if (a.not_received) return [{ text: "none: sent by this system, never received", tone: "plain" }];
-  if (!a.verified) return [{ text: `unverified${a.reason ? ` (${a.reason})` : ""}`, tone: "warn" }];
+  if (a.not_received) return [{ text: msg.facts_auth_not_received(), tone: "plain" }];
+  // The reason is the server's words, a note after ours (§12.11).
+  if (!a.verified) return [{ text: a.reason ? msg.facts_auth_unverified_because({ reason: a.reason }) : msg.facts_auth_unverified(), tone: "warn" }];
   const parts: Part[] = [];
   for (const [name, r] of [
     ["dmarc", a.dmarc],
@@ -35,7 +37,7 @@ function authParts(a: Auth): Part[] {
     if (r) parts.push({ text: `${name}=${r}`, tone: resultTone(r) });
   }
   // DMARC alone says whether this domain is genuine (§8.1).
-  if (a.from_domain) parts.push({ text: `for ${a.from_domain}`, tone: "plain" });
+  if (a.from_domain) parts.push({ text: msg.facts_auth_for({ domain: a.from_domain }), tone: "plain" });
   return parts;
 }
 
@@ -44,7 +46,11 @@ const verdictTone: Record<LeakVerdict, Tone> = { ok: "ok", leak: "warn", spoof: 
 /** One delivery's leak check (§3.3), e.g. "github@example.com" "leak" "from example.org". */
 export function leakParts(c: LeakCheck): Part[] {
   const about =
-    c.verdict === "spoof" ? `claims ${c.domain} unproven` : c.domain ? `from ${c.domain}` : "from an unproven sender";
+    c.verdict === "spoof"
+      ? msg.facts_leak_claims({ domain: c.domain ?? "" })
+      : c.domain
+        ? msg.facts_leak_from({ domain: c.domain })
+        : msg.facts_leak_unproven();
   return [
     { text: c.to, tone: "plain" },
     { text: c.verdict, tone: verdictTone[c.verdict] },
@@ -54,26 +60,26 @@ export function leakParts(c: LeakCheck): Part[] {
 
 export function strippedText(s: Stripped): string {
   const out: string[] = [];
-  const add = (n: number | undefined, one: string, many: string) => n && out.push(`${n} ${n === 1 ? one : many}`);
-  add(s.tracking_pixels, "tracking pixel", "tracking pixels");
-  add(s.hidden, "hidden element", "hidden elements");
-  add(s.images, "image without alt text", "images without alt text");
-  add(s.unsafe_links, "unsafe link target", "unsafe link targets");
-  add(s.quoted_lines, "quoted line", "quoted lines");
+  const add = (n: number | undefined, text: (i: { count: number }) => string) => n && out.push(text({ count: n }));
+  add(s.tracking_pixels, msg.facts_stripped_pixels);
+  add(s.hidden, msg.facts_stripped_hidden);
+  add(s.images, msg.facts_stripped_images);
+  add(s.unsafe_links, msg.facts_stripped_links);
+  add(s.quoted_lines, msg.facts_stripped_quoted);
   return out.join(", ");
 }
 
 /** The rows of the facts box; f is undefined until the view has loaded. */
 export function systemFacts(m: Message, f: Facts | undefined): Fact[] {
   const facts: Fact[] = [];
-  if (m.parse_error) facts.push({ label: "Parse error", parts: [{ text: m.parse_error, tone: "bad" }] });
-  if (f?.sent) facts.push({ label: "Sent", parts: sentParts(f.sent) });
-  if (f) facts.push({ label: "Auth", parts: authParts(f.auth) });
-  if (f?.leak_checks?.length) facts.push({ label: "Prefix", parts: f.leak_checks.flatMap(leakParts) });
-  facts.push({ label: f?.auth.not_received ? "Submitted" : "Received", parts: [{ text: fullTime(m.received_at), tone: "plain" }] });
-  facts.push({ label: "Class", parts: [{ text: m.class, tone: "plain" }] });
+  if (m.parse_error) facts.push({ label: msg.facts_parse_error(), parts: [{ text: m.parse_error, tone: "bad" }] });
+  if (f?.sent) facts.push({ label: msg.facts_sent(), parts: sentParts(f.sent) });
+  if (f) facts.push({ label: msg.facts_auth(), parts: authParts(f.auth) });
+  if (f?.leak_checks?.length) facts.push({ label: msg.facts_prefix(), parts: f.leak_checks.flatMap(leakParts) });
+  facts.push({ label: f?.auth.not_received ? msg.facts_submitted() : msg.facts_received(), parts: [{ text: fullTime(m.received_at), tone: "plain" }] });
+  facts.push({ label: msg.facts_class(), parts: [{ text: m.class, tone: "plain" }] });
   const stripped = f && strippedText(f.stripped);
-  if (stripped) facts.push({ label: "Left out", parts: [{ text: stripped, tone: "plain" }] });
+  if (stripped) facts.push({ label: msg.facts_left_out(), parts: [{ text: stripped, tone: "plain" }] });
   return facts;
 }
 
@@ -123,5 +129,5 @@ export function sentState(s: Sent): Part {
 }
 
 function sentParts(s: Sent): Part[] {
-  return [{ text: `by this system as ${s.from}`, tone: "plain" }, sentState(s)];
+  return [{ text: msg.facts_sent_as({ from: s.from }), tone: "plain" }, sentState(s)];
 }

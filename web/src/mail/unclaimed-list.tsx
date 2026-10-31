@@ -4,6 +4,9 @@ import { useEffect, useRef } from "react";
 import { useUnclaimedPrefixes } from "@/api/queries";
 import { Skeleton } from "@/components/ui/skeleton";
 import { count, listTime } from "@/lib/format";
+import { m } from "@/paraglide/messages.js";
+import { ProblemLine } from "@/send/marks";
+import { problem } from "@/send/outgoing";
 
 const rowHeight = 28;
 
@@ -34,15 +37,19 @@ export function UnclaimedList({ onPick }: { onPick: (address: string) => void })
     );
   }
   if (list.error) {
-    return <p className="p-4 text-destructive">{list.error instanceof Error ? list.error.message : "Could not load the prefixes."}</p>;
+    return (
+      <p className="p-4">
+        <ProblemLine p={problem(list.error)} />
+      </p>
+    );
   }
   if (list.items.length === 0) {
-    return <p className="p-4 text-muted-foreground">No unclaimed prefixes.</p>;
+    return <p className="p-4 text-muted-foreground">{m.leak_no_unclaimed()}</p>;
   }
 
   return (
     <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto py-1">
-      <ul className="relative w-full" style={{ height: v.getTotalSize() }} aria-label="Unclaimed prefixes">
+      <ul className="relative w-full" style={{ height: v.getTotalSize() }} aria-label={m.leak_unclaimed_label()}>
         {items.map((it) => {
           const p = list.items[it.index];
           return (
@@ -58,7 +65,7 @@ export function UnclaimedList({ onPick }: { onPick: (address: string) => void })
                   <span className="w-14 shrink-0 text-right text-meta text-muted-foreground tabular-nums">{p.last_seen ? listTime(p.last_seen) : ""}</span>
                 </button>
               ) : (
-                <div className="flex h-full items-center px-3 text-small text-muted-foreground">Loading more…</div>
+                <div className="flex h-full items-center px-3 text-small text-muted-foreground">{m.leak_loading_more()}</div>
               )}
             </li>
           );

@@ -1,9 +1,13 @@
+/// <reference types="vitest/config" />
 import { rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { paraglideVitePlugin } from "@inlang/paraglide-js";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
+
+import { paraglide } from "./scripts/paraglide.mjs";
 
 // The API the dev server proxies to: `yuuka serve` with
 // YUUKA_WEB_ORIGIN=http://localhost:<dev port>, so WebAuthn and the
@@ -24,7 +28,7 @@ function cleanAssets(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), tailwindcss(), cleanAssets()],
+  plugins: [react(), tailwindcss(), cleanAssets(), paraglideVitePlugin(paraglide)],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
@@ -36,6 +40,10 @@ export default defineConfig({
       "/api": { target: api },
       "/auth": { target: api },
     },
+  },
+  test: {
+    // Tests read English, whatever language the machine prefers.
+    setupFiles: ["./src/test-setup.ts"],
   },
   build: {
     emptyOutDir: false,

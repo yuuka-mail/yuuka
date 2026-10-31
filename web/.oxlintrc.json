@@ -10,5 +10,5 @@
     "import/no-unassigned-import": ["warn", { "allow": ["**/*.css"] }],
     "react/incompatible-library": "off"
   },
-  "ignorePatterns": ["src/api/schema.gen.ts"]
+  "ignorePatterns": ["src/api/schema.gen.ts", "src/paraglide"]
 }

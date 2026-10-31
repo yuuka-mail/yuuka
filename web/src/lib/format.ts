@@ -1,12 +1,15 @@
+import { getLocale } from "@/paraglide/runtime.js";
+
 // Dates in lists are short and fixed-width enough to scan down a column:
-// time today, day and month this year, the full date before that.
+// time today, day and month this year, the full date before that. Only
+// the middle one follows the UI language (Nov 1, 11月1日; §12.11).
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-export function listTime(iso: string, now = new Date()): string {
+export function listTime(iso: string, now = new Date(), locale: string = getLocale()): string {
   const d = new Date(iso);
   if (d.toDateString() === now.toDateString()) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  if (d.getFullYear() === now.getFullYear()) return `${d.toLocaleString("en", { month: "short" })} ${d.getDate()}`;
+  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString(locale, { month: "short", day: "numeric" });
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
@@ -29,4 +32,4 @@ export function localPart(address: string): string {
   return i > 0 ? address.slice(0, i) : address;
 }
 
-export const count = (n: number) => n.toLocaleString("en");
+export const count = (n: number) => n.toLocaleString(getLocale());

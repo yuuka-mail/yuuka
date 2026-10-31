@@ -14,7 +14,7 @@
 
 ```
 React 19 + Vite + TypeScript + Tailwind 4 + shadcn/ui + TanStack Query
-+ TanStack Virtual（虚拟列表）+ vite-plugin-pwa
++ TanStack Virtual（虚拟列表）+ Paraglide JS（界面文案，§12.11）+ vite-plugin-pwa
 ```
 
 ### 12.0 Next 还是 Vite：选 Vite
@@ -166,7 +166,7 @@ M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里�
   （punycode 原样显示），链接文字自称的主机和真实主机对不上时标成错误色。附件列表里每项是指向上面那个端点的普通下载链接，不预览。
   取舍：引用折叠后只剩一行标记，看不到被引的原文——那是线程里的另一封信，点线程条去看
 - **shadcn 选 Base UI 作底层**（`components.json` 的 `base-nova`），只拷了 Button / Input / Badge /
-  ToggleGroup / Skeleton / Separator；三栏、列表、阅读区按 §12.3 自己写
+  ToggleGroup / Skeleton / Separator，外加一个照 shadcn 形状裁剪的 DropdownMenu（顶栏的账户菜单）；三栏、列表、阅读区按 §12.3 自己写
 - **lint 用 oxlint 而不是 ESLint**：仓库固定 TypeScript 7（与 Worker 一致），typescript-eslint
   还不支持它；oxlint 不依赖 TS 的 JS API，一个依赖就带齐 React hooks 规则。typescript-eslint
   支持 TS 7 之后可以换回去，规则集不变
@@ -423,6 +423,27 @@ i18n 是边角情况积累很深的领域：复数类别、带参数的语序、
 - 截图自查从「亮暗两套主题 × 窄屏」再乘上两种语言。英文通常更长，按钮和分段控件以英文为准不截断
 - 消息要有人守门：JSX 文本节点里的裸字符串由测试拦住，办法和 [`design.test.ts`](../../web/src/design.test.ts) 拦字号一样，
   否则新代码会悄悄绕过 `m.*`
+
+**落地。** 文案在 [`web/messages/`](../../web/messages/)，编译配置只有一处（[`web/scripts/paraglide.mjs`](../../web/scripts/paraglide.mjs)，
+Vite 插件和 `check` 里的 `pnpm run i18n` 都读它），守门的测试在 [`i18n.test.ts`](../../web/src/i18n.test.ts)。实现时定下的几处：
+
+- **版本**：`@inlang/paraglide-js` 2.29、`@inlang/plugin-message-format` 4.5 是构建期依赖；运行时只多一个 `@inlang/paraglide-js-react`
+  （几十行，只渲染 markup）。markup 的渲染组件集中在 [`markup.tsx`](../../web/src/components/markup.tsx)，文案里只写标签名
+- **消息格式插件按 npm 依赖装，`settings.json` 用本地路径引用它**，不用 inlang 默认的 CDN 地址：编译不联网，
+  插件版本进锁文件、受 14 天规则管，和别的依赖一样
+- **生成物 `web/src/paraglide/` 不进 git**（编译器自己写 `.gitignore`），和 `schema.gen.ts` 不同：它是几百个文件，
+  由同一份 JSON 确定地生成，审阅看 JSON 的 diff 就够了。生成的是带 JSDoc 类型的 JS，所以 `tsconfig` 开了 `allowJs`；
+  Paraglide 另生成 `.d.ts` 的选项要 TypeScript 的 JS API，TS 7 没有
+- **键是扁平的 snake_case，按区域加前缀**（`send_`、`reading_`、`area_`……）。状态名、原因短语这类查表的文案写成调用时求值的函数，
+  不是模块级常量——常量在模块加载时就按当时的语言定死了
+- **三条测试**：各语言的键一致、译文只用英文有的参数；每条消息在每种语言下用单数和复数各渲染一次，
+  变体一个都不匹配时生成的代码会返回键名本身，编译期发现不了；JSX 文本节点里不许有裸字符串
+  （产品名和 `Ctrl+Enter` 这类键名除外）。测试一律按英文跑（[`test-setup.ts`](../../web/src/test-setup.ts)），不跟机器的语言走
+- **一个变体里不要有两个选择器**：`{messages} 封、{participants} 人` 拆成两条各自带复数的消息再拼，
+  多选择器的匹配键语法容易写错，错了只会在运行时打印键名
+- 语言在顶栏的账户菜单里选，每种语言用它自己的名字（English / 中文），看不懂当前界面也找得到
+- 读路径的错误（列表、阅读区、前缀表）也改成按 `code` 说一句自己的话、`detail` 作附注（`send/outgoing.ts` 的 `problem`），
+  登录、注册、恢复页同理：浏览器或服务端说的原话只作附注
 
 ### 12.12 管理动作长在上下文里
 

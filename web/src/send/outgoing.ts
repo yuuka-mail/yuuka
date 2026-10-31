@@ -1,6 +1,7 @@
 import { ApiError } from "@/api/client";
 import type { Actor, Code, Draft, DraftBody, HoldReason, Message, OutboxEntry, OutboxState, RecipientState, SendingIdentity, SessionInfo, Tier } from "@/api/types";
 import { fullTime, sender } from "@/lib/format";
+import { m as msg } from "@/paraglide/messages.js";
 
 // What yuuka says about outgoing mail, as words and tones. Everything
 // here is the system speaking (§12.5): the outbox state, why a draft was
@@ -18,23 +19,24 @@ export interface StateInfo {
   tone: Tone;
 }
 
-const outboxStates: Record<OutboxState, StateInfo> = {
-  held: { label: "held for review", tone: "moving" },
-  queued: { label: "queued", tone: "moving" },
-  sending: { label: "sending", tone: "moving" },
-  sent: { label: "sent", tone: "ok" },
+// Functions, not strings: the words are the current locale's (§12.11).
+const outboxStates: Record<OutboxState, () => StateInfo> = {
+  held: () => ({ label: msg.send_state_held(), tone: "moving" }),
+  queued: () => ({ label: msg.send_state_queued(), tone: "moving" }),
+  sending: () => ({ label: msg.send_state_sending(), tone: "moving" }),
+  sent: () => ({ label: msg.send_state_sent(), tone: "ok" }),
   // Some recipients took it, some are still being retried or refused.
-  partial: { label: "partly sent", tone: "warn" },
+  partial: () => ({ label: msg.send_state_partial(), tone: "warn" }),
   // §4.5: past the commit point with no answer. The words are the ones
   // §4.5 asks for: the person decides from here.
-  unknown: { label: "may have been sent", tone: "warn" },
-  failed: { label: "failed, will retry", tone: "warn" },
-  dead: { label: "not sent", tone: "bad" },
-  withdrawn: { label: "withdrawn", tone: "plain" },
+  unknown: () => ({ label: msg.send_state_unknown(), tone: "warn" }),
+  failed: () => ({ label: msg.send_state_failed(), tone: "warn" }),
+  dead: () => ({ label: msg.send_state_dead(), tone: "bad" }),
+  withdrawn: () => ({ label: msg.send_state_withdrawn(), tone: "plain" }),
 };
 
 export function outboxState(s: OutboxState | string): StateInfo {
-  return outboxStates[s as OutboxState] ?? { label: s, tone: "plain" };
+  return outboxStates[s as OutboxState]?.() ?? { label: s, tone: "plain" };
 }
 
 /** Whether a row changes without anyone deciding, so it is worth polling. */
@@ -52,16 +54,16 @@ export function outboxMoves(e: Pick<OutboxEntry, "state" | "next_retry_at">): bo
   }
 }
 
-const recipientStates: Record<RecipientState, StateInfo> = {
-  pending: { label: "pending", tone: "moving" },
-  accepted: { label: "accepted", tone: "ok" },
-  deferred: { label: "deferred", tone: "warn" },
-  rejected: { label: "rejected", tone: "bad" },
-  unknown: { label: "unknown", tone: "warn" },
+const recipientStates: Record<RecipientState, () => StateInfo> = {
+  pending: () => ({ label: msg.send_rcpt_pending(), tone: "moving" }),
+  accepted: () => ({ label: msg.send_rcpt_accepted(), tone: "ok" }),
+  deferred: () => ({ label: msg.send_rcpt_deferred(), tone: "warn" }),
+  rejected: () => ({ label: msg.send_rcpt_rejected(), tone: "bad" }),
+  unknown: () => ({ label: msg.send_rcpt_unknown(), tone: "warn" }),
 };
 
 export function recipientState(s: RecipientState): StateInfo {
-  return recipientStates[s] ?? { label: s, tone: "plain" };
+  return recipientStates[s]?.() ?? { label: s, tone: "plain" };
 }
 
 /**
@@ -69,33 +71,62 @@ export function recipientState(s: RecipientState): StateInfo {
  * should look at; unknown among it is what only a person can settle.
  */
 export const outboxFilters = {
-  all: { label: "All", states: undefined },
-  attention: { label: "Needs attention", states: ["unknown", "partial", "failed", "dead"] },
-  moving: { label: "In flight", states: ["held", "queued", "sending"] },
-  sent: { label: "Sent", states: ["sent"] },
-} as const satisfies Record<string, { label: string; states: readonly OutboxState[] | undefined }>;
+  all: {
+    get label() {
+      return msg.send_filter_all();
+    },
+    states: undefined,
+  },
+  attention: {
+    get label() {
+      return msg.send_filter_attention();
+    },
+    states: ["unknown", "partial", "failed", "dead"],
+  },
+  moving: {
+    get label() {
+      return msg.send_filter_moving();
+    },
+    states: ["held", "queued", "sending"],
+  },
+  sent: {
+    get label() {
+      return msg.send_filter_sent();
+    },
+    states: ["sent"],
+  },
+} as const satisfies Record<string, { readonly label: string; states: readonly OutboxState[] | undefined }>;
 export type OutboxFilter = keyof typeof outboxFilters;
 
-const holdReasons: Record<HoldReason, string> = {
-  policy: "drafts only",
-  owner: "owner cap",
-  limit: "over the sending limit",
-  recipients: "recipient outside the grant",
-  suspended: "grant suspended",
-  loop: "mail loop guard",
-  review: "review not available yet",
-  withdrawn: "withdrawn",
+const holdReasons: Record<HoldReason, () => string> = {
+  policy: () => msg.send_hold_policy(),
+  owner: () => msg.send_hold_owner(),
+  limit: () => msg.send_hold_limit(),
+  recipients: () => msg.send_hold_recipients(),
+  suspended: () => msg.send_hold_suspended(),
+  loop: () => msg.send_hold_loop(),
+  review: () => msg.send_hold_review(),
+  withdrawn: () => msg.send_hold_withdrawn(),
 };
 
 /** A few words for why a submission stopped at a draft (§8.9). */
 export function holdLabel(r: HoldReason | undefined): string {
-  return r ? (holdReasons[r] ?? r) : "held";
+  return r ? (holdReasons[r]?.() ?? r) : msg.send_hold_unknown();
 }
 
-const tiers: Record<Tier, string> = { none: "no use", draft: "drafts only", review: "review", auto: "auto" };
-export const tierLabel = (t: Tier) => tiers[t] ?? t;
+const tiers: Record<Tier, () => string> = {
+  none: () => msg.send_tier_none(),
+  draft: () => msg.send_tier_draft(),
+  review: () => msg.send_tier_review(),
+  auto: () => msg.send_tier_auto(),
+};
+export const tierLabel = (t: Tier) => tiers[t]?.() ?? t;
 
-const scopes = { thread: "the thread's participants", allowlist: "allowlisted recipients", any: "any recipient" } as const;
+const scopes = {
+  thread: () => msg.send_scope_thread(),
+  allowlist: () => msg.send_scope_allowlist(),
+  any: () => msg.send_scope_any(),
+} as const;
 
 /**
  * What pressing Send as identity i would do, before anything is
@@ -103,13 +134,19 @@ const scopes = { thread: "the thread's participants", allowlist: "allowlisted re
  * submission, so a "queues" can still come back held, never the reverse.
  */
 export function standing(i: SendingIdentity): { sends: boolean; headline: string; detail: string } {
-  if (!i.sends) return { sends: false, headline: `Held as a draft: ${holdLabel(i.hold_reason)}`, detail: i.hold_detail ?? "" };
-  const limits = [i.limits.max_per_hour && `${i.limits.max_per_hour}/hour`, i.limits.max_per_day && `${i.limits.max_per_day}/day`].filter(Boolean);
-  const scope = i.recipient_scope === "allowlist" && i.allowlist.length ? `${scopes.allowlist} (${i.allowlist.join(", ")})` : scopes[i.recipient_scope];
+  if (!i.sends) return { sends: false, headline: msg.send_held_as_draft({ reason: holdLabel(i.hold_reason) }), detail: i.hold_detail ?? "" };
+  const limits = [
+    i.limits.max_per_hour && msg.send_limit_hour({ n: i.limits.max_per_hour }),
+    i.limits.max_per_day && msg.send_limit_day({ n: i.limits.max_per_day }),
+  ].filter(Boolean);
+  const scope =
+    i.recipient_scope === "allowlist" && i.allowlist.length
+      ? msg.send_scope_allowlist_some({ list: i.allowlist.join(", ") })
+      : (scopes[i.recipient_scope]?.() ?? i.recipient_scope);
   return {
     sends: true,
-    headline: "Send queues it",
-    detail: [`${tierLabel(i.tier)}`, `to ${scope}`, ...limits].join(" · "),
+    headline: msg.send_queues_it(),
+    detail: [`${tierLabel(i.tier)}`, msg.send_to_scope({ scope }), ...limits].join(" · "),
   };
 }
 
@@ -141,17 +178,16 @@ export function strangerStanding(owner: Actor, s: SessionInfo): { reason: HoldRe
   if (owner.kind === "human" && !isMine(owner, s)) {
     return {
       reason: "owner",
-      note: `held: ${holdLabel("owner")}`,
-      headline: `Held: only ${owner.name} can send as this address`,
-      detail: `it is ${owner.name}'s, and you cannot send as it (§8.9)`,
+      note: msg.send_note_held({ reason: holdLabel("owner") }),
+      headline: msg.send_only_owner_sends({ name: owner.name }),
+      detail: msg.send_only_owner_sends_detail({ name: owner.name }),
     };
   }
-  const whose = isMine(owner, s) ? "yours" : `${principal(owner)}'s`;
   return {
     reason: "policy",
-    note: "held: no grant",
-    headline: "Held as a draft: no grant",
-    detail: `the address is ${whose}, and you have no grant to send as it`,
+    note: msg.send_note_no_grant(),
+    headline: msg.send_held_no_grant(),
+    detail: isMine(owner, s) ? msg.send_no_grant_yours() : msg.send_no_grant_theirs({ owner: principal(owner) }),
   };
 }
 
@@ -227,19 +263,19 @@ export function draftSnippet(md: string): string {
   return "";
 }
 
-const problems: Partial<Record<Code, string>> = {
-  invalid_body: "Something in the draft is not valid",
-  invalid_param: "The request was not valid",
-  no_identity: "No identity covers this From address",
-  conflict: "Already submitted: the draft has gone to the outbox",
-  not_found: "Not found: it may have been deleted",
-  scope_required: "This session is not allowed to do that",
-  forbidden: "Not allowed",
-  submission_rejected: "yuuka refused the submission",
-  rate_limited: "Too many requests; try again in a moment",
-  unavailable: "yuuka is busy; try again in a moment",
-  unauthenticated: "The session has ended; sign in again",
-  body_too_large: "The draft is too large",
+const problems: Partial<Record<Code, () => string>> = {
+  invalid_body: () => msg.send_problem_invalid_body(),
+  invalid_param: () => msg.send_problem_invalid_param(),
+  no_identity: () => msg.send_problem_no_identity(),
+  conflict: () => msg.send_problem_conflict(),
+  not_found: () => msg.send_problem_not_found(),
+  scope_required: () => msg.send_problem_scope_required(),
+  forbidden: () => msg.send_problem_forbidden(),
+  submission_rejected: () => msg.send_problem_submission_rejected(),
+  rate_limited: () => msg.send_problem_rate_limited(),
+  unavailable: () => msg.send_problem_unavailable(),
+  unauthenticated: () => msg.send_problem_unauthenticated(),
+  body_too_large: () => msg.send_problem_body_too_large(),
 };
 
 // The codes whose detail names what is wrong (a field, an address).
@@ -251,8 +287,8 @@ const specific = new Set<Code>(["invalid_body", "invalid_param", "no_identity", 
  */
 export function problem(err: unknown): { text: string; detail?: string; code?: string } {
   if (err instanceof ApiError) {
-    const text = (err.code && problems[err.code]) || `Request failed (${err.status})`;
+    const text = (err.code && problems[err.code]?.()) || msg.send_problem_status({ status: String(err.status) });
     return { text, detail: err.code && specific.has(err.code) ? err.message : undefined, code: err.code };
   }
-  return { text: "Could not reach yuuka" };
+  return { text: msg.send_problem_unreachable() };
 }

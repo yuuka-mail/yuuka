@@ -9,8 +9,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Signature, system, Voice } from "@/components/voice";
 import { fullTime, listTime, sender } from "@/lib/format";
 import { cn } from "@/lib/utils";
-
-import { OutgoingMark } from "@/send/marks";
+import { m as msg } from "@/paraglide/messages.js";
+import { OutgoingMark, ProblemLine } from "@/send/marks";
+import { problem } from "@/send/outgoing";
 
 import { shownExtraction } from "./extracted";
 import { ExtractedLine } from "./extracted-line";
@@ -38,14 +39,16 @@ export function ReadingPane({ id, onBack, ...rest }: Props) {
       <div className="flex h-11 shrink-0 items-center border-b px-2 md:hidden">
         <Button variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeftIcon data-icon="inline-start" />
-          Back
+          {msg.reading_back()}
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {q.data ? (
           <Reading message={q.data} {...rest} />
         ) : q.error ? (
-          <p className="p-6 text-destructive">{q.error instanceof Error ? q.error.message : "Could not load the message."}</p>
+          <p className="p-6">
+            <ProblemLine p={problem(q.error)} />
+          </p>
         ) : (
           <div className="flex flex-col gap-3 p-6">
             <Skeleton className="h-6 w-2/3" />
@@ -72,11 +75,11 @@ function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox }
     <div className="flex max-w-[56rem] flex-col gap-4 px-4 py-4 md:px-6">
       <header className="flex flex-col gap-1.5">
         <div className="flex items-start gap-2">
-          <h1 className="min-w-0 flex-1 text-title font-semibold break-words">{m.subject || <span className="text-muted-foreground">(no subject)</span>}</h1>
+          <h1 className="min-w-0 flex-1 text-title font-semibold break-words">{m.subject ? <span lang="">{m.subject}</span> : <span className="text-muted-foreground">{msg.no_subject()}</span>}</h1>
           {onReply && (
             <Button variant="outline" size="sm" className="shrink-0" onClick={onReply}>
               <ReplyIcon data-icon="inline-start" />
-              Reply
+              {msg.reading_reply()}
             </Button>
           )}
         </div>
@@ -87,17 +90,17 @@ function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox }
         <HeaderAddresses message={m} />
         <div className="flex flex-wrap items-center gap-1.5 text-small text-muted-foreground">
           {/* Mail we only sent has no delivery here, so no prefix it came to. */}
-          {m.recipients.length > 0 && <span>delivered to</span>}
+          {m.recipients.length > 0 && <span>{msg.reading_delivered_to()}</span>}
           {m.recipients.map((r) => (
             <Badge key={r} variant="outline" className="font-mono font-normal">
               {r}
             </Badge>
           ))}
-          {m.date && <span className="ml-auto">dated {fullTime(m.date)}</span>}
+          {m.date && <span className="ml-auto">{msg.reading_dated({ when: fullTime(m.date) })}</span>}
           {m.has_attach && (
             <span className="inline-flex items-center gap-1">
               <PaperclipIcon className="size-3" aria-hidden />
-              attachment
+              {msg.reading_attachment()}
             </span>
           )}
         </div>
@@ -120,7 +123,7 @@ function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox }
           isFetchingMore={body.isFetchingMore}
         />
       ) : body.error ? (
-        <p className="text-destructive">{body.error instanceof Error ? body.error.message : "Could not load the text."}</p>
+        <ProblemLine p={problem(body.error)} />
       ) : (
         <div className="flex flex-col gap-2">
           <Skeleton className="h-4 w-full" />
@@ -142,7 +145,7 @@ function ExtractedBox({ message: m }: { message: Message }) {
   const x = shownExtraction(m);
   if (!x) return null;
   return (
-    <section aria-label="Extracted by yuuka" className="flex max-w-full min-w-0 items-center gap-2 self-start rounded-md border border-system-border bg-system-surface px-2 py-0.5">
+    <section aria-label={msg.reading_extracted_label()} className="flex max-w-full min-w-0 items-center gap-2 self-start rounded-md border border-system-border bg-system-surface px-2 py-0.5">
       <Signature speaker={system} />
       <ExtractedLine x={x} verified={m.sender_verified} mark={false} />
     </section>
@@ -161,9 +164,9 @@ const addrsShown = 3;
 function HeaderAddresses({ message: m }: { message: Message }) {
   const [all, setAll] = useState(false);
   const fields = [
-    ["To", m.to],
-    ["Cc", m.cc],
-    ["Reply-To", m.reply_to],
+    [msg.reading_to(), m.to],
+    [msg.reading_cc(), m.cc],
+    [msg.reading_reply_to(), m.reply_to],
   ] as const;
   if (fields.every(([, l]) => l.length === 0)) return null;
   const hidden = fields.reduce((n, [, l]) => n + Math.max(0, l.length - addrsShown), 0);
@@ -185,7 +188,7 @@ function HeaderAddresses({ message: m }: { message: Message }) {
       )}
       {hidden > 0 && !all && (
         <button type="button" className="text-muted-foreground underline underline-offset-2 hover:text-foreground" onClick={() => setAll(true)}>
-          +{hidden} more
+          {msg.reading_more({ count: hidden })}
         </button>
       )}
     </div>
@@ -222,19 +225,19 @@ function SystemFacts({ message: m, facts, onOpenOutbox }: { message: Message; fa
         <Signature speaker={system} />
         {sent ? (
           <span className="truncate">
-            sent as {sent.from} · <span className={toneClass[sentState(sent).tone]}>{sentState(sent).text}</span>
+            {msg.reading_sent_as({ from: sent.from })} · <span className={toneClass[sentState(sent).tone]}>{sentState(sent).text}</span>
           </span>
         ) : (
           facts && (
             <span className="truncate">
               <span className="text-system-foreground">dmarc=pass</span> {facts.auth.from_domain}
               {/* Quiet mail only ever has ok verdicts: a leak or spoof warns. */}
-              {facts.leak_checks?.length ? <span className="text-muted-foreground"> · expected sender</span> : null}
+              {facts.leak_checks?.length ? <span className="text-muted-foreground"> · {msg.reading_expected_sender()}</span> : null}
             </span>
           )
         )}
         <span className="shrink-0 text-muted-foreground">
-          {facts?.auth.not_received ? "submitted" : "received"} {listTime(m.received_at)}
+          {facts?.auth.not_received ? msg.reading_submitted_at({ when: listTime(m.received_at) }) : msg.reading_received_at({ when: listTime(m.received_at) })}
         </span>
         {facts && <ChevronDownIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />}
       </button>
@@ -246,7 +249,7 @@ function SystemFacts({ message: m, facts, onOpenOutbox }: { message: Message; fa
     <button
       type="button"
       aria-expanded
-      aria-label="Fold the facts into one line"
+      aria-label={msg.reading_fold_facts()}
       onClick={() => setOpen(false)}
       className="flex text-muted-foreground hover:text-foreground"
     >
@@ -256,7 +259,7 @@ function SystemFacts({ message: m, facts, onOpenOutbox }: { message: Message; fa
     sent &&
     onOpenOutbox && (
       <button type="button" className="text-small underline underline-offset-2" onClick={() => onOpenOutbox(sent.outbox_id)}>
-        Open in outbox
+        {msg.reading_open_in_outbox()}
       </button>
     )
   );
@@ -312,7 +315,7 @@ function ThreadStrip({ message, onOpen }: { message: Message; onOpen: (id: strin
   return (
     <section className="rounded-md border text-small">
       <header className="border-b px-3 py-1.5 text-muted-foreground">
-        Thread · {ms.length} messages · {t.data?.participants.length} participants
+        {msg.reading_thread({ messages: msg.reading_n_messages({ count: ms.length }), participants: msg.reading_n_participants({ count: t.data?.participants.length ?? 0 }) })}
       </header>
       {/* Mailing-list threads run long; the strip stays a strip. */}
       <ol className="relative max-h-56 overflow-y-auto">

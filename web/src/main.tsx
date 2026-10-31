@@ -4,6 +4,7 @@ import { createRoot } from "react-dom/client";
 
 import { isUnauthenticated } from "@/api/client";
 import { keys } from "@/api/queries";
+import { getLocale } from "@/paraglide/runtime.js";
 
 import { App } from "./app";
 import "./index.css";
@@ -24,6 +25,10 @@ queryClient.getQueryCache().subscribe((e) => {
     queryClient.setQueryData(keys.session, null);
   }
 });
+
+// The UI's language decides which glyphs Han characters take; mail bodies
+// set their own (§12.11).
+document.documentElement.lang = getLocale();
 
 const root = document.getElementById("root");
 if (!root) throw new Error("no #root");

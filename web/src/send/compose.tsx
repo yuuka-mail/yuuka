@@ -1,7 +1,9 @@
+import { ParaglideMessage } from "@inlang/paraglide-js-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftIcon, ExternalLinkIcon, SendIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { markup } from "@/components/markup";
 import { $api, api, data } from "@/api/client";
 import { useDraft, useIdentities, useOutboxEntry, useReplyIdentities } from "@/api/queries";
 import type { Cite, Draft, HoldReason, Message, ReplyIdentity, SendingIdentity, SessionInfo, SubmitResult } from "@/api/types";
@@ -11,6 +13,7 @@ import { Signature, system, Voice } from "@/components/voice";
 import { listTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { useMessage } from "@/mail/reading-data";
+import { m as msg } from "@/paraglide/messages.js";
 
 import { AuthorMark, OutgoingMark, ProblemLine } from "./marks";
 import { OutboxFacts } from "./outbox-facts";
@@ -53,24 +56,24 @@ export function Composer(props: Props) {
   const opened = props.draftId;
   const ids = useIdentities();
   const draft = useDraft(opened);
-  const msg = useMessage(props.replyTo ?? "", !!props.replyTo && !opened);
+  const replied = useMessage(props.replyTo ?? "", !!props.replyTo && !opened);
   const cands = useReplyIdentities(!opened ? props.replyTo : undefined);
   // The first load decides the fields; refetches do not reset them, and
   // neither does the URL naming the draft once the first save created it
   // (the shell keeps this composer mounted across that change).
   const [start, setStart] = useState<{ fields: Fields; draft?: Draft }>();
 
-  const ready = ids.data && (opened ? draft.data : props.replyTo ? msg.data && cands.data : true);
+  const ready = ids.data && (opened ? draft.data : props.replyTo ? replied.data && cands.data : true);
   if (!start && ready) {
     const identities = ids.data?.identities ?? [];
     if (opened && draft.data) setStart({ fields: fieldsOf(draft.data), draft: draft.data });
-    else if (props.replyTo && msg.data) setStart({ fields: replyFields(msg.data, cands.data?.candidates ?? [], identities) });
+    else if (props.replyTo && replied.data) setStart({ fields: replyFields(replied.data, cands.data?.candidates ?? [], identities) });
     else setStart({ fields: { from: defaultFrom(identities), to: "", cc: "", bcc: "", subject: "", body: "" } });
   }
 
-  const error = ids.error ?? draft.error ?? msg.error ?? cands.error;
+  const error = ids.error ?? draft.error ?? replied.error ?? cands.error;
   return (
-    <section aria-label="Compose" className="flex h-full min-h-0 flex-col">
+    <section aria-label={msg.send_compose_label()} className="flex h-full min-h-0 flex-col">
       {start ? (
         <Editor
           {...props}
@@ -98,7 +101,7 @@ function ComposeError({ err, onClose }: { err: unknown; onClose: () => void }) {
     <div className="flex flex-col items-start gap-2 p-6">
       <ProblemLine p={p} />
       <Button variant="outline" size="sm" onClick={onClose}>
-        Close
+        {msg.send_close()}
       </Button>
     </div>
   );
@@ -308,7 +311,7 @@ function Editor({
     onDeleted();
   };
 
-  const title = inOutbox ? "In the outbox" : f.inReplyTo ? "Reply" : d ? "Draft" : "New message";
+  const title = inOutbox ? msg.send_title_in_outbox() : f.inReplyTo ? msg.send_title_reply() : d ? msg.send_title_draft() : msg.send_title_new();
   const outboxId = result?.outbox_id ?? d?.outbox?.outbox_id;
   // The hold, from this submit or from the draft as stored.
   const held = result && !result.queued ? result : !result && d?.state === "held" ? { hold_reason: d.hold_reason, hold_detail: d.hold_detail } : undefined;
@@ -316,7 +319,7 @@ function Editor({
   return (
     <>
       <header className="flex h-11 shrink-0 items-center gap-2 border-b px-2 md:px-4">
-        <Button variant="ghost" size="icon-sm" className="md:hidden" aria-label="Back" onClick={onClose}>
+        <Button variant="ghost" size="icon-sm" className="md:hidden" aria-label={msg.send_back()} onClick={onClose}>
           <ArrowLeftIcon />
         </Button>
         <h1 className="font-semibold">{title}</h1>
@@ -327,18 +330,18 @@ function Editor({
             (confirmDelete ? (
               <>
                 <Button variant="destructive" size="sm" onClick={() => void remove()}>
-                  Delete draft
+                  {msg.send_delete_draft()}
                 </Button>
                 <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>
-                  Keep
+                  {msg.send_keep()}
                 </Button>
               </>
             ) : (
-              <Button variant="ghost" size="icon-sm" aria-label="Delete draft" title="Delete draft" onClick={() => setConfirmDelete(true)}>
+              <Button variant="ghost" size="icon-sm" aria-label={msg.send_delete_draft()} title={msg.send_delete_draft()} onClick={() => setConfirmDelete(true)}>
                 <Trash2Icon />
               </Button>
             ))}
-          <Button variant="ghost" size="icon-sm" className="max-md:hidden" aria-label="Close composer" title="Close (saved as a draft)" onClick={onClose}>
+          <Button variant="ghost" size="icon-sm" className="max-md:hidden" aria-label={msg.send_close_composer()} title={msg.send_close_composer_title()} onClick={onClose}>
             <XIcon />
           </Button>
         </span>
@@ -358,7 +361,7 @@ function Editor({
         </div>
 
         <div className="flex flex-col px-4 md:px-6">
-          <Row label="From">
+          <Row label={msg.send_field_from()}>
             {/* Confirming someone's draft is about that draft as written:
                 the picker's previews are for the viewer's own mail. */}
             {readOnly || confirming ? (
@@ -370,46 +373,46 @@ function Editor({
           {!inOutbox && (
             <Standing identity={identity} stranger={stranger} confirming={confirming ? d : undefined} session={session} from={f.from} held={held?.hold_reason} />
           )}
-          <Row label="To">
-            <AddrInput value={f.to} readOnly={readOnly} onChange={(to) => edit({ to })} label="To" autoFocus={!initial.to && !readOnly} />
+          <Row label={msg.send_field_to()}>
+            <AddrInput value={f.to} readOnly={readOnly} onChange={(to) => edit({ to })} label={msg.send_field_to()} autoFocus={!initial.to && !readOnly} />
             {!showCc && !readOnly && (
               <button type="button" className="shrink-0 text-small text-muted-foreground hover:text-foreground" onClick={() => setShowCc(true)}>
-                Cc Bcc
+                {msg.send_cc_bcc()}
               </button>
             )}
           </Row>
           {showCc && (
             <>
-              <Row label="Cc">
-                <AddrInput value={f.cc} readOnly={readOnly} onChange={(cc) => edit({ cc })} label="Cc" />
+              <Row label={msg.send_field_cc()}>
+                <AddrInput value={f.cc} readOnly={readOnly} onChange={(cc) => edit({ cc })} label={msg.send_field_cc()} />
               </Row>
-              <Row label="Bcc">
-                <AddrInput value={f.bcc} readOnly={readOnly} onChange={(bcc) => edit({ bcc })} label="Bcc" />
+              <Row label={msg.send_field_bcc()}>
+                <AddrInput value={f.bcc} readOnly={readOnly} onChange={(bcc) => edit({ bcc })} label={msg.send_field_bcc()} />
               </Row>
             </>
           )}
-          <Row label="Subject">
+          <Row label={msg.send_field_subject()}>
             <input
-              aria-label="Subject"
+              aria-label={msg.send_field_subject()}
               value={f.subject}
               readOnly={readOnly}
               onChange={(e) => edit({ subject: e.target.value })}
               className="h-8 min-w-0 flex-1 bg-transparent font-medium outline-none"
             />
           </Row>
-          {bad.length > 0 && <p className="py-1 text-small text-warning">Not an address: {bad.join(", ")}</p>}
+          {bad.length > 0 && <p className="py-1 text-small text-warning">{msg.send_not_an_address({ list: bad.join(", ") })}</p>}
         </div>
 
         {d?.smtp ? (
           <p className="px-4 py-3 text-small text-muted-foreground md:px-6">
-            Submitted over SMTP: the message is kept as the client sent it and is not edited here. Send it as it is, or delete it.
+            {msg.send_smtp_note()}
           </p>
         ) : (
           <textarea
-            aria-label="Body"
+            aria-label={msg.send_field_body()}
             value={f.body}
             readOnly={readOnly}
-            placeholder="Write in Markdown. > quotes, a blank line starts a paragraph."
+            placeholder={msg.send_body_placeholder()}
             onChange={(e) => edit({ body: e.target.value })}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -440,11 +443,11 @@ function Editor({
         <footer className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-2 md:px-6">
           <Button size="sm" disabled={!canSend} onClick={() => void send()}>
             <SendIcon data-icon="inline-start" />
-            {sending ? "Sending…" : confirming ? "Confirm and send" : "Send"}
+            {sending ? msg.send_sending() : confirming ? msg.send_confirm_and_send() : msg.send_send()}
           </Button>
           <span className="text-meta text-muted-foreground max-sm:hidden">Ctrl+Enter</span>
-          {!can.compose && <span className="text-small text-muted-foreground">This session may not write drafts (draft:create).</span>}
-          {noRecipients && can.compose && <span className="text-small text-muted-foreground">Add a recipient to send.</span>}
+          {!can.compose && <span className="text-small text-muted-foreground">{msg.send_no_draft_scope({ scope: "draft:create" })}</span>}
+          {noRecipients && can.compose && <span className="text-small text-muted-foreground">{msg.send_add_recipient()}</span>}
           {sendErr !== undefined && <ProblemLine p={problem(sendErr)} />}
         </footer>
       )}
@@ -471,7 +474,7 @@ function AddrInput({ value, onChange, label, readOnly, autoFocus }: { value: str
       autoFocus={autoFocus}
       spellCheck={false}
       autoComplete="off"
-      placeholder={readOnly ? "" : "name@example.org, …"}
+      placeholder={readOnly ? "" : msg.send_addr_placeholder()}
       aria-invalid={badAddrs(value).length > 0 || undefined}
       onChange={(e) => onChange(e.target.value)}
       className="h-8 min-w-0 flex-1 bg-transparent font-mono text-ui outline-none placeholder:font-sans placeholder:text-muted-foreground aria-invalid:text-warning"
@@ -504,7 +507,7 @@ function FromPicker({
   const add = (v: string, i: SendingIdentity | string) => {
     if (seen.has(v.toLowerCase())) return;
     seen.add(v.toLowerCase());
-    opts.push({ value: v, note: typeof i === "string" ? i : i.sends ? `sends (${i.tier})` : `held: ${holdLabel(i.hold_reason)}` });
+    opts.push({ value: v, note: typeof i === "string" ? i : i.sends ? msg.send_opt_sends({ tier: i.tier }) : msg.send_note_held({ reason: holdLabel(i.hold_reason) }) });
   };
   // The pattern picked, while its local part is being typed.
   const [patternChoice, setPatternChoice] = useState<string>();
@@ -513,16 +516,20 @@ function FromPicker({
   // An address only a pattern covers, as a saved draft or a reply has it.
   const covering = identityFor(value, identities, candidates);
   if (value && !choosingPattern && covering && isPattern(covering.address)) add(value, covering);
-  if (value && !choosingPattern && !covering) add(value, stranger ?? "no identity");
+  if (value && !choosingPattern && !covering) add(value, stranger ?? msg.send_opt_no_identity());
   for (const i of identities) add(i.address, i);
 
   if (opts.length === 0) {
-    return <span className="text-small text-muted-foreground">No identity to send as. Add one with yuuka identity add and yuuka grant set.</span>;
+    return (
+      <span className="text-small text-muted-foreground">
+        <ParaglideMessage message={msg.send_no_identities} markup={markup} />
+      </span>
+    );
   }
   return (
     <span className="flex min-w-0 flex-1 items-center gap-1.5">
       <select
-        aria-label="From"
+        aria-label={msg.send_field_from()}
         value={choosingPattern ? patternChoice : value}
         onChange={(e) => {
           const v = e.target.value;
@@ -545,8 +552,8 @@ function FromPicker({
       {choosingPattern && (
         <span className="flex min-w-0 items-center font-mono text-ui">
           <input
-            aria-label="Local part"
-            placeholder="name"
+            aria-label={msg.send_local_part()}
+            placeholder={msg.send_local_part_placeholder()}
             className="h-7 w-28 min-w-0 rounded-md border border-input bg-transparent px-1.5 outline-none focus-visible:border-ring"
             onChange={(e) => {
               const l = e.target.value.trim();
@@ -592,8 +599,8 @@ function Standing({
     const owner = onlyConfirmer(confirming, session);
     sends = !owner;
     reason = owner ? "owner" : undefined;
-    headline = owner ? `Held: only ${owner} can confirm mail as this address` : `Send confirms ${confirming.author.name}'s draft`;
-    detail = owner ? "owner cap (§8.9)" : "it is queued with you as the approver (§8.9)";
+    headline = owner ? msg.send_only_owner_confirms({ name: owner }) : msg.send_confirms_draft({ name: confirming.author.name });
+    detail = owner ? msg.send_owner_cap_detail() : msg.send_confirm_detail();
   } else if (!from || isPattern(from)) {
     return null;
   } else if (!identity && stranger) {
@@ -601,8 +608,8 @@ function Standing({
     ({ headline, detail, reason } = stranger);
   } else if (!identity) {
     sends = false;
-    headline = "No identity covers this address";
-    detail = "the draft is kept, but it cannot be sent as it is";
+    headline = msg.send_no_identity_headline();
+    detail = msg.send_no_identity_detail();
   } else {
     ({ sends, headline, detail } = standing(identity));
     reason = sends ? undefined : identity.hold_reason;
@@ -621,7 +628,7 @@ function Standing({
 function AgentNote({ draft, onOpenMessage }: { draft: Draft; onOpenMessage: (id: string, anchor?: string) => void }) {
   const name = draft.author.kind === "agent" ? draft.author.name : `${draft.author.kind}:${draft.author.name}`;
   return (
-    <Voice speaker={{ kind: "agent", name }} title={`drafted this ${listTime(draft.created_at)}`}>
+    <Voice speaker={{ kind: "agent", name }} title={msg.send_agent_drafted({ time: listTime(draft.created_at) })}>
       {draft.cites.length > 0 ? (
         <ul className="flex flex-col gap-0.5">
           {draft.cites.map((c, i) => (
@@ -629,7 +636,7 @@ function AgentNote({ draft, onOpenMessage }: { draft: Draft; onOpenMessage: (id:
           ))}
         </ul>
       ) : (
-        <p className="text-muted-foreground">No cites given.</p>
+        <p className="text-muted-foreground">{msg.send_no_cites()}</p>
       )}
     </Voice>
   );
@@ -638,14 +645,14 @@ function AgentNote({ draft, onOpenMessage }: { draft: Draft; onOpenMessage: (id:
 const citePattern = /^yuuka:\/\/message\/([0-9A-Za-z]+)(?:#(.+))?$/;
 
 function CiteItem({ cite, onOpen }: { cite: Cite; onOpen: (id: string, anchor?: string) => void }) {
-  const m = citePattern.exec(cite.uri);
+  const hit = citePattern.exec(cite.uri);
   return (
     <li className="flex min-w-0 items-baseline gap-1.5">
-      <span className="text-muted-foreground">cites</span>
+      <span className="text-muted-foreground">{msg.send_cites()}</span>
       {cite.quote && <span className="min-w-0 truncate italic">“{cite.quote}”</span>}
-      {m ? (
-        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 underline underline-offset-2" onClick={() => onOpen(m[1] ?? "", m[2])}>
-          {m[2] ?? "message"}
+      {hit ? (
+        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 underline underline-offset-2" onClick={() => onOpen(hit[1] ?? "", hit[2])}>
+          {hit[2] ?? msg.send_cite_message()}
           <ExternalLinkIcon aria-hidden className="size-3" />
         </button>
       ) : (
@@ -661,13 +668,13 @@ function CiteItem({ cite, onOpen }: { cite: Cite; onOpen: (id: string, anchor?: 
  */
 function HeldNote({ reason, detail, confirmer }: { reason?: HoldReason; detail?: string; confirmer?: string }) {
   return (
-    <Voice speaker={system} title="held as a draft">
+    <Voice speaker={system} title={msg.send_held_title()}>
       <p>
         <span className="font-semibold">{holdLabel(reason)}</span>
         {detail && <span className="text-muted-foreground"> · {detail}</span>}
       </p>
       <p className="mt-0.5 text-muted-foreground">
-        Nothing was sent. The draft stays in Drafts; {confirmer ? `only ${confirmer} can confirm it.` : "a person can confirm it there."}
+        {confirmer ? msg.send_held_nothing_sent_owner({ name: confirmer }) : msg.send_held_nothing_sent()}
       </p>
     </Voice>
   );
@@ -690,11 +697,11 @@ function QueuedNote({
   return (
     <Voice
       speaker={system}
-      title="submitted to the outbox"
+      title={msg.send_submitted_title()}
       action={
         canSeeOutbox && (
           <button type="button" className="text-small underline underline-offset-2" onClick={() => onOpenOutbox(outboxId)}>
-            Open in outbox
+            {msg.send_open_in_outbox()}
           </button>
         )
       }
@@ -703,7 +710,7 @@ function QueuedNote({
         <OutboxFacts e={e.data} />
       ) : (
         <p className="flex items-center gap-2">
-          <OutgoingMark state={state} /> outbox {outboxId}
+          <OutgoingMark state={state} /> {msg.send_outbox_id({ id: outboxId })}
         </p>
       )}
     </Voice>
@@ -715,10 +722,10 @@ function SaveStatus({ save }: { save: SaveState }) {
     case "idle":
       return null;
     case "saving":
-      return <span className="text-meta text-muted-foreground">Saving…</span>;
+      return <span className="text-meta text-muted-foreground">{msg.send_saving()}</span>;
     case "saved":
-      return <span className="text-meta text-muted-foreground">Saved {listTime(save.at)}</span>;
+      return <span className="text-meta text-muted-foreground">{msg.send_saved({ time: listTime(save.at) })}</span>;
     case "error":
-      return <span className="text-meta font-medium text-destructive">Not saved: {problem(save.err).text}</span>;
+      return <span className="text-meta font-medium text-destructive">{msg.send_not_saved({ reason: problem(save.err).text })}</span>;
   }
 }

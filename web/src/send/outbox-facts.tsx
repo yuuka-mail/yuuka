@@ -1,6 +1,7 @@
 import type { OutboxEntry } from "@/api/types";
 import { fullTime, listTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages.js";
 
 import { toneText } from "./marks";
 import { outboxState, principal, recipientState } from "./outgoing";
@@ -13,13 +14,20 @@ import { outboxState, principal, recipientState } from "./outgoing";
 export function OutboxFacts({ e, className }: { e: OutboxEntry; className?: string }) {
   const s = outboxState(e.state);
   const rows: [string, React.ReactNode][] = [];
-  rows.push(["State", <span key="state" className={toneText[s.tone]}>{s.label}</span>]);
-  rows.push(["From", <span key="from" className="font-mono">{e.from}</span>]);
-  rows.push(["Submitted", `${fullTime(e.created_at)} by ${principal(e.submitted_by)}`]);
-  if (e.approved_by) rows.push(["Approved by", principal(e.approved_by)]);
-  rows.push(["Attempts", e.attempts ? `${e.attempts}${e.last_outcome ? `, last ${e.last_outcome}` : ""}` : "none yet"]);
-  if (e.next_retry_at) rows.push(["Next try", `${listTime(e.next_retry_at)} (${fullTime(e.next_retry_at)})`]);
-  if (e.error) rows.push(["Error", <span key="error" className="font-mono wrap-anywhere">{e.error}</span>]);
+  rows.push([m.send_fact_state(), <span key="state" className={toneText[s.tone]}>{s.label}</span>]);
+  rows.push([m.send_fact_from(), <span key="from" className="font-mono">{e.from}</span>]);
+  rows.push([m.send_fact_submitted(), m.send_fact_submitted_by({ time: fullTime(e.created_at), who: principal(e.submitted_by) })]);
+  if (e.approved_by) rows.push([m.send_fact_approved_by(), principal(e.approved_by)]);
+  rows.push([
+    m.send_fact_attempts(),
+    e.attempts
+      ? e.last_outcome
+        ? m.send_fact_attempts_last({ n: e.attempts, outcome: e.last_outcome })
+        : String(e.attempts)
+      : m.send_fact_attempts_none(),
+  ]);
+  if (e.next_retry_at) rows.push([m.send_fact_next_try(), `${listTime(e.next_retry_at)} (${fullTime(e.next_retry_at)})`]);
+  if (e.error) rows.push([m.send_fact_error(), <span key="error" className="font-mono wrap-anywhere">{e.error}</span>]);
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
@@ -31,7 +39,7 @@ export function OutboxFacts({ e, className }: { e: OutboxEntry; className?: stri
         ))}
       </dl>
       <table className="w-full border-t border-system-border text-left">
-        <caption className="sr-only">Recipients</caption>
+        <caption className="sr-only">{m.send_fact_recipients()}</caption>
         <tbody>
           {e.recipients.map((r) => {
             const rs = recipientState(r.state);

@@ -3,6 +3,7 @@ import type { OutboxEntry } from "@/api/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages.js";
 
 import { AuthorMark, OutgoingMark, toneText } from "./marks";
 import { outboxFilters, problem, recipientState, type OutboxFilter } from "./outgoing";
@@ -31,10 +32,10 @@ export function OutboxList({ filter, selected, onSelect }: { filter: OutboxFilte
     );
   }
   if (list.error) return <p className="p-4 text-destructive">{problem(list.error).text}</p>;
-  if (list.items.length === 0) return <p className="p-4 text-muted-foreground">Nothing in the outbox here.</p>;
+  if (list.items.length === 0) return <p className="p-4 text-muted-foreground">{m.send_outbox_empty()}</p>;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <ul aria-label="Outbox">
+      <ul aria-label={m.send_outbox_list_label()}>
         {list.items.map((e) => (
           <li key={e.id} className="h-14">
             <Row e={e} selected={e.id === selected} onSelect={onSelect} />
@@ -43,7 +44,7 @@ export function OutboxList({ filter, selected, onSelect }: { filter: OutboxFilte
       </ul>
       {list.hasMore && (
         <button type="button" className="w-full py-2 text-small text-muted-foreground hover:text-foreground" disabled={list.isFetchingMore} onClick={list.loadMore}>
-          {list.isFetchingMore ? "Loading…" : "Load more"}
+          {list.isFetchingMore ? m.send_loading() : m.send_load_more()}
         </button>
       )}
     </div>
@@ -66,7 +67,7 @@ function Row({ e, selected, onSelect }: { e: OutboxEntry; selected: boolean; onS
             it does not fit, it wraps onto a line that is clipped, since
             a From cut to a few letters says nothing (the detail has it). */}
         <span className="flex h-[1lh] min-w-0 flex-wrap items-baseline overflow-hidden">
-          <span className="min-w-0 truncate font-medium">{e.subject || <span className="font-normal text-muted-foreground">(no subject)</span>}</span>
+          <span className="min-w-0 truncate font-medium">{e.subject || <span className="font-normal text-muted-foreground">{m.send_no_subject()}</span>}</span>
           <span className="shrink-0 font-mono text-small whitespace-pre text-muted-foreground"> · {e.from}</span>
         </span>
         {e.submitted_by.kind !== "human" && <AuthorMark author={e.submitted_by} />}

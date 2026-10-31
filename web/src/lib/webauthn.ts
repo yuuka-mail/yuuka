@@ -1,5 +1,6 @@
-import { api, data } from "@/api/client";
+import { ApiError, api, data } from "@/api/client";
 import type { LoginResult, RegisterBegin, RegisterResult } from "@/api/types";
+import { m } from "@/paraglide/messages.js";
 
 // The WebAuthn ceremonies against internal/authn. The server speaks the
 // JSON form of the options and credentials (binary fields as base64url),
@@ -95,7 +96,7 @@ export function supported() {
 export async function login(): Promise<LoginResult> {
   const opts = (await data(api.POST("/auth/passkey/login/begin", { body: {} }))) as unknown as JSONRequest;
   const cred = (await navigator.credentials.get({ publicKey: requestOptions(opts) })) as PublicKeyCredential | null;
-  if (!cred) throw new Error("No passkey was chosen.");
+  if (!cred) throw new Error(m.auth_no_passkey_chosen());
   return data(api.POST("/auth/passkey/login/finish", { body: credentialJSON(cred) }));
 }
 
@@ -108,16 +109,33 @@ export async function register(token: string, label: string): Promise<RegisterRe
   if (token) body.enrollment_token = token;
   const opts = (await data(api.POST("/auth/passkey/register/begin", { body }))) as unknown as JSONCreation;
   const cred = (await navigator.credentials.create({ publicKey: creationOptions(opts) })) as PublicKeyCredential | null;
-  if (!cred) throw new Error("No passkey was created.");
+  if (!cred) throw new Error(m.auth_no_passkey_created());
   return data(api.POST("/auth/passkey/register/finish", { body: credentialJSON(cred) }));
 }
 
+/**
+ * A failed ceremony as people read it: a sentence of ours, and what the
+ * browser or the server said only as a note (§12.11).
+ */
+export interface Failure {
+  text: string;
+  detail?: string;
+}
+
 /** A readable message for a failed ceremony. */
-export function ceremonyError(err: unknown): string {
+export function ceremonyError(err: unknown): Failure {
   if (err instanceof DOMException) {
-    if (err.name === "NotAllowedError") return "The passkey prompt was cancelled or timed out.";
-    if (err.name === "InvalidStateError") return "This authenticator already holds a passkey for yuuka.";
-    if (err.name === "SecurityError") return "This page's origin does not match the configured WebUI origin.";
+    if (err.name === "NotAllowedError") return { text: m.auth_err_not_allowed() };
+    if (err.name === "InvalidStateError") return { text: m.auth_err_invalid_state() };
+    if (err.name === "SecurityError") return { text: m.auth_err_security() };
+    return { text: m.auth_err_ceremony(), detail: err.message };
   }
-  return err instanceof Error ? err.message : String(err);
+  if (err instanceof ApiError) {
+    if (err.status === 429) return { text: m.auth_err_too_many() };
+    return { text: m.auth_err_refused(), detail: err.message };
+  }
+  // fetch fails with a TypeError when the server cannot be reached.
+  if (err instanceof TypeError) return { text: m.auth_err_unreachable(), detail: err.message };
+  // Errors thrown above carry our own words already.
+  return { text: err instanceof Error ? err.message : String(err) };
 }

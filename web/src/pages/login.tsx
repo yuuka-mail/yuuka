@@ -1,13 +1,15 @@
+import { ParaglideMessage } from "@inlang/paraglide-js-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyRoundIcon } from "lucide-react";
 import { useState } from "react";
 
-import { ApiError } from "@/api/client";
+import { markup } from "@/components/markup";
 import { Button } from "@/components/ui/button";
 import { navigate, useLocation } from "@/lib/router";
-import { ceremonyError, login, supported } from "@/lib/webauthn";
+import { ceremonyError, login, supported, type Failure } from "@/lib/webauthn";
+import { m } from "@/paraglide/messages.js";
 
-import { AuthLayout, ErrorText } from "./auth-layout";
+import { AuthLayout, ErrorText, FailureText } from "./auth-layout";
 
 /**
  * Passkey login, the only way to get a session (§13.7). There is
@@ -18,39 +20,34 @@ export function LoginPage({ error }: { error?: unknown }) {
   const qc = useQueryClient();
   const { pathname } = useLocation();
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState(error ? errorText(error) : "");
+  const [failure, setFailure] = useState<Failure | undefined>(error ? ceremonyError(error) : undefined);
 
   async function signIn() {
     setBusy(true);
-    setFailure("");
+    setFailure(undefined);
     try {
       await login();
       await qc.resetQueries();
       if (pathname === "/login") navigate("/", { replace: true });
     } catch (err) {
-      setFailure(errorText(err));
+      setFailure(ceremonyError(err));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <AuthLayout title="Sign in">
-      <p className="text-body text-muted-foreground">Use a passkey registered for this mailbox.</p>
+    <AuthLayout title={m.auth_sign_in()}>
+      <p className="text-body text-muted-foreground">{m.auth_login_hint()}</p>
       <Button size="lg" onClick={signIn} disabled={busy || !supported()} className="self-start">
         <KeyRoundIcon data-icon="inline-start" />
-        {busy ? "Waiting for passkey…" : "Sign in with passkey"}
+        {busy ? m.auth_waiting_passkey() : m.auth_sign_in_passkey()}
       </Button>
-      {!supported() && <ErrorText>This browser does not support passkeys.</ErrorText>}
-      <ErrorText>{failure}</ErrorText>
+      {!supported() && <ErrorText>{m.auth_unsupported()}</ErrorText>}
+      <FailureText f={failure} />
       <p className="text-small text-muted-foreground">
-        No passkey yet? Run <code className="font-mono">yuuka admin enroll</code> on the server for a one-time link.
+        <ParaglideMessage message={m.auth_login_no_passkey} markup={markup} />
       </p>
     </AuthLayout>
   );
-}
-
-function errorText(err: unknown) {
-  if (err instanceof ApiError && err.status === 429) return "Too many attempts. Wait a moment and try again.";
-  return ceremonyError(err);
 }

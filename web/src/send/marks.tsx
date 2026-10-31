@@ -2,6 +2,7 @@ import { SendIcon } from "lucide-react";
 
 import type { Actor, HoldReason, OutboxState } from "@/api/types";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages.js";
 
 import { holdLabel, outboxState, principal, type problem, type Tone } from "./outgoing";
 
@@ -22,7 +23,7 @@ export const toneText: Record<Tone, string> = {
 export function OutgoingMark({ state, className }: { state: OutboxState | string; className?: string }) {
   const s = outboxState(state);
   return (
-    <span className={cn("inline-flex shrink-0 items-center gap-1 text-meta", toneText[s.tone], className)} title={`outbox: ${s.label}`}>
+    <span className={cn("inline-flex shrink-0 items-center gap-1 text-meta", toneText[s.tone], className)} title={m.send_mark_outbox_title({ state: s.label })}>
       <SendIcon aria-hidden className="size-3" />
       {s.label}
     </span>
@@ -34,7 +35,7 @@ export function HeldMark({ reason, className }: { reason?: HoldReason; className
   return (
     <span className={cn("inline-flex shrink-0 items-center gap-1 text-meta text-system-foreground", className)}>
       <span aria-hidden className="size-1.5 rounded-[1px] bg-system" />
-      held · {holdLabel(reason)}
+      {m.send_mark_held({ reason: holdLabel(reason) })}
     </span>
   );
 }

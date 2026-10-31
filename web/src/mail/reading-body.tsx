@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import type { Attachment, Block, Span } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages.js";
 
 import { claimedHost, linkTarget } from "./links";
 import { attachmentHref, type Reading } from "./reading-data";
@@ -54,9 +55,9 @@ export function ReadingBody({
 
   return (
     <div className="flex max-w-[78ch] flex-col gap-3 text-body">
-      {parts.length === 0 && <p className="text-muted-foreground italic">No text body.</p>}
+      {parts.length === 0 && <p className="text-muted-foreground italic">{m.read_no_body()}</p>}
       {parts.map((p) => (
-        <section key={p.anchor} id={p.anchor} aria-label={parts.length > 1 ? `Part ${p.anchor.slice(5)}` : undefined} className="flex flex-col gap-2">
+        <section key={p.anchor} id={p.anchor} aria-label={parts.length > 1 ? m.read_part({ section: p.anchor.slice(5) }) : undefined} className="flex flex-col gap-2">
           {parts.length > 1 && (
             <p className="border-b pb-0.5 font-mono text-meta text-muted-foreground">
               {p.anchor} · {p.media_type}
@@ -69,10 +70,10 @@ export function ReadingBody({
       ))}
       {more && (
         <Button variant="outline" size="sm" className="self-start" disabled={isFetchingMore} onClick={loadMore}>
-          {isFetchingMore ? "Loading…" : "Load the rest"}
+          {isFetchingMore ? m.read_loading() : m.read_load_rest()}
         </Button>
       )}
-      {!found && !more && <p className="text-small text-muted-foreground">There is no {anchor} in this message; it may have been cited from an older view.</p>}
+      {!found && !more && <p className="text-small text-muted-foreground">{m.read_no_anchor({ anchor: anchor ?? "" })}</p>}
       {reading.content.attachments && <Attachments id={id} list={reading.content.attachments} />}
     </div>
   );
@@ -80,10 +81,10 @@ export function ReadingBody({
 
 function BlockView({ block: b, uri, highlight, onAnchor }: { block: Block; uri: string; highlight: boolean; onAnchor: (a: string) => void }) {
   return (
-    <div id={b.anchor} className={cn("group relative -mx-1.5 rounded-sm px-1.5 scroll-mt-4", highlight && "bg-ring/10 ring-1 ring-ring/40")}>
+    <div id={b.anchor} lang="" className={cn("group relative -mx-1.5 rounded-sm px-1.5 scroll-mt-4", highlight && "bg-ring/10 ring-1 ring-ring/40")}>
       <button
         type="button"
-        aria-label={`Link to ${b.anchor}`}
+        aria-label={m.read_link_to({ anchor: b.anchor })}
         title={`${uri}#${b.anchor}`}
         onClick={() => {
           onAnchor(b.anchor);
@@ -122,8 +123,8 @@ function BlockContent({ b }: { b: Block }) {
         <div className="flex items-baseline gap-1.5 border-l-2 pl-2 text-small text-muted-foreground">
           <QuoteIcon aria-hidden className="size-3 shrink-0 self-center" />
           <span className="min-w-0 break-words">
-            {b.spans?.length ? <span className="italic">{spans}</span> : "Quoted text"}
-            {b.lines ? ` · ${b.lines} line${b.lines === 1 ? "" : "s"} collapsed` : ""}
+            {b.spans?.length ? <span className="italic">{spans}</span> : m.read_quoted()}
+            {b.lines ? ` · ${m.read_lines_collapsed({ count: b.lines })}` : ""}
           </span>
         </div>
       );
@@ -153,7 +154,7 @@ function Spans({ spans }: { spans: Span[] }) {
         </a>
         {(t.mismatch || !echoed) && (
           <span
-            title={t.mismatch ? `The text names another site; this link goes to ${t.shown}` : `Goes to ${t.shown}`}
+            title={t.mismatch ? m.read_link_mismatch({ host: t.shown }) : m.read_link_goes({ host: t.shown })}
             className={cn("ml-1 inline-flex items-baseline gap-0.5 font-mono text-meta", t.mismatch ? "font-semibold text-destructive" : "text-muted-foreground")}
           >
             <ExternalLinkIcon aria-hidden className="size-3 self-center" />
@@ -173,9 +174,7 @@ function Spans({ spans }: { spans: Span[] }) {
 function Attachments({ id, list }: { id: string; list: Attachment[] }) {
   return (
     <section className="mt-1 border-t pt-2 text-small">
-      <h2 className="mb-1 font-medium text-muted-foreground">
-        {list.length} attachment{list.length === 1 ? "" : "s"}
-      </h2>
+      <h2 className="mb-1 font-medium text-muted-foreground">{m.read_attachments({ count: list.length })}</h2>
       <ul className="flex flex-col gap-0.5">
         {list.map((a) => (
           <li key={a.section} className="flex items-baseline gap-2">
@@ -183,10 +182,10 @@ function Attachments({ id, list }: { id: string; list: Attachment[] }) {
             <a
               href={attachmentHref(id, a.section)}
               download
-              title={`Download ${a.filename || "part " + a.section}`}
+              title={a.filename ? m.read_download({ name: a.filename }) : m.read_download_part({ section: a.section })}
               className="group inline-flex min-w-0 items-baseline gap-1 text-primary underline decoration-muted-foreground/50 underline-offset-2 hover:decoration-current"
             >
-              <span className="min-w-0 truncate">{a.filename || `(no file name, part ${a.section})`}</span>
+              <span className="min-w-0 truncate">{a.filename || m.read_no_filename({ section: a.section })}</span>
               <DownloadIcon aria-hidden className="size-3 shrink-0 self-center text-muted-foreground group-hover:text-foreground" />
             </a>
             <span className="shrink-0 font-mono text-meta text-muted-foreground">{a.media_type}</span>

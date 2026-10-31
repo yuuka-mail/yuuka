@@ -3,6 +3,7 @@ import type { Draft, DraftState, SessionInfo } from "@/api/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages.js";
 
 import { AuthorMark, HeldMark, OutgoingMark } from "./marks";
 import { draftSnippet, isMine, problem } from "./outgoing";
@@ -35,10 +36,10 @@ export function DraftsList({ session, states, selected, onSelect }: { session: S
     );
   }
   if (list.error) return <p className="p-4 text-destructive">{problem(list.error).text}</p>;
-  if (list.items.length === 0) return <p className="p-4 text-muted-foreground">No drafts here.</p>;
+  if (list.items.length === 0) return <p className="p-4 text-muted-foreground">{m.send_drafts_empty()}</p>;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <ul aria-label="Drafts">
+      <ul aria-label={m.send_drafts_list_label()}>
         {list.items.map((d) => (
           <li key={d.id} className="h-14">
             <Row d={d} mine={isMine(d.author, session)} selected={d.id === selected} onSelect={onSelect} />
@@ -47,7 +48,7 @@ export function DraftsList({ session, states, selected, onSelect }: { session: S
       </ul>
       {list.hasMore && (
         <button type="button" className="w-full py-2 text-small text-muted-foreground hover:text-foreground" disabled={list.isFetchingMore} onClick={list.loadMore}>
-          {list.isFetchingMore ? "Loading…" : "Load more"}
+          {list.isFetchingMore ? m.send_loading() : m.send_load_more()}
         </button>
       )}
     </div>
@@ -56,7 +57,7 @@ export function DraftsList({ session, states, selected, onSelect }: { session: S
 
 function Row({ d, mine, selected, onSelect }: { d: Draft; mine: boolean; selected: boolean; onSelect: (id: string) => void }) {
   const to = [...d.to, ...d.cc, ...d.bcc];
-  const snippet = d.smtp ? "(submitted over SMTP)" : draftSnippet(d.body_markdown);
+  const snippet = d.smtp ? m.send_draft_smtp_snippet() : draftSnippet(d.body_markdown);
   return (
     <button
       type="button"
@@ -69,12 +70,12 @@ function Row({ d, mine, selected, onSelect }: { d: Draft; mine: boolean; selecte
     >
       <span className="flex min-w-0 items-center gap-1.5 text-ui">
         {!mine && d.author.kind !== "human" && <AuthorMark author={d.author} />}
-        <span className="min-w-0 truncate font-medium">{to.length ? to.join(", ") : <span className="text-muted-foreground">(no recipients)</span>}</span>
+        <span className="min-w-0 truncate font-medium">{to.length ? to.join(", ") : <span className="text-muted-foreground">{m.send_no_recipients()}</span>}</span>
         <span className="ml-auto shrink-0 pl-2 text-meta text-muted-foreground tabular-nums">{listTime(d.updated_at)}</span>
       </span>
       <span className="flex min-w-0 items-center gap-2 text-ui">
         <span className="min-w-0 truncate">
-          {d.subject || <span className="text-muted-foreground">(no subject)</span>}
+          {d.subject || <span className="text-muted-foreground">{m.send_no_subject()}</span>}
           {snippet && <span className="text-muted-foreground"> — {snippet}</span>}
         </span>
         {d.state === "held" && <HeldMark reason={d.hold_reason} className="ml-auto" />}

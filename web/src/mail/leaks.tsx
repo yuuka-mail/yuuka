@@ -1,9 +1,13 @@
+import { ParaglideMessage } from "@inlang/paraglide-js-react";
+
+import { markup } from "@/components/markup";
 import { usePrefixDetail, usePrefixes } from "@/api/queries";
 import type { Offense, Prefix } from "@/api/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Signature, system } from "@/components/voice";
 import { count, listTime, sender } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages.js";
 
 // The leak check of §3.3 as yuuka states it: which claimed prefixes got
 // mail from senders they were not given to (a leak) or mail claiming one
@@ -20,9 +24,13 @@ export function leakTone(p: Prefix): LeakTone | undefined {
 /** "2 leaked (1 unproven) · 1 spoofed"; empty when nothing offended. */
 export function leakSummary(p: Prefix): string {
   const out: string[] = [];
-  if (p.leaks) out.push(`${count(p.leaks)} leaked${p.unverified ? ` (${count(p.unverified)} unproven)` : ""}`);
-  if (p.spoofs) out.push(`${count(p.spoofs)} spoofed`);
+  if (p.leaks) out.push(leakedText(p));
+  if (p.spoofs) out.push(m.leak_spoofed({ n: count(p.spoofs) }));
   return out.join(" · ");
+}
+
+function leakedText(p: Prefix): string {
+  return p.unverified ? m.leak_leaked_unproven({ n: count(p.leaks), unproven: count(p.unverified) }) : m.leak_leaked({ n: count(p.leaks) });
 }
 
 /** leakSummary in colour: a leak is a caution, a spoof an error. */
@@ -30,12 +38,10 @@ function LeakCounts({ p }: { p: Prefix }) {
   return (
     <span className="font-medium">
       {p.leaks > 0 && (
-        <span className="text-warning">
-          {count(p.leaks)} leaked{p.unverified ? ` (${count(p.unverified)} unproven)` : ""}
-        </span>
+        <span className="text-warning">{leakedText(p)}</span>
       )}
       {p.leaks > 0 && p.spoofs > 0 && <span className="text-muted-foreground"> · </span>}
-      {p.spoofs > 0 && <span className="text-destructive">{count(p.spoofs)} spoofed</span>}
+      {p.spoofs > 0 && <span className="text-destructive">{m.leak_spoofed({ n: count(p.spoofs) })}</span>}
     </span>
   );
 }
@@ -69,9 +75,9 @@ export function LeakList({ onPick }: { onPick: (address: string) => void }) {
     );
   }
   const ps = flagged(q.data.prefixes);
-  if (ps.length === 0) return <p className="p-4 text-muted-foreground">No claimed prefix got mail it should not have.</p>;
+  if (ps.length === 0) return <p className="p-4 text-muted-foreground">{m.leak_none()}</p>;
   return (
-    <ul className="min-h-0 flex-1 overflow-y-auto" aria-label="Leaked prefixes">
+    <ul className="min-h-0 flex-1 overflow-y-auto" aria-label={m.leak_list_label()}>
       {ps.map((p) => {
         const strangers = p.observed.filter((o) => !o.expected).map((o) => o.domain);
         return (
@@ -89,7 +95,7 @@ export function LeakList({ onPick }: { onPick: (address: string) => void }) {
               </span>
               <span className="truncate text-small">
                 <LeakCounts p={p} />
-                {strangers.length > 0 && <span className="text-muted-foreground"> · from {strangers.join(", ")}</span>}
+                {strangers.length > 0 && <span className="text-muted-foreground"> · {m.leak_from({ domains: strangers.join(", ") })}</span>}
               </span>
             </button>
           </li>
@@ -117,7 +123,7 @@ export function PrefixFacts({ address, onOpen }: { address: string; onOpen: (mes
   const expects = p.expected_domains.length ? p.expected_domains.join(", ") : undefined;
   return (
     <section
-      aria-label="Prefix facts"
+      aria-label={m.leak_facts_label()}
       className={cn(
         "flex flex-col gap-1 rounded-md border border-system-border bg-system-surface px-2 py-1 text-small",
         tone === "bad" && "border-destructive/60",
@@ -127,18 +133,22 @@ export function PrefixFacts({ address, onOpen }: { address: string; onOpen: (mes
         <Signature speaker={system} />
         {expects ? (
           <span>
-            given to <span className="font-medium">{expects}</span>
+            <ParaglideMessage
+              message={m.leak_given_to}
+              inputs={{ domains: expects }}
+              markup={markup}
+            />
           </span>
         ) : (
           <span className="text-muted-foreground">
-            given to nobody yet: <code className="font-mono">yuuka prefix expect</code>
+            <ParaglideMessage message={m.leak_given_to_nobody} markup={markup} />
           </span>
         )}
         {tone && <LeakCounts p={p} />}
       </p>
       {p.observed.length > 0 && (
         <p className="wrap-anywhere text-muted-foreground">
-          proven senders{" "}
+          {m.leak_proven_senders()}{" "}
           {p.observed.map((o, i) => (
             <span key={o.domain}>
               {i > 0 && ", "}
@@ -158,12 +168,12 @@ function Offenses({ offenses, total, onOpen }: { offenses?: Offense[]; total: nu
   if (!offenses) return <Skeleton className="h-3.5 w-2/3" />;
   const more = total - Math.min(offenses.length, shownOffenses);
   return (
-    <ul className="flex flex-col border-t border-system-border pt-1" aria-label="Offending mail">
+    <ul className="flex flex-col border-t border-system-border pt-1" aria-label={m.leak_offending_label()}>
       {offenses.slice(0, shownOffenses).map((o) => (
         <li key={o.message.id}>
           <button type="button" onClick={() => onOpen(o.message.id)} className="flex w-full min-w-0 items-baseline gap-1.5 rounded-sm text-left hover:bg-muted">
             <span className={cn("w-9 shrink-0 font-medium", o.verdict === "spoof" ? "text-destructive" : "text-warning")}>{o.verdict}</span>
-            <span className="w-24 shrink-0 truncate text-muted-foreground">{o.domain ?? "unproven"}</span>
+            <span className="w-24 shrink-0 truncate text-muted-foreground">{o.domain ?? m.leak_unproven()}</span>
             <span className="min-w-0 flex-1 truncate underline-offset-2 hover:underline">
               {o.message.subject || sender(o.message.from_name, o.message.from_addr)}
             </span>
@@ -171,7 +181,7 @@ function Offenses({ offenses, total, onOpen }: { offenses?: Offense[]; total: nu
           </button>
         </li>
       ))}
-      {more > 0 && <li className="text-meta text-muted-foreground">{count(more)} more in the list below</li>}
+      {more > 0 && <li className="text-meta text-muted-foreground">{m.leak_more_below({ n: count(more) })}</li>}
     </ul>
   );
 }

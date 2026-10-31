@@ -1,22 +1,26 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { LogOutIcon, PanelLeftIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import { ParaglideMessage } from "@inlang/paraglide-js-react";
+import { PanelLeftIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
+import { markup } from "@/components/markup";
 import type { SessionInfo } from "@/api/types";
-import { api } from "@/api/client";
-import { keys, useMessageList, usePrefixes, useSearchList, useUnclaimedPrefixes, type MailList } from "@/api/queries";
+import { useMessageList, usePrefixes, useSearchList, useUnclaimedPrefixes, type MailList } from "@/api/queries";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { count } from "@/lib/format";
 import { navigate, useLocation } from "@/lib/router";
+import { m as msg } from "@/paraglide/messages.js";
 import { cn } from "@/lib/utils";
 import { Composer } from "@/send/compose";
 import { DraftsList, parseDraftFilter } from "@/send/drafts-list";
 import { OutboxList, parseOutboxFilter } from "@/send/outbox-list";
 import { OutboxPane } from "@/send/outbox-pane";
 import { abilities, outboxFilters, type OutboxFilter } from "@/send/outgoing";
+
+import { AccountMenu } from "./account-menu";
+import { areaTitle } from "./areas";
 
 import { LeakList, PrefixFacts, useFlaggedCount } from "./leaks";
 import { MessageList } from "./message-list";
@@ -78,19 +82,18 @@ export function MailShell({ session }: { session: SessionInfo }) {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-11 shrink-0 items-center gap-2 border-b px-2 md:px-3">
-        <Button variant="ghost" size="icon-sm" className="lg:hidden" aria-label="Prefixes" aria-pressed={showPrefixes} onClick={() => setShowPrefixes((s) => !s)}>
+        <Button variant="ghost" size="icon-sm" className="lg:hidden" aria-label={msg.shell_prefixes()} aria-pressed={showPrefixes} onClick={() => setShowPrefixes((s) => !s)}>
           <PanelLeftIcon />
         </Button>
         <Logo className="hidden w-[12.25rem] sm:inline-flex" />
         <SearchBox ref={searchBox} value={view.q ?? ""} onSearch={(q) => go({ q: q || undefined, m: undefined }, !!view.q === !!q)} />
         {can.compose && (
-          <Button variant="outline" size="sm" aria-label="Compose" title="New message (c)" onClick={startNew}>
+          <Button variant="outline" size="sm" aria-label={msg.shell_compose()} title={msg.shell_compose_title()} onClick={startNew}>
             <SquarePenIcon data-icon="inline-start" />
-            <span className="max-sm:sr-only">Compose</span>
+            <span className="max-sm:sr-only">{msg.shell_compose()}</span>
           </Button>
         )}
-        <span className="ml-auto hidden truncate text-meta text-muted-foreground sm:inline">{session.principal}</span>
-        <Logout />
+        <AccountMenu session={session} className="ml-auto" />
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[22rem_1fr] lg:grid-cols-[13.5rem_24rem_1fr]">
@@ -159,16 +162,16 @@ export function MailShell({ session }: { session: SessionInfo }) {
           ) : (
             <div className="m-auto text-center text-small text-muted-foreground">
               {unclaimed || leaks ? (
-                <p>Pick a prefix to list its mail.</p>
+                <p>{msg.shell_pick_prefix()}</p>
               ) : drafts ? (
-                <p>No draft open.</p>
+                <p>{msg.shell_no_draft_open()}</p>
               ) : outbox ? (
-                <p>Pick a row to see each recipient and the attempts.</p>
+                <p>{msg.shell_pick_outbox_row()}</p>
               ) : (
                 <>
-                  <p>No message selected.</p>
+                  <p>{msg.shell_no_message()}</p>
                   <p className="mt-1">
-                    <Kbd>j</Kbd> <Kbd>k</Kbd> move · <Kbd>/</Kbd> search · <Kbd>r</Kbd> reply · <Kbd>c</Kbd> compose · <Kbd>Esc</Kbd> close
+                    <ParaglideMessage message={msg.shell_keys} markup={markup} />
                   </p>
                 </>
               )}
@@ -180,35 +183,18 @@ export function MailShell({ session }: { session: SessionInfo }) {
   );
 }
 
-function Kbd({ children }: { children: string }) {
-  return <kbd className="rounded border bg-muted px-1 font-mono text-meta">{children}</kbd>;
+function areaHint(a: Area): React.ReactNode {
+  switch (a) {
+    case "downgraded":
+      return msg.area_downgraded_hint();
+    case "unclaimed":
+      return <ParaglideMessage message={msg.area_unclaimed_hint} markup={markup} />;
+    case "leaks":
+      return <ParaglideMessage message={msg.area_leaks_hint} markup={markup} />;
+    default:
+      return undefined;
+  }
 }
-
-const areaTitles: Record<Area, string> = {
-  conversations: "Conversations",
-  notifications: "Notifications",
-  all: "All mail",
-  drafts: "Drafts",
-  outbox: "Outbox",
-  downgraded: "Downgraded",
-  unclaimed: "Unclaimed prefixes",
-  leaks: "Leaks & spoofs",
-};
-
-const areaHints: Partial<Record<Area, React.ReactNode>> = {
-  downgraded: "Mail to unclaimed prefixes, or that failed DMARC. Hidden everywhere else.",
-  unclaimed: (
-    <>
-      Addresses that got mail without being claimed. Claim one with <code className="font-mono">yuuka prefix claim</code>.
-    </>
-  ),
-  leaks: (
-    <>
-      Claimed prefixes that got mail from senders they were not given to, or mail pretending to be one of those senders. Set who a
-      prefix was given to with <code className="font-mono">yuuka prefix expect</code>.
-    </>
-  ),
-};
 
 function ListHeader({
   view,
@@ -222,7 +208,7 @@ function ListHeader({
   pick: (next: Partial<View>) => void;
 }) {
   const browsing = !view.q && !view.prefix;
-  const title = view.q ? `“${view.q}”` : view.prefix ? view.prefix : areaTitles[view.area];
+  const title = view.q ? msg.shell_search_title({ q: view.q }) : view.prefix ? view.prefix : areaTitle(view.area);
   const prefixes = usePrefixes();
   const unclaimed = useUnclaimedPrefixes(browsing && view.area === "unclaimed");
   const flagged = useFlaggedCount();
@@ -237,7 +223,7 @@ function ListHeader({
   // The zones and the review group never show downgraded mail mixed in;
   // all mail and search can.
   const canToggleDowngraded = !!view.q || (browsing && view.area === "all");
-  const hint = browsing ? areaHints[view.area] : undefined;
+  const hint = browsing ? areaHint(view.area) : undefined;
   // Without the sidebar the two zones are a switch over the list, standing
   // in for the title it would repeat.
   const zone = browsing && (view.area === "conversations" || view.area === "notifications");
@@ -252,19 +238,15 @@ function ListHeader({
             variant="outline"
             spacing={0}
             className="lg:hidden"
-            aria-label="Zone"
+            aria-label={msg.shell_zone()}
             value={[view.area]}
             onValueChange={(v: string[]) => {
               const a = v[0] as Area | undefined;
               if (a) pick({ area: a });
             }}
           >
-            <ToggleGroupItem value="conversations">
-              Conversations
-            </ToggleGroupItem>
-            <ToggleGroupItem value="notifications">
-              Notifications
-            </ToggleGroupItem>
+            <ToggleGroupItem value="conversations">{msg.area_conversations()}</ToggleGroupItem>
+            <ToggleGroupItem value="notifications">{msg.area_notifications()}</ToggleGroupItem>
           </ToggleGroup>
         )}
         <h1 className={cn("min-w-0 truncate font-semibold", view.prefix && "font-mono", zone && "max-lg:sr-only")}>{title}</h1>
@@ -277,7 +259,7 @@ function ListHeader({
         {canToggleDowngraded && (
           <label className="ml-auto flex shrink-0 items-center gap-1.5 self-center text-small text-muted-foreground">
             <input type="checkbox" className="accent-current" checked={view.dg} onChange={(e) => go({ dg: e.target.checked, m: undefined })} />
-            downgraded
+            {msg.shell_include_downgraded()}
           </label>
         )}
       </div>
@@ -289,7 +271,7 @@ function ListHeader({
   );
 }
 
-const draftFilterLabels = { draft: "Drafts", held: "Held", outbox: "In outbox" } as const;
+const draftFilterLabels = { draft: () => msg.shell_drafts_draft(), held: () => msg.shell_drafts_held(), outbox: () => msg.shell_drafts_outbox() } as const;
 
 /** Which drafts to list: any of draft, held, in the outbox (§12.10). */
 function DraftFilter({ st, onChange }: { st?: string; onChange: (st: string | undefined) => void }) {
@@ -300,7 +282,7 @@ function DraftFilter({ st, onChange }: { st?: string; onChange: (st: string | un
       size="xs"
       variant="outline"
       spacing={0}
-      aria-label="Show drafts"
+      aria-label={msg.shell_show_drafts()}
       value={value}
       onValueChange={(v: string[]) => {
         const next = parseDraftFilter(v.join(","));
@@ -310,7 +292,7 @@ function DraftFilter({ st, onChange }: { st?: string; onChange: (st: string | un
     >
       {(Object.keys(draftFilterLabels) as (keyof typeof draftFilterLabels)[]).map((k) => (
         <ToggleGroupItem key={k} value={k}>
-          {draftFilterLabels[k]}
+          {draftFilterLabels[k]()}
         </ToggleGroupItem>
       ))}
     </ToggleGroup>
@@ -323,7 +305,7 @@ function OutboxFilterBar({ st, onChange }: { st?: string; onChange: (st: string 
       size="xs"
       variant="outline"
       spacing={0}
-      aria-label="Show outbox rows"
+      aria-label={msg.shell_show_outbox()}
       value={[parseOutboxFilter(st)]}
       onValueChange={(v: string[]) => {
         const f = v[0] as OutboxFilter | undefined;
@@ -369,35 +351,16 @@ function SearchBox({ ref, value, onSearch }: { ref: React.Ref<HTMLInputElement>;
           if (e.key === "Enter") latest.current(text.trim());
           if (e.key === "Escape") e.currentTarget.blur();
         }}
-        placeholder="Search subject, sender, body"
-        aria-label="Search mail"
+        placeholder={msg.shell_search_placeholder()}
+        aria-label={msg.shell_search_label()}
         className="h-7 pr-7 pl-7"
       />
       {text && (
-        <button type="button" aria-label="Clear search" onClick={() => setText("")} className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+        <button type="button" aria-label={msg.shell_search_clear()} onClick={() => setText("")} className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground hover:text-foreground">
           <XIcon className="size-3.5" />
         </button>
       )}
     </div>
-  );
-}
-
-function Logout() {
-  const qc = useQueryClient();
-  return (
-    <Button
-      variant="ghost"
-      size="icon-sm"
-      aria-label="Sign out"
-      title="Sign out"
-      onClick={async () => {
-        await api.POST("/auth/logout").catch(() => undefined);
-        qc.clear();
-        qc.setQueryData(keys.session, null);
-      }}
-    >
-      <LogOutIcon />
-    </Button>
   );
 }
 

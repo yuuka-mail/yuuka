@@ -3,6 +3,7 @@ import { useEffect, useState, type SyntheticEvent } from "react";
 
 import type { Extracted } from "@/api/types";
 import { cn } from "@/lib/utils";
+import { m } from "@/paraglide/messages.js";
 
 import { openable, timeLeft } from "./extracted";
 
@@ -30,7 +31,7 @@ export function ExtractedLine({ x, verified, subject, mark = true }: { x: Extrac
         <>
           <span
             className={cn("shrink-0 font-mono text-body font-semibold tracking-wider tabular-nums", tone)}
-            title={`Code found by yuuka in the ${x.code.source} (confidence ${x.code.confidence})`}
+            title={m.x_code_title({ source: x.code.source, confidence: x.code.confidence })}
           >
             {x.code.value}
           </span>
@@ -46,9 +47,9 @@ export function ExtractedLine({ x, verified, subject, mark = true }: { x: Extrac
             onClick={stop}
             onKeyDown={stop}
             className={cn("inline-flex min-w-0 shrink items-center gap-1 underline underline-offset-2", tone)}
-            title={`Open ${link.href} in a new tab`}
+            title={m.x_open_title({ href: link.href })}
           >
-            <span className="shrink-0 font-medium">open</span>
+            <span className="shrink-0 font-medium">{m.x_open()}</span>
             <span className="truncate font-mono text-meta">{link.host}</span>
             <ExternalLinkIcon aria-hidden className="size-3 shrink-0" />
           </a>
@@ -56,8 +57,8 @@ export function ExtractedLine({ x, verified, subject, mark = true }: { x: Extrac
       )}
       {left && <span className={cn("shrink-0 text-meta tabular-nums", expired ? "text-muted-foreground" : "text-system-foreground")}>{left.text}</span>}
       {verified === false && (
-        <span className="shrink-0 text-meta font-medium text-warning" title="No DMARC pass from the trusted receiver: the sender is unproven">
-          unverified
+        <span className="shrink-0 text-meta font-medium text-warning" title={m.x_unverified_title()}>
+          {m.x_unverified()}
         </span>
       )}
       {subject !== undefined && <span className="min-w-0 truncate text-muted-foreground">{subject}</span>}
@@ -77,8 +78,8 @@ function CopyButton({ value }: { value: string }) {
   return (
     <button
       type="button"
-      aria-label={copied ? "Copied" : `Copy ${value}`}
-      title="Copy the code"
+      aria-label={copied ? m.x_copied() : m.x_copy_value({ value })}
+      title={m.x_copy_title()}
       onClick={(e) => {
         e.stopPropagation();
         void navigator.clipboard?.writeText(value).then(

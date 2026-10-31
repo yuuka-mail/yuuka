@@ -1,5 +1,7 @@
 import type { Extracted, MessageSummary } from "@/api/types";
 
+import { m as msg } from "@/paraglide/messages.js";
+
 import { linkTarget } from "./links";
 
 // What the notification zone shows in place of a subject (§12.9): the
@@ -20,13 +22,13 @@ export interface Left {
 /** How long is left until expiresAt at now: "9 min left", "expired". */
 export function timeLeft(expiresAt: string, now: number): Left {
   const s = Math.floor((Date.parse(expiresAt) - now) / 1000);
-  if (Number.isNaN(s) || s <= 0) return { text: "expired", expired: true };
-  if (s < 60) return { text: `${s} s left`, expired: false };
+  if (Number.isNaN(s) || s <= 0) return { text: msg.x_expired(), expired: true };
+  if (s < 60) return { text: msg.x_left_s({ n: s }), expired: false };
   const m = Math.ceil(s / 60);
-  if (m < 120) return { text: `${m} min left`, expired: false };
+  if (m < 120) return { text: msg.x_left_min({ n: m }), expired: false };
   const h = Math.floor(m / 60);
-  if (h < 48) return { text: `${h} h left`, expired: false };
-  return { text: `${Math.floor(h / 24)} d left`, expired: false };
+  if (h < 48) return { text: msg.x_left_h({ n: h }), expired: false };
+  return { text: msg.x_left_d({ n: Math.floor(h / 24) }), expired: false };
 }
 
 /**
