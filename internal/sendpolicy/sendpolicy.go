@@ -1,10 +1,11 @@
 // Package sendpolicy decides where one outbound submission goes (§8.9,
 // §13.5): into the outbox, or back to a draft with a reason. It is a pure
 // function of its input: no clock, no database. The store gathers the
-// facts (grant, counters, thread participants) and the submission paths
-// (REST, MCP, the SMTP submission port) call Decide before anything is
-// queued, and again inside the enqueue transaction; nothing reaches the
-// outbox any other way.
+// facts (grant, counters, thread participants) and calls Decide itself,
+// inside the transaction that holds the grant's lock
+// (store.WithDecision); an outbox row can only be created through the
+// store.PolicyTx that carries that decision, and only when it is Queue.
+// internal/submit is the one caller, for every submission path.
 //
 // Exceeding a grant is a downgrade, never a refusal: every outcome other
 // than Queue is a draft with a hold reason, so the caller never has a

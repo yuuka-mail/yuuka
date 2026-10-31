@@ -42,6 +42,11 @@ type ReplyFacts struct {
 	// clear it: agents may classify (§8.2), so an override must not open
 	// the loop rule.
 	Machine bool
+	// The message's own threading headers as parsed (ids without angle
+	// brackets), for the In-Reply-To and References of a reply.
+	HeaderID   string
+	InReplyTo  string
+	References []string
 }
 
 // ReplyFacts returns the facts of message id as v sees it; ErrNotFound
@@ -56,10 +61,12 @@ func (db *DB) ReplyFacts(ctx context.Context, v *auth.Viewer, id string) (ReplyF
 func (db *DB) replyFacts(ctx context.Context, q dbtx, v *auth.Viewer, id string) (ReplyFacts, error) {
 	var f ReplyFacts
 	err := q.QueryRow(ctx, `
-		SELECT m.id, m.thread_id, m.class = $2 OR coalesce(s.class_override = $2, false)
+		SELECT m.id, m.thread_id, m.class = $2 OR coalesce(s.class_override = $2, false),
+		       coalesce(m.message_id, ''), coalesce(m.in_reply_to, ''), m.refs
 		FROM messages m LEFT JOIN message_state s ON s.message_id = m.id
 		WHERE m.id = coalesce((SELECT new_id FROM message_aliases WHERE old_id = $1), $1)
-		  AND `+db.visibleMessage(v, "m"), id, int16(classify.Machine)).Scan(&f.MessageID, &f.ThreadID, &f.Machine)
+		  AND `+db.visibleMessage(v, "m"), id, int16(classify.Machine)).
+		Scan(&f.MessageID, &f.ThreadID, &f.Machine, &f.HeaderID, &f.InReplyTo, &f.References)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return f, fmt.Errorf("message %s: %w", id, ErrNotFound)
 	}
@@ -215,10 +222,9 @@ type PolicyFacts struct {
 
 // PolicyInput gathers sendpolicy.Input for submission s by v. Everything
 // sendpolicy.Decide reads comes from here, so no submission path builds
-// it by hand: REST and MCP (submit_draft), the WebUI's send button and
-// the SMTP submission port all call this and then Decide. The enqueue
-// transaction repeats both under lockGrant (WithPolicyInput), so
-// a limit cannot be overrun by two concurrent submissions.
+// it by hand. It is a read for previews and for the SMTP port's Sender
+// check; what is queued is decided by WithDecision, which gathers the
+// same input again under the grant's lock.
 //
 // It fails with ErrNoIdentity when nothing covers s.FromAddr and no
 // IdentityID is given; the SMTP port rejects such mail (§13.6), the other
@@ -290,27 +296,22 @@ func (db *DB) policyInput(ctx context.Context, q dbtx, v *auth.Viewer, s Submiss
 	return f, nil
 }
 
-// WithPolicyInput runs f in one transaction that holds the grant's lock
-// (lockGrant) and passes it the PolicyFacts read inside that
-// transaction. The enqueue path decides on these facts and writes the
-// outbox row (or the draft) through tx, so the counters it decided on are
-// still true when the row commits.
-func (db *DB) WithPolicyInput(ctx context.Context, v *auth.Viewer, s Submission, f func(tx pgx.Tx, facts PolicyFacts) error) error {
-	if err := needViewer(v, "policy input"); err != nil {
-		return err
+// MessageByHeaderID returns the newest message v can see whose
+// Message-ID header is headerID (without angle brackets): the message a
+// raw submission's In-Reply-To names. ErrNotFound if there is none.
+func (db *DB) MessageByHeaderID(ctx context.Context, v *auth.Viewer, headerID string) (string, error) {
+	if err := needViewer(v, "message by header id"); err != nil {
+		return "", err
 	}
-	return pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
-		// Read once to learn whose grant it is, lock it, read again.
-		facts, err := db.policyInput(ctx, tx, v, s)
-		if err != nil {
-			return err
-		}
-		if err := lockGrant(ctx, tx, facts.Identity.ID, facts.Input.Submitter.ID); err != nil {
-			return err
-		}
-		if facts, err = db.policyInput(ctx, tx, v, s); err != nil {
-			return err
-		}
-		return f(tx, facts)
-	})
+	var id string
+	err := db.pool.QueryRow(ctx, `SELECT m.id FROM messages m
+		WHERE m.message_id = $1 AND `+db.visibleMessage(v, "m")+`
+		ORDER BY m.received_at DESC, m.id DESC LIMIT 1`, headerID).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("message-id %s: %w", headerID, ErrNotFound)
+	}
+	if err != nil {
+		return "", fmt.Errorf("message-id %s: %w", headerID, err)
+	}
+	return id, nil
 }

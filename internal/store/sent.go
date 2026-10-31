@@ -147,3 +147,23 @@ func (w *writer) sentIDs(ctx context.Context, h []byte) ([]string, error) {
 	}
 	return ids, nil
 }
+
+// SentRawByID returns the raw_objects row of sent copy id: an outbox
+// row's, or a held SMTP submission's (drafts.raw_id).
+func (db *DB) SentRawByID(ctx context.Context, id string) (SentRaw, error) {
+	var r SentRaw
+	var sum, ch []byte
+	err := db.pool.QueryRow(ctx, `SELECT id, r2_key, size, sha256, content_hash, received_at FROM raw_objects WHERE id = $1`, id).
+		Scan(&r.ID, &r.Key, &r.Size, &sum, &ch, &r.At)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return r, fmt.Errorf("raw %s: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return r, fmt.Errorf("raw %s: %w", id, err)
+	}
+	if len(sum) != len(r.SHA256) || len(ch) != len(r.ContentHash) {
+		return r, fmt.Errorf("raw %s: not a sent copy (no sha256 or content hash)", id)
+	}
+	r.SHA256, r.ContentHash = [32]byte(sum), [32]byte(ch)
+	return r, nil
+}

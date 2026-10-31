@@ -176,9 +176,8 @@ const grantLockKey = 0x79756b
 // lockGrant serializes submissions of one (identity, principal) until tx
 // ends, so that two concurrent submissions cannot both pass a limit with
 // one slot left. An advisory lock rather than a row lock: a human sending
-// as their own identity usually has no grant row to lock. The enqueue
-// transaction takes it, recomputes PolicyInput inside the transaction and
-// decides again before inserting the outbox row.
+// as their own identity usually has no grant row to lock. WithDecision
+// takes it, reads the policy input again under it and decides on that.
 func lockGrant(ctx context.Context, tx pgx.Tx, identityID, principalID string) error {
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2))`, grantLockKey, identityID+"/"+principalID)
 	if err != nil {

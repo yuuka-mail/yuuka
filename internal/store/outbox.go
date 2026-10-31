@@ -13,9 +13,10 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
-// The outbox side of §4.5: enqueueing a message, claiming it for an
-// attempt, the commit point, recording the result, lease recovery and the
-// human resolution of unknown. Every transaction that writes a change
+// The outbox side of §4.5: enqueueing a message (only through a
+// PolicyTx, see policytx.go), claiming it for an attempt, the commit
+// point, recording the result, lease recovery and the human resolution
+// of unknown. Every transaction that writes a change
 // takes contentLock first, like the content writers, so changes.seq stays
 // in commit order and the lock order is always content lock, then rows.
 // The two statements that run during an attempt (CommitAttempt and
@@ -106,18 +107,35 @@ type OutboxRecipient struct {
 	Kind string // RecipientTo, RecipientCc or RecipientBcc
 }
 
-// NewOutbox is everything EnqueueOutbox writes.
+// NewOutbox is what (*PolicyTx).Enqueue writes besides what the
+// decision fixes. The identity, the From address, the submitter and the
+// approver are not in it: they come from the PolicyTx, so a caller
+// cannot queue mail as anyone the decision was not about.
 type NewOutbox struct {
-	ID          string
-	IdentityID  string
-	FromAddr    string
-	SubmittedBy string
-	ApprovedBy  string
-	DraftID     string // "" for none
-	Raw         SentRaw
+	ID      string
+	DraftID string // "" for none
+	// Raw is the sent copy, already stored under Raw.Key. It is recorded
+	// here, unless it is the raw of DraftID (a held SMTP submission sent
+	// as it was stored), which already has its row.
+	Raw SentRaw
+	// Message is the bytes stored under Raw.Key. Enqueue checks them
+	// against Raw and against the decision (header From).
+	Message []byte
 	// Recipients in the order given. Spellings that fold to the same
-	// address keep the first (§4.6).
+	// address keep the first (§4.6). Their folded set must be the one
+	// decided on.
 	Recipients []OutboxRecipient
+}
+
+// outboxRow is one outbox row with its sent copy and recipients.
+type outboxRow struct {
+	NewOutbox
+	identityID  string
+	fromAddr    string
+	submittedBy string
+	approvedBy  string
+	// newRaw: Raw has no raw_objects row yet.
+	newRaw bool
 }
 
 // IdentityTransport returns the transport name of identity id, which must
@@ -139,11 +157,15 @@ func (db *DB) IdentityTransport(ctx context.Context, id string) (string, error) 
 	return transport, nil
 }
 
-// EnqueueOutbox records a sent copy and the outbox row that will send it,
-// in state queued and due now, in one transaction (§4.6). The bytes must
-// already be stored: if this fails they are an orphan under sent/, which
+// enqueueOutbox records a sent copy and the outbox row that will send it,
+// in state queued and due now, in tx (§4.6). The bytes must already be
+// stored: if the transaction fails they are an orphan under sent/, which
 // is not lost mail, since nothing was sent.
-func (db *DB) EnqueueOutbox(ctx context.Context, o NewOutbox) error {
+//
+// It is the only statement that creates an outbox row, and
+// (*PolicyTx).Enqueue is its only caller (TestOneWayToTheOutbox): an
+// outbox row exists only where sendpolicy.Decide said Queue.
+func enqueueOutbox(ctx context.Context, tx pgx.Tx, o outboxRow) error {
 	addrs, folds, kinds := dedupeRecipients(o.Recipients)
 	if len(addrs) == 0 {
 		return fmt.Errorf("enqueue %s: no recipients", o.ID)
@@ -153,34 +175,33 @@ func (db *DB) EnqueueOutbox(ctx context.Context, o NewOutbox) error {
 			return fmt.Errorf("enqueue %s: recipient kind %q", o.ID, k)
 		}
 	}
-	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
-		if err := lockContent(ctx, tx); err != nil {
-			return err
-		}
+	if err := lockContent(ctx, tx); err != nil {
+		return err
+	}
+	if o.newRaw {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO raw_objects (id, r2_key, local_path, size, sha256, received_at, completeness, content_hash)
 			VALUES ($1, $2, $2, $3, $4, $5, 1, $6)`,
 			o.Raw.ID, o.Raw.Key, o.Raw.Size, o.Raw.SHA256[:], o.Raw.At, o.Raw.ContentHash[:])
 		if err != nil {
-			return fmt.Errorf("insert raw_objects: %w", err)
+			return fmt.Errorf("enqueue %s: insert raw_objects: %w", o.ID, err)
 		}
-		_, err = tx.Exec(ctx, `
-			INSERT INTO outbox (id, state, next_retry_at, identity_id, from_addr, submitted_by, approved_by, draft_id, raw_id)
-			VALUES ($1, 'queued', now(), $2, $3, $4, $5, $6, $7)`,
-			o.ID, o.IdentityID, o.FromAddr, o.SubmittedBy, o.ApprovedBy, nullable(o.DraftID), o.Raw.ID)
-		if err != nil {
-			return fmt.Errorf("insert outbox: %w", err)
-		}
-		_, err = tx.Exec(ctx, `
-			INSERT INTO outbox_recipients (outbox_id, addr, addr_fold, kind)
-			SELECT $1, a, f, k FROM unnest($2::text[], $3::text[], $4::text[]) AS u(a, f, k)`,
-			o.ID, addrs, folds, kinds)
-		if err != nil {
-			return fmt.Errorf("insert outbox_recipients: %w", err)
-		}
-		return outboxChanged(ctx, tx, o.ID)
-	})
+	}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO outbox (id, state, next_retry_at, identity_id, from_addr, submitted_by, approved_by, draft_id, raw_id)
+		VALUES ($1, 'queued', now(), $2, $3, $4, $5, $6, $7)`,
+		o.ID, o.identityID, o.fromAddr, o.submittedBy, o.approvedBy, nullable(o.DraftID), o.Raw.ID)
 	if err != nil {
+		return fmt.Errorf("enqueue %s: insert outbox: %w", o.ID, err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO outbox_recipients (outbox_id, addr, addr_fold, kind)
+		SELECT $1, a, f, k FROM unnest($2::text[], $3::text[], $4::text[]) AS u(a, f, k)`,
+		o.ID, addrs, folds, kinds)
+	if err != nil {
+		return fmt.Errorf("enqueue %s: insert outbox_recipients: %w", o.ID, err)
+	}
+	if err := outboxChanged(ctx, tx, o.ID); err != nil {
 		return fmt.Errorf("enqueue %s: %w", o.ID, err)
 	}
 	return nil

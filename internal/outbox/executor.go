@@ -1,12 +1,10 @@
 package outbox
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"slices"
 	"strings"
@@ -215,22 +213,13 @@ func (s *Service) keepLease(ctx context.Context, log *slog.Logger, c *store.Clai
 	}
 }
 
-// readRaw returns the sent copy, preferring the local copy, and checks it
-// against the hash recorded when it was stored: the bytes sent must be
-// the sent copy.
+// readRaw returns the sent copy of c, checked against the hash recorded
+// when it was stored: the bytes sent must be the sent copy.
 func (s *Service) readRaw(ctx context.Context, c *store.Claimed) ([]byte, error) {
-	b, err := s.cfg.Local.Get(c.LocalPath)
-	if errors.Is(err, fs.ErrNotExist) {
-		obj, gerr := s.cfg.Raw.Get(ctx, c.R2Key)
-		b, err = obj.Body, gerr
+	if c.LocalPath != c.R2Key || len(c.SHA256) != sha256.Size {
+		return nil, fmt.Errorf("raw %s: local path %q, key %q, sha256 of %d bytes", c.RawID, c.LocalPath, c.R2Key, len(c.SHA256))
 	}
-	if err != nil {
-		return nil, err
-	}
-	if sum := sha256.Sum256(b); int64(len(b)) != c.Size || !bytes.Equal(sum[:], c.SHA256) {
-		return nil, fmt.Errorf("%s does not match its recorded size and sha256", c.LocalPath)
-	}
-	return b, nil
+	return s.ReadSent(ctx, store.SentRaw{ID: c.RawID, Key: c.R2Key, Size: c.Size, SHA256: [sha256.Size]byte(c.SHA256)})
 }
 
 func (s *Service) abandon(ctx context.Context, log *slog.Logger, c *store.Claimed, why string, retry time.Duration) {

@@ -222,43 +222,53 @@ func logDraftChange(ctx context.Context, tx pgx.Tx, id string) error {
 
 // CreateDraft stores a new draft written by v at time at and returns it.
 // d.ID, PrincipalID and the timestamps are set here; d.IdentityID
-// follows from d.FromAddr (ErrNoIdentity if nothing covers it). A
-// HoldReason records a submission that stopped here, such as an SMTP
-// submission held with its RawID. Recorded as draft.create.
+// follows from d.FromAddr (ErrNoIdentity if nothing covers it). It takes
+// a Markdown body only: a raw body and a hold reason come from a
+// submission that stopped at a draft, which (*PolicyTx).CreateDraft
+// records with its decision. Recorded as draft.create.
 func (db *DB) CreateDraft(ctx context.Context, v *auth.Viewer, d Draft, at time.Time) (Draft, error) {
 	if err := needViewer(v, "create draft"); err != nil {
 		return Draft{}, err
 	}
-	if d.RawID != "" && d.BodyMD != "" {
-		return Draft{}, errors.New("create draft: a body or a raw, not both")
+	if d.RawID != "" || d.HoldReason != "" || d.HoldDetail != "" {
+		return Draft{}, errors.New("create draft: a raw body and a hold reason come from a submission's decision")
 	}
-	d.ID, d.PrincipalID, d.CreatedAt, d.UpdatedAt = ulid.New(at), v.PrincipalID, at, at
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
-		if err := db.prepareDraft(ctx, tx, v, &d); err != nil {
-			return err
-		}
-		var body any = d.BodyMD
-		if d.RawID != "" {
-			body = nil
-		}
-		_, err := tx.Exec(ctx, `
-			INSERT INTO drafts (id, principal_id, identity_id, from_addr, in_reply_to_id, to_addrs, cc_addrs, bcc_addrs,
-			                    subject, body_md, raw_id, cites, hold_reason, hold_detail, created_at, updated_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)`,
-			d.ID, d.PrincipalID, d.IdentityID, d.FromAddr, nullable(d.InReplyToID), d.To, d.Cc, d.Bcc,
-			d.Subject, body, nullable(d.RawID), d.Cites, nullable(string(d.HoldReason)), nullable(d.HoldDetail), at)
-		if err != nil {
-			return fmt.Errorf("insert draft: %w", err)
-		}
-		if err := logDraftChange(ctx, tx, d.ID); err != nil {
-			return err
-		}
-		return insertAction(ctx, tx, draftAction(v, "draft.create", d, at))
+		var err error
+		d, err = db.createDraft(ctx, tx, v, d, at)
+		return err
 	})
 	if err != nil {
 		return Draft{}, fmt.Errorf("create draft: %w", err)
 	}
 	return d, nil
+}
+
+func (db *DB) createDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, d Draft, at time.Time) (Draft, error) {
+	if d.RawID != "" && d.BodyMD != "" {
+		return Draft{}, errors.New("a body or a raw, not both")
+	}
+	d.ID, d.PrincipalID, d.CreatedAt, d.UpdatedAt = ulid.New(at), v.PrincipalID, at, at
+	if err := db.prepareDraft(ctx, tx, v, &d); err != nil {
+		return Draft{}, err
+	}
+	var body any = d.BodyMD
+	if d.RawID != "" {
+		body = nil
+	}
+	_, err := tx.Exec(ctx, `
+		INSERT INTO drafts (id, principal_id, identity_id, from_addr, in_reply_to_id, to_addrs, cc_addrs, bcc_addrs,
+		                    subject, body_md, raw_id, cites, hold_reason, hold_detail, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)`,
+		d.ID, d.PrincipalID, d.IdentityID, d.FromAddr, nullable(d.InReplyToID), d.To, d.Cc, d.Bcc,
+		d.Subject, body, nullable(d.RawID), d.Cites, nullable(string(d.HoldReason)), nullable(d.HoldDetail), at)
+	if err != nil {
+		return Draft{}, fmt.Errorf("insert draft: %w", err)
+	}
+	if err := logDraftChange(ctx, tx, d.ID); err != nil {
+		return Draft{}, err
+	}
+	return d, insertAction(ctx, tx, draftAction(v, "draft.create", d, at))
 }
 
 // UpdateDraft replaces the content of draft d.ID (From, reply target,
@@ -312,37 +322,29 @@ func (db *DB) UpdateDraft(ctx context.Context, v *auth.Viewer, d Draft, at time.
 	return out, nil
 }
 
-// HoldDraft records why a submission of draft id stopped at the draft
-// (sendpolicy.Decision), as v at time at. Recorded as draft.hold.
-func (db *DB) HoldDraft(ctx context.Context, v *auth.Viewer, id string, reason sendpolicy.HoldReason, detail string, at time.Time) error {
-	if err := needViewer(v, "hold draft"); err != nil {
-		return err
-	}
+// holdDraft records why a submission of draft id stopped at the draft,
+// as v at time at; (*PolicyTx).HoldDraft passes its decision. Recorded
+// as draft.hold.
+func holdDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, id string, reason sendpolicy.HoldReason, detail string, at time.Time) error {
 	if reason == "" {
 		return errors.New("hold draft: no reason")
 	}
-	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
-		d, err := draftByID(ctx, tx, v, id, true)
-		if err != nil {
-			return err
-		}
-		if err := notInFlight(ctx, tx, id); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE drafts SET hold_reason = $2, hold_detail = $3, updated_at = $4 WHERE id = $1`,
-			id, string(reason), nullable(detail), at); err != nil {
-			return err
-		}
-		if err := logDraftChange(ctx, tx, id); err != nil {
-			return err
-		}
-		d.HoldReason = reason
-		return insertAction(ctx, tx, draftAction(v, "draft.hold", d, at))
-	})
+	d, err := draftByID(ctx, tx, v, id, true)
 	if err != nil {
-		return fmt.Errorf("hold draft %s: %w", id, err)
+		return err
 	}
-	return nil
+	if err := notInFlight(ctx, tx, id); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE drafts SET hold_reason = $2, hold_detail = $3, updated_at = $4 WHERE id = $1`,
+		id, string(reason), nullable(detail), at); err != nil {
+		return err
+	}
+	if err := logDraftChange(ctx, tx, id); err != nil {
+		return err
+	}
+	d.HoldReason = reason
+	return insertAction(ctx, tx, draftAction(v, "draft.hold", d, at))
 }
 
 // DeleteDraft deletes draft id as v at time at. A draft any outbox row

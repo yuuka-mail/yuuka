@@ -3,14 +3,17 @@
 //
 // Enqueue stores the bytes first, write-once under sent/ (R2 and the local
 // copy), and then records the sent copy, the outbox row and its recipients
-// in one transaction. The executor claims due rows, hands the bytes to the
+// through a store.PolicyTx, in the transaction of the decision that let
+// the message go. The executor claims due rows, hands the bytes to the
 // identity's transport with a commit callback that records committed_at
 // before the point of no return, and records what came back. Whether a
 // failure may be retried is decided only by what was recorded, never by
 // whether a process is still alive: see store.RecoverAttempts.
 //
-// Whether a principal may send at all is not decided here. Callers come
-// through the send policy (§8.9), which also decides ApprovedBy.
+// Whether a principal may send at all is not decided here: a row can only
+// be queued through a store.PolicyTx whose decision (sendpolicy.Decide,
+// §8.9) is Queue, and that decision fixes the identity, the submitter and
+// the approver. internal/submit is the caller.
 package outbox
 
 import (
@@ -19,6 +22,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"strings"
@@ -26,7 +30,6 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/yuuka-mail/yuuka/internal/contenthash"
 	"github.com/yuuka-mail/yuuka/internal/localraw"
 	"github.com/yuuka-mail/yuuka/internal/r2"
 	"github.com/yuuka-mail/yuuka/internal/store"
@@ -190,28 +193,23 @@ func New(cfg Config) *Service {
 	}
 }
 
-// Submission is a message to send.
+// Submission is a message to queue. Who sends it, as what and approved
+// by whom is not in it: that is the decision of the store.PolicyTx it is
+// queued through.
 type Submission struct {
-	// IdentityID is the identity it is sent as; its transport carries it
-	// (§9.3).
-	IdentityID string
-	// From is the concrete address of the header From, which for a *@zone
-	// identity names the prefix. It is also the envelope reverse-path.
-	From string
-	// SubmittedBy is who started it, ApprovedBy who let it go: the human
-	// who pressed send, or store.SystemPrincipalID when a policy did
-	// (§8.8). Both are principal ids.
-	SubmittedBy string
-	ApprovedBy  string
 	// DraftID is the draft it came from, if any.
 	DraftID string
+	// RawID, when set, is the existing sent copy of the held SMTP
+	// submission DraftID, queued as it was stored; Raw must be its bytes.
+	// Otherwise Raw is stored as a new sent copy.
+	RawID string
 	// Raw is the composed message. Header fields the transport does not
 	// let the caller set are removed before it is stored
 	// (transport.StripHeaders), so the sent copy is what the exit gets.
 	Raw []byte
 	// Recipients are the envelope recipients, verbatim. Spellings that
 	// differ only in case are one recipient, the first spelling wins
-	// (§4.6).
+	// (§4.6). They must be the ones the decision was made for.
 	Recipients []store.OutboxRecipient
 }
 
@@ -225,67 +223,101 @@ type Enqueued struct {
 // process does not have.
 var ErrUnconfigured = errors.New("transport not configured")
 
+// Caps returns the caps of the transport called name, ErrUnconfigured if
+// this process has none by that name.
+func (s *Service) Caps(name string) (transport.Caps, error) {
+	tr, ok := s.cfg.Transports[name]
+	if !ok {
+		return transport.Caps{}, fmt.Errorf("%w: %q", ErrUnconfigured, name)
+	}
+	return tr.Caps(), nil
+}
+
 // Enqueue stores sub's bytes as a sent copy and queues it for sending
-// (§4.6). The stored bytes are written once, under sent/ in R2 and in the
-// local copy, before the one transaction that records the raw object, the
-// outbox row (queued, due now), its recipients and a change. If anything
-// fails nothing is queued; bytes already written stay as an orphan, which
-// is not lost mail since nothing was sent.
-func (s *Service) Enqueue(ctx context.Context, sub Submission) (Enqueued, error) {
+// (§4.6) through p, the submission's decision, which must be Queue
+// (store.ErrNotApproved otherwise). The bytes are written once, under
+// sent/ in R2 and in the local copy, before p records the raw object,
+// the outbox row (queued, due now), its recipients and a change. If
+// anything fails nothing is queued; bytes already written stay as an
+// orphan, which is not lost mail since nothing was sent. Once p's
+// transaction commits, an idle worker wakes and the sent copy is indexed.
+func (s *Service) Enqueue(ctx context.Context, p *store.PolicyTx, sub Submission) (Enqueued, error) {
 	if err := checkSubmission(sub); err != nil {
 		return Enqueued{}, fmt.Errorf("enqueue: %w", err)
 	}
-	name, err := s.cfg.DB.IdentityTransport(ctx, sub.IdentityID)
-	if err != nil {
-		return Enqueued{}, fmt.Errorf("enqueue: %w", err)
+	// p.Enqueue below is the check; this one only saves storing bytes
+	// for a submission that cannot be queued.
+	if d := p.Decision(); !d.Queue {
+		return Enqueued{}, fmt.Errorf("enqueue: %w: %s", store.ErrNotApproved, d.HoldReason)
 	}
-	tr, ok := s.cfg.Transports[name]
-	if !ok {
+	name := p.Facts().Identity.Transport
+	caps, err := s.Caps(name)
+	if err != nil {
 		// Its caps decide which header fields to strip, so the bytes
 		// cannot be prepared without it.
-		return Enqueued{}, fmt.Errorf("enqueue: identity %s: %w: %q", sub.IdentityID, ErrUnconfigured, name)
+		return Enqueued{}, fmt.Errorf("enqueue: identity %s: %w", p.Facts().Identity.ID, err)
 	}
-	raw := transport.StripHeaders(sub.Raw, tr.Caps())
+	raw := transport.StripHeaders(sub.Raw, caps)
 
-	now := s.cfg.Now()
-	e := Enqueued{OutboxID: ulid.New(now), RawID: ulid.New(now)}
-	key := r2.SentKey(now, e.RawID)
-	// The local copy first: it is cheap and fails on a full disk before
-	// anything leaves the host.
-	if err := s.cfg.Local.Put(key, raw); err != nil {
+	var sr store.SentRaw
+	if sub.RawID != "" {
+		sr = store.SentRaw{ID: sub.RawID}
+	} else if sr, err = s.StoreSent(ctx, raw); err != nil {
 		return Enqueued{}, fmt.Errorf("enqueue: %w", err)
 	}
-	if err := s.putSent(ctx, key, raw); err != nil {
-		return Enqueued{}, fmt.Errorf("enqueue: %w", err)
-	}
-	err = s.cfg.DB.EnqueueOutbox(ctx, store.NewOutbox{
-		ID:          e.OutboxID,
-		IdentityID:  sub.IdentityID,
-		FromAddr:    sub.From,
-		SubmittedBy: sub.SubmittedBy,
-		ApprovedBy:  sub.ApprovedBy,
-		DraftID:     sub.DraftID,
-		Raw: store.SentRaw{
-			ID:          e.RawID,
-			Key:         key,
-			Size:        int64(len(raw)),
-			SHA256:      sha256.Sum256(raw),
-			ContentHash: contenthash.V1(raw),
-			At:          now,
-		},
-		Recipients: sub.Recipients,
+	e := Enqueued{OutboxID: ulid.New(s.cfg.Now()), RawID: sr.ID}
+	err = p.Enqueue(ctx, store.NewOutbox{
+		ID: e.OutboxID, DraftID: sub.DraftID, Raw: sr, Message: raw, Recipients: sub.Recipients,
 	})
 	if err != nil {
 		return Enqueued{}, err
 	}
-	s.Wake()
-	s.log.Info("queued", "outbox", e.OutboxID, "raw", e.RawID, "transport", name)
-	if s.cfg.IndexSent != nil {
-		if err := s.cfg.IndexSent(ctx, e.RawID); err != nil {
-			s.log.Warn("index sent copy; the backlog pass will retry", "raw", e.RawID, "err", err)
+	p.AfterCommit(func(ctx context.Context) {
+		s.Wake()
+		s.log.Info("queued", "outbox", e.OutboxID, "raw", e.RawID, "transport", name)
+		if s.cfg.IndexSent != nil {
+			if err := s.cfg.IndexSent(ctx, e.RawID); err != nil {
+				s.log.Warn("index sent copy; the backlog pass will retry", "raw", e.RawID, "err", err)
+			}
 		}
-	}
+	})
 	return e, nil
+}
+
+// StoreSent writes raw as a new sent copy, write-once under sent/ (the
+// local copy, then R2), and returns its description for the row that
+// will point at it. Storing bytes sends nothing: sent/ holds every byte
+// string composed or normalized for sending, sent or not (§4.6).
+func (s *Service) StoreSent(ctx context.Context, raw []byte) (store.SentRaw, error) {
+	now := s.cfg.Now()
+	id := ulid.New(now)
+	key := r2.SentKey(now, id)
+	// The local copy first: it is cheap and fails on a full disk before
+	// anything leaves the host.
+	if err := s.cfg.Local.Put(key, raw); err != nil {
+		return store.SentRaw{}, err
+	}
+	if err := s.putSent(ctx, key, raw); err != nil {
+		return store.SentRaw{}, err
+	}
+	return store.NewSentRaw(id, key, raw, now), nil
+}
+
+// ReadSent returns the bytes of sent copy r, preferring the local copy,
+// checked against the size and sha256 recorded when they were stored.
+func (s *Service) ReadSent(ctx context.Context, r store.SentRaw) ([]byte, error) {
+	b, err := s.cfg.Local.Get(r.Key)
+	if errors.Is(err, fs.ErrNotExist) {
+		obj, gerr := s.cfg.Raw.Get(ctx, r.Key)
+		b, err = obj.Body, gerr
+	}
+	if err != nil {
+		return nil, err
+	}
+	if sum := sha256.Sum256(b); int64(len(b)) != r.Size || sum != r.SHA256 {
+		return nil, fmt.Errorf("%s does not match its recorded size and sha256", r.Key)
+	}
+	return b, nil
 }
 
 // putSent writes a sent copy create-only. A write that finds the key
@@ -308,17 +340,10 @@ func (s *Service) putSent(ctx context.Context, key string, raw []byte) error {
 
 func checkSubmission(sub Submission) error {
 	switch {
-	case sub.IdentityID == "":
-		return errors.New("no identity")
-	case sub.SubmittedBy == "" || sub.ApprovedBy == "":
-		return errors.New("submitted_by and approved_by are required")
 	case len(sub.Raw) == 0:
 		return errors.New("empty message")
 	case len(sub.Recipients) == 0:
 		return errors.New("no recipients")
-	}
-	if err := checkAddr(sub.From); err != nil {
-		return fmt.Errorf("from: %w", err)
 	}
 	for _, r := range sub.Recipients {
 		if err := checkAddr(r.Addr); err != nil {

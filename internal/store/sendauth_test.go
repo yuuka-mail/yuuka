@@ -1,6 +1,7 @@
 package store_test
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -10,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
@@ -458,11 +458,17 @@ func TestDrafts(t *testing.T) {
 		t.Errorf("another agent updates: %v", err)
 	}
 
-	// Hold, then edit: the edit clears the hold.
-	if err := e.db.HoldDraft(ctx, e.arisu, d.ID, sendpolicy.HoldOwner, "capped", e.at()); err != nil {
+	// Submitted, it is held (the owner cap), then edited: the edit
+	// clears the hold.
+	hold := func(d store.Draft) error {
+		return e.db.WithDecision(ctx, e.arisu, store.Submission{
+			FromAddr: d.FromAddr, IdentityID: d.IdentityID, Recipients: d.To, InReplyToID: d.InReplyToID, Now: e.at(),
+		}, func(ctx context.Context, p *store.PolicyTx) error { return p.HoldDraft(ctx, d.ID, e.at()) })
+	}
+	if err := hold(d); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := e.db.DraftByID(ctx, e.op, d.ID); got.HoldReason != sendpolicy.HoldOwner || got.HoldDetail != "capped" {
+	if got, _ := e.db.DraftByID(ctx, e.op, d.ID); got.HoldReason != sendpolicy.HoldOwner || !strings.Contains(got.HoldDetail, "drafts only") {
 		t.Errorf("held: %+v", got)
 	}
 	upd, err := e.db.UpdateDraft(ctx, e.arisu, store.Draft{
@@ -477,19 +483,33 @@ func TestDrafts(t *testing.T) {
 	}
 
 	// An SMTP submission held as a draft carries its raw and is not edited.
-	raw := e.sentRaw("")
-	smtp, err := e.db.CreateDraft(ctx, e.monitor, store.Draft{
-		FromAddr: "alerts@example.com", To: []string{"ops@example.net"},
-		RawID: raw, HoldReason: sendpolicy.HoldOwner, HoldDetail: "capped",
-	}, e.at())
+	msg := []byte("From: alerts@example.com\r\nTo: ops@example.net\r\n\r\nDisk full.\r\n")
+	at := e.at()
+	raw := store.NewSentRaw(ulid.New(at), "sent/2026/11/x.eml", msg, at)
+	var smtp store.Draft
+	err = e.db.WithDecision(ctx, e.monitor, store.Submission{FromAddr: "alerts@example.com", Recipients: []string{"ops@example.net"}, Now: at},
+		func(ctx context.Context, p *store.PolicyTx) error {
+			var err error
+			smtp, err = p.CreateDraft(ctx, store.Draft{FromAddr: "alerts@example.com", To: []string{"ops@example.net"}}, &raw, msg, at)
+			return err
+		})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if smtp.RawID != raw.ID || smtp.HoldReason != sendpolicy.HoldOwner || smtp.PrincipalID != e.monitor.PrincipalID {
+		t.Errorf("held SMTP submission: %+v", smtp)
 	}
 	if _, err := e.db.UpdateDraft(ctx, e.monitor, store.Draft{ID: smtp.ID, FromAddr: "alerts@example.com", BodyMD: "x"}, e.at()); err == nil {
 		t.Error("edited an SMTP draft")
 	}
-	if _, err := e.db.CreateDraft(ctx, e.monitor, store.Draft{FromAddr: "alerts@example.com", RawID: raw, BodyMD: "x"}, e.at()); err == nil {
-		t.Error("body and raw")
+	// Raw bodies and hold reasons are a decision's to record.
+	for name, bad := range map[string]store.Draft{
+		"raw":         {FromAddr: "alerts@example.com", RawID: raw.ID},
+		"hold reason": {FromAddr: "alerts@example.com", BodyMD: "x", HoldReason: sendpolicy.HoldLimit},
+	} {
+		if _, err := e.db.CreateDraft(ctx, e.monitor, bad, e.at()); err == nil {
+			t.Errorf("%s: no error", name)
+		}
 	}
 
 	// Once in the outbox it is history.
@@ -500,7 +520,7 @@ func TestDrafts(t *testing.T) {
 	if _, err := e.db.UpdateDraft(ctx, e.arisu, upd, e.at()); !errors.Is(err, store.ErrInFlight) {
 		t.Errorf("update in flight: %v", err)
 	}
-	if err := e.db.HoldDraft(ctx, e.arisu, d.ID, sendpolicy.HoldLimit, "x", e.at()); !errors.Is(err, store.ErrInFlight) {
+	if err := hold(upd); !errors.Is(err, store.ErrInFlight) {
 		t.Errorf("hold in flight: %v", err)
 	}
 	if err := e.db.DeleteDraft(ctx, e.arisu, d.ID, e.at()); !errors.Is(err, store.ErrInFlight) {
@@ -688,17 +708,18 @@ func TestPolicyFacts(t *testing.T) {
 		t.Error("nil viewer")
 	}
 
-	// The locked variant hands the same facts to f inside its transaction.
+	// The locked variant reads the same facts inside its transaction and
+	// decides on them itself.
 	var inTx store.PolicyFacts
-	err = e.db.WithPolicyInput(ctx, e.arisu, store.Submission{
+	var d sendpolicy.Decision
+	err = e.db.WithDecision(ctx, e.arisu, store.Submission{
 		FromAddr: "arisu@example.com", Recipients: []string{"carol@example.org"},
 		InReplyToID: m2, Now: now,
-	}, func(tx pgx.Tx, f store.PolicyFacts) error {
-		inTx = f
-		_, err := tx.Exec(ctx, `SELECT 1`)
-		return err
+	}, func(_ context.Context, p *store.PolicyTx) error {
+		inTx, d = p.Facts(), p.Decision()
+		return nil
 	})
-	if err != nil || inTx.Input.Grant == nil || inTx.Input.Counters.SentLastDay != 3 {
-		t.Errorf("WithPolicyInput: %+v, %v", inTx.Input, err)
+	if err != nil || inTx.Input.Grant == nil || inTx.Input.Counters.SentLastDay != 3 || d != sendpolicy.Decide(inTx.Input) || !d.Queue {
+		t.Errorf("WithDecision: %+v, %+v, %v", inTx.Input, d, err)
 	}
 }

@@ -1,37 +1,45 @@
 package main
 
 import (
-	"crypto/sha256"
+	"context"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
 // unknownOutbox writes an outbox row that an attempt left unknown, the
-// way the executor and recovery leave it.
+// way the executor and recovery leave it. It is queued like any mail,
+// through a decision: the operator sends as their own identity.
 func (e *hostEnv) unknownOutbox() string {
 	e.t.Helper()
 	ctx := e.t.Context()
-	identity := ulid.New(time.Now())
-	if _, err := e.pool.Exec(ctx, `
-		INSERT INTO identities (id, account_id, zone, prefix, transport, owner_id)
-		VALUES ($1, $2, 'example.com', $3, 'cf', $4)`,
-		identity, storetest.Account(e.t, e.db), strings.ToLower(identity), store.SystemPrincipalID); err != nil {
+	now := time.Now()
+	op := store.Principal{ID: ulid.New(now), Kind: "human", Name: "operator", DisplayName: "operator", CreatedAt: now}
+	if err := e.db.CreatePrincipal(ctx, op, store.Action{ID: ulid.New(now), Tool: "principal.create", At: now}); err != nil {
 		e.t.Fatal(err)
 	}
-	raw := []byte("Subject: hi\r\n\r\nhi\r\n")
-	now := time.Now()
+	if _, err := e.pool.Exec(ctx, `
+		INSERT INTO identities (id, account_id, zone, prefix, transport, owner_id)
+		VALUES ($1, $2, 'example.com', 'me', 'cf', $3)`,
+		ulid.New(now), storetest.Account(e.t, e.db), op.ID); err != nil {
+		e.t.Fatal(err)
+	}
+	raw := []byte("From: me@example.com\r\nSubject: hi\r\n\r\nhi\r\n")
 	id, rawID := ulid.New(now), ulid.New(now)
-	if err := e.db.EnqueueOutbox(ctx, store.NewOutbox{
-		ID: id, IdentityID: identity, FromAddr: "me@example.com",
-		SubmittedBy: store.SystemPrincipalID, ApprovedBy: store.SystemPrincipalID,
-		Raw:        store.SentRaw{ID: rawID, Key: "sent/2026/10/" + rawID + ".eml", Size: int64(len(raw)), SHA256: sha256.Sum256(raw), At: now},
-		Recipients: []store.OutboxRecipient{{Addr: "a@example.net", Kind: "to"}, {Addr: "b@example.net", Kind: "cc"}},
-	}); err != nil {
+	v := &auth.Viewer{PrincipalID: op.ID, PrincipalKind: op.Kind, PrincipalName: op.Name, Scopes: []auth.Scope{auth.SubmissionSend}}
+	err := e.db.WithDecision(ctx, v, store.Submission{FromAddr: "me@example.com", Recipients: []string{"a@example.net", "b@example.net"}, Now: now},
+		func(ctx context.Context, p *store.PolicyTx) error {
+			return p.Enqueue(ctx, store.NewOutbox{
+				ID: id, Raw: store.NewSentRaw(rawID, "sent/2026/10/"+rawID+".eml", raw, now), Message: raw,
+				Recipients: []store.OutboxRecipient{{Addr: "a@example.net", Kind: "to"}, {Addr: "b@example.net", Kind: "cc"}},
+			})
+		})
+	if err != nil {
 		e.t.Fatal(err)
 	}
 	c, err := e.db.ClaimOutbox(ctx, "gone", []string{"cf"}, time.Minute)

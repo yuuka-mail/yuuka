@@ -151,6 +151,9 @@ type env struct {
 	tr       *fakeTransport
 	svc      *Service
 	identity string
+	// operator owns the identities: the default grant lets a human send
+	// as their own identity, so each enqueue is approved by Decide.
+	operator *auth.Viewer
 	clock    *clock
 	indexed  []string
 }
@@ -184,7 +187,8 @@ func newEnv(t *testing.T, mut func(*Config)) *env {
 		tr: &fakeTransport{caps: transport.CloudflareCaps()}, clock: &clock{t: time.Now()},
 	}
 	e.tr.set(reply(nil, nil))
-	e.identity = e.addIdentity("cf")
+	e.operator = e.addOperator()
+	e.identity = e.addIdentity("me", "cf")
 	cfg := Config{
 		DB: db, Raw: e.bucket, Local: e.local,
 		Transports: map[string]Transport{"cf": e.tr},
@@ -211,29 +215,57 @@ func newEnv(t *testing.T, mut func(*Config)) *env {
 	return e
 }
 
-func (e *env) addIdentity(transportName string) string {
+func (e *env) addOperator() *auth.Viewer {
+	e.t.Helper()
+	now := time.Now()
+	p := store.Principal{ID: ulid.New(now), Kind: "human", Name: "operator", DisplayName: "operator", CreatedAt: now}
+	if err := e.db.CreatePrincipal(e.t.Context(), p, store.Action{ID: ulid.New(now), Tool: "principal.create", At: now}); err != nil {
+		e.t.Fatal(err)
+	}
+	return &auth.Viewer{PrincipalID: p.ID, PrincipalKind: p.Kind, PrincipalName: p.Name, Scopes: []auth.Scope{auth.SubmissionSend}}
+}
+
+// addIdentity adds prefix@example.com, owned by the operator.
+func (e *env) addIdentity(prefix, transportName string) string {
 	e.t.Helper()
 	id := ulid.New(time.Now())
 	if _, err := e.pool.Exec(e.t.Context(), `
 		INSERT INTO identities (id, account_id, zone, prefix, transport, owner_id)
 		VALUES ($1, $2, 'example.com', $3, $4, $5)`,
-		id, storetest.Account(e.t, e.db), "me-"+strings.ToLower(id[20:]), transportName, store.SystemPrincipalID); err != nil {
+		id, storetest.Account(e.t, e.db), prefix, transportName, e.operator.PrincipalID); err != nil {
 		e.t.Fatal(err)
 	}
 	return id
 }
 
+// submit queues sub from from as v, through the decision of the send
+// policy like every submission: there is no other way into the outbox.
+func (e *env) submit(v *auth.Viewer, from string, sub Submission) (Enqueued, error) {
+	var rcpts []string
+	for _, r := range sub.Recipients {
+		rcpts = append(rcpts, r.Addr)
+	}
+	var q Enqueued
+	err := e.db.WithDecision(e.t.Context(), v, store.Submission{FromAddr: from, Recipients: rcpts, Now: time.Now()},
+		func(ctx context.Context, p *store.PolicyTx) error {
+			var err error
+			q, err = e.svc.Enqueue(ctx, p, sub)
+			return err
+		})
+	return q, err
+}
+
+func to(rcpts ...string) []store.OutboxRecipient {
+	var out []store.OutboxRecipient
+	for _, r := range rcpts {
+		out = append(out, store.OutboxRecipient{Addr: r, Kind: store.RecipientTo})
+	}
+	return out
+}
+
 func (e *env) enqueue(rcpts ...string) Enqueued {
 	e.t.Helper()
-	sub := Submission{
-		IdentityID: e.identity, From: "me@example.com",
-		SubmittedBy: store.SystemPrincipalID, ApprovedBy: store.SystemPrincipalID,
-		Raw: []byte(testRaw),
-	}
-	for _, r := range rcpts {
-		sub.Recipients = append(sub.Recipients, store.OutboxRecipient{Addr: r, Kind: store.RecipientTo})
-	}
-	q, err := e.svc.Enqueue(e.t.Context(), sub)
+	q, err := e.submit(e.operator, "me@example.com", Submission{Raw: []byte(testRaw), Recipients: to(rcpts...)})
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -375,26 +407,38 @@ func TestEnqueue(t *testing.T) {
 		t.Errorf("indexed %v", e.indexed)
 	}
 
-	// Refusals happen before anything is stored.
+	// Refusals happen before anything is recorded.
 	for name, sub := range map[string]Submission{
-		"no recipients": {IdentityID: e.identity, From: "me@example.com", SubmittedBy: store.SystemPrincipalID, ApprovedBy: store.SystemPrincipalID, Raw: []byte(testRaw)},
-		"bad recipient": {
-			IdentityID: e.identity, From: "me@example.com", SubmittedBy: store.SystemPrincipalID, ApprovedBy: store.SystemPrincipalID, Raw: []byte(testRaw),
-			Recipients: []store.OutboxRecipient{{Addr: "a@example.net>\r\nRCPT TO:<b@example.net", Kind: "to"}},
-		},
-		"no approver": {
-			IdentityID: e.identity, From: "me@example.com", SubmittedBy: store.SystemPrincipalID, Raw: []byte(testRaw),
-			Recipients: []store.OutboxRecipient{{Addr: "a@example.net", Kind: "to"}},
-		},
+		"no recipients": {Raw: []byte(testRaw)},
+		"bad recipient": {Raw: []byte(testRaw), Recipients: to("a@example.net>\r\nRCPT TO:<b@example.net")},
 	} {
-		if _, err := e.svc.Enqueue(ctx, sub); err == nil {
+		if _, err := e.submit(e.operator, "me@example.com", sub); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	gone := e.addIdentity("gone")
-	_, err = e.svc.Enqueue(ctx, Submission{
-		IdentityID: gone, From: "me@example.com", SubmittedBy: store.SystemPrincipalID,
-		ApprovedBy: store.SystemPrincipalID, Raw: []byte(testRaw), Recipients: []store.OutboxRecipient{{Addr: "a@example.net", Kind: "to"}},
+	// Only what was decided on is queued.
+	noSend := *e.operator
+	noSend.Scopes = nil
+	for name, c := range map[string]struct {
+		v    *auth.Viewer
+		from string
+		sub  Submission
+	}{
+		"held decision":   {&noSend, "me@example.com", Submission{Raw: []byte(testRaw), Recipients: to("a@example.net")}},
+		"another From":    {e.operator, "me@example.com", Submission{Raw: []byte(strings.Replace(testRaw, "me@", "you@", 1)), Recipients: to("a@example.net")}},
+		"two From fields": {e.operator, "me@example.com", Submission{Raw: []byte("From: me@example.com\r\n" + testRaw), Recipients: to("a@example.net")}},
+	} {
+		if _, err := e.submit(c.v, c.from, c.sub); !errors.Is(err, store.ErrNotApproved) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	var n int
+	if err := e.pool.QueryRow(ctx, `SELECT count(*) FROM outbox`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("%d outbox rows after the refusals, %v", n, err)
+	}
+	e.addIdentity("gone", "gone")
+	_, err = e.submit(e.operator, "gone@example.com", Submission{
+		Raw: []byte(strings.Replace(testRaw, "me@", "gone@", 1)), Recipients: to("a@example.net"),
 	})
 	if !errors.Is(err, ErrUnconfigured) {
 		t.Errorf("unconfigured transport: %v", err)
@@ -427,11 +471,7 @@ func TestEnqueueReadsBackAnExistingCopy(t *testing.T) {
 	other := newEnv(t, func(c *Config) {
 		c.Raw = landedRetry{Bucket: r2fake.New(), body: []byte("Subject: other\r\n\r\nx\r\n")}
 	})
-	_, err := other.svc.Enqueue(t.Context(), Submission{
-		IdentityID: other.identity, From: "me@example.com",
-		SubmittedBy: store.SystemPrincipalID, ApprovedBy: store.SystemPrincipalID, Raw: []byte(testRaw),
-		Recipients: []store.OutboxRecipient{{Addr: "a@example.net", Kind: "to"}},
-	})
+	_, err := other.submit(other.operator, "me@example.com", Submission{Raw: []byte(testRaw), Recipients: to("a@example.net")})
 	if err == nil || !strings.Contains(err.Error(), "different content") {
 		t.Errorf("different bytes under the key: %v", err)
 	}

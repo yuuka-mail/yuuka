@@ -361,19 +361,19 @@ func TestVisibility(t *testing.T) {
 	msgs := map[string]string{}
 	msgs["in-open"] = inbound(t, db, open, "a", letter("x@example.net", "a@example.com", "in-open",
 		"Message-ID: <in-open@example.net>\r\n", "visible inbound"), tick())
-	msgs["in-closed"] = inbound(t, db, closed, "b", letter("x@example.net", "b@example.com", "in-closed", "", "hidden inbound"), tick())
+	msgs["in-closed"] = inbound(t, db, closed, "b", letter("x@example.net", "b@example.com", "in-closed", "Message-ID: <in-closed@example.net>\r\n", "hidden inbound"), tick())
 	sendAs := func(name, identity, headers string) {
 		raw := letter("me@example.com", "x@example.net", name, headers, name+" body")
 		rawID, _ := enqueue(t, pool, identity, raw, tick())
 		msgs[name] = foldSent(t, db, rawID, raw).MessageID
 	}
-	sendAs("sent-open", mine, "")
+	sendAs("sent-open", mine, "Message-ID: <sent-open@example.com>\r\n")
 	// Hidden, in the same thread as in-open.
-	sendAs("sent-closed", theirs, "In-Reply-To: <in-open@example.net>\r\n")
+	sendAs("sent-closed", theirs, "In-Reply-To: <in-open@example.net>\r\nMessage-ID: <sent-closed@example.com>\r\n")
 	// One content, delivered to the closed account and sent as an open
 	// identity: visible through the sent copy only, so its delivery, raw
 	// and recipients stay hidden.
-	both := letter("me@example.com", "b@example.com", "both", "", "both body")
+	both := letter("me@example.com", "b@example.com", "both", "Message-ID: <both@example.com>\r\n", "both body")
 	msgs["both"] = inbound(t, db, closed, "b", both, tick())
 	bothRaw, _ := enqueue(t, pool, mine, both, tick())
 	if f := foldSent(t, db, bothRaw, both); f.MessageID != msgs["both"] || f.NewMessage {
@@ -487,6 +487,15 @@ func TestVisibility(t *testing.T) {
 				_, err = db.ReplyIdentities(ctx, v, id)
 				if slices.Contains(want, n) != (err == nil) || err != nil && !errors.Is(err, store.ErrNotFound) {
 					t.Errorf("ReplyIdentities %s: %v", n, err)
+				}
+				// What an SMTP submission's In-Reply-To finds.
+				var hid string
+				if err := pool.QueryRow(ctx, `SELECT coalesce(message_id, '') FROM messages WHERE id = $1`, id).Scan(&hid); err != nil || hid == "" {
+					t.Fatalf("Message-ID of %s: %q, %v", n, hid, err)
+				}
+				got, err := db.MessageByHeaderID(ctx, v, hid)
+				if slices.Contains(want, n) != (err == nil && got == id) || err != nil && !errors.Is(err, store.ErrNotFound) {
+					t.Errorf("MessageByHeaderID %s: %s, %v", n, got, err)
 				}
 			}
 			if slices.Contains(want, "in-open") {
