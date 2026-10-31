@@ -17,10 +17,10 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
-const tokenUsage = "usage: yuuka token issue --principal <kind>:<name> --scope <s1,s2,...> [--label L] [--ttl D] | yuuka token ls [--principal <kind>:<name>] | yuuka token revoke <credential-id>"
+const tokenUsage = "usage: yuuka token issue --principal <kind>:<name> --scope <s1,s2,...> [--label L] [--ttl D] | yuuka token issue --kind smtp --principal <kind>:<name> [--label L] [--ttl D] | yuuka token ls [--principal <kind>:<name>] | yuuka token revoke <credential-id>"
 
-// tokenCmd is `yuuka token`: bearer tokens for agents and services
-// (§13.3, §13.7).
+// tokenCmd is `yuuka token`: bearer tokens and SMTP submission passwords
+// for agents and services (§13.3, §13.6, §13.7).
 func (h *host) tokenCmd(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New(tokenUsage)
@@ -28,17 +28,33 @@ func (h *host) tokenCmd(ctx context.Context, args []string) error {
 	switch args[0] {
 	case "issue":
 		fs := flag.NewFlagSet("token issue", flag.ContinueOnError)
+		kind := fs.String("kind", "token", "token (a bearer token for REST and MCP) or smtp (a password for the SMTP submission port)")
 		principal := fs.String("principal", "", "agent:<name> or service:<name>; created if it does not exist")
-		scopes := fs.String("scope", "", "comma-separated scopes, all of them explicit: "+strings.Join(auth.Strings(auth.AllScopes), ","))
+		scopes := fs.String("scope", "", "comma-separated scopes, all of them explicit: "+strings.Join(auth.Strings(auth.AllScopes), ",")+
+			"; an smtp password holds submission:send and nothing else")
 		label := fs.String("label", "", "what the token is for, e.g. the machine it lives on")
 		ttl := fs.Duration("ttl", 0, "lifetime, e.g. 720h; 0 means until revoked")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
-		if fs.NArg() != 0 || *principal == "" || *scopes == "" {
+		if fs.NArg() != 0 || *principal == "" {
 			return errors.New(tokenUsage)
 		}
-		return h.tokenIssue(ctx, *principal, *scopes, *label, *ttl)
+		switch *kind {
+		case "token":
+			if *scopes == "" {
+				return errors.New(tokenUsage)
+			}
+			return h.tokenIssue(ctx, auth.KindToken, *principal, *scopes, *label, *ttl)
+		case "smtp":
+			// The kind names the one thing it can do; a --scope that says
+			// anything else is a mistake, not a request for more.
+			if *scopes != "" && *scopes != string(auth.SubmissionSend) {
+				return fmt.Errorf("--scope %q: an smtp password holds exactly %s", *scopes, auth.SubmissionSend)
+			}
+			return h.tokenIssue(ctx, auth.KindSMTPPassword, *principal, string(auth.SubmissionSend), *label, *ttl)
+		}
+		return fmt.Errorf("--kind %q: want token or smtp", *kind)
 	case "ls":
 		fs := flag.NewFlagSet("token ls", flag.ContinueOnError)
 		principal := fs.String("principal", "", "only the tokens of <kind>:<name>")
@@ -99,7 +115,7 @@ func parseScopes(s string) ([]auth.Scope, error) {
 	return out, nil
 }
 
-func (h *host) tokenIssue(ctx context.Context, principal, scopeList, label string, ttl time.Duration) error {
+func (h *host) tokenIssue(ctx context.Context, credKind, principal, scopeList, label string, ttl time.Duration) error {
 	kind, name, err := parsePrincipal(principal)
 	if err != nil {
 		return err
@@ -127,17 +143,27 @@ func (h *host) tokenIssue(ctx context.Context, principal, scopeList, label strin
 		h.note("created principal %s:%s", kind, name)
 	}
 	tok, err := authn.IssueToken(ctx, h.db, h.now(), authn.TokenRequest{
-		PrincipalID: p.ID, Label: label, Scopes: scopes, TTL: ttl,
+		Kind: credKind, PrincipalID: p.ID, Label: label, Scopes: scopes, TTL: ttl,
 		IssuedBy: store.SystemPrincipalID, AuditArgs: h.auditArgs(),
 	})
 	if err != nil {
 		return err
 	}
-	id, _, _ := auth.ParseSecret(auth.PrefixToken, tok)
 	expires := "never expires"
 	if ttl > 0 {
 		expires = "expires " + h.now().Add(ttl).UTC().Format(time.RFC3339)
 	}
+	if credKind == auth.KindSMTPPassword {
+		// The user name is the credential id: the port looks the row up
+		// by it and compares the password's hash in constant time.
+		id, _, _ := auth.ParseSecret(auth.PrefixSMTP, tok)
+		h.note("SMTP password for %s:%s, %s. SMTP user name:", kind, name, expires)
+		h.note("  %s", id)
+		h.note("The password follows; it is shown once and cannot be recovered. Revoke it with `yuuka token revoke %s`.", id)
+		h.note("What it may send as is decided by `yuuka grant`, not by the password.")
+		return h.say("%s", tok)
+	}
+	id, _, _ := auth.ParseSecret(auth.PrefixToken, tok)
 	h.note("Bearer token %s for %s:%s, scopes %s, %s.", id, kind, name, strings.Join(auth.Strings(scopes), ","), expires)
 	h.note("It is shown once and cannot be recovered; revoke it with `yuuka token revoke %s`.", id)
 	return h.say("%s", tok)
@@ -186,13 +212,17 @@ func (h *host) tokenList(ctx context.Context, principal string) error {
 	}
 	// Write errors surface on Flush.
 	tw := tabwriter.NewWriter(h.out, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "ID\tPRINCIPAL\tLABEL\tSCOPES\tCREATED\tEXPIRES\tLAST USED\tREVOKED")
+	_, _ = fmt.Fprintln(tw, "ID\tKIND\tPRINCIPAL\tLABEL\tSCOPES\tCREATED\tEXPIRES\tLAST USED\tREVOKED")
 	for _, t := range toks {
 		label := shown(t.Label)
 		if label == "" {
 			label = "-"
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s:%s\t%s\t%s\t%s\t%s\t%s\t%s\n", t.ID, t.PrincipalKind, t.PrincipalName, label,
+		kind := t.Kind
+		if kind == auth.KindSMTPPassword {
+			kind = "smtp"
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s:%s\t%s\t%s\t%s\t%s\t%s\t%s\n", t.ID, kind, t.PrincipalKind, t.PrincipalName, label,
 			strings.Join(t.Scopes, ","), stamp(&t.CreatedAt), stamp(t.ExpiresAt), stamp(t.LastUsedAt), stamp(t.RevokedAt))
 	}
 	return tw.Flush()
@@ -204,10 +234,10 @@ func (h *host) tokenRevoke(ctx context.Context, id string) error {
 	}
 	err := authn.RevokeToken(ctx, h.db, h.now(), id, store.SystemPrincipalID, h.auditArgs())
 	if errors.Is(err, store.ErrNotFound) {
-		return fmt.Errorf("no unrevoked token %s", id)
+		return fmt.Errorf("no unrevoked token or SMTP password %s", id)
 	}
 	if err != nil {
 		return err
 	}
-	return h.say("revoked token %s", id)
+	return h.say("revoked %s", id)
 }

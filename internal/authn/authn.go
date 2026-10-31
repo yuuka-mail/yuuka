@@ -195,11 +195,7 @@ func (s *Service) Authenticate(ctx context.Context, kind, text string) (*auth.Vi
 }
 
 func authenticate(ctx context.Context, db *store.DB, log *slog.Logger, now time.Time, kind, text string) (*auth.Viewer, error) {
-	prefix := auth.PrefixToken
-	if kind == auth.KindSession {
-		prefix = auth.PrefixSession
-	}
-	id, hash, ok := auth.ParseSecret(prefix, text)
+	id, hash, ok := auth.ParseSecret(secretPrefix(kind), text)
 	if !ok {
 		return nil, ErrUnauthenticated
 	}
@@ -241,8 +237,24 @@ func authenticate(ctx context.Context, db *store.DB, log *slog.Logger, now time.
 	}, nil
 }
 
-// TokenRequest describes a bearer token to issue.
+// secretPrefix is the prefix of a credential kind's secrets.
+func secretPrefix(kind string) string {
+	switch kind {
+	case auth.KindSession:
+		return auth.PrefixSession
+	case auth.KindSMTPPassword:
+		return auth.PrefixSMTP
+	}
+	return auth.PrefixToken
+}
+
+// TokenRequest describes a bearer token or an SMTP password to issue.
 type TokenRequest struct {
+	// Kind is auth.KindToken (the default when empty) or
+	// auth.KindSMTPPassword. An SMTP password does one thing, submit
+	// mail, so its Scopes must be exactly submission:send: the scope is
+	// what the kind means, not a default filled in.
+	Kind        string
 	PrincipalID string
 	Label       string
 	// Scopes are what the token may do, and there is no default: an empty
@@ -267,7 +279,24 @@ func (s *Service) IssueToken(ctx context.Context, req TokenRequest) (string, err
 // such as `yuuka token issue`: bearer tokens work where no WebUI origin is
 // configured. Only agent and service principals get tokens; a human signs
 // in with a passkey and gets a session (§13.7).
+//
+// For an SMTP password the result is the password; the SMTP user name is
+// the credential id inside it (`yuuka token issue --kind smtp` prints
+// both), so the submission port finds the row by id and compares the hash
+// in constant time, exactly like a token.
 func IssueToken(ctx context.Context, db *store.DB, now time.Time, req TokenRequest) (string, error) {
+	kind, tool := req.Kind, "auth.token.issue"
+	switch kind {
+	case "", auth.KindToken:
+		kind = auth.KindToken
+	case auth.KindSMTPPassword:
+		tool = "auth.smtp_password.issue"
+		if len(req.Scopes) != 1 || req.Scopes[0] != auth.SubmissionSend {
+			return "", fmt.Errorf("issue SMTP password: scopes %v; an SMTP password holds exactly %s", req.Scopes, auth.SubmissionSend)
+		}
+	default:
+		return "", fmt.Errorf("issue token: kind %q is not issued here", kind)
+	}
 	if len(req.Scopes) == 0 {
 		return "", errors.New("issue token: no scopes; a token holds exactly the scopes it is given")
 	}
@@ -287,7 +316,7 @@ func IssueToken(ctx context.Context, db *store.DB, now time.Time, req TokenReque
 	if p.DisabledAt != nil {
 		return "", fmt.Errorf("issue token: %s:%s is disabled", p.Kind, p.Name)
 	}
-	sec := auth.NewSecret(auth.PrefixToken, ulid.New(now))
+	sec := auth.NewSecret(secretPrefix(kind), ulid.New(now))
 	var expires *time.Time
 	if req.TTL > 0 {
 		t := now.Add(req.TTL)
@@ -301,9 +330,9 @@ func IssueToken(ctx context.Context, db *store.DB, now time.Time, req TokenReque
 		args[k] = v
 	}
 	err = db.CreateCredential(ctx, store.Credential{
-		ID: sec.ID, PrincipalID: req.PrincipalID, Kind: auth.KindToken, Label: req.Label,
+		ID: sec.ID, PrincipalID: req.PrincipalID, Kind: kind, Label: req.Label,
 		SecretHash: sec.Hash[:], Scopes: auth.Strings(req.Scopes), CreatedAt: now, ExpiresAt: expires,
-	}, store.Action{ID: ulid.New(now), Actor: req.IssuedBy, Tool: "auth.token.issue", At: now, Args: args})
+	}, store.Action{ID: ulid.New(now), Actor: req.IssuedBy, Tool: tool, At: now, Args: args})
 	if err != nil {
 		return "", fmt.Errorf("issue token: %w", err)
 	}
@@ -319,18 +348,19 @@ func (s *Service) Revoke(ctx context.Context, v *auth.Viewer, credentialID strin
 	})
 }
 
-// RevokeToken revokes the bearer token credentialID for `yuuka token
-// revoke`, recording actor and auditArgs. The token stops working on the
-// next request: REST, MCP over HTTP and every MCP stdio tool call
-// authenticate again. It returns store.ErrNotFound if no unrevoked token
-// has that id; other credential kinds are refused, not revoked.
+// RevokeToken revokes the bearer token or SMTP password credentialID for
+// `yuuka token revoke`, recording actor and auditArgs. It stops working
+// on the next request: REST, MCP over HTTP, every MCP stdio tool call and
+// every SMTP session authenticate again. It returns store.ErrNotFound if
+// no unrevoked one has that id; other credential kinds are refused, not
+// revoked.
 func RevokeToken(ctx context.Context, db *store.DB, now time.Time, credentialID, actor string, auditArgs map[string]any) error {
 	c, err := db.CredentialForAuth(ctx, credentialID)
 	if err != nil {
 		return fmt.Errorf("revoke %s: %w", credentialID, err)
 	}
-	if c.Kind != auth.KindToken {
-		return fmt.Errorf("revoke %s: a %s credential, not a token", credentialID, c.Kind)
+	if c.Kind != auth.KindToken && c.Kind != auth.KindSMTPPassword {
+		return fmt.Errorf("revoke %s: a %s credential, not a token or SMTP password", credentialID, c.Kind)
 	}
 	args := map[string]any{"credential_id": credentialID, "principal_id": c.PrincipalID}
 	for k, v := range auditArgs {

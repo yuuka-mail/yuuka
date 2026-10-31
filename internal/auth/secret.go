@@ -18,6 +18,9 @@ const (
 	PrefixSession    = "yks"
 	PrefixToken      = "ykt"
 	PrefixEnrollment = "yke"
+	// PrefixSMTP is an SMTP submission password; its SMTP user name is
+	// the credential id it carries.
+	PrefixSMTP = "ykp"
 )
 
 // secretBytes is the entropy of every token: 256 bits.

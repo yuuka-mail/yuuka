@@ -14,11 +14,12 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
-// host is what the management commands (prefix, token) share. They run on
-// the host, like `admin enroll`: being able to run them there is the
-// highest authority there is (§13.7), so they need no login, and nobody
-// is authenticated either. Their actions are recorded with the system
-// principal as actor, no credential, and args.via = "cli" plus the
+// host is what the management commands (prefix, token, outbox, identity,
+// grant) share. They run on the host, like `admin enroll`: being able to
+// run them there is the highest authority there is (§13.7), so they need
+// no login, and nobody is authenticated either. Their actions are
+// recorded with the system principal as actor, no credential, and
+// args.via = "cli" plus the
 // operating system user that ran them (host_user), which is what is
 // actually known. Recording a human principal instead would claim a login
 // that never happened.

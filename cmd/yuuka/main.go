@@ -16,6 +16,8 @@
 //	                         set a prefix claimed or back to discovered (§3.3)
 //	yuuka token issue --principal <kind>:<name> --scope <s1,s2,...> [--label L] [--ttl D]
 //	                         bearer token for an agent or service; printed once
+//	yuuka token issue --kind smtp --principal <kind>:<name> [--label L] [--ttl D]
+//	                         SMTP submission password (user name: its credential id)
 //	yuuka token ls [--principal <kind>:<name>]
 //	yuuka token revoke <credential-id>
 //	yuuka outbox ls [--state S] [--limit N]
@@ -23,6 +25,17 @@
 //	yuuka outbox resolve <id> --sent|--resend|--abandon
 //	                         decide an unknown send (§4.5): it was delivered, send
 //	                         it again, or give up
+//	yuuka identity add <local>@<zone>|*@<zone> --owner <kind>:<name> --transport NAME
+//	                         [--display-name N] [--signature S] [--plain-strip-markup] [--account A]
+//	yuuka identity ls [--all]
+//	yuuka identity rm <local>@<zone>|*@<zone>
+//	                         addresses to send as (§9.3); rm disables
+//	yuuka grant set --identity A --principal <kind>:<name> [--policy P] [--recipients S] [--allow L]
+//	                         [--max-per-hour N] [--max-per-day N] [--max-new-recipients-per-day N]
+//	                         [--hold-seconds N] [--suspend|--resume]
+//	yuuka grant ls [--identity A] [--principal <kind>:<name>]
+//	yuuka grant rm --identity A --principal <kind>:<name>
+//	                         who may send as an identity, and how far (§13.5, §8.9)
 //	yuuka mcp --stdio       read-only MCP server on stdin/stdout, acting as the
 //	                         bearer token in YUUKA_MCP_TOKEN (§8.7)
 //	yuuka version
@@ -78,10 +91,11 @@
 //	YUUKA_OUTBOX_WORKERS                concurrent send attempts in serve (default 2)
 //	YUUKA_OUTBOX_POLL_INTERVAL          how often serve looks for due mail (default 30s)
 //
-// `yuuka migrate`, `yuuka prefix`, `yuuka token` and `yuuka outbox` only
-// need the database URLs; `yuuka admin` the database URLs and
-// YUUKA_WEB_ORIGIN. All but migrate run on the host without a login;
-// host.go says how their actions are recorded.
+// `yuuka migrate`, `yuuka prefix`, `yuuka token`, `yuuka outbox`,
+// `yuuka identity` and `yuuka grant` only need the database URLs;
+// `yuuka admin` the database URLs and YUUKA_WEB_ORIGIN. All but migrate
+// run on the host without a login; host.go says how their actions are
+// recorded.
 //
 // The webhook is served at POST /ingest/cloudflare (HMAC, §2.2); the login
 // endpoints under /auth/ (see internal/authn); the REST API under /api/v1/
@@ -139,7 +153,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka mcp --stdio | yuuka version")
+	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka identity add|ls|rm | yuuka grant set|ls|rm | yuuka mcp --stdio | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -213,6 +227,10 @@ func run(args []string, log *slog.Logger) error {
 		return withHost(ctx, func(h *host) error { return h.tokenCmd(ctx, args[1:]) })
 	case "outbox":
 		return withHost(ctx, func(h *host) error { return h.outboxCmd(ctx, args[1:]) })
+	case "identity":
+		return withHost(ctx, func(h *host) error { return h.identityCmd(ctx, args[1:]) })
+	case "grant":
+		return withHost(ctx, func(h *host) error { return h.grantCmd(ctx, args[1:]) })
 	}
 	return usage()
 }

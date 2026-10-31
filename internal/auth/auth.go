@@ -63,6 +63,8 @@ func Strings(scopes []Scope) []string {
 const (
 	KindSession = "session"
 	KindToken   = "token"
+	// KindSMTPPassword authenticates the SMTP submission port (§13.6).
+	KindSMTPPassword = "smtp_password"
 )
 
 // Viewer is who a request acts as: a principal, through one credential,
@@ -74,7 +76,7 @@ type Viewer struct {
 	PrincipalKind  string // human | agent | service | rule | system
 	PrincipalName  string
 	CredentialID   string
-	CredentialKind string // session | token
+	CredentialKind string // session | token | smtp_password
 	Scopes         []Scope
 }
 

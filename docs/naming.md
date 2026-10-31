@@ -25,6 +25,9 @@ yuuka prefix label|leaks                # 前缀注册表的标注与泄漏视�
 yuuka token issue                       # 给 agent / service 签发 bearer token，只显示一次（§13.3）
 yuuka token ls                          # 列出 token：主体、scope、各时间点，不含秘密
 yuuka token revoke                      # 吊销 token，REST 与 MCP 下一次请求起失效
+yuuka token issue --kind smtp           # SMTP 提交口的密码，用户名是凭据 id（§13.3、§13.6）
+yuuka identity add|ls|rm                # 能发信的地址（精确或 *@zone）、出口、归属；rm 是停用（§9.3）
+yuuka grant set|ls|rm                   # 谁能以哪个身份发信、发到哪一步（§13.5、§8.9）
 yuuka outbox ls|retry|dead              # 出口状态机（§3.6）
 yuuka account add|sync|caps             # 多账户（§9）
 yuuka doctor                            # DNS / SPF / DKIM / 出口授权自检（§10.4.4）

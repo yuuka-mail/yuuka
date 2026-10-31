@@ -613,6 +613,70 @@ func TestParseOrigin(t *testing.T) {
 	}
 }
 
+// An SMTP password authenticates the submission port only: user name =
+// its credential id, scope exactly submission:send; it is no bearer
+// token, and a token is no SMTP password.
+func TestSMTPPassword(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	svc, err := h.db.EnsurePrincipal(t.Context(), store.Principal{ID: "01M67SX66B38NKRKAYDXR834N8", Kind: "service", Name: "monitoring", DisplayName: "monitoring", CreatedAt: h.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	send := []auth.Scope{auth.SubmissionSend}
+	for name, scopes := range map[string][]auth.Scope{
+		"none":  nil,
+		"read":  {auth.MessageRead},
+		"extra": {auth.SubmissionSend, auth.MessageRead},
+	} {
+		if _, err := h.svc.IssueToken(t.Context(), TokenRequest{Kind: auth.KindSMTPPassword, PrincipalID: svc.ID, Scopes: scopes}); err == nil {
+			t.Errorf("scopes %s: issued", name)
+		}
+	}
+	if _, err := h.svc.IssueToken(t.Context(), TokenRequest{Kind: auth.KindSession, PrincipalID: svc.ID, Scopes: send}); err == nil {
+		t.Error("issued a session")
+	}
+	pw, err := h.svc.IssueToken(t.Context(), TokenRequest{Kind: auth.KindSMTPPassword, PrincipalID: svc.ID, Scopes: send, IssuedBy: store.SystemPrincipalID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, _, ok := auth.ParseSecret(auth.PrefixSMTP, pw)
+	if !ok || h.count(`SELECT count(*) FROM credentials WHERE id = $1 AND kind = 'smtp_password'`, user) != 1 ||
+		h.count(`SELECT count(*) FROM actions WHERE tool = 'auth.smtp_password.issue'`) != 1 {
+		t.Fatalf("issued %q", pw)
+	}
+	tok, err := h.svc.IssueToken(t.Context(), TokenRequest{PrincipalID: svc.ID, Scopes: send, IssuedBy: store.SystemPrincipalID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokID, _, _ := auth.ParseSecret(auth.PrefixToken, tok)
+
+	b := NewBearer(h.db, slog.New(slog.NewTextHandler(io.Discard, nil)), func() time.Time { return h.now })
+	v, err := b.AuthenticateSMTP(t.Context(), user, pw, "smtp")
+	if err != nil || v.String() != "service:monitoring" || v.CredentialKind != auth.KindSMTPPassword || !v.Has(auth.SubmissionSend) {
+		t.Fatalf("smtp: %+v %v", v, err)
+	}
+	for name, c := range map[string][2]string{
+		"other user name": {tokID, pw},
+		"empty user name": {"", pw},
+		"a token":         {tokID, tok},
+		"wrong secret":    {user, pw[:len(pw)-2] + "AA"},
+	} {
+		if _, err := b.AuthenticateSMTP(t.Context(), c[0], c[1], "smtp"); !errors.Is(err, ErrUnauthenticated) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if _, err := b.Authenticate(t.Context(), pw, "test"); !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("SMTP password as a bearer token: %v", err)
+	}
+	if err := RevokeToken(t.Context(), h.db, h.now, user, store.SystemPrincipalID, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.AuthenticateSMTP(t.Context(), user, pw, "smtp"); !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("revoked: %v", err)
+	}
+}
+
 // Tokens go to agents and services only, with the scopes named; and the
 // token revocation of the CLI revokes tokens only.
 func TestIssueTokenRefuses(t *testing.T) {

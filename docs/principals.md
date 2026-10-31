@@ -79,9 +79,21 @@ passkey 不是 `credentials` 的一行：它是产生 `session` 凭据的登录�
 - token 明文只打印一次，单独一行写到 stdout（说明写 stderr），便于直接重定向进密钥文件；库里只有哈希，丢了只能吊销重发。
   `--ttl` 缺省为不过期：token 靠显式吊销收回，`ls` 的 `last_used_at` 让闲置的那把看得见
 - `ls` 连已吊销的也列出，永远不显示秘密
-- `revoke` 只收 `token` 类凭据（会话由登出撤销），记 `auth.credential.revoke`。
+- `revoke` 只收 `token` 和 `smtp_password` 类凭据（会话由登出撤销），记 `auth.credential.revoke`。
   吊销立即生效：REST 和 MCP 的 HTTP 形态每个请求重新认证，stdio 形态每次工具调用重新认证（§8.7），
-  没有任何缓存的认证结果要等它过期
+  SMTP 每个会话重新认证，没有任何缓存的认证结果要等它过期
+
+**SMTP 提交口的密码（M2）**：`yuuka token issue --kind smtp --principal service:<name>`，同一套签发、`ls`、`revoke`。
+
+- 交给持有者的密码是 `ykp_<凭据 id>_<秘密>`，**SMTP 用户名就是凭据 id**（命令单独打印出来）。
+  提交口解析密码、要求其中的 id 等于用户名，再按 id 取行做常量时间比较
+  （[`authn.Bearer.AuthenticateSMTP`](../internal/authn/bearer.go)），和 token 完全一样；用户名和密码对不上一律拒绝，
+  一把密码不能挂在另一把凭据的名下用。另一种做法是用户名写主体名（`service:monitoring`），
+  但那样查找要么按哈希搜索，要么一个主体只能有一把密码；凭据 id 两个问题都没有。
+  密码带前缀，泄漏时能被认出来，也不会被当成 bearer token 接受（反之亦然）
+- scope **恰好是** `submission:send`：这类凭据只能做这一件事，scope 由类型决定，不是替人补的默认值；
+  `--scope` 写了别的就拒绝。用哪个身份、发到哪一步照旧由 `yuuka grant` 决定，不由密码决定
+- 和 token 一样只发给 `agent` 和 `service`
 
 ### 13.4 scope 是唯一的权限语言
 
@@ -109,24 +121,54 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 §9.3 已经把 identity 硬绑到 transport。现在再加一层：谁可以用这个 identity 发信。
 
 `identity_grants` 每行是一个（身份, 主体）对：档位 `send_policy`（§8.9）、收件人范围、各项限额、
-`review` 档的撤回窗口和熔断时间。**表已建**（[`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)），默认值取安全的一端；
-**还没有任何代码读它**：档位、限额、硬上限的执行随发信（M2）落在 API 层。
+`review` 档的撤回窗口和熔断时间。表见 [`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)，
+列的默认值取安全的一端（`none` + `thread`）。由 `yuuka grant set|ls|rm` 管理（参数见
+[`cmd/yuuka/grant.go`](../cmd/yuuka/grant.go)）：`set` 只改给出的参数，其余保持原值，新行从列默认值起步；
+`rm` 之后适用的是下面的默认，不一定是「什么都不能做」，命令会把它打印出来。
 
-各项限额的默认值由授权代码决定，不写在库里：库里的空值只表示「这条授权没有自己的数」，
-用什么默认值、按主体类型怎么区分，是 API 层执行授权时的事，改默认值不需要迁移。
+执行全在一个纯函数里：[`sendpolicy.Decide`](../internal/sendpolicy/sendpolicy.go)，没有时钟、不碰数据库，
+输入由 store 的 [`PolicyInput`](../internal/store/policyfacts.go) 一次备齐。所有提交路径（REST / MCP 的
+`submit_draft`、WebUI 的发送、SMTP 提交口）都走「`PolicyInput` → `Decide`」，入 outbox 的事务里在授权锁下再做一遍，
+并发提交不会一起越过最后一个名额。没有第二条路径，测试辅助和 CLI 也不例外。
+
+**各项限额的默认值由授权代码决定，不写在库里**：库里的空值只表示「这条授权没有自己的数」，
+值见 [`sendpolicy.DefaultLimits`](../internal/sendpolicy/sendpolicy.go)，改默认值不需要迁移。按提交主体的类型：
+
+| 主体 | 每小时 | 每天 | 每天新收件人 |
+|---|---|---|---|
+| human | 不限 | 不限 | 不限 |
+| service | 30 | 200 | 5 |
+| agent 及其他 | 10 | 50 | 5 |
+
+取舍：数字故意低。限额触发的代价是信变成草稿、人看一眼；限额太高的代价是失控或被注入的 agent
+在没人注意时发出一整天的信。人按发送本身就是确认，所以人不设默认限额。需要更多就在授权里写明数字。
+窗口是滚动的（最近 60 分钟、最近 24 小时），不依赖时区；按 outbox 行计数，不论状态，提交过就占一个名额。
+「新收件人」是此前没有任何处于已发出或在途状态（`queued`…`failed`）的 outbox 行发往过的地址，按 `addr_fold` 比较。
+
+**硬上限在两处成立**：`Decide` 里身份属于某个 human、提交者不是他时一律压回 `draft`，不看授权表；
+`yuuka grant set`（[`store.SetGrant`](../internal/store/grants.go)）拒绝写入这种组合下高于 `draft` 的档位，
+而不是存下来再在执行时压低——表里写着一个永远不会生效的 `auto`，只会误导下一个读它的人。
+后者只是提示，前者才是保证：即使表被手改，`Decide` 照样压回去。
 
 于是 `service:monitoring` 只能以 `alerts@example.com` 发，**无法冒用运维者本人的地址**。
 服务凭据泄露的后果因此被限制在一个前缀内——这对 catch-all 尤其要紧，
 因为域级 onboard 意味着"能发信"默认等于"能以任意前缀发信"（§9.3）。
 
-档位和限额对所有主体是同一套机制，区别只在默认值：
+档位和限额对所有主体是同一套机制，区别只在默认值。没有授权行时（[`sendpolicy.Effective`](../internal/sendpolicy/sendpolicy.go)）：
 
-| 主体 → 身份 | 默认档位 |
+| 主体 → 身份 | 没有授权行时的档位 |
 |---|---|
-| `human:<operator>` → 自己的身份 | `auto`（人按发送就是确认） |
-| `agent:arisu` → `arisu@example.com`（owner 是它自己） | `review` + `thread` |
-| `agent:arisu` → 人的身份 | `draft`，**且不能调高**（§8.9 的硬上限） |
-| `service:monitoring` → `alerts@example.com` | `auto` + `allowlist` |
+| `human:<operator>` → 自己的身份 | `auto` + `any`（人按发送就是确认） |
+| `agent:arisu` → `arisu@example.com`（owner 是它自己） | `review` + `thread`；M2 没有自动审核，等于草稿 |
+| service → 自己拥有的身份 | 同上，`review` + `thread` |
+| `agent:arisu` → 人的身份 | `draft`，**且不能调高**（§8.9 的硬上限）：替人起草正是 agent 的用处（§8.2） |
+| 其他组合（service → 人的身份、human → 别人的身份……） | `none` |
+
+人对自己身份的默认是 `auto` 而不是 `none`：要求运维者先给自己写一条授权才能回信，只增加步骤，不增加安全——
+能写授权的就是他本人。service → 人的身份默认 `none` 而不是 `draft`，因为 SMTP 提交口对 `none` 直接拒收（§13.6），
+`service:monitoring` 写 `From: 运维者` 得到的是拒绝，而不是一堆草稿。
+`service:monitoring` → `alerts@example.com` 的 `auto` + `allowlist` 是要显式写的授权；`alerts@` 的 owner 若是运维者，
+硬上限会让它停在草稿，所以给服务专用的地址应当 owner 就是这个服务（或授权写在 service 自己拥有的身份上）。
 
 服务主体也可以设成 `review` 或 `draft`：SMTP 客户端照常拿到 `250`，
 信停在 `held` 或草稿里等审核 / 等人。这让「新接入的服务先观察一周」不需要另做机制。
@@ -146,6 +188,12 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
    然后按该授权的 `send_policy` 处理（§13.5）；`none` 直接拒收
 2. 规范化 MIME（按出口 caps 去掉不允许的头，§10.2），写 Sent 副本
 3. 入 outbox 状态机，由 §10.2 的 transport 真正投递
+
+落到代码上的顺序（提交口和其他提交路径共用前两步）：信头 `From` 经
+[`store.ResolveIdentity`](../internal/store/identities.go) 找到 identity（精确地址压过 `*@zone`，停用的跳过；找不到就拒收），
+`Sender` 同样解析且必须是同一主体能用的身份；`store.PolicyInput` + `sendpolicy.Decide` 得出去向：
+`Decision.Tier` 为 `none` 时拒收（550），否则一律 `250`——`Queue` 入 outbox，否则规范化后的字节写进 `sent/`、
+以 `drafts.raw_id` 停在草稿，`hold_reason` 记原因。`Decision.AutoSubmitted` 非空时规范化要补上 `Auto-Submitted` 头。
 
 **监听方式**（对 yuuka 所有的邮件协议监听器都成立，包括 M5 可能加的 IMAP 网关）。
 实现在 [`internal/mailnet`](../internal/mailnet/mailnet.go)：它包住一个 TCP listener，
@@ -334,6 +382,11 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 [`TestVisibility`](../internal/store/sent_test.go)：过滤在 M2 默认关着，测试里打开，
 用可读、不可读两个账户下的收信和 Sent 副本跑列表、搜索、详情、线程和前缀视图。
 REST 层的 [`TestACL`](../internal/api/api_test.go) 管的是另一半：每个端点要认证、要 scope、把认证出的主体交给 store。
+
+发信授权读的事实也走同一个条件：回复的默认身份（`ReplyIdentities`）和线程参与者（`ReplyFacts`）
+只来自可见的投递、可见的消息和可见的 outbox 行，同在 `TestVisibility` 里。
+草稿行另有一条 M2 规则（[`drafts.go`](../internal/store/drafts.go) 的 `visibleDraft`，唯一的一处）：
+human 看全部，其他主体只看自己写的。草稿是没发出去的字，常常是替人写的，比信件收得更窄。
 
 **随 M3.5 再定的两件事**（M2 不过滤读路径，所以现在不必定）：
 

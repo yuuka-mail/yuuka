@@ -117,7 +117,7 @@ func TestTokenLifecycle(t *testing.T) {
 		t.Fatalf("MCP with a fresh token: %+v", res.Content)
 	}
 
-	if out := e.must("token", "revoke", id); !strings.Contains(out, "revoked token "+id) {
+	if out := e.must("token", "revoke", id); !strings.Contains(out, "revoked "+id) {
 		t.Errorf("revoke: %q", out)
 	}
 	if _, _, args := e.lastAction("auth.credential.revoke"); args["credential_id"] != id || args["via"] != "cli" {

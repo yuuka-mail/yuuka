@@ -40,7 +40,25 @@ func NewBearer(db *store.DB, log *slog.Logger, now func() time.Time) *Bearer {
 // recorded in the audit log, at most once per credential per ten minutes;
 // via says where it was presented, e.g. "mcp stdio".
 func (b *Bearer) Authenticate(ctx context.Context, token, via string) (*auth.Viewer, error) {
-	v, err := authenticate(ctx, b.db, b.log, b.now(), auth.KindToken, token)
+	return b.check(ctx, auth.KindToken, token, via)
+}
+
+// AuthenticateSMTP resolves the SASL user name and password of the SMTP
+// submission port (§13.6) to a Viewer, with the same audit of refused
+// credentials as Authenticate. The user name is the credential id, which
+// the password carries too; they must agree, so a password cannot be
+// presented under another credential's name. Errors wrap
+// ErrUnauthenticated unless the database failed.
+func (b *Bearer) AuthenticateSMTP(ctx context.Context, username, password, via string) (*auth.Viewer, error) {
+	id, _, ok := auth.ParseSecret(auth.PrefixSMTP, password)
+	if !ok || id != username {
+		return nil, ErrUnauthenticated
+	}
+	return b.check(ctx, auth.KindSMTPPassword, password, via)
+}
+
+func (b *Bearer) check(ctx context.Context, kind, secret, via string) (*auth.Viewer, error) {
+	v, err := authenticate(ctx, b.db, b.log, b.now(), kind, secret)
 	if rej, ok := errors.AsType[*rejection](err); ok && b.rejectLog.allow(rej.credentialID) {
 		now := b.now()
 		a := store.Action{

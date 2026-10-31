@@ -250,16 +250,16 @@ func (db *DB) CredentialForAuth(ctx context.Context, id string) (CredentialPrinc
 	return c, nil
 }
 
-// Tokens lists the bearer tokens of one principal, or of all principals
-// when principalID is empty, oldest first, revoked and expired ones
-// included. SecretHash is not loaded.
+// Tokens lists the bearer tokens and SMTP passwords of one principal, or
+// of all principals when principalID is empty, oldest first, revoked and
+// expired ones included. SecretHash is not loaded.
 func (db *DB) Tokens(ctx context.Context, principalID string) ([]CredentialPrincipal, error) {
 	rows, err := db.pool.Query(ctx, `
 		SELECT c.id, c.principal_id, c.kind, c.label, c.scopes,
 		       c.created_at, c.expires_at, c.last_used_at, c.revoked_at,
 		       p.kind, p.name, p.disabled_at IS NOT NULL
 		FROM credentials c JOIN principals p ON p.id = c.principal_id
-		WHERE c.kind = 'token' AND ($1::text IS NULL OR c.principal_id = $1)
+		WHERE c.kind IN ('token', 'smtp_password') AND ($1::text IS NULL OR c.principal_id = $1)
 		ORDER BY c.created_at, c.id`, nullable(principalID))
 	if err != nil {
 		return nil, fmt.Errorf("list tokens: %w", err)
