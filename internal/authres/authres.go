@@ -129,31 +129,28 @@ func receiverField(fs []field, name string) string {
 // parse splits an Authentication-Results value into its authserv-id and
 // results (RFC 8601 §2.2). It is lenient: unparseable pieces are skipped,
 // never guessed at.
+//
+// The grammar allows CFWS around "=" and around a method's "/" version,
+// so a result is not one whitespace-separated word; a quoted value may
+// hold spaces; and an unquoted value ends only at whitespace, because
+// receivers write header.b and similar base64 values unquoted, "=" and
+// "/" included. go-msgauth's authres splits on whitespace and keeps only
+// a few properties per method, which is why this parser stays.
 func parse(v string) (string, []Result) {
 	segs := split(stripComments(v), ';')
-	if len(segs) == 0 {
-		return "", nil
-	}
 	// authserv-id [ CFWS authres-version ]
-	idFields := strings.Fields(segs[0])
-	if len(idFields) == 0 {
-		return "", nil
-	}
-	id := idFields[0]
+	id, _ := value(segs[0], skipSpace(segs[0], 0))
 	var out []Result
 	for _, seg := range segs[1:] {
-		toks := strings.Fields(seg)
-		if len(toks) == 0 {
-			continue
-		}
-		method, result, ok := strings.Cut(toks[0], "=")
+		method, result, i, ok := pair(seg, skipSpace(seg, 0))
 		if !ok {
 			continue // "none" or garbage
 		}
 		method, _, _ = strings.Cut(method, "/") // method version
-		r := Result{Method: strings.ToLower(method), Result: strings.ToLower(unquote(result))}
-		for _, t := range toks[1:] {
-			k, val, ok := strings.Cut(t, "=")
+		r := Result{Method: strings.ToLower(method), Result: strings.ToLower(result)}
+		for i < len(seg) {
+			k, val, next, ok := pair(seg, i)
+			i = next
 			if !ok {
 				continue
 			}
@@ -161,13 +158,67 @@ func parse(v string) (string, []Result) {
 				r.Props = map[string]string{}
 			}
 			if _, dup := r.Props[strings.ToLower(k)]; !dup {
-				r.Props[strings.ToLower(k)] = unquote(val)
+				r.Props[strings.ToLower(k)] = val
 			}
 		}
 		out = append(out, r)
 	}
 	return id, out
 }
+
+// pair reads key [CFWS] ["/" [CFWS] version [CFWS]] "=" [CFWS] value at
+// s[i:], comments already blanked, and returns the index after it and any
+// trailing space. A key without "=" is a stray word: ok is false and next
+// skips just that word.
+func pair(s string, i int) (key, val string, next int, ok bool) {
+	start := i
+	for i < len(s) && !isSpace(s[i]) && s[i] != '=' && s[i] != '/' {
+		i++
+	}
+	end := i
+	i = skipSpace(s, i)
+	if i < len(s) && s[i] == '/' {
+		i = skipSpace(s, i+1)
+		for i < len(s) && !isSpace(s[i]) && s[i] != '=' {
+			i++
+		}
+		i = skipSpace(s, i)
+	}
+	if end == start || i >= len(s) || s[i] != '=' {
+		return "", "", skipSpace(s, max(end, start+1)), false
+	}
+	val, i = value(s, skipSpace(s, i+1))
+	return s[start:end], val, skipSpace(s, i), true
+}
+
+// value reads a quoted-string, unescaping quoted-pairs, or else everything
+// up to the next whitespace.
+func value(s string, i int) (string, int) {
+	if i < len(s) && s[i] == '"' {
+		var b strings.Builder
+		for i++; i < len(s) && s[i] != '"'; i++ {
+			if s[i] == '\\' && i+1 < len(s) {
+				i++
+			}
+			b.WriteByte(s[i])
+		}
+		return b.String(), min(i+1, len(s))
+	}
+	start := i
+	for i < len(s) && !isSpace(s[i]) {
+		i++
+	}
+	return s[start:i], i
+}
+
+func skipSpace(s string, i int) int {
+	for i < len(s) && isSpace(s[i]) {
+		i++
+	}
+	return i
+}
+
+func isSpace(c byte) bool { return c == ' ' || c == '\t' || c == '\r' || c == '\n' }
 
 // stripComments removes RFC 5322 comments (nested, with quoted-pairs),
 // leaving quoted strings intact.
@@ -224,13 +275,6 @@ func split(s string, sep byte) []string {
 		}
 	}
 	return append(out, s[start:])
-}
-
-func unquote(s string) string {
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		s = strings.ReplaceAll(s[1:len(s)-1], `\"`, `"`)
-	}
-	return s
 }
 
 type field struct{ name, value string }

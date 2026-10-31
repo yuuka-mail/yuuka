@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -99,6 +100,46 @@ func TestParse(t *testing.T) {
 	if rs[2].Method != "dmarc" || rs[2].Result != "pass" {
 		t.Errorf("dmarc %+v", rs[2])
 	}
+}
+
+// Spacing and quoting that RFC 8601 allows and a whitespace split gets
+// wrong: CFWS around "=" and "/", quoted values with spaces or escaped
+// quotes, and token values that themselves contain "=" and "/".
+func TestParseGrammar(t *testing.T) {
+	id, rs := parse(`"mx.example.org"; dkim / 1 (v1) = pass header.d = example.net header.b=Ab/c+D=;` +
+		` spf=neutral reason="x y" smtp.mailfrom=a@example.net; dmarc=fail reason="say \"no\""`)
+	if id != "mx.example.org" {
+		t.Errorf("id %q", id)
+	}
+	want := []Result{
+		{Method: "dkim", Result: "pass", Props: map[string]string{"header.d": "example.net", "header.b": "Ab/c+D="}},
+		{Method: "spf", Result: "neutral", Props: map[string]string{"reason": "x y", "smtp.mailfrom": "a@example.net"}},
+		{Method: "dmarc", Result: "fail", Props: map[string]string{"reason": `say "no"`}},
+	}
+	if !reflect.DeepEqual(rs, want) {
+		t.Errorf("got  %+v\nwant %+v", rs, want)
+	}
+}
+
+// The value comes from the receiver, but a parser bug here would turn
+// into a hang or panic on every delivery, so any input must terminate.
+func FuzzParse(f *testing.F) {
+	for _, s := range []string{
+		`mx.example.org 1; dkim=pass header.b="ab;c"; none`,
+		`"mx"; dkim / 1 = pass header.d = example.net header.b=Ab/c+D=`,
+		`x; = ; / ; a/=b ; "unterminated`,
+		`x; spf=pass (nested (comment) \) ) reason="q\"`,
+	} {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, v string) {
+		_, rs := parse(v)
+		for _, r := range rs {
+			if r.Method == "" || r.Method != strings.ToLower(r.Method) {
+				t.Errorf("method %q from %q", r.Method, v)
+			}
+		}
+	})
 }
 
 func TestSpamScoreOnlyFromReceiverBlock(t *testing.T) {
