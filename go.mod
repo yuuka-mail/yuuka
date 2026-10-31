@@ -11,6 +11,7 @@ require (
 	github.com/go-webauthn/webauthn v0.18.2
 	github.com/jackc/pgx/v5 v5.12.0
 	github.com/modelcontextprotocol/go-sdk v1.8.0
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/net v0.60.0
 	golang.org/x/text v0.42.0
 )

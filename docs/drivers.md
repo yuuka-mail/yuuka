@@ -193,7 +193,7 @@ type TransportCaps struct {
 }
 ```
 
-**关键决策：MIME 由我们自己组装（go-message），transport 只投递字节。**
+**关键决策：MIME 由我们自己组装（[`internal/compose`](../internal/compose/compose.go)），transport 只投递字节。**
 好处是线程头（`In-Reply-To` / `References`）完全可控，Sent 副本就是我们提交的字节。
 但它**不一定等于收件人收到的字节**：有的出口会加上或替换 `Message-ID`、`DKIM-Signature`、
 `Return-Path`（Cloudflare 就是，§10.3）。这些差异用 `SendResult` 回填，而不是假装不存在。
@@ -209,14 +209,16 @@ type TransportCaps struct {
 
 #### 10.2.1 Markdown → MIME
 
-撰写用 Markdown（§12.1），所以组装规则要定死。渲染器用 **goldmark**
-（Go 生态标准、CommonMark 合规、可扩展）。
+撰写用 Markdown（§12.1），所以组装规则要定死。实现在
+[`internal/compose`](../internal/compose/compose.go)：输入一封信的描述，输出交给 transport 的完整字节，
+不碰数据库和网络。渲染器用 **goldmark**（Go 生态标准、CommonMark 合规、可扩展），
+这是组装唯一的第三方依赖；头部编码、折行、quoted-printable / base64 都用标准库。
 
 完整的 MIME 树（这是实现时最容易搞错的地方）：
 
 ```
-multipart/mixed
-├── multipart/related
+multipart/mixed                         ← 只在有普通附件时出现
+├── multipart/related                   ← 只在有内联图时出现
 │   ├── multipart/alternative
 │   │   ├── text/plain   ← Markdown 源码本身
 │   │   └── text/html    ← goldmark 渲染 + 样式内联
@@ -224,20 +226,56 @@ multipart/mixed
 └── application/*  (attachment) ← 普通附件
 ```
 
+空的层级不写：只有一个孩子的 multipart 不携带信息，有的客户端还会把它显示成一个空附件。
+所以最简单的信就是一个 `multipart/alternative`。
+
 几条硬规则：
 
 - **`text/plain` 直接用 Markdown 源码**。这是选 Markdown 最大的收益：
   纯文本部分天然可读，不需要另写一个"HTML 转纯文本"的降级器（那玩意儿永远写不好）。
 - **HTML 必须把样式内联**。邮件客户端普遍剥掉 `<head>` 和 `<style>`（Gmail 就会），
-  所以 goldmark 的输出要再过一道 inliner（premailer 思路）。不要外链 CSS，
-  不要 `<script>`，表格补 `border`/`cellpadding` 属性给老客户端兜底。
+  所以不外链 CSS、不写 `<style>`、不出 `class`，表格补 `border`/`cellpadding` 属性给老客户端兜底。
+  内联的做法是在渲染前给 AST 节点设 `style` 属性，由 goldmark 自己渲染出来，
+  而不是渲染完再跑一遍 premailer 式的 inliner：后者要把自己的输出再解析一次，还要多一个依赖。
+  代价是样式只能落在 goldmark 会渲染属性的节点上（引用、行内代码、图片、分割线、表格），
+  代码块和原始 HTML 由自己的渲染函数接管。
+- **原始 HTML 不透传，转义成文本显示**。草稿可能是读过不可信来信的 agent 写的（§8.3），
+  `<script>`、`<img onerror>` 一类必须失效。goldmark 默认是丢弃并留一句注释，
+  这里改成转义后照原样显示：收件人在 HTML 里看到的和 plain 部分一致，审核者看到的也就是发出去的。
+  `javascript:` 链接沿用 goldmark 的过滤（`href` 置空）。
+- **换行即换行**（hard wraps，同 GitHub 评论）。草稿在文本框里写，签名、地址都靠单个换行分行；
+  按 CommonMark 把它们并成一段会让 HTML 和 plain 两份长得不一样。
 - **`>` 引用在两份里都天然正确**：plain 部分 `>` 就是邮件引用的原生语法，
   html 部分渲染成 `<blockquote>`。Markdown 和邮件在这一点上恰好同源。
 - **代码块**不做语法高亮——邮件里 class 样式会被剥掉，`<pre>` 加内联背景色就够。
+- **扩展只开 GFM 的表格、删除线、裸链接**。任务列表会渲染出表单控件，不开。
 - **正式邮件的一个权衡**：plain 部分会裸露 `**bold**` 这类标记。
   Markdown 的 plain 可读性本来就是设计目标，日常无妨；但对外发正式邮件
   （如漏洞报告）时略显业余。所以给一个按身份配置的开关：
   plain 部分可选"去标记"渲染（`**bold**` → `bold`），默认保留原文以保真。
+  去标记时链接写成「文字 <URL>」，代码块缩进四格，列表符号和 `>` 引用保留（它们本来就是纯文本的写法）；
+  删除线保留 `~~`，因为去掉它会把意思说反。
+
+组装上的几个决定：
+
+- **输出是输入的纯函数**。Date 和 Message-ID 由调用方给，multipart 边界从它所分隔的内容的哈希派生，
+  不取随机数。同一份草稿永远得到同样的字节，重试发出的就是提交时的那一份，测试直接比 golden file。
+  边界以 `=_` 开头：quoted-printable 和 base64 的输出里不可能出现这个序列，所以边界与正文不会撞；
+  哈希只负责区分嵌套的层级。哈希的输入是收件人本来就能看到的各部分，Bcc 不在其中，不泄露什么。
+- **`Message-ID` 由调用方决定写不写**：`CallerMessageID=false` 的出口传空，组装就不写（§10.4.1）。
+  生成器是 `<ULID@域名>`（§11.2）。不写 `X-Mailer`，任何头里都不出现项目名。
+- **Bcc 不进头部**，只进 `Recipients()` 返回的信封收件人，由调用方交给 transport。
+- **回信的 `References`** = 父信的 `References`（没有就用它唯一的 `In-Reply-To`）加父信自己的 id
+  （RFC 5322 §3.6.4）。父信来自外部，格式不对的 id 直接丢弃而不是写出去，重复的只留一个。
+  链长超过 20 时保留第一个（线程根）和最近的 19 个，砍掉中间——线程算法只需要根和最近的祖先，
+  RFC 5537 §3.4.4 也是这么修剪的。
+- **正文编码取 quoted-printable 和 base64 中较短的一个**：以 ASCII 为主的信用 QP，
+  Sent 副本里还能直接读；中文为主时 QP 会膨胀到三倍，改用 base64。主题和文件名的 RFC 2047
+  encoded-word 按同样的规则在 Q 和 B 之间选（显示名交给 `net/mail`）。附件一律 base64，字节原样。
+- **附件文件名写两处**：`Content-Disposition` 用 RFC 2231（标准写法），`Content-Type` 的 `name`
+  用 RFC 2047（老客户端只认这个）。文件名限 255 字节，这样 2231 编码后的参数（无法折行）仍在 998 octets 以内。
+- **地址只收 ASCII**。非 ASCII 的本地部分要 SMTPUTF8，还没有出口协商它；国际化域名请传 A-label。
+  `multipart/*`、`message/*` 作附件暂不支持（RFC 2046 不允许它们用 base64），以附件形式转发等需要时再做。
 
 ### 10.3 能力矩阵
 

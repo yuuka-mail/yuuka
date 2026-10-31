@@ -1,0 +1,67 @@
+Date: Sat, 31 Oct 2026 09:30:00 +0800
+From: <operator@example.com>
+To: <alice@example.com>
+Subject: Logo and contract
+Message-ID: <01JBXM0000000000000000000D@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="=_a9f86f8b83a3ba3822270038"
+
+--=_a9f86f8b83a3ba3822270038
+Content-Type: multipart/related; boundary="=_54283a83ccd92a9983aba8e9";
+ type="multipart/alternative"
+
+--=_54283a83ccd92a9983aba8e9
+Content-Type: multipart/alternative; boundary="=_5709b7ff87a9bb3108137d85"
+
+--=_5709b7ff87a9bb3108137d85
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+The new logo:
+
+![logo](cid:logo@example.com)
+
+The contract is attached.
+
+--=_5709b7ff87a9bb3108137d85
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8">
+</head>
+<body>
+<p>The new logo:</p>
+<p><img src=3D"cid:logo@example.com" alt=3D"logo" style=3D"max-width:100%">=
+</p>
+<p>The contract is attached.</p>
+</body>
+</html>
+
+--=_5709b7ff87a9bb3108137d85--
+
+--=_54283a83ccd92a9983aba8e9
+Content-Type: image/png; name=logo.png
+Content-Disposition: inline; filename=logo.png
+Content-ID: <logo@example.com>
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4DwAAAQEABRjYTgAA
+AABJRU5ErkJggg==
+--=_54283a83ccd92a9983aba8e9--
+
+--=_a9f86f8b83a3ba3822270038
+Content-Type: application/pdf; name="contract draft.pdf"
+Content-Disposition: attachment; filename="contract draft.pdf"
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjcgc3ludGhldGljCiVQREYtMS43IHN5bnRoZXRpYwolUERGLTEuNyBzeW50aGV0aWMK
+JVBERi0xLjcgc3ludGhldGljCiVQREYtMS43IHN5bnRoZXRpYwolUERGLTEuNyBzeW50aGV0aWMK
+JVBERi0xLjcgc3ludGhldGljCiVQREYtMS43IHN5bnRoZXRpYwolUERGLTEuNyBzeW50aGV0aWMK
+JVBERi0xLjcgc3ludGhldGljCiVQREYtMS43IHN5bnRoZXRpYwolUERGLTEuNyBzeW50aGV0aWMK
+JVBERi0xLjcgc3ludGhldGljCiVQREYtMS43IHN5bnRoZXRpYwolUERGLTEuNyBzeW50aGV0aWMK
+JVBERi0xLjcgc3ludGhldGljCiVQREYtMS43IHN5bnRoZXRpYwolUERGLTEuNyBzeW50aGV0aWMK
+JVBERi0xLjcgc3ludGhldGljCiVQREYtMS43IHN5bnRoZXRpYwo=
+--=_a9f86f8b83a3ba3822270038--

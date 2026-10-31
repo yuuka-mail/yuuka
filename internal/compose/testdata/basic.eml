@@ -1,0 +1,94 @@
+Date: Sat, 31 Oct 2026 09:30:00 +0800
+From: "Operator" <operator@example.com>
+Reply-To: <replies@example.com>
+To: "Alice Example" <alice@example.com>
+Cc: <bob@example.com>
+Subject: Quarterly numbers
+Message-ID: <01JBXM0000000000000000000A@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="=_852ce5cdc218050a7dd2cff1"
+
+--=_852ce5cdc218050a7dd2cff1
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Hi Alice,
+
+The **numbers** are in. See the [report](https://example.com/report) or htt=
+ps://example.com/raw for the raw data.
+
+> Can you send them by Friday?
+
+- revenue up
+- costs `flat`
+
+| Quarter | Revenue |
+|:--|--:|
+| Q3 | 120 |
+| Q4 | 135 |
+
+```go
+fmt.Println("<ok>")
+```
+
+---
+
+Thanks,
+Operator
+
+--=_852ce5cdc218050a7dd2cff1
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8">
+</head>
+<body>
+<p>Hi Alice,</p>
+<p>The <strong>numbers</strong> are in. See the <a href=3D"https://example.=
+com/report">report</a> or <a href=3D"https://example.com/raw">https://examp=
+le.com/raw</a> for the raw data.</p>
+<blockquote style=3D"margin:0 0 0 0.8ex;border-left:2px solid #ccc;padding-=
+left:1ex;color:#555"><p>Can you send them by Friday?</p>
+</blockquote>
+<ul>
+<li>revenue up</li>
+<li>costs <code style=3D"background-color:#f6f8fa;padding:1px 4px;border-ra=
+dius:3px;font-family:monospace">flat</code></li>
+</ul>
+<table border=3D"1" cellpadding=3D"6" cellspacing=3D"0" style=3D"border-col=
+lapse:collapse">
+<thead>
+<tr>
+<th style=3D"border:1px solid #ccc;padding:4px 8px;text-align:left">Quarter=
+</th>
+<th style=3D"border:1px solid #ccc;padding:4px 8px;text-align:right">Revenu=
+e</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style=3D"border:1px solid #ccc;padding:4px 8px;text-align:left">Q3</td>
+<td style=3D"border:1px solid #ccc;padding:4px 8px;text-align:right">120</t=
+d>
+</tr>
+<tr>
+<td style=3D"border:1px solid #ccc;padding:4px 8px;text-align:left">Q4</td>
+<td style=3D"border:1px solid #ccc;padding:4px 8px;text-align:right">135</t=
+d>
+</tr>
+</tbody>
+</table>
+<pre style=3D"background-color:#f6f8fa;padding:8px 12px;border-radius:4px;f=
+ont-family:monospace;white-space:pre-wrap;word-wrap:break-word"><code>fmt.P=
+rintln(&quot;&lt;ok&gt;&quot;)
+</code></pre>
+<hr style=3D"border:none;border-top:1px solid #ccc">
+<p>Thanks,<br>
+Operator</p>
+</body>
+</html>
+
+--=_852ce5cdc218050a7dd2cff1--

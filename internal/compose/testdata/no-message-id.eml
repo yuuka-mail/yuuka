@@ -1,0 +1,28 @@
+Date: Sat, 31 Oct 2026 09:30:00 +0800
+From: <operator@example.com>
+To: <alice@example.com>
+Subject: Sent through a transport that sets its own Message-ID
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="=_06fbfb85a1c4b031e30dc8bf"
+
+--=_06fbfb85a1c4b031e30dc8bf
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Short.
+
+--=_06fbfb85a1c4b031e30dc8bf
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8">
+</head>
+<body>
+<p>Short.</p>
+</body>
+</html>
+
+--=_06fbfb85a1c4b031e30dc8bf--

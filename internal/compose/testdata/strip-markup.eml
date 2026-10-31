@@ -1,0 +1,84 @@
+Date: Sat, 31 Oct 2026 09:30:00 +0800
+From: "Operator" <operator@example.com>
+To: <security@example.com>
+Subject: Vulnerability report
+Message-ID: <01JBXM0000000000000000000F@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="=_a334516385fc8a5397c45a5a"
+
+--=_a334516385fc8a5397c45a5a
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Summary
+
+The login form accepts admin\* as a wildcard; see the advisory <https://exa=
+mple.com/advisory> & ~~old~~ notes.
+
+1. Open the page
+
+2. Submit:
+
+       curl -d 'u=3Dadmin*' https://example.com/login
+
+> quoted line
+> second line
+
+a | b
+1 | 2
+
+Regards,
+Operator
+
+--=_a334516385fc8a5397c45a5a
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8">
+</head>
+<body>
+<h1>Summary</h1>
+<p>The <strong>login form</strong> accepts <code style=3D"background-color:=
+#f6f8fa;padding:1px 4px;border-radius:3px;font-family:monospace">admin\*</c=
+ode> as a wildcard; see <a href=3D"https://example.com/advisory">the adviso=
+ry</a> &amp; <del>old</del> notes.</p>
+<ol>
+<li>
+<p>Open the page</p>
+</li>
+<li>
+<p>Submit:</p>
+<pre style=3D"background-color:#f6f8fa;padding:8px 12px;border-radius:4px;f=
+ont-family:monospace;white-space:pre-wrap;word-wrap:break-word"><code>curl =
+-d 'u=3Dadmin*' https://example.com/login
+</code></pre>
+</li>
+</ol>
+<blockquote style=3D"margin:0 0 0 0.8ex;border-left:2px solid #ccc;padding-=
+left:1ex;color:#555"><p>quoted line<br>
+second line</p>
+</blockquote>
+<table border=3D"1" cellpadding=3D"6" cellspacing=3D"0" style=3D"border-col=
+lapse:collapse">
+<thead>
+<tr>
+<th style=3D"border:1px solid #ccc;padding:4px 8px">a</th>
+<th style=3D"border:1px solid #ccc;padding:4px 8px">b</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style=3D"border:1px solid #ccc;padding:4px 8px">1</td>
+<td style=3D"border:1px solid #ccc;padding:4px 8px">2</td>
+</tr>
+</tbody>
+</table>
+<p>Regards,<br>
+Operator</p>
+</body>
+</html>
+
+--=_a334516385fc8a5397c45a5a--

@@ -1,0 +1,38 @@
+Date: Sat, 31 Oct 2026 09:30:00 +0800
+From: "Arisu" <arisu@example.com>
+To: <monitoring@example.com>
+Subject: Re: disk usage alert
+Message-ID: <01JBXM0000000000000000000C@example.com>
+In-Reply-To: <parent@example.com>
+References: <msg00@example.com> <msg12@example.com> <msg13@example.com>
+ <msg14@example.com> <msg15@example.com> <msg16@example.com>
+ <msg17@example.com> <msg18@example.com> <msg19@example.com>
+ <msg20@example.com> <msg21@example.com> <msg22@example.com>
+ <msg23@example.com> <msg24@example.com> <msg25@example.com>
+ <msg26@example.com> <msg27@example.com> <msg28@example.com>
+ <msg29@example.com> <parent@example.com>
+Auto-Submitted: auto-generated
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="=_57fd8d3dc058130972f884ef"
+
+--=_57fd8d3dc058130972f884ef
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Acknowledged; cleanup is scheduled.
+
+--=_57fd8d3dc058130972f884ef
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8">
+</head>
+<body>
+<p>Acknowledged; cleanup is scheduled.</p>
+</body>
+</html>
+
+--=_57fd8d3dc058130972f884ef--

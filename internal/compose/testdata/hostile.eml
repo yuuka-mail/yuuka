@@ -1,0 +1,46 @@
+Date: Sat, 31 Oct 2026 09:30:00 +0800
+From: "Arisu  Bcc: victim@example.com" <arisu@example.com>
+To: <alice@example.com>
+Subject: Hello  Bcc: victim@example.com
+Message-ID: <01JBXM0000000000000000000E@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="=_0cc3769931ae039cc00fe33f"
+
+--=_0cc3769931ae039cc00fe33f
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Summary of the mail you asked about.
+
+<script>alert('x')</script>
+
+Inline <img src=3Dx onerror=3D"alert(1)"> and <b onclick=3D"steal()">bold</=
+b>.
+
+[click](javascript:alert(1)) ![pixel](https://tracker.example.com/p.gif)
+
+<style>body{display:none}</style>
+
+--=_0cc3769931ae039cc00fe33f
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv=3D"Content-Type" content=3D"text/html; charset=3Dutf-8">
+</head>
+<body>
+<p>Summary of the mail you asked about.</p>
+<p style=3D"white-space:pre-wrap">&lt;script&gt;alert('x')&lt;/script&gt;</=
+p>
+<p>Inline &lt;img src=3Dx onerror=3D&quot;alert(1)&quot;&gt; and &lt;b oncl=
+ick=3D&quot;steal()&quot;&gt;bold&lt;/b&gt;.</p>
+<p><a href=3D"">click</a> <img src=3D"https://tracker.example.com/p.gif" al=
+t=3D"pixel" style=3D"max-width:100%"></p>
+<p style=3D"white-space:pre-wrap">&lt;style&gt;body{display:none}&lt;/style=
+&gt;</p>
+</body>
+</html>
+
+--=_0cc3769931ae039cc00fe33f--

@@ -1,0 +1,42 @@
+Date: Sat, 31 Oct 2026 09:30:00 +0800
+From: =?utf-8?q?=E8=BF=90=E7=BB=B4=E8=80=85?= <operator@example.com>
+To: =?utf-8?q?=E5=BC=A0=E4=B8=89=EF=BC=88=E8=B4=A2=E5=8A=A1=E9=83=A8=EF=BC=89?=
+ <zhangsan@example.com>
+Subject: =?utf-8?b?5YWz5LqO56ys5LiJ5a2j5bqm5oql6ZSA5Y2V55qE6KGl5YWF5p2Q5paZ77yM?=
+ =?utf-8?b?6K+35Zyo5ZGo5LqU5LmL5YmN56Gu6K6k5bm25Zue5aSN?=
+Message-ID: <01JBXM0000000000000000000B@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="=_7b35f418b9466c489ec42bab"
+
+--=_7b35f418b9466c489ec42bab
+Content-Type: multipart/alternative; boundary="=_75c2501fbaf06972639c714f"
+
+--=_75c2501fbaf06972639c714f
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+5byg5LiJ5L2g5aW977yaDQoNCumZhOS7tuaYryoq56ys5LiJ5a2j5bqmKirnmoTmiqXplIDljZXv
+vIzor7fmn6XmlLbjgIINCg0KPiDljp/mlofvvJror7fooaXlhYXlj5HnpajjgIINCg0K6LCi6LCi
+77yBDQo=
+--=_75c2501fbaf06972639c714f
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PCFET0NUWVBFIGh0bWw+DQo8aHRtbD4NCjxoZWFkPg0KPG1ldGEgaHR0cC1lcXVpdj0iQ29udGVu
+dC1UeXBlIiBjb250ZW50PSJ0ZXh0L2h0bWw7IGNoYXJzZXQ9dXRmLTgiPg0KPC9oZWFkPg0KPGJv
+ZHk+DQo8cD7lvKDkuInkvaDlpb3vvJo8L3A+DQo8cD7pmYTku7bmmK88c3Ryb25nPuesrOS4ieWt
+o+W6pjwvc3Ryb25nPueahOaKpemUgOWNle+8jOivt+afpeaUtuOAgjwvcD4NCjxibG9ja3F1b3Rl
+IHN0eWxlPSJtYXJnaW46MCAwIDAgMC44ZXg7Ym9yZGVyLWxlZnQ6MnB4IHNvbGlkICNjY2M7cGFk
+ZGluZy1sZWZ0OjFleDtjb2xvcjojNTU1Ij48cD7ljp/mlofvvJror7fooaXlhYXlj5HnpajjgII8
+L3A+DQo8L2Jsb2NrcXVvdGU+DQo8cD7osKLosKLvvIE8L3A+DQo8L2JvZHk+DQo8L2h0bWw+DQo=
+--=_75c2501fbaf06972639c714f--
+
+--=_7b35f418b9466c489ec42bab
+Content-Type: text/csv;
+ name="=?utf-8?b?56ys5LiJ5a2j5bqm5oql6ZSA5Y2VLmNzdg==?="
+Content-Disposition: attachment;
+ filename*=utf-8''%E7%AC%AC%E4%B8%89%E5%AD%A3%E5%BA%A6%E6%8A%A5%E9%94%80%E5%8D%95.csv
+Content-Transfer-Encoding: base64
+
+6aG555uuLOmHkeminQ0K5beu5peFLDEyMDANCg==
+--=_7b35f418b9466c489ec42bab--
