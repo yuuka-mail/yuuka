@@ -29,6 +29,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/outbox"
 	"github.com/yuuka-mail/yuuka/internal/r2/r2fake"
 	"github.com/yuuka-mail/yuuka/internal/rules"
+	"github.com/yuuka-mail/yuuka/internal/sendpolicy"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/submit"
@@ -246,6 +247,64 @@ func (s *spy) ApplyRule(ctx context.Context, id string, since time.Time, dry boo
 func (s *spy) RevertRule(ctx context.Context, id string, since time.Time, a store.Action) (store.RevertStats, error) {
 	s.saw("RevertRule", actor(a))
 	return s.DB.RevertRule(ctx, id, since, a)
+}
+
+func (s *spy) SetPrefixState(ctx context.Context, zone, prefix string, state int, a store.Action) (store.PrefixChange, error) {
+	s.saw("SetPrefixState", actor(a))
+	return s.DB.SetPrefixState(ctx, zone, prefix, state, a)
+}
+
+func (s *spy) SetPrefixExpected(ctx context.Context, zone, prefix string, domains []string, a store.Action) ([]string, bool, error) {
+	s.saw("SetPrefixExpected", actor(a))
+	return s.DB.SetPrefixExpected(ctx, zone, prefix, domains, a)
+}
+
+// Who may do what is configuration too: reads without a viewer, writes
+// recorded as the actor.
+
+func (s *spy) Tokens(ctx context.Context, principalID string) ([]store.CredentialPrincipal, error) {
+	s.saw("Tokens", configRead)
+	return s.DB.Tokens(ctx, principalID)
+}
+
+func (s *spy) CredentialForAuth(ctx context.Context, id string) (store.CredentialPrincipal, error) {
+	s.saw("CredentialForAuth", configRead)
+	return s.DB.CredentialForAuth(ctx, id)
+}
+
+func (s *spy) RevokeCredential(ctx context.Context, id string, a store.Action) error {
+	s.saw("RevokeCredential", actor(a))
+	return s.DB.RevokeCredential(ctx, id, a)
+}
+
+func (s *spy) Identities(ctx context.Context, all bool) ([]store.Identity, error) {
+	s.saw("Identities", configRead)
+	return s.DB.Identities(ctx, all)
+}
+
+func (s *spy) IdentityByID(ctx context.Context, id string) (store.Identity, error) {
+	s.saw("IdentityByID", configRead)
+	return s.DB.IdentityByID(ctx, id)
+}
+
+func (s *spy) DisableIdentityIfTighter(ctx context.Context, id string, a store.Action) error {
+	s.saw("DisableIdentityIfTighter", actor(a))
+	return s.DB.DisableIdentityIfTighter(ctx, id, a)
+}
+
+func (s *spy) Grants(ctx context.Context, identityID, principalID string) ([]store.Grant, error) {
+	s.saw("Grants", configRead)
+	return s.DB.Grants(ctx, identityID, principalID)
+}
+
+func (s *spy) TightenGrant(ctx context.Context, identityID, principalID string, t store.GrantTightening, a store.Action) (store.Grant, error) {
+	s.saw("TightenGrant", actor(a))
+	return s.DB.TightenGrant(ctx, identityID, principalID, t, a)
+}
+
+func (s *spy) RemoveGrantIfTighter(ctx context.Context, identityID, principalID string, a store.Action) (sendpolicy.Grant, error) {
+	s.saw("RemoveGrantIfTighter", actor(a))
+	return s.DB.RemoveGrantIfTighter(ctx, identityID, principalID, a)
 }
 
 // localRaw reads raw messages the way ingest does without R2.
@@ -477,6 +536,16 @@ func TestACL(t *testing.T) {
 	propose := func(label string) string { return h.proposal(h.agent, msg.ID, label) }
 	seeProposal, accept, reject, withdraw := propose("p1"), propose("p2"), propose("p3"), propose("p4")
 	aRule, gone := h.rule("acl"), h.rule("gone")
+	// Management (§13.10): prefixes to decide on, and the operator's
+	// settings to tighten: momoi's token, an identity no pattern covers,
+	// arisu's grants on its own identity and on the operator's.
+	h.claim("unclaim")
+	h.claim("expect")
+	revocable, _, _ := auth.ParseSecret(auth.PrefixToken, h.tokenFor(other, auth.MessageRead))
+	disable := h.identity("bot@example.org", other).ID
+	arisuID, star := h.identityAt("arisu@example.com").ID, h.identityAt("*@example.com").ID
+	h.grant(store.Grant{IdentityID: arisuID, PrincipalID: h.agent.ID, Policy: sendpolicy.Auto, RecipientScope: sendpolicy.ScopeAny})
+	h.grant(store.Grant{IdentityID: star, PrincipalID: h.agent.ID, Policy: sendpolicy.Draft, RecipientScope: sendpolicy.ScopeThread})
 	h.spy.take()
 
 	// How to call each route, and the store methods it must go through.
@@ -491,6 +560,10 @@ func TestACL(t *testing.T) {
 		// people: only a person may call it (§8.5): an agent holding
 		// every scope is refused before the store is asked.
 		people bool
+		// authority: it reads or changes who may do what (§13.10): only
+		// a person's session, so on top of people a token holding every
+		// scope is refused even for a human, and a session for an agent.
+		authority bool
 	}
 	calls := map[string]call{
 		"GET /api/v1/messages":                         {path: "/api/v1/messages?prefix=github@example.com", reads: []string{"ListMessages"}},
@@ -584,6 +657,39 @@ func TestACL(t *testing.T) {
 			method: http.MethodPost, path: "/api/v1/rules/" + aRule + "/revert", body: `{}`,
 			as: h.human, reads: []string{"RevertRule"}, people: true,
 		},
+
+		// Decisions prompted by mail: scopes, like any write.
+		"POST /api/v1/prefixes/{address}/claim": {
+			method: http.MethodPost, path: "/api/v1/prefixes/acl@example.com/claim", reads: []string{"SetPrefixState", "PrefixStats"},
+		},
+		"POST /api/v1/prefixes/{address}/unclaim": {
+			method: http.MethodPost, path: "/api/v1/prefixes/unclaim@example.com/unclaim", reads: []string{"SetPrefixState", "PrefixStats"},
+		},
+		"PUT /api/v1/prefixes/{address}/expected-domains": {
+			method: http.MethodPut, path: "/api/v1/prefixes/expect@example.com/expected-domains", body: `{"domains":["example.net"]}`,
+			reads: []string{"SetPrefixExpected", "PrefixStats"},
+		},
+
+		// Who may do what: a person's session only.
+		"GET /api/v1/admin/credentials": {path: "/api/v1/admin/credentials", as: h.human, reads: []string{"Tokens"}, people: true, authority: true},
+		"POST /api/v1/admin/credentials/{id}/revoke": {
+			method: http.MethodPost, path: "/api/v1/admin/credentials/" + revocable + "/revoke",
+			as: h.human, reads: []string{"CredentialForAuth", "RevokeCredential"}, people: true, authority: true,
+		},
+		"GET /api/v1/admin/identities": {path: "/api/v1/admin/identities", as: h.human, reads: []string{"Identities"}, people: true, authority: true},
+		"POST /api/v1/admin/identities/{id}/disable": {
+			method: http.MethodPost, path: "/api/v1/admin/identities/" + disable + "/disable",
+			as: h.human, reads: []string{"DisableIdentityIfTighter"}, people: true, authority: true,
+		},
+		"GET /api/v1/admin/grants": {path: "/api/v1/admin/grants", as: h.human, reads: []string{"Grants"}, people: true, authority: true},
+		"POST /api/v1/admin/grants/{identity}/{principal}/tighten": {
+			method: http.MethodPost, path: "/api/v1/admin/grants/" + arisuID + "/" + h.agent.ID + "/tighten", body: `{"suspended":true}`,
+			as: h.human, reads: []string{"TightenGrant"}, people: true, authority: true,
+		},
+		"DELETE /api/v1/admin/grants/{identity}/{principal}": {
+			method: http.MethodDelete, path: "/api/v1/admin/grants/" + star + "/" + h.agent.ID,
+			as: h.human, reads: []string{"RemoveGrantIfTighter"}, people: true, authority: true,
+		},
 	}
 	for _, rt := range routes {
 		pattern := rt.Method + " " + rt.Path
@@ -598,7 +704,11 @@ func TestACL(t *testing.T) {
 			t.Errorf("route %s is missing from the ACL table", pattern)
 			continue
 		}
-		if rt.Access != openapi.Authenticated || len(rt.Scopes) == 0 {
+		access := openapi.Authenticated
+		if row.authority {
+			access = openapi.HumanSession
+		}
+		if rt.Access != access || len(rt.Scopes) == 0 {
 			t.Errorf("%s: access %v, scopes %v", pattern, rt.Access, rt.Scopes)
 		}
 		if row.method == "" {
@@ -645,6 +755,21 @@ func TestACL(t *testing.T) {
 			}
 			if calls := h.spy.take(); len(calls) != 0 {
 				t.Errorf("%s: an agent's request reached the store: %v", pattern, calls)
+			}
+		}
+		if row.authority {
+			// Neither a token in a person's name nor a session in an
+			// agent's is a person at the WebUI, whatever the scopes.
+			for who, cred := range map[string]string{
+				"a human's token":    h.credential(h.human, auth.KindToken, auth.AllScopes...),
+				"an agent's session": h.credential(h.agent, auth.KindSession, auth.AllScopes...),
+			} {
+				if w := send(cred); w.Code != http.StatusForbidden || problemOf(t, w).Code != openapi.CodeForbidden {
+					t.Errorf("%s as %s with every scope: %d %s", pattern, who, w.Code, w.Body.String())
+				}
+			}
+			if calls := h.spy.take(); len(calls) != 0 {
+				t.Errorf("%s: a refused request reached the store: %v", pattern, calls)
 			}
 		}
 

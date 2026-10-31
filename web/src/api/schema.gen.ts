@@ -51,6 +51,333 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List tokens and SMTP passwords, never their secrets; a person's session only */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CredentialList"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/credentials/{id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke a token or SMTP password; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List grants, stored and applied; a person's session only */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["GrantAdminList"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/grants/{identity}/{principal}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove a grant, unless its default lets more through; a person's session only */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description the identity's id */
+                    identity: string;
+                    /** @description the principal's id */
+                    principal: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/grants/{identity}/{principal}/tighten": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Tighten a grant; anything that would let more through is refused; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description the identity's id */
+                    identity: string;
+                    /** @description the principal's id */
+                    principal: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TightenBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ManagedGrant"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/identities": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List identities, disabled ones included; a person's session only */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["IdentityAdminList"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/identities/{id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable an identity, unless the zone's pattern would take its address over; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/changes": {
         parameters: {
             query?: never;
@@ -1054,6 +1381,154 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/prefixes/{address}/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Claim a prefix: its mail is no longer downgraded unless DMARC failed, and new mail to it notifies (§3.3) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description prefix@zone */
+                    address: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PrefixDecision"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/prefixes/{address}/expected-domains": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace the domains a claimed prefix was given to, and see what the leak check now makes of its mail */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description prefix@zone */
+                    address: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ExpectBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ExpectResult"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/prefixes/{address}/unclaim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unclaim a prefix: its mail is downgraded again */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description prefix@zone */
+                    address: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PrefixDecision"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -2241,6 +2716,14 @@ export interface components {
             class?: components["schemas"]["Class"];
             outcome: components["schemas"]["AnnotateOutcome"];
         };
+        AppliedGrant: {
+            send_policy: components["schemas"]["Tier"];
+            recipient_scope: components["schemas"]["RecipientScope"];
+            allowlist: string[];
+            limits: components["schemas"]["Limits"];
+            hold_seconds: number;
+            suspended: boolean;
+        };
         Attachment: {
             section: string;
             filename?: string;
@@ -2289,7 +2772,7 @@ export interface components {
         /** @enum {string} */
         Class: "unknown" | "machine" | "human";
         /** @enum {string} */
-        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "invalid_rule" | "cursor_expired" | "internal";
+        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "invalid_rule" | "cursor_expired" | "widening_requires_cli" | "internal";
         Content: {
             notice: string;
             from: components["schemas"]["Address"];
@@ -2302,6 +2785,15 @@ export interface components {
             sections?: components["schemas"]["Section"][];
             parts?: components["schemas"]["Part"][];
             more?: string;
+        };
+        CountedAs: {
+            domain: string;
+            as: string;
+        };
+        /** @enum {string} */
+        CredentialKind: "token" | "smtp_password";
+        CredentialList: {
+            credentials: components["schemas"]["ManagedCredential"][];
         };
         Delivery: {
             id: string;
@@ -2375,6 +2867,15 @@ export interface components {
         };
         /** @enum {string} */
         DraftState: "draft" | "held" | "outbox";
+        ExpectBody: {
+            domains: string[];
+        };
+        ExpectResult: {
+            changed: boolean;
+            expected: string[];
+            counted_as: components["schemas"]["CountedAs"][];
+            prefix?: components["schemas"]["Prefix"];
+        };
         Extracted: {
             code?: components["schemas"]["Extraction"];
             link?: components["schemas"]["Extraction"];
@@ -2407,8 +2908,20 @@ export interface components {
             warnings?: string[];
             stripped: components["schemas"]["Stripped"];
         };
+        GrantAdminList: {
+            grants: components["schemas"]["ManagedGrant"][];
+        };
+        GrantIdentity: {
+            id: string;
+            address: string;
+            owner: components["schemas"]["Actor"];
+            disabled: boolean;
+        };
         /** @enum {string} */
         HoldReason: "policy" | "owner" | "limit" | "recipients" | "suspended" | "loop" | "review" | "withdrawn";
+        IdentityAdminList: {
+            identities: components["schemas"]["ManagedIdentity"][];
+        };
         IdentityList: {
             identities: components["schemas"]["SendingIdentity"][];
         };
@@ -2439,6 +2952,47 @@ export interface components {
             principal: string;
             /** Format: date-time */
             expires_at: string;
+        };
+        ManagedCredential: {
+            id: string;
+            kind: components["schemas"]["CredentialKind"];
+            principal: components["schemas"]["Actor"];
+            principal_disabled: boolean;
+            label: string;
+            scopes: components["schemas"]["Scope"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at?: string;
+            /** Format: date-time */
+            last_used_at?: string;
+            /** Format: date-time */
+            revoked_at?: string;
+        };
+        ManagedGrant: {
+            identity: components["schemas"]["GrantIdentity"];
+            principal: components["schemas"]["Actor"];
+            stored: components["schemas"]["StoredGrant"];
+            applied: components["schemas"]["AppliedGrant"];
+            owner_capped: boolean;
+            default: components["schemas"]["AppliedGrant"];
+            removal_widens: string[];
+            /** Format: date-time */
+            created_at: string;
+            host: string;
+        };
+        ManagedIdentity: {
+            id: string;
+            address: string;
+            display_name: string;
+            owner: components["schemas"]["Actor"];
+            transport: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            disabled_at?: string;
+            taken_over_by?: string;
+            host: string;
         };
         Message: {
             id: string;
@@ -2576,6 +3130,10 @@ export interface components {
             /** Format: date-time */
             last_offense?: string;
         };
+        PrefixDecision: {
+            outcome: components["schemas"]["PrefixOutcome"];
+            prefix?: components["schemas"]["Prefix"];
+        };
         PrefixDetail: {
             zone: string;
             address: string;
@@ -2602,6 +3160,8 @@ export interface components {
             total: number;
             prefixes: components["schemas"]["Prefix"][];
         };
+        /** @enum {string} */
+        PrefixOutcome: "created" | "updated" | "unchanged" | "removed";
         PreviewBody: {
             match: {
                 [key: string]: unknown;
@@ -2903,6 +3463,15 @@ export interface components {
             text: string;
             href?: string;
         };
+        StoredGrant: {
+            send_policy: components["schemas"]["Tier"];
+            recipient_scope: components["schemas"]["RecipientScope"];
+            allowlist: string[];
+            limits: components["schemas"]["Limits"];
+            hold_seconds: number;
+            /** Format: date-time */
+            suspended_at?: string;
+        };
         Stripped: {
             tracking_pixels?: number;
             images?: number;
@@ -2929,6 +3498,15 @@ export interface components {
         };
         /** @enum {string} */
         Tier: "none" | "draft" | "review" | "auto";
+        TightenBody: {
+            send_policy?: components["schemas"]["Tier"];
+            recipient_scope?: components["schemas"]["RecipientScope"];
+            allowlist?: string[];
+            max_per_hour?: number;
+            max_per_day?: number;
+            max_new_recipients_per_day?: number;
+            suspended?: boolean;
+        };
         UndoResult: {
             reverted: number;
             superseded: number;

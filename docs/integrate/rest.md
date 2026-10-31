@@ -26,7 +26,13 @@ WebUI 用的是浏览器会话，程序不要模仿它。
   保存成功但有风险的规则（按 `From` 匹配却不要求 `from.verified`）在成功的响应里带 `warnings`
 - 决定提案和管理规则只有人能做，别的主体即使 scope 齐全也回 `403 forbidden`；
   一个提议者待决的提案到了上限（50 个）回 `429 rate_limited`
-- 创建回 `201` 和新对象，删除回 `204`。修改是 `PUT` 整体替换，没有 `PATCH`
+- `/api/v1/admin/` 下的端点（凭据、身份、授权）只认人在 WebUI 里的会话：bearer token 即使带着 `admin` 和其他全部 scope
+  也回 `403 forbidden`，程序用不了它们。它们只能查看和收紧；会让某个主体能做更多的改动回 `403 widening_requires_cli`，
+  `detail` 写出在主机上做这件事的 `yuuka` 命令（[为什么](../design/principals.md#1310-管理面收紧在界面放宽在主机)）
+- 认领、取消认领前缀和改期望域只看 scope（`prefix:manage` 加 `prefix:read`），回答里带前缀现在的统计：
+  认领与否、期望域都在读时现算，已收的信立刻按新决定显示
+- 创建回 `201` 和新对象，删除回 `204`。修改是 `PUT` 整体替换，没有 `PATCH`；只改一部分、且有方向限制的改动是一个动作，
+  如 `POST /api/v1/admin/grants/{identity}/{principal}/tighten`
 - 会有新行插到头部的列表（消息、搜索、草稿、发件队列、提案）和变更（见下）用不透明游标分页；变化很慢的列表用 `limit` / `offset`
 - 多值参数逗号分隔，如 `class=human,unknown`
 - 字段名 snake_case，时间是 RFC 3339 UTC，列表永远是数组，响应里没有 `null`

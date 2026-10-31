@@ -269,7 +269,7 @@ func (s *Service) registerBegin(w http.ResponseWriter, r *http.Request) {
 		case !ok:
 			writeError(w, http.StatusUnauthorized, "enrollment token or session required")
 			return
-		case v.CredentialKind != auth.KindSession || v.PrincipalKind != "human" || !v.Has(auth.Admin):
+		case !v.HumanSession() || !v.Has(auth.Admin):
 			writeError(w, http.StatusForbidden, "only a human session with admin can add a passkey")
 			return
 		}

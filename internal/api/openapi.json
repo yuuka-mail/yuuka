@@ -234,6 +234,41 @@
         ],
         "additionalProperties": false
       },
+      "AppliedGrant": {
+        "type": "object",
+        "properties": {
+          "send_policy": {
+            "$ref": "#/components/schemas/Tier"
+          },
+          "recipient_scope": {
+            "$ref": "#/components/schemas/RecipientScope"
+          },
+          "allowlist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limits": {
+            "$ref": "#/components/schemas/Limits"
+          },
+          "hold_seconds": {
+            "type": "integer"
+          },
+          "suspended": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "send_policy",
+          "recipient_scope",
+          "allowlist",
+          "limits",
+          "hold_seconds",
+          "suspended"
+        ],
+        "additionalProperties": false
+      },
       "Attachment": {
         "type": "object",
         "properties": {
@@ -436,6 +471,7 @@
           "submission_rejected",
           "invalid_rule",
           "cursor_expired",
+          "widening_requires_cli",
           "internal"
         ]
       },
@@ -491,6 +527,44 @@
           "from",
           "subject",
           "snippet"
+        ],
+        "additionalProperties": false
+      },
+      "CountedAs": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "as": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "domain",
+          "as"
+        ],
+        "additionalProperties": false
+      },
+      "CredentialKind": {
+        "type": "string",
+        "enum": [
+          "token",
+          "smtp_password"
+        ]
+      },
+      "CredentialList": {
+        "type": "object",
+        "properties": {
+          "credentials": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedCredential"
+            }
+          }
+        },
+        "required": [
+          "credentials"
         ],
         "additionalProperties": false
       },
@@ -757,6 +831,50 @@
           "outbox"
         ]
       },
+      "ExpectBody": {
+        "type": "object",
+        "properties": {
+          "domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "domains"
+        ],
+        "additionalProperties": false
+      },
+      "ExpectResult": {
+        "type": "object",
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "expected": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "counted_as": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CountedAs"
+            }
+          },
+          "prefix": {
+            "$ref": "#/components/schemas/Prefix"
+          }
+        },
+        "required": [
+          "changed",
+          "expected",
+          "counted_as"
+        ],
+        "additionalProperties": false
+      },
       "Extracted": {
         "type": "object",
         "properties": {
@@ -880,6 +998,45 @@
         ],
         "additionalProperties": false
       },
+      "GrantAdminList": {
+        "type": "object",
+        "properties": {
+          "grants": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedGrant"
+            }
+          }
+        },
+        "required": [
+          "grants"
+        ],
+        "additionalProperties": false
+      },
+      "GrantIdentity": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "disabled": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "address",
+          "owner",
+          "disabled"
+        ],
+        "additionalProperties": false
+      },
       "HoldReason": {
         "type": "string",
         "enum": [
@@ -892,6 +1049,21 @@
           "review",
           "withdrawn"
         ]
+      },
+      "IdentityAdminList": {
+        "type": "object",
+        "properties": {
+          "identities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedIdentity"
+            }
+          }
+        },
+        "required": [
+          "identities"
+        ],
+        "additionalProperties": false
       },
       "IdentityList": {
         "type": "object",
@@ -1013,6 +1185,150 @@
         "required": [
           "principal",
           "expires_at"
+        ],
+        "additionalProperties": false
+      },
+      "ManagedCredential": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/CredentialKind"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "principal_disabled": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "principal",
+          "principal_disabled",
+          "label",
+          "scopes",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
+      "ManagedGrant": {
+        "type": "object",
+        "properties": {
+          "identity": {
+            "$ref": "#/components/schemas/GrantIdentity"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "stored": {
+            "$ref": "#/components/schemas/StoredGrant"
+          },
+          "applied": {
+            "$ref": "#/components/schemas/AppliedGrant"
+          },
+          "owner_capped": {
+            "type": "boolean"
+          },
+          "default": {
+            "$ref": "#/components/schemas/AppliedGrant"
+          },
+          "removal_widens": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "host": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "identity",
+          "principal",
+          "stored",
+          "applied",
+          "owner_capped",
+          "default",
+          "removal_widens",
+          "created_at",
+          "host"
+        ],
+        "additionalProperties": false
+      },
+      "ManagedIdentity": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "owner": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "transport": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "disabled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "taken_over_by": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "address",
+          "display_name",
+          "owner",
+          "transport",
+          "created_at",
+          "host"
         ],
         "additionalProperties": false
       },
@@ -1565,6 +1881,21 @@
         ],
         "additionalProperties": false
       },
+      "PrefixDecision": {
+        "type": "object",
+        "properties": {
+          "outcome": {
+            "$ref": "#/components/schemas/PrefixOutcome"
+          },
+          "prefix": {
+            "$ref": "#/components/schemas/Prefix"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "additionalProperties": false
+      },
       "PrefixDetail": {
         "type": "object",
         "properties": {
@@ -1668,6 +1999,15 @@
           "prefixes"
         ],
         "additionalProperties": false
+      },
+      "PrefixOutcome": {
+        "type": "string",
+        "enum": [
+          "created",
+          "updated",
+          "unchanged",
+          "removed"
+        ]
       },
       "PreviewBody": {
         "type": "object",
@@ -2717,6 +3057,41 @@
         ],
         "additionalProperties": false
       },
+      "StoredGrant": {
+        "type": "object",
+        "properties": {
+          "send_policy": {
+            "$ref": "#/components/schemas/Tier"
+          },
+          "recipient_scope": {
+            "$ref": "#/components/schemas/RecipientScope"
+          },
+          "allowlist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limits": {
+            "$ref": "#/components/schemas/Limits"
+          },
+          "hold_seconds": {
+            "type": "integer"
+          },
+          "suspended_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "send_policy",
+          "recipient_scope",
+          "allowlist",
+          "limits",
+          "hold_seconds"
+        ],
+        "additionalProperties": false
+      },
       "Stripped": {
         "type": "object",
         "properties": {
@@ -2811,6 +3186,39 @@
           "review",
           "auto"
         ]
+      },
+      "TightenBody": {
+        "type": "object",
+        "properties": {
+          "send_policy": {
+            "$ref": "#/components/schemas/Tier"
+          },
+          "recipient_scope": {
+            "$ref": "#/components/schemas/RecipientScope"
+          },
+          "allowlist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_per_hour": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_per_day": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_new_recipients_per_day": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "suspended": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "UndoResult": {
         "type": "object",
@@ -2924,6 +3332,293 @@
                 }
               }
             }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/credentials": {
+      "get": {
+        "summary": "List tokens and SMTP passwords, never their secrets; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CredentialList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/credentials/{id}/revoke": {
+      "post": {
+        "summary": "Revoke a token or SMTP password; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/grants": {
+      "get": {
+        "summary": "List grants, stored and applied; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantAdminList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/grants/{identity}/{principal}": {
+      "delete": {
+        "summary": "Remove a grant, unless its default lets more through; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "description": "the identity's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "principal",
+            "in": "path",
+            "description": "the principal's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/grants/{identity}/{principal}/tighten": {
+      "post": {
+        "summary": "Tighten a grant; anything that would let more through is refused; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "identity",
+            "in": "path",
+            "description": "the identity's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "principal",
+            "in": "path",
+            "description": "the principal's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TightenBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedGrant"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/identities": {
+      "get": {
+        "summary": "List identities, disabled ones included; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IdentityAdminList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/identities/{id}/disable": {
+      "post": {
+        "summary": "Disable an identity, unless the zone's pattern would take its address over; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
           },
           "default": {
             "description": "A problem",
@@ -4151,6 +4846,172 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PrefixDetail"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prefixes/{address}/claim": {
+      "post": {
+        "summary": "Claim a prefix: its mail is no longer downgraded unless DMARC failed, and new mail to it notifies (§3.3)",
+        "security": [
+          {
+            "bearer": [
+              "prefix:manage",
+              "prefix:read"
+            ]
+          },
+          {
+            "session": [
+              "prefix:manage",
+              "prefix:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "description": "prefix@zone",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrefixDecision"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prefixes/{address}/expected-domains": {
+      "put": {
+        "summary": "Replace the domains a claimed prefix was given to, and see what the leak check now makes of its mail",
+        "security": [
+          {
+            "bearer": [
+              "prefix:manage",
+              "prefix:read"
+            ]
+          },
+          {
+            "session": [
+              "prefix:manage",
+              "prefix:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "description": "prefix@zone",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExpectBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExpectResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prefixes/{address}/unclaim": {
+      "post": {
+        "summary": "Unclaim a prefix: its mail is downgraded again",
+        "security": [
+          {
+            "bearer": [
+              "prefix:manage",
+              "prefix:read"
+            ]
+          },
+          {
+            "session": [
+              "prefix:manage",
+              "prefix:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "description": "prefix@zone",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrefixDecision"
                 }
               }
             }

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/yuuka-mail/yuuka/internal/contenthash"
 	"github.com/yuuka-mail/yuuka/internal/contract"
@@ -225,4 +226,18 @@ func SplitAddress(addr string) (zone, prefix string) {
 		return "", strings.ToLower(addr)
 	}
 	return strings.ToLower(addr[i+1:]), strings.ToLower(addr[:i])
+}
+
+// ParsePrefixAddress reads a prefix someone names to decide about it
+// (`yuuka prefix`, the WebUI): <local>@<zone>, keyed as SplitAddress keys
+// the mail, so a claim matches the mail it is meant for.
+func ParsePrefixAddress(addr string) (zone, prefix string, err error) {
+	if strings.IndexFunc(addr, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+		return "", "", fmt.Errorf("%q: an address has no spaces or control characters", addr)
+	}
+	zone, prefix = SplitAddress(addr)
+	if zone == "" || prefix == "" || !strings.Contains(addr, "@") {
+		return "", "", fmt.Errorf("%q: want <local>@<zone>, e.g. github@example.com", addr)
+	}
+	return zone, prefix, nil
 }

@@ -24,6 +24,9 @@ const (
 	Optional
 	// Public: no credential at all.
 	Public
+	// HumanSession: a person's session cookie holding Op.Scopes; never a
+	// bearer token, whatever its scopes (§13.10).
+	HumanSession
 )
 
 // Op describes one operation. Route tables build it next to the handler
@@ -263,6 +266,8 @@ func security(op Op) []map[string][]string {
 		return []map[string][]string{}
 	case Optional:
 		return []map[string][]string{{}, {"bearer": scopes}, {"session": scopes}}
+	case HumanSession:
+		return []map[string][]string{{"session": scopes}}
 	}
 	return []map[string][]string{{"bearer": scopes}, {"session": scopes}}
 }

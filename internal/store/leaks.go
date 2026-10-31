@@ -277,6 +277,10 @@ func (db *DB) offenses(ctx context.Context, tx pgx.Tx, v *auth.Viewer, p PrefixS
 // can carry.
 var ErrNotClaimed = errors.New("prefix is not claimed")
 
+// ErrInvalidDomain: an expected domain is not one a sender can own
+// (leak.Expected says which and why).
+var ErrInvalidDomain = errors.New("expected domain")
+
 // SetPrefixExpected is the operator's decision of who prefix@zone was
 // handed out to (§3 principle 3): it replaces the expected domains with
 // domains, normalized by leak.Expected, and returns what was stored.
@@ -291,7 +295,7 @@ var ErrNotClaimed = errors.New("prefix is not claimed")
 func (db *DB) SetPrefixExpected(ctx context.Context, zone, prefix string, domains []string, a Action) (stored []string, changed bool, err error) {
 	stored, err = leak.Expected(domains)
 	if err != nil {
-		return nil, false, err
+		return nil, false, fmt.Errorf("%w %w", ErrInvalidDomain, err)
 	}
 	extra, ok := a.Args.(map[string]any)
 	if a.Args != nil && !ok {

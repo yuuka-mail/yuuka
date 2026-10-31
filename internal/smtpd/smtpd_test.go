@@ -30,6 +30,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/clientip"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
+	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
 const host = "mail.example.com"
@@ -394,7 +395,7 @@ func TestAuth(t *testing.T) {
 	// Revocation reaches a session that is already open at its next MAIL,
 	// and new sessions at AUTH.
 	open := h.login()
-	if err := authn.RevokeToken(t.Context(), h.db, time.Now(), h.user, store.SystemPrincipalID, nil); err != nil {
+	if err := authn.RevokeToken(t.Context(), h.db, h.user, store.Action{ID: ulid.New(time.Now()), Actor: store.SystemPrincipalID, At: time.Now()}); err != nil {
 		t.Fatal(err)
 	}
 	if n, msg := send(open, "alerts@example.com", []string{"ops@example.net"}, message); n != 421 {

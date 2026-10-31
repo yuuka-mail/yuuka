@@ -348,28 +348,41 @@ func (s *Service) Revoke(ctx context.Context, v *auth.Viewer, credentialID strin
 	})
 }
 
+// ErrNotToken: RevokeToken was given a credential of another kind.
+var ErrNotToken = errors.New("not a token or SMTP password")
+
+// TokenStore is what RevokeToken reads and writes (store.DB).
+type TokenStore interface {
+	CredentialForAuth(ctx context.Context, id string) (store.CredentialPrincipal, error)
+	RevokeCredential(ctx context.Context, id string, a store.Action) error
+}
+
 // RevokeToken revokes the bearer token or SMTP password credentialID for
-// `yuuka token revoke`, recording actor and auditArgs. It stops working
-// on the next request: REST, MCP over HTTP, every MCP stdio tool call and
-// every SMTP session authenticate again. It returns store.ErrNotFound if
-// no unrevoked one has that id; other credential kinds are refused, not
-// revoked.
-func RevokeToken(ctx context.Context, db *store.DB, now time.Time, credentialID, actor string, auditArgs map[string]any) error {
+// `yuuka token revoke` and the WebUI's settings, recording it as a (its
+// ID, Actor, CredentialID and At; Args, nil or a map[string]any, gain the
+// credential and its principal). It stops working on the next request:
+// REST, MCP over HTTP, every MCP stdio tool call and every SMTP session
+// authenticate again. It returns store.ErrNotFound if no unrevoked one
+// has that id; other credential kinds are refused (ErrNotToken), not
+// revoked: a session ends by signing out.
+func RevokeToken(ctx context.Context, db TokenStore, credentialID string, a store.Action) error {
 	c, err := db.CredentialForAuth(ctx, credentialID)
 	if err != nil {
 		return fmt.Errorf("revoke %s: %w", credentialID, err)
 	}
 	if c.Kind != auth.KindToken && c.Kind != auth.KindSMTPPassword {
-		return fmt.Errorf("revoke %s: a %s credential, not a token or SMTP password", credentialID, c.Kind)
+		return fmt.Errorf("revoke %s: a %s credential: %w", credentialID, c.Kind, ErrNotToken)
+	}
+	extra, ok := a.Args.(map[string]any)
+	if a.Args != nil && !ok {
+		return fmt.Errorf("revoke %s: action args: want a map, got %T", credentialID, a.Args)
 	}
 	args := map[string]any{"credential_id": credentialID, "principal_id": c.PrincipalID}
-	for k, v := range auditArgs {
+	for k, v := range extra {
 		args[k] = v
 	}
-	err = db.RevokeCredential(ctx, credentialID, store.Action{
-		ID: ulid.New(now), Actor: actor, Tool: "auth.credential.revoke", At: now, Args: args,
-	})
-	if err != nil {
+	a.Tool, a.Args = "auth.credential.revoke", args
+	if err := db.RevokeCredential(ctx, credentialID, a); err != nil {
 		return fmt.Errorf("revoke %s: %w", credentialID, err)
 	}
 	return nil

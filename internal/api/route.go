@@ -72,6 +72,15 @@ func (rt route) withStatus(code int) route {
 	return rt
 }
 
+// authority marks a route that reads or changes who may do what
+// (§13.10): on top of its scopes it is served only to a person's
+// session, checked before the handler runs. A token holding every scope
+// is refused, so an agent cannot use one to change its own authority.
+func (rt route) authority() route {
+	rt.Access = openapi.HumanSession
+	return rt
+}
+
 // submitting marks a route that hands mail to the submission core.
 func (rt route) submitting() route {
 	rt.needsSubmitter = true

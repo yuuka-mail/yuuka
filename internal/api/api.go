@@ -28,6 +28,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/rules"
+	"github.com/yuuka-mail/yuuka/internal/sendpolicy"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/submit"
 )
@@ -87,6 +88,25 @@ type Store interface {
 	PreviewRule(ctx context.Context, v *auth.Viewer, spec []byte, q store.PreviewQuery) (store.Preview, error)
 	FactsFor(ctx context.Context, v *auth.Viewer, id string) ([]rules.Facts, error)
 	CountMatches(ctx context.Context, v *auth.Viewer, ms []rules.Match, since time.Time) ([]int, error)
+
+	// Decisions prompted by mail (§13.10), the same functions `yuuka
+	// prefix` calls; what they mean for the mail is read back through
+	// PrefixStats as the viewer.
+	SetPrefixState(ctx context.Context, zone, prefix string, state int, a store.Action) (store.PrefixChange, error)
+	SetPrefixExpected(ctx context.Context, zone, prefix string, domains []string, a store.Action) ([]string, bool, error)
+
+	// Who may do what (§13.10): configuration, read without a viewer
+	// and written only to tighten; the routes let only a person's
+	// session through.
+	Tokens(ctx context.Context, principalID string) ([]store.CredentialPrincipal, error)
+	CredentialForAuth(ctx context.Context, id string) (store.CredentialPrincipal, error)
+	RevokeCredential(ctx context.Context, id string, a store.Action) error
+	Identities(ctx context.Context, all bool) ([]store.Identity, error)
+	IdentityByID(ctx context.Context, id string) (store.Identity, error)
+	DisableIdentityIfTighter(ctx context.Context, id string, a store.Action) error
+	Grants(ctx context.Context, identityID, principalID string) ([]store.Grant, error)
+	TightenGrant(ctx context.Context, identityID, principalID string, t store.GrantTightening, a store.Action) (store.Grant, error)
+	RemoveGrantIfTighter(ctx context.Context, identityID, principalID string, a store.Action) (sendpolicy.Grant, error)
 }
 
 // RawReader loads the raw message of a delivery (ingest.Ingester).
@@ -142,6 +162,12 @@ var (
 	// mail as well.
 	ruleManage  = []auth.Scope{auth.RuleManage}
 	ruleReading = []auth.Scope{auth.RuleManage, auth.MessageRead}
+	// Claiming a prefix and what it expects (§3.3); the answer is the
+	// prefix as read, so reading it too.
+	prefixManage = []auth.Scope{auth.PrefixManage, auth.PrefixRead}
+	// Who may do what (§13.10): routes marked authority(), a person's
+	// session only.
+	admin = []auth.Scope{auth.Admin}
 )
 
 // routes is every operation under /api/. A new one is one entry here and
@@ -210,6 +236,33 @@ var routes = []route{
 		ruleManage, (*API).applyRule),
 	jsonRoute(http.MethodPost, "/api/v1/rules/{id}/revert", "Take back what a rule did to mail; people only",
 		ruleManage, (*API).revertRule),
+
+	jsonRoute(http.MethodPost, "/api/v1/prefixes/{address}/claim",
+		"Claim a prefix: its mail is no longer downgraded unless DMARC failed, and new mail to it notifies (§3.3)",
+		prefixManage, (*API).claimPrefix),
+	jsonRoute(http.MethodPost, "/api/v1/prefixes/{address}/unclaim", "Unclaim a prefix: its mail is downgraded again",
+		prefixManage, (*API).unclaimPrefix),
+	jsonRoute(http.MethodPut, "/api/v1/prefixes/{address}/expected-domains",
+		"Replace the domains a claimed prefix was given to, and see what the leak check now makes of its mail",
+		prefixManage, (*API).expectDomains),
+
+	jsonRoute(http.MethodGet, "/api/v1/admin/credentials", "List tokens and SMTP passwords, never their secrets; a person's session only",
+		admin, (*API).credentials).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/credentials/{id}/revoke", "Revoke a token or SMTP password; a person's session only",
+		admin, (*API).revokeCredential).authority(),
+	jsonRoute(http.MethodGet, "/api/v1/admin/identities", "List identities, disabled ones included; a person's session only",
+		admin, (*API).adminIdentities).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/identities/{id}/disable",
+		"Disable an identity, unless the zone's pattern would take its address over; a person's session only",
+		admin, (*API).disableIdentity).authority(),
+	jsonRoute(http.MethodGet, "/api/v1/admin/grants", "List grants, stored and applied; a person's session only",
+		admin, (*API).adminGrants).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/grants/{identity}/{principal}/tighten",
+		"Tighten a grant; anything that would let more through is refused; a person's session only",
+		admin, (*API).tightenGrant).authority(),
+	jsonRoute(http.MethodDelete, "/api/v1/admin/grants/{identity}/{principal}",
+		"Remove a grant, unless its default lets more through; a person's session only",
+		admin, (*API).removeGrant).authority(),
 	{Op: openapi.Op{
 		Method: http.MethodGet, Path: "/api/v1/openapi.json", Summary: "This document",
 		Access: openapi.Public, Media: "application/json",
@@ -254,6 +307,12 @@ func (a *API) Handler(g Guard) http.Handler {
 				// bug, never "anonymous".
 				a.fail(w, r, errors.New("api: no viewer after guard"))
 				return
+			}
+			if rt.Access == openapi.HumanSession {
+				if err := authorityDenied(v); err != nil {
+					a.fail(w, r, err)
+					return
+				}
 			}
 			res, err := rt.serve(a, w, r, v)
 			switch {

@@ -242,7 +242,7 @@ Cloudflare Email Routing 基本不做内容过滤，`spam_score` 字段必须有
   不必 reparse；`spam_score` 因此在 M1 恒为空。未验证（取不到可信认证头）不算 `dmarc=fail`，不降级。
   推送只在 ingest 当场判断：这条投递不降级、且同一封信没有更早的不降级投递时推一次；
   解析步骤失败、或由补跑（backlog）处理的投递一律不推——前者判断不了降级，后者已经不是新信
-- 认领与取消认领（M1 只有 CLI：`yuuka prefix claim` / `unclaim`，§11）只改 `prefixes.state`，
+- 认领与取消认领（`yuuka prefix claim` / `unclaim`，§11；M3 起 WebUI 经同一个 store 函数，§13.10）只改 `prefixes.state`，
   记一条 `actions`、一条 `changes`（kind `prefix`），并和 ingest 的内容步骤持同一把锁，
   所以一次投递看到的要么是认领前、要么是认领后的状态。地址的大小写按 ingest 的规则折叠。
   因为降级现算，已有的信立刻不再降级；推送只对认领之后到达的信生效，不补推旧信——

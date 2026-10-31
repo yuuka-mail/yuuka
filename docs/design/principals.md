@@ -70,7 +70,7 @@ passkey 不是 `credentials` 的一行：它是产生 `session` 凭据的登录�
 （公钥、签名计数、AAGUID、BE/BS 标志），不把任何库的序列化格式冻结进库里。
 
 **`token` 的签发（M1）**：只有主机上的 CLI 能签发（`yuuka token issue` / `ls` / `revoke`，
-参数见 [`cmd/yuuka/token.go`](../../cmd/yuuka/token.go)），WebUI 入口还没有；以后也只列出和吊销，签发留在 CLI（§13.10）。
+参数见 [`cmd/yuuka/token.go`](../../cmd/yuuka/token.go)）；WebUI 只列出和吊销，签发留在 CLI（§13.10）。
 
 - 只发给 `agent` 和 `service`。`human` 的凭据只有 passkey 登录产生的 `session`，
   `issue` 遇到 human 直接拒绝并指向 `admin enroll`：给人发一把长期 token，等于在 passkey 旁边开一扇不防钓鱼的后门。
@@ -457,7 +457,7 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 变更日志在同一个夹具上对每条变化断言「列出 ⟺ 目标对象自己的读路径可见」。
 REST 层的 [`TestACL`](../../internal/api/api_test.go) 管的是另一半：它遍历路由表（§5.1），每个端点要认证、要 scope、把认证出的主体交给 store；
 只有人能调的端点（决定提案、管理规则、`outbox.resolve`）另断言持有全部 scope 的 agent 得到 403，且请求到不了 store。
-规则本身是运维者的配置，读它不带 Viewer；能读的只有人，这由端点保证。
+规则本身是运维者的配置，读它不带 Viewer；能读的只有人，这由端点保证。凭据、身份、授权的列表同理，端点只放人的会话（§13.10）。
 
 发信授权读的事实也走同一个条件：回复的默认身份（`ReplyIdentities`）和线程参与者（`ReplyFacts`）
 只来自可见的投递、可见的消息和可见的 outbox 行，同在 `TestVisibility` 里。
@@ -547,7 +547,46 @@ M2 结束时，几乎所有管理动作都只能在主机上敲 CLI。这不全�
 多一种例外只会多一条要测的路径。
 
 这一节不新增任何绕过授权的路径。界面只是 `identity_grants` 的又一个写入方：
-硬上限照样在 [`store.SetGrant`](../../internal/store/grants.go) 和 `Decide` 两处成立（§13.5），提交时的判定一处不变。
+硬上限照样在写授权行的 [`setGrant`](../../internal/store/grants.go) 和 `Decide` 两处成立（§13.5），提交时的判定一处不变。
 
 **审计也因此更准。** 从 WebUI 来的管理动作记成 `human:<operator>`，带具体的 `credential_id`；
 CLI 只能记 `system` 加 `host_user`（§13.7）。信任根之外的动作值得进界面，这是另一个理由。
+
+**M3 的落法**：端点在 [`internal/api/api.go`](../../internal/api/api.go) 的 `routes`，处理在 [`settings.go`](../../internal/api/settings.go)；
+收紧的判定在 [`store/tighten.go`](../../internal/store/tighten.go) 和 [`sendpolicy/tighten.go`](../../internal/sendpolicy/tighten.go)。实现时定下的几处：
+
+- **「只认人的会话」写在路由表里**：权限类路由标 `authority()`，OpenAPI 里只列 `session` 一种认证；
+  处理函数之前统一查 [`Viewer.HumanSession`](../../internal/auth/auth.go)，添加 passkey 用的是同一个函数。
+  跟着信走的决定（认领、取消认领、期望域）只看 scope：`prefix:manage` 加 `prefix:read`，
+  因为回答里带着前缀现在的统计，也就是 `yuuka prefix expect` 打印的那份「对已收的信意味着什么」
+- **收紧按生效值逐列比较**。两边都是生效值（[`sendpolicy.Applied`](../../internal/sendpolicy/tighten.go)：空限额换成按主体类型的默认数，
+  档位过了 owner cap），每一列都不能比现在宽，否则整条拒绝、什么都不改，回 `403 widening_requires_cli`，
+  `detail` 写出在主机上做这件事的 `yuuka grant set …` 命令。从窄到宽：
+
+  | 列 | 顺序 |
+  |---|---|
+  | `send_policy` | `none` < `draft` < `review` < `auto` |
+  | `recipient_scope` | `thread` < `allowlist` < `any` |
+  | `recipient_allowlist` | 新名单是旧名单的子集（大小写不敏感） |
+  | 三项限额 | 数字越小越窄；不限（人的默认）比任何数字都宽 |
+  | 暂停 | 暂停 < 不暂停 |
+
+  取舍：
+  - 降到 `draft` 时其余各列暂不起作用，仍然逐列比较：此刻存下的 `any`，会在以后有人在主机上把档位调回 `auto` 时
+    一起生效，而那个人读到的是那时的授权，不知道这一列是什么时候变宽的。名单不论范围是不是 `allowlist` 都只能删条目，理由相同
+  - `thread` 算最窄，沿用列默认值的判断：只能回给已经在对话里的人。它和名单并不是包含关系，
+    把 `allowlist → thread` 当收紧，接受的代价是对话里新出现的人也能被回复
+  - `hold_seconds` 在界面上不能改：撤回窗口属于 review 档（§8.9），等自动审核落地再定它怎么收紧
+- **删授权不一定是收紧**：删掉之后适用 §13.5 的默认，可能比这一行宽（agent 自己身份上写的 `draft`，删掉就成了默认的 `review`）。
+  所以删除也要比较（[`Grant.RemovalWidenings`](../../internal/store/tighten.go)）：默认不发信（`none` / `draft`）时只比档位——
+  默认没有存下任何一列，其余各列不会日后生效；默认会发信时逐列比，两边都是 `review` 时撤回窗口也不能变短。
+  已停用身份上的授权总能删：有没有这一行都发不出去。列表里每条授权带 `removal_widens`，界面据此决定给删除按钮还是给命令
+- **硬上限仍在写入的那一处**：CLI 和界面都经同一个 `setGrant` 写行。人的身份上给别人 `review` / `auto`，
+  按生效值并不更宽（照样压成 `draft`），由 `setGrant` 以 `ErrOwnerCap` 拒绝，REST 回 `409 conflict`
+- **停用身份也可能是放宽**：地址身份停用后，这个地址落到同 zone 的 `*@zone` 身份（§9.3），换了 owner、也换了一整套授权。
+  所以 zone 里有启用的 pattern 时界面不能停用地址身份（列表的 `taken_over_by` 指出是哪个），要在主机上 `yuuka identity rm`；
+  停用 pattern 本身总是收紧
+- **凭据只列 `token` 和 `smtp_password`**，和 `yuuka token ls` 是同一个查询，从不带秘密；会话不列，由登出结束。
+  吊销和 CLI 走同一个 [`authn.RevokeToken`](../../internal/authn/authn.go)
+- 授权的每次写入（界面的收紧、删除，CLI 的 `grant set` / `rm`）都先取提交判定用的那把授权锁（`lockGrant`）再锁行：
+  返回时，已经没有基于旧授权的判定还在进行，暂停在按下的那一刻之后就成立

@@ -89,6 +89,15 @@ func (v *Viewer) String() string { return v.PrincipalKind + ":" + v.PrincipalNam
 // Has reports whether the viewer holds scope s.
 func (v *Viewer) Has(s Scope) bool { return v != nil && slices.Contains(v.Scopes, s) }
 
+// HumanSession reports whether the viewer is a person signed in to the
+// WebUI with a passkey. Changing who may do what (§13.10) and adding a
+// passkey take this on top of their scope: admin can be written into a
+// token like any scope, and a token in an agent's hands must not be a
+// way to change its own authority.
+func (v *Viewer) HumanSession() bool {
+	return v != nil && v.CredentialKind == KindSession && v.PrincipalKind == "human"
+}
+
 // Missing returns the scopes of required that the viewer lacks.
 func (v *Viewer) Missing(required ...Scope) []Scope {
 	var out []Scope

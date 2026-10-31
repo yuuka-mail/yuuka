@@ -21,6 +21,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/clientip"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
+	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
 const origin = "https://mail.example.com"
@@ -669,7 +670,7 @@ func TestSMTPPassword(t *testing.T) {
 	if _, err := b.Authenticate(t.Context(), pw, "test"); !errors.Is(err, ErrUnauthenticated) {
 		t.Errorf("SMTP password as a bearer token: %v", err)
 	}
-	if err := RevokeToken(t.Context(), h.db, h.now, user, store.SystemPrincipalID, nil); err != nil {
+	if err := RevokeToken(t.Context(), h.db, user, store.Action{ID: ulid.New(h.now), Actor: store.SystemPrincipalID, At: h.now}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := b.AuthenticateSMTP(t.Context(), user, pw, "smtp"); !errors.Is(err, ErrUnauthenticated) {
@@ -707,10 +708,10 @@ func TestIssueTokenRefuses(t *testing.T) {
 		t.Errorf("%d tokens issued", n)
 	}
 	id, _, _ := auth.ParseSecret(auth.PrefixSession, session.Value)
-	if err := RevokeToken(t.Context(), h.db, h.now, id, store.SystemPrincipalID, nil); err == nil {
+	if err := RevokeToken(t.Context(), h.db, id, store.Action{ID: ulid.New(h.now), Actor: store.SystemPrincipalID, At: h.now}); !errors.Is(err, ErrNotToken) {
 		t.Error("revoked a session as a token")
 	}
-	if err := RevokeToken(t.Context(), h.db, h.now, "01M67SX66B38NKRKAYDXR834N7", store.SystemPrincipalID, nil); !errors.Is(err, store.ErrNotFound) {
+	if err := RevokeToken(t.Context(), h.db, "01M67SX66B38NKRKAYDXR834N7", store.Action{ID: ulid.New(h.now), Actor: store.SystemPrincipalID, At: h.now}); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("unknown token: %v", err)
 	}
 }

@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
-	"unicode"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/ingest"
@@ -54,7 +53,7 @@ func (h *host) prefixCmd(ctx context.Context, args []string) error {
 		if fs.NArg() != 1 {
 			return errors.New(prefixUsage)
 		}
-		zone, prefix, err := parsePrefixAddress(fs.Arg(0))
+		zone, prefix, err := ingest.ParsePrefixAddress(fs.Arg(0))
 		if err != nil {
 			return err
 		}
@@ -83,7 +82,7 @@ func (h *host) prefixCmd(ctx context.Context, args []string) error {
 		if !given {
 			return errors.New("prefix expect: --domains is required (--domains '' expects nothing)")
 		}
-		zone, prefix, err := parsePrefixAddress(addr)
+		zone, prefix, err := ingest.ParsePrefixAddress(addr)
 		if err != nil {
 			return err
 		}
@@ -96,19 +95,6 @@ func (h *host) prefixCmd(ctx context.Context, args []string) error {
 		return h.prefixExpect(ctx, zone, prefix, list)
 	}
 	return errors.New(prefixUsage)
-}
-
-// parsePrefixAddress reads <local>@<zone> exactly as ingest keys the
-// envelope recipient (ingest.SplitAddress), so a claim matches the mail.
-func parsePrefixAddress(addr string) (zone, prefix string, err error) {
-	if strings.IndexFunc(addr, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
-		return "", "", fmt.Errorf("%q: an address has no spaces or control characters", addr)
-	}
-	zone, prefix = ingest.SplitAddress(addr)
-	if zone == "" || prefix == "" || !strings.Contains(addr, "@") {
-		return "", "", fmt.Errorf("%q: want <local>@<zone>, e.g. github@example.com", addr)
-	}
-	return zone, prefix, nil
 }
 
 func (h *host) prefixList(ctx context.Context, q store.PrefixQuery) error {

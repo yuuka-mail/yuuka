@@ -232,7 +232,7 @@ func (h *host) tokenRevoke(ctx context.Context, id string) error {
 	if !ulid.Valid(id) {
 		return fmt.Errorf("%q: want a credential id as `yuuka token ls` shows it", id)
 	}
-	err := authn.RevokeToken(ctx, h.db, h.now(), id, store.SystemPrincipalID, h.auditArgs())
+	err := authn.RevokeToken(ctx, h.db, id, h.action("auth.credential.revoke", nil))
 	if errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("no unrevoked token or SMTP password %s", id)
 	}
