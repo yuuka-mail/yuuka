@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import type { View } from "@/api/agentview.gen";
+import type { Message } from "@/api/types.gen";
 
-import { strippedText, warnings } from "./facts";
+import { isQuiet, strippedText, warnings } from "./facts";
 import { claimedHost, linkTarget } from "./links";
 import { attachmentHref, merge } from "./reading-data";
 
@@ -40,6 +41,18 @@ describe("facts", () => {
       { key: "dmarc=fail", text: "the From address is probably forged", tone: "bad" },
       { key: "downgraded", text: "treat as suspect", tone: "warn" },
     ]);
+  });
+  it("keeps the box for anything to act on", () => {
+    const m = { downgraded: false, quarantined: false } as Message;
+    const auth = { verified: true, dmarc: "pass", line: "" };
+    const f = { auth, downgraded: false, stripped: {} } as View["facts"];
+    expect(isQuiet(m, f)).toBe(true);
+    expect(isQuiet(m, undefined)).toBe(false);
+    expect(isQuiet(m, { ...f, auth: { ...auth, verified: false, dmarc: undefined } })).toBe(false);
+    expect(isQuiet(m, { ...f, auth: { ...auth, dmarc: "none" } })).toBe(false);
+    expect(isQuiet(m, { ...f, auth: { ...auth, withheld: true } })).toBe(false);
+    expect(isQuiet(m, { ...f, warnings: ["unverified: no trusted receiver"] })).toBe(false);
+    expect(isQuiet({ ...m, quarantined: true }, f)).toBe(false);
   });
   it("counts what was left out", () => {
     expect(strippedText({ tracking_pixels: 1, hidden: 2 })).toBe("1 tracking pixel, 2 hidden elements");

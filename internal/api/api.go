@@ -161,21 +161,26 @@ func parseDowngrade(s string) (store.Downgrade, error) {
 	return 0, badRequest("downgraded: want hide, include or only")
 }
 
-func parseClass(s string) (*classify.Class, error) {
-	var c classify.Class
-	switch Class(s) {
-	case "":
+// parseClasses reads class=human,unknown: one class or several, comma
+// separated.
+func parseClasses(s string) ([]classify.Class, error) {
+	if s == "" {
 		return nil, nil
-	case ClassUnknown:
-		c = classify.Unknown
-	case ClassMachine:
-		c = classify.Machine
-	case ClassHuman:
-		c = classify.Human
-	default:
-		return nil, badRequest("class: want unknown, machine or human")
 	}
-	return &c, nil
+	var out []classify.Class
+	for _, name := range strings.Split(s, ",") {
+		switch Class(name) {
+		case ClassUnknown:
+			out = append(out, classify.Unknown)
+		case ClassMachine:
+			out = append(out, classify.Machine)
+		case ClassHuman:
+			out = append(out, classify.Human)
+		default:
+			return nil, badRequest("class: want unknown, machine or human, comma separated")
+		}
+	}
+	return out, nil
 }
 
 // Cursors are opaque to clients: base64url of "<RFC 3339 nano> <id>".
@@ -236,7 +241,7 @@ func messageQuery(r *http.Request) (store.MessageQuery, error) {
 		}
 		q.Prefix, q.Zone = strings.ToLower(addr[:i]), strings.ToLower(addr[i+1:])
 	}
-	if q.Class, err = parseClass(p.Get("class")); err != nil {
+	if q.Classes, err = parseClasses(p.Get("class")); err != nil {
 		return q, err
 	}
 	if q.Downgraded, err = parseDowngrade(p.Get("downgraded")); err != nil {
@@ -350,12 +355,17 @@ func (a *API) thread(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
 }
 
 func (a *API) prefixes(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
-	sum, err := a.db.PrefixStats(r.Context(), v, store.PrefixQuery{})
+	q, err := prefixQuery(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	sum, err := a.db.PrefixStats(r.Context(), v, q)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	out := PrefixList{Messages: sum.Messages, Downgraded: sum.Downgraded, Prefixes: make([]Prefix, len(sum.Prefixes))}
+	out := PrefixList{Messages: sum.Messages, Downgraded: sum.Downgraded, Total: sum.Total, Prefixes: make([]Prefix, len(sum.Prefixes))}
 	for i, p := range sum.Prefixes {
 		out.Prefixes[i] = Prefix{
 			Zone: p.Zone, Prefix: p.Prefix, Address: p.Prefix + "@" + p.Zone,
@@ -366,6 +376,41 @@ func (a *API) prefixes(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// prefixQuery reads state=claimed|discovered and limit/offset paging.
+// Without a limit every matching prefix comes back.
+func prefixQuery(r *http.Request) (store.PrefixQuery, error) {
+	p := r.URL.Query()
+	var q store.PrefixQuery
+	switch p.Get("state") {
+	case "":
+	case "claimed":
+		q.State = store.PrefixClaimed
+	case "discovered":
+		q.State = store.PrefixDiscovered
+	default:
+		return q, badRequest("state: want claimed or discovered")
+	}
+	var err error
+	if q.Limit, err = parseLimit(p.Get("limit"), 500); err != nil {
+		return q, err
+	}
+	if q.Offset, err = parseOffset(p.Get("offset")); err != nil {
+		return q, err
+	}
+	return q, nil
+}
+
+func parseOffset(s string) (int, error) {
+	if s == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return 0, badRequest("offset: want a non-negative integer")
+	}
+	return n, nil
+}
+
 func (a *API) search(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
 	p := r.URL.Query()
 	limit, err := parseLimit(p.Get("limit"), 500)
@@ -373,12 +418,10 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	offset := 0
-	if s := p.Get("offset"); s != "" {
-		if offset, err = strconv.Atoi(s); err != nil || offset < 0 {
-			writeError(w, http.StatusBadRequest, "offset: want a non-negative integer")
-			return
-		}
+	offset, err := parseOffset(p.Get("offset"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	dg, err := parseDowngrade(p.Get("downgraded"))
 	if err != nil || dg == store.OnlyDowngraded {

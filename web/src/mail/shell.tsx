@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import type { SessionInfo } from "@/api/auth.gen";
 import { postJSON } from "@/api/client";
-import { keys, useMessageList, usePrefixes, useSearchList, type MailList } from "@/api/queries";
-import type { Class } from "@/api/types.gen";
+import { keys, useMessageList, usePrefixes, useSearchList, useUnclaimedPrefixes, type MailList } from "@/api/queries";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,7 +16,8 @@ import { cn } from "@/lib/utils";
 import { MessageList } from "./message-list";
 import { PrefixPane } from "./prefix-pane";
 import { ReadingPane } from "./reading-pane";
-import { knownTotal, parseView, viewHref, type View } from "./view";
+import { UnclaimedList } from "./unclaimed-list";
+import { knownTotal, parseView, viewHref, type Area, type View } from "./view";
 
 /**
  * The three columns: prefixes · message list · reading pane. Below lg the
@@ -37,14 +37,17 @@ export function MailShell({ session }: { session: SessionInfo }) {
     const a = "a" in next ? next.a : "m" in next && next.m !== view.m ? undefined : view.a;
     navigate(viewHref({ ...view, ...next, a }), { replace });
   };
+  // Picking an area leaves any prefix; picking a prefix keeps the area,
+  // so Back from it lands where it was picked.
   const pick = (next: Partial<View>) => {
     setShowPrefixes(false);
-    go({ cls: undefined, q: undefined, m: undefined, ...next });
+    go({ q: undefined, m: undefined, prefix: undefined, dg: false, ...next });
   };
 
   const searching = !!view.q;
+  const unclaimed = !searching && !view.prefix && view.area === "unclaimed";
   const messages = useMessageList(view, !searching);
-  const hits = useSearchList(view.q ?? "", view.dg !== "hide", searching);
+  const hits = useSearchList(view.q ?? "", view.dg, searching);
   const list = searching ? hits : messages;
 
   useKeys(list, view, go, searchBox);
@@ -73,8 +76,12 @@ export function MailShell({ session }: { session: SessionInfo }) {
             </div>
           )}
           <div className={cn("min-h-0 flex-1 flex-col", showPrefixes ? "hidden lg:flex" : "flex")}>
-            <ListHeader view={view} list={list} go={go} />
-            <MessageList list={list} selected={view.m} onSelect={(m) => go({ m }, true)} />
+            <ListHeader view={view} list={list} go={go} pick={pick} />
+            {unclaimed ? (
+              <UnclaimedList onPick={(prefix) => go({ prefix, m: undefined })} />
+            ) : (
+              <MessageList list={list} selected={view.m} markNotifications={searching} onSelect={(m) => go({ m }, true)} />
+            )}
           </div>
         </section>
 
@@ -106,22 +113,45 @@ function Kbd({ children }: { children: string }) {
   return <kbd className="rounded border bg-muted px-1 font-mono text-meta">{children}</kbd>;
 }
 
-const classes: { value: Class | "all"; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "human", label: "Human" },
-  { value: "machine", label: "Machine" },
-  { value: "unknown", label: "Unknown" },
-];
+const areaTitles: Record<Area, string> = {
+  conversations: "Conversations",
+  notifications: "Notifications",
+  all: "All mail",
+  downgraded: "Downgraded",
+  unclaimed: "Unclaimed prefixes",
+};
 
-function ListHeader({ view, list, go }: { view: View; list: MailList; go: (next: Partial<View>, replace?: boolean) => void }) {
-  const title = view.q ? `“${view.q}”` : view.prefix ? view.prefix : view.dg === "only" ? "Downgraded" : "All mail";
+const areaHints: Partial<Record<Area, React.ReactNode>> = {
+  downgraded: "Mail to unclaimed prefixes, or that failed DMARC. Hidden everywhere else.",
+  unclaimed: (
+    <>
+      Addresses that got mail without being claimed. Claim one with <code className="font-mono">yuuka prefix claim</code>.
+    </>
+  ),
+};
+
+function ListHeader({
+  view,
+  list,
+  go,
+  pick,
+}: {
+  view: View;
+  list: MailList;
+  go: (next: Partial<View>, replace?: boolean) => void;
+  pick: (next: Partial<View>) => void;
+}) {
+  const browsing = !view.q && !view.prefix;
+  const title = view.q ? `“${view.q}”` : view.prefix ? view.prefix : areaTitles[view.area];
   const prefixes = usePrefixes();
-  const total = list.total ?? knownTotal(view, prefixes.data);
+  const unclaimed = useUnclaimedPrefixes(browsing && view.area === "unclaimed");
+  const total = browsing && view.area === "unclaimed" ? unclaimed.total : (list.total ?? knownTotal(view, prefixes.data));
   const n = total ?? list.items.length;
   const more = total === undefined && list.hasMore;
-  // The downgrade switch only means something in the views that hide
-  // downgraded mail by default.
-  const canToggleDowngraded = !view.prefix && view.dg !== "only";
+  // The zones and the review group never show downgraded mail mixed in;
+  // all mail and search can.
+  const canToggleDowngraded = !!view.q || (browsing && view.area === "all");
+  const hint = browsing ? areaHints[view.area] : undefined;
   return (
     <div className="flex shrink-0 flex-col gap-1.5 border-b px-3 py-2">
       <div className="flex items-baseline gap-2">
@@ -134,32 +164,31 @@ function ListHeader({ view, list, go }: { view: View; list: MailList; go: (next:
         )}
         {canToggleDowngraded && (
           <label className="ml-auto flex shrink-0 items-center gap-1.5 self-center text-small text-muted-foreground">
-            <input
-              type="checkbox"
-              className="accent-current"
-              checked={view.dg === "include"}
-              onChange={(e) => go({ dg: e.target.checked ? "include" : "hide", m: undefined })}
-            />
+            <input type="checkbox" className="accent-current" checked={view.dg} onChange={(e) => go({ dg: e.target.checked, m: undefined })} />
             downgraded
           </label>
         )}
       </div>
-      {!view.q && (
+      {hint && <p className="text-small text-muted-foreground">{hint}</p>}
+      {/* Without the sidebar, the two zones are a switch over the list. */}
+      {browsing && (
         <ToggleGroup
           size="sm"
           variant="outline"
           spacing={0}
-          value={[view.cls ?? "all"]}
+          className="lg:hidden"
+          value={view.area === "conversations" || view.area === "notifications" ? [view.area] : []}
           onValueChange={(v: string[]) => {
-            const c = v[0];
-            if (c) go({ cls: c === "all" ? undefined : (c as Class), m: undefined });
+            const a = v[0] as Area | undefined;
+            if (a) pick({ area: a });
           }}
         >
-          {classes.map((c) => (
-            <ToggleGroupItem key={c.value} value={c.value} className="h-6 px-2 text-small">
-              {c.label}
-            </ToggleGroupItem>
-          ))}
+          <ToggleGroupItem value="conversations" className="h-6 px-2 text-small">
+            Conversations
+          </ToggleGroupItem>
+          <ToggleGroupItem value="notifications" className="h-6 px-2 text-small">
+            Notifications
+          </ToggleGroupItem>
         </ToggleGroup>
       )}
     </div>

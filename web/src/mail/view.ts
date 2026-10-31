@@ -1,4 +1,4 @@
-import type { Class, PrefixList } from "@/api/types.gen";
+import type { PrefixList } from "@/api/types.gen";
 
 /**
  * What the mail screen shows, kept entirely in the query string so that a
@@ -7,11 +7,12 @@ import type { Class, PrefixList } from "@/api/types.gen";
  * (SameSite=Strict); the shell loads anyway and fetches state afterwards.
  */
 export interface View {
-  /** prefix@zone, or undefined for all mail. */
+  /** What the list shows when no prefix is picked and nothing searched. */
+  area: Area;
+  /** prefix@zone: that prefix's mail, whatever its class. */
   prefix?: string;
-  cls?: Class;
-  /** The §4.3 downgrade filter. */
-  dg: Downgraded;
+  /** All mail and search: include downgraded mail too. */
+  dg: boolean;
   /** Search text; when set, the list shows search hits. */
   q?: string;
   /** The open message. */
@@ -23,22 +24,26 @@ export interface View {
   a?: string;
 }
 
-export type Downgraded = "hide" | "include" | "only";
+/**
+ * The sidebar's entries (§12.9). Conversations and notifications are the
+ * two zones of §3 principle 4; downgraded and unclaimed are the review
+ * group, where the mail and prefixes the zones hide can still be found.
+ */
+export type Area = "conversations" | "notifications" | "all" | "downgraded" | "unclaimed";
 
-const classes: readonly Class[] = ["machine", "human", "unknown"];
-const downgrades: readonly Downgraded[] = ["hide", "include", "only"];
+export const areas: readonly Area[] = ["conversations", "notifications", "all", "downgraded", "unclaimed"];
+
 // The anchor grammar of §8.1, without yuuka://message/<id>#.
 const anchorPattern = /^part\/[1-9][0-9]*(\.[1-9][0-9]*)*(\/para\/[1-9][0-9]*)?$/;
 
 export function parseView(search: URLSearchParams): View {
-  const cls = search.get("class") as Class | null;
-  const dg = search.get("dg") as Downgraded | null;
+  const area = search.get("area") as Area | null;
   const m = search.get("m") || undefined;
   const a = search.get("a") ?? "";
   return {
+    area: area && areas.includes(area) ? area : "conversations",
     prefix: search.get("prefix") || undefined,
-    cls: cls && classes.includes(cls) ? cls : undefined,
-    dg: dg && downgrades.includes(dg) ? dg : "hide",
+    dg: search.get("dg") === "include",
     q: search.get("q")?.trim() || undefined,
     m,
     a: m && anchorPattern.test(a) ? a : undefined,
@@ -47,9 +52,9 @@ export function parseView(search: URLSearchParams): View {
 
 export function viewHref(v: View): string {
   const p = new URLSearchParams();
+  if (v.area !== "conversations") p.set("area", v.area);
   if (v.prefix) p.set("prefix", v.prefix);
-  if (v.cls) p.set("class", v.cls);
-  if (v.dg !== "hide") p.set("dg", v.dg);
+  if (v.dg) p.set("dg", "include");
   if (v.q) p.set("q", v.q);
   if (v.m) p.set("m", v.m);
   if (v.m && v.a) p.set("a", v.a);
@@ -58,30 +63,39 @@ export function viewHref(v: View): string {
 }
 
 /**
- * The downgrade filter the API gets. Opening one prefix means wanting all
- * of its mail: a discovered prefix has nothing but downgraded mail, and a
- * hidden DMARC failure inside a claimed one is exactly what to look at.
+ * The query string of GET /api/v1/messages for v, without a cursor;
+ * undefined when the list column shows something else. Unknown mail goes
+ * with conversations: a person's first mail is unknown, and missing it
+ * costs more than a stray notification among conversations (§12.9).
+ *
+ * Opening one prefix means wanting all of its mail: a discovered prefix
+ * has nothing but downgraded mail, and a hidden DMARC failure inside a
+ * claimed one is exactly what to look at.
  */
-export function effectiveDowngrade(v: View): Downgraded {
-  return v.prefix && v.dg === "hide" ? "include" : v.dg;
-}
-
-/** The query string of GET /api/v1/messages for v, without a cursor. */
-export function listParams(v: View): URLSearchParams {
-  const p = new URLSearchParams();
-  if (v.prefix) p.set("prefix", v.prefix);
-  if (v.cls) p.set("class", v.cls);
-  p.set("downgraded", effectiveDowngrade(v));
-  return p;
+export function listParams(v: View): URLSearchParams | undefined {
+  if (v.prefix) return new URLSearchParams({ prefix: v.prefix, downgraded: "include" });
+  switch (v.area) {
+    case "conversations":
+      return new URLSearchParams({ class: "human,unknown", downgraded: "hide" });
+    case "notifications":
+      return new URLSearchParams({ class: "machine", downgraded: "hide" });
+    case "all":
+      return new URLSearchParams({ downgraded: v.dg ? "include" : "hide" });
+    case "downgraded":
+      return new URLSearchParams({ downgraded: "only" });
+    case "unclaimed":
+      return undefined;
+  }
 }
 
 /**
  * How many messages v lists in all, when the prefix aggregation already
- * says so; undefined for class-filtered views, which it does not count.
+ * says so; undefined for the zones, which it does not count by class.
  */
 export function knownTotal(v: View, ps: PrefixList | undefined): number | undefined {
-  if (!ps || v.q || v.cls) return undefined;
+  if (!ps || v.q) return undefined;
   if (v.prefix) return ps.prefixes.find((p) => p.address === v.prefix)?.messages;
-  if (v.dg === "only") return ps.downgraded;
-  return v.dg === "include" ? ps.messages : ps.messages - ps.downgraded;
+  if (v.area === "downgraded") return ps.downgraded;
+  if (v.area === "all") return v.dg ? ps.messages : ps.messages - ps.downgraded;
+  return undefined;
 }

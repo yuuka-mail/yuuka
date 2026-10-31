@@ -144,7 +144,7 @@ func TestListMessages(t *testing.T) {
 	}
 
 	human := classify.Human
-	hs, _ := db.ListMessages(t.Context(), operator, store.MessageQuery{MessageFilter: store.MessageFilter{Class: &human, Downgraded: store.IncludeDowngraded}})
+	hs, _ := db.ListMessages(t.Context(), operator, store.MessageQuery{MessageFilter: store.MessageFilter{Classes: []classify.Class{human}, Downgraded: store.IncludeDowngraded}})
 	for _, m := range hs {
 		if m.Class != classify.Human {
 			t.Errorf("class filter returned %q (%v)", m.Subject, m.Class)
@@ -152,6 +152,16 @@ func TestListMessages(t *testing.T) {
 	}
 	if len(hs) == 0 {
 		t.Error("no human mail in the corpus?")
+	}
+	conv, _ := db.ListMessages(t.Context(), operator, store.MessageQuery{MessageFilter: store.MessageFilter{
+		Classes: []classify.Class{classify.Human, classify.Unknown}, Downgraded: store.IncludeDowngraded,
+	}})
+	seen := map[classify.Class]bool{}
+	for _, m := range conv {
+		seen[m.Class] = true
+	}
+	if seen[classify.Machine] || !seen[classify.Human] || !seen[classify.Unknown] {
+		t.Errorf("human and unknown returned classes %v", seen)
 	}
 
 	if _, err := db.ListMessages(t.Context(), operator, store.MessageQuery{MessageFilter: store.MessageFilter{Prefix: "a"}}); err == nil {
@@ -271,6 +281,10 @@ func TestPrefixStatsQuery(t *testing.T) {
 	one, err := db.PrefixStats(t.Context(), operator, store.PrefixQuery{Limit: 1})
 	if err != nil || one.Total != 2 || len(one.Prefixes) != 1 || one.Prefixes[0].Prefix != "leaky" {
 		t.Errorf("limit 1: %+v %v", one, err)
+	}
+	next, err := db.PrefixStats(t.Context(), operator, store.PrefixQuery{Limit: 1, Offset: 1})
+	if err != nil || next.Total != 2 || len(next.Prefixes) != 1 || next.Prefixes[0].Prefix == "leaky" {
+		t.Errorf("offset 1: %+v %v", next, err)
 	}
 }
 

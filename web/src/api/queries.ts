@@ -4,11 +4,12 @@ import { listParams, type View } from "@/mail/view";
 
 import type { SessionInfo } from "./auth.gen";
 import { getJSON, isUnauthenticated } from "./client";
-import type { MessagePage, MessageSummary, PrefixList, SearchResult, Thread } from "./types.gen";
+import type { MessagePage, MessageSummary, Prefix, PrefixList, SearchResult, Thread } from "./types.gen";
 
 export const keys = {
   session: ["session"] as const,
   prefixes: ["prefixes"] as const,
+  unclaimed: ["prefixes", "unclaimed"] as const,
   messages: (p: string) => ["messages", p] as const,
   search: (q: string, dg: string) => ["search", q, dg] as const,
   message: (id: string) => ["message", id] as const,
@@ -32,15 +33,45 @@ export function useSession() {
   });
 }
 
+/**
+ * The claimed prefixes and the mail totals, for the sidebar. Unclaimed
+ * prefixes run to thousands under a dictionary attack (§12.9); they are
+ * paged in their own list.
+ */
 export function usePrefixes() {
   return useQuery({
     queryKey: keys.prefixes,
-    queryFn: () => getJSON<PrefixList>("/api/v1/prefixes"),
+    queryFn: () => getJSON<PrefixList>("/api/v1/prefixes?state=claimed"),
     staleTime: 30_000,
   });
 }
 
 const pageSize = 100;
+
+/** Unclaimed prefixes, most recently delivered to first. */
+export function useUnclaimedPrefixes(enabled = true) {
+  const q = useInfiniteQuery({
+    queryKey: keys.unclaimed,
+    queryFn: ({ pageParam }) =>
+      getJSON<PrefixList>(`/api/v1/prefixes?${new URLSearchParams({ state: "discovered", limit: String(pageSize), offset: String(pageParam) })}`),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => {
+      const seen = pages.reduce((n, p) => n + p.prefixes.length, 0);
+      return seen < last.total && last.prefixes.length > 0 ? seen : undefined;
+    },
+    staleTime: 30_000,
+    enabled,
+  });
+  return {
+    items: q.data?.pages.flatMap((p) => p.prefixes) ?? ([] as Prefix[]),
+    total: q.data?.pages[0]?.total,
+    hasMore: q.hasNextPage,
+    loadMore: () => void q.fetchNextPage(),
+    isLoading: q.isLoading,
+    isFetchingMore: q.isFetchingNextPage,
+    error: q.error,
+  };
+}
 
 /** A list the virtualised list pages through, from messages or search. */
 export interface MailList {
@@ -55,7 +86,8 @@ export interface MailList {
 }
 
 export function useMessageList(v: View, enabled: boolean): MailList {
-  const params = listParams(v).toString();
+  const lp = listParams(v);
+  const params = lp?.toString() ?? "";
   const q = useInfiniteQuery({
     queryKey: keys.messages(params),
     queryFn: ({ pageParam }) => {
@@ -67,7 +99,7 @@ export function useMessageList(v: View, enabled: boolean): MailList {
     initialPageParam: "",
     getNextPageParam: (last) => last.next_cursor || undefined,
     placeholderData: keepPreviousData,
-    enabled,
+    enabled: enabled && !!lp,
   });
   return {
     items: q.data?.pages.flatMap((p) => p.messages) ?? [],

@@ -78,3 +78,14 @@ export function warnings(f: Facts | undefined): Warning[] {
     return { key, text: i > 0 ? w.slice(i + 2) : "", tone: key === "dmarc=fail" || key === "quarantined" ? "bad" : "warn" };
   });
 }
+
+/**
+ * Whether the facts say nothing to act on: the trusted receiver passed
+ * DMARC and nothing is downgraded, quarantined or warned about. Such mail
+ * gets one line of facts instead of the box (§12.9), so that the box still
+ * gets read when it does appear.
+ */
+export function isQuiet(m: Message, f: Facts | undefined): boolean {
+  if (!f || m.parse_error || m.quarantined || m.downgraded || f.downgraded) return false;
+  return !f.auth.withheld && f.auth.verified && f.auth.dmarc === "pass" && warnings(f).length === 0;
+}

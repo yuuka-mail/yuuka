@@ -105,6 +105,15 @@ if (enrollURL) {
       await s.goto(base + "/");
       await s.getByRole("listbox", { name: "Messages" }).waitFor();
       await shot(s, `list-${tag}`);
+      // The other sidebar entries of §12.9.
+      for (const area of ["notifications", "downgraded"]) {
+        await s.goto(base + `/?area=${area}`);
+        await s.getByRole("listbox", { name: "Messages" }).waitFor();
+        await shot(s, `area-${area}-${tag}`);
+      }
+      await s.goto(base + "/?area=unclaimed");
+      await s.getByRole("list", { name: "Unclaimed prefixes" }).waitFor();
+      await shot(s, `area-unclaimed-${tag}`);
       await s.goto(base + `/?m=${lunch}`);
       await s.getByRole("heading", { name: /lunch on friday/i }).waitFor();
       await shot(s, `reading-${tag}`);

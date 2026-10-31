@@ -140,11 +140,14 @@ export interface Prefix {
 }
 /**
  * PrefixList is GET /api/v1/prefixes. Messages and Downgraded are
- * distinct totals: mail sent to two prefixes counts once here.
+ * distinct totals over all visible mail, whatever the query: mail sent
+ * to two prefixes counts once here. Total is how many prefixes the query
+ * matched, before limit and offset.
  */
 export interface PrefixList {
   messages: number /* int */;
   downgraded: number /* int */;
+  total: number /* int */;
   prefixes: Prefix[];
 }
 /**

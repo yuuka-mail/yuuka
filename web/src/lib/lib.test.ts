@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { effectiveDowngrade, knownTotal, listParams, parseView, viewHref } from "@/mail/view";
+import { knownTotal, listParams, parseView, viewHref } from "@/mail/view";
 
 import { listTime, localPart } from "./format";
 import { creationOptions, fromB64url, requestOptions, toB64url } from "./webauthn";
@@ -43,25 +43,30 @@ describe("WebAuthn options", () => {
 });
 
 describe("view state", () => {
+  const home = { area: "conversations" as const, dg: false };
   it("round-trips through the query string", () => {
-    const v = { prefix: "github@example.com", cls: "machine" as const, dg: "include" as const, q: "code", m: "01ABC" };
+    const v = { area: "all" as const, prefix: "github@example.com", dg: true, q: "code", m: "01ABC" };
     expect(parseView(new URL(viewHref(v), "http://x").searchParams)).toEqual(v);
-    expect(viewHref({ dg: "hide" })).toBe("/");
+    expect(viewHref(home)).toBe("/");
   });
   it("ignores junk", () => {
-    expect(parseView(new URLSearchParams("class=spam&dg=maybe&q=%20"))).toEqual({ dg: "hide" });
+    expect(parseView(new URLSearchParams("area=spam&dg=maybe&q=%20"))).toEqual(home);
   });
   it("keeps an anchor only with its message", () => {
-    expect(parseView(new URLSearchParams("m=01ABC&a=part/1.2/para/7"))).toEqual({ dg: "hide", m: "01ABC", a: "part/1.2/para/7" });
-    expect(parseView(new URLSearchParams("a=part/1"))).toEqual({ dg: "hide" });
+    expect(parseView(new URLSearchParams("m=01ABC&a=part/1.2/para/7"))).toEqual({ ...home, m: "01ABC", a: "part/1.2/para/7" });
+    expect(parseView(new URLSearchParams("a=part/1"))).toEqual(home);
     expect(parseView(new URLSearchParams("m=01ABC&a=part/0/para/1")).a).toBeUndefined();
     expect(parseView(new URLSearchParams("m=01ABC&a=javascript:x")).a).toBeUndefined();
-    expect(viewHref({ dg: "hide", a: "part/1" })).toBe("/");
+    expect(viewHref({ ...home, a: "part/1" })).toBe("/");
   });
-  it("shows a prefix's downgraded mail", () => {
-    expect(effectiveDowngrade({ dg: "hide" })).toBe("hide");
-    expect(effectiveDowngrade({ dg: "hide", prefix: "k3x9q@example.com" })).toBe("include");
-    expect(listParams({ dg: "only", cls: "human" }).toString()).toBe("class=human&downgraded=only");
+  it("puts unknown mail with conversations", () => {
+    expect(listParams(home)?.toString()).toBe("class=human%2Cunknown&downgraded=hide");
+    expect(listParams({ ...home, area: "notifications" })?.toString()).toBe("class=machine&downgraded=hide");
+    expect(listParams({ ...home, area: "downgraded" })?.toString()).toBe("downgraded=only");
+    expect(listParams({ ...home, area: "unclaimed" })).toBeUndefined();
+  });
+  it("shows all of a prefix's mail", () => {
+    expect(listParams({ ...home, area: "notifications", prefix: "k3x9q@example.com" })?.toString()).toBe("prefix=k3x9q%40example.com&downgraded=include");
   });
 });
 
@@ -69,18 +74,21 @@ describe("list totals", () => {
   const ps = {
     messages: 10,
     downgraded: 3,
-    prefixes: [{ zone: "example.com", prefix: "k3x9q", address: "k3x9q@example.com", claimed: false, label: "", first_seen: "", last_seen: "", messages: 2, downgraded: 2 }],
+    total: 1,
+    prefixes: [{ zone: "example.com", prefix: "github", address: "github@example.com", claimed: true, label: "", first_seen: "", last_seen: "", messages: 2, downgraded: 0 }],
   };
+  const all = { area: "all" as const, dg: false };
   it("comes from the prefix aggregation", () => {
-    expect(knownTotal({ dg: "hide" }, ps)).toBe(7);
-    expect(knownTotal({ dg: "include" }, ps)).toBe(10);
-    expect(knownTotal({ dg: "only" }, ps)).toBe(3);
-    expect(knownTotal({ dg: "hide", prefix: "k3x9q@example.com" }, ps)).toBe(2);
+    expect(knownTotal(all, ps)).toBe(7);
+    expect(knownTotal({ ...all, dg: true }, ps)).toBe(10);
+    expect(knownTotal({ ...all, area: "downgraded" }, ps)).toBe(3);
+    expect(knownTotal({ ...all, prefix: "github@example.com" }, ps)).toBe(2);
   });
   it("is unknown where the aggregation does not count", () => {
-    expect(knownTotal({ dg: "hide", cls: "human" }, ps)).toBeUndefined();
-    expect(knownTotal({ dg: "hide", q: "x" }, ps)).toBeUndefined();
-    expect(knownTotal({ dg: "hide" }, undefined)).toBeUndefined();
+    expect(knownTotal({ ...all, area: "conversations" }, ps)).toBeUndefined();
+    expect(knownTotal({ ...all, q: "x" }, ps)).toBeUndefined();
+    expect(knownTotal({ ...all, prefix: "k3x9q@example.com" }, ps)).toBeUndefined();
+    expect(knownTotal(all, undefined)).toBeUndefined();
   });
 });
 

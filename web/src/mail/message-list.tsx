@@ -15,7 +15,18 @@ const rowHeight = 56;
  * thousands of rows, so only the visible ones exist in the DOM. The next
  * page loads when the last rows come into view.
  */
-export function MessageList({ list, selected, onSelect }: { list: MailList; selected?: string; onSelect: (id: string) => void }) {
+export function MessageList({
+  list,
+  selected,
+  markNotifications,
+  onSelect,
+}: {
+  list: MailList;
+  selected?: string;
+  /** Search spans both zones (§12.9): tag the rows from notifications. */
+  markNotifications?: boolean;
+  onSelect: (id: string) => void;
+}) {
   const scroller = useRef<HTMLDivElement>(null);
   const rows = list.items.length + (list.hasMore ? 1 : 0);
   const v = useVirtualizer({
@@ -64,7 +75,7 @@ export function MessageList({ list, selected, onSelect }: { list: MailList; sele
           return (
             <div key={it.key} className="absolute top-0 left-0 w-full" style={{ height: it.size, transform: `translateY(${it.start}px)` }}>
               {m ? (
-                <Row m={m} selected={m.id === selected} onSelect={onSelect} />
+                <Row m={m} selected={m.id === selected} tag={markNotifications && m.class === "machine"} onSelect={onSelect} />
               ) : (
                 <div className="flex h-full items-center px-3 text-small text-muted-foreground">Loading more…</div>
               )}
@@ -76,7 +87,7 @@ export function MessageList({ list, selected, onSelect }: { list: MailList; sele
   );
 }
 
-function Row({ m, selected, onSelect }: { m: MessageSummary; selected: boolean; onSelect: (id: string) => void }) {
+function Row({ m, selected, tag, onSelect }: { m: MessageSummary; selected: boolean; tag?: boolean; onSelect: (id: string) => void }) {
   return (
     <button
       type="button"
@@ -94,6 +105,7 @@ function Row({ m, selected, onSelect }: { m: MessageSummary; selected: boolean; 
         {m.recipients.length > 0 && (
           <span className="shrink-0 truncate font-mono text-meta text-muted-foreground">→ {m.recipients.map(localPart).join(", ")}</span>
         )}
+        {tag && <span className="shrink-0 rounded-sm bg-muted px-1 text-meta text-muted-foreground">notification</span>}
         <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-meta text-muted-foreground tabular-nums">
           {m.quarantined && <TriangleAlertIcon aria-label="quarantined" className="size-3 text-warning" />}
           {m.has_attach && <PaperclipIcon aria-label="attachment" className="size-3" />}

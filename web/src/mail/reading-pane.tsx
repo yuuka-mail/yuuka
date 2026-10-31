@@ -1,15 +1,18 @@
-import { ArrowLeftIcon, OctagonAlertIcon, PaperclipIcon, TriangleAlertIcon } from "lucide-react";
+import { ArrowLeftIcon, ChevronDownIcon, OctagonAlertIcon, PaperclipIcon, TriangleAlertIcon } from "lucide-react";
+import { useState } from "react";
+
+import type { Facts } from "@/api/agentview.gen";
 
 import { useThread } from "@/api/queries";
 import type { Message, MessageSummary } from "@/api/types.gen";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { system, Voice } from "@/components/voice";
+import { Signature, system, Voice } from "@/components/voice";
 import { fullTime, listTime, sender } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-import { systemFacts, warnings, type Tone } from "./facts";
+import { isQuiet, systemFacts, warnings, type Tone } from "./facts";
 import { ReadingBody } from "./reading-body";
 import { useMessage, useReading } from "./reading-data";
 
@@ -59,7 +62,6 @@ const toneClass: Record<Tone, string> = {
 function Reading({ message: m, anchor, onAnchor, onOpen }: { message: Message } & Omit<Props, "id" | "onBack">) {
   const body = useReading(m.id);
   const facts = body.reading?.facts;
-  const warns = warnings(facts);
   return (
     <div className="flex max-w-[56rem] flex-col gap-4 px-4 py-4 md:px-6">
       <header className="flex flex-col gap-1.5">
@@ -85,39 +87,7 @@ function Reading({ message: m, anchor, onAnchor, onOpen }: { message: Message } 
         </div>
       </header>
 
-      <Voice speaker={system} className={cn(warns.some((w) => w.tone === "bad") && "border-destructive/60")}>
-        {warns.length > 0 && (
-          <ul className="mb-1.5 flex flex-col gap-0.5 border-b border-system-border pb-1.5">
-            {warns.map((w) => (
-              <li key={w.key} className={cn("flex items-baseline gap-1.5", w.tone === "bad" ? "text-destructive" : "text-warning")}>
-                {w.tone === "bad" ? (
-                  <OctagonAlertIcon aria-hidden className="size-3 shrink-0 self-center" />
-                ) : (
-                  <TriangleAlertIcon aria-hidden className="size-3 shrink-0 self-center" />
-                )}
-                <span>
-                  <span className="font-semibold">{w.key}</span>
-                  {w.text && <span className="text-foreground/80"> · {w.text}</span>}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-          {systemFacts(m, facts).map((f) => (
-            <div key={f.label} className="contents">
-              <dt className="text-muted-foreground">{f.label}</dt>
-              <dd className="flex flex-wrap gap-x-2 wrap-anywhere">
-                {f.parts.map((p, i) => (
-                  <span key={i} className={toneClass[p.tone]}>
-                    {p.text}
-                  </span>
-                ))}
-              </dd>
-            </div>
-          ))}
-        </dl>
-      </Voice>
+      <SystemFacts message={m} facts={facts} />
 
       <ThreadStrip message={m} onOpen={onOpen} />
 
@@ -143,6 +113,72 @@ function Reading({ message: m, anchor, onAnchor, onOpen }: { message: Message } 
 
       {m.message_id && <p className="font-mono text-meta break-all text-muted-foreground">Message-ID &lt;{m.message_id}&gt;</p>}
     </div>
+  );
+}
+
+/**
+ * What yuuka established about the message: one line when there is
+ * nothing to act on (§12.9), the full box when there is or when asked.
+ * Until the view loads the line shows only what is already known, so
+ * quiet mail, the common case, opens without the box flashing up.
+ */
+function SystemFacts({ message: m, facts }: { message: Message; facts?: Facts }) {
+  const [open, setOpen] = useState(false);
+  if (!open && (!facts || isQuiet(m, facts))) {
+    return (
+      <button
+        type="button"
+        aria-expanded={false}
+        disabled={!facts}
+        onClick={() => setOpen(true)}
+        className="flex max-w-full items-center gap-2 self-start rounded-md border border-system-border bg-system-surface px-2 py-0.5 text-small hover:border-system disabled:cursor-default"
+      >
+        <Signature speaker={system} />
+        {facts && (
+          <span className="truncate">
+            <span className="text-system-foreground">dmarc=pass</span> {facts.auth.from_domain}
+          </span>
+        )}
+        <span className="shrink-0 text-muted-foreground">received {listTime(m.received_at)}</span>
+        {facts && <ChevronDownIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />}
+      </button>
+    );
+  }
+  const warns = warnings(facts);
+  return (
+    <Voice speaker={system} className={cn(warns.some((w) => w.tone === "bad") && "border-destructive/60")}>
+      {warns.length > 0 && (
+        <ul className="mb-1.5 flex flex-col gap-0.5 border-b border-system-border pb-1.5">
+          {warns.map((w) => (
+            <li key={w.key} className={cn("flex items-baseline gap-1.5", w.tone === "bad" ? "text-destructive" : "text-warning")}>
+              {w.tone === "bad" ? (
+                <OctagonAlertIcon aria-hidden className="size-3 shrink-0 self-center" />
+              ) : (
+                <TriangleAlertIcon aria-hidden className="size-3 shrink-0 self-center" />
+              )}
+              <span>
+                <span className="font-semibold">{w.key}</span>
+                {w.text && <span className="text-foreground/80"> · {w.text}</span>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        {systemFacts(m, facts).map((f) => (
+          <div key={f.label} className="contents">
+            <dt className="text-muted-foreground">{f.label}</dt>
+            <dd className="flex flex-wrap gap-x-2 wrap-anywhere">
+              {f.parts.map((p, i) => (
+                <span key={i} className={toneClass[p.tone]}>
+                  {p.text}
+                </span>
+              ))}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </Voice>
   );
 }
 

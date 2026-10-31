@@ -320,7 +320,12 @@ func TestMessageListPaging(t *testing.T) {
 		t.Errorf("paged %d, want %d", len(ids), len(all.Messages))
 	}
 
-	for _, bad := range []string{"prefix=nozone", "class=spam", "downgraded=maybe", "cursor=%21%21", "limit=0", "limit=501"} {
+	conv := decode[MessagePage](t, h.get("/api/v1/messages?downgraded=include&limit=500&class=human,unknown", tok))
+	if len(conv.Messages) == 0 || slices.ContainsFunc(conv.Messages, func(m MessageSummary) bool { return m.Class == ClassMachine }) {
+		t.Errorf("class=human,unknown: %d messages, machine among them or none", len(conv.Messages))
+	}
+
+	for _, bad := range []string{"prefix=nozone", "class=spam", "class=human,", "downgraded=maybe", "cursor=%21%21", "limit=0", "limit=501"} {
 		if w := h.get("/api/v1/messages?"+bad, tok); w.Code != http.StatusBadRequest {
 			t.Errorf("%s: %d", bad, w.Code)
 		}
@@ -346,6 +351,17 @@ func TestPrefixesAndSearch(t *testing.T) {
 	}
 	if p := byAddr["random456@example.com"]; p.Claimed || p.Downgraded != p.Messages || p.Messages == 0 {
 		t.Errorf("random456: %+v", p)
+	}
+	// The unclaimed list pages; the totals stay those of all mail.
+	page := decode[PrefixList](t, h.get("/api/v1/prefixes?state=discovered&limit=2&offset=1", h.token(auth.PrefixRead)))
+	discovered := slices.DeleteFunc(slices.Clone(ps.Prefixes), func(p Prefix) bool { return p.Claimed })
+	if page.Total != len(discovered) || len(page.Prefixes) != 2 || page.Prefixes[0].Address != discovered[1].Address || page.Messages != ps.Messages {
+		t.Errorf("discovered page: %+v", page)
+	}
+	for _, bad := range []string{"state=spam", "offset=-1", "limit=0"} {
+		if w := h.get("/api/v1/prefixes?"+bad, h.token(auth.PrefixRead)); w.Code != http.StatusBadRequest {
+			t.Errorf("prefixes %s: %d", bad, w.Code)
+		}
 	}
 	read := h.token(auth.MessageRead)
 	// Generated variants may reuse the body under another subject.

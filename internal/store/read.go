@@ -51,9 +51,10 @@ type MessageFilter struct {
 	// Zone and Prefix select mail delivered to prefix@zone; set both or
 	// neither.
 	Zone, Prefix string
-	// Class selects by effective class (a human override wins); nil means
-	// any.
-	Class      *classify.Class
+	// Classes selects by effective class (a human override wins); empty
+	// means any. The WebUI's conversation view is human and unknown
+	// together (§12.9).
+	Classes    []classify.Class
 	Downgraded Downgrade
 }
 
@@ -139,8 +140,12 @@ func (db *DB) ListMessages(ctx context.Context, v *auth.Viewer, q MessageQuery) 
 		where = append(where, `EXISTS (SELECT 1 FROM deliveries d WHERE d.message_id = m.id AND d.zone = `+
 			arg(q.Zone)+` AND d.prefix = `+arg(q.Prefix)+` AND `+visibleDelivery(v)+`)`)
 	}
-	if q.Class != nil {
-		where = append(where, `coalesce(s.class_override, m.class) = `+arg(int16(*q.Class)))
+	if len(q.Classes) > 0 {
+		cs := make([]int16, len(q.Classes))
+		for i, c := range q.Classes {
+			cs[i] = int16(c)
+		}
+		where = append(where, `coalesce(s.class_override, m.class) = ANY(`+arg(cs)+`)`)
 	}
 	switch q.Downgraded {
 	case HideDowngraded:
@@ -339,8 +344,9 @@ type PrefixQuery struct {
 	// it).
 	Zone string
 	// Limit caps the prefixes returned, most recently seen first; 0
-	// returns all of them.
-	Limit int
+	// returns all of them. Offset skips that many first: the unclaimed
+	// list runs to thousands under a dictionary attack (§12.9).
+	Limit, Offset int
 }
 
 // PrefixSummary is the aggregation view: the prefixes and the distinct
@@ -360,8 +366,8 @@ func (db *DB) PrefixStats(ctx context.Context, v *auth.Viewer, q PrefixQuery) (P
 	if err := needViewer(v, "prefixes"); err != nil {
 		return PrefixSummary{}, err
 	}
-	if q.Limit < 0 {
-		return PrefixSummary{}, errors.New("prefixes: negative limit")
+	if q.Limit < 0 || q.Offset < 0 {
+		return PrefixSummary{}, errors.New("prefixes: negative limit or offset")
 	}
 	if q.State != 0 && q.State != PrefixClaimed && q.State != PrefixDiscovered {
 		return PrefixSummary{}, fmt.Errorf("prefixes: state %d", q.State)
@@ -406,7 +412,7 @@ func (db *DB) PrefixStats(ctx context.Context, v *auth.Viewer, q PrefixQuery) (P
 			`+where+`
 			GROUP BY p.zone, p.prefix
 			ORDER BY p.last_seen DESC NULLS LAST, p.zone, p.prefix
-			LIMIT $4`, append(filter, limit)...)
+			LIMIT $4 OFFSET $5`, append(filter, limit, q.Offset)...)
 		if err != nil {
 			return err
 		}
