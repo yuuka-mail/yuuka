@@ -54,8 +54,13 @@ func TestOneWayToTheOutbox(t *testing.T) {
 			return err
 		}
 		if d.IsDir() {
-			switch d.Name() {
-			case ".git", "node_modules", "testdata", "local":
+			// The directories the go command leaves out of ./... (names
+			// starting with "." or "_", testdata), so that copies of the
+			// module elsewhere in the tree, such as git worktrees under
+			// .claude/, are not mistaken for this module's code.
+			name := d.Name()
+			if path != root && (strings.HasPrefix(name, ".") || strings.HasPrefix(name, "_") ||
+				name == "testdata" || name == "node_modules" || name == "local") {
 				return filepath.SkipDir
 			}
 			return nil
