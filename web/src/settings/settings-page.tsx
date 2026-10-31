@@ -17,19 +17,34 @@ import { RuleEditor } from "@/rules/rule-editor";
 import { ActionsWords } from "@/rules/words";
 import { ProblemLine } from "@/send/marks";
 import { problem, type Abilities } from "@/send/outgoing";
-import type { SettingsSection, View } from "@/mail/view";
+import { settingsSections, type SettingsSection, type View } from "@/mail/view";
+
+import { CredentialsSection } from "./credentials";
+import { GrantsSection } from "./grants";
+import { IdentitiesSection } from "./identities";
 
 // Settings (§12.12): the one page that does not follow a message,
 // entered from the account menu, never from the sidebar. It holds what
-// has no message of its own. Rules come first; passkeys, credentials,
-// identities and grants (§13.10) join as further sections in the nav
-// below, each listed only when the session may see it.
+// has no message of its own: rules, then who may do what (§13.10) —
+// credentials, identities and grants, which only a person's own session
+// with admin sees, to look at and tighten. Each section is listed only
+// when the session may see it.
 
-const sectionTitle: Record<SettingsSection, () => string> = { rules: m.settings_rules };
+const sectionTitle: Record<SettingsSection, () => string> = {
+  rules: m.settings_rules,
+  credentials: m.settings_credentials,
+  identities: m.settings_identities,
+  grants: m.settings_grants,
+};
+
+/** The settings sections the session may see, in the page's order. */
+export function settingsFor(can: Abilities): SettingsSection[] {
+  return settingsSections.filter((s) => (s === "rules" ? can.rules : can.authority));
+}
 
 export function SettingsPage({ view, can, go, onOpenMessage }: { view: View; can: Abilities; go: (next: Partial<View>, replace?: boolean) => void; onOpenMessage: (id: string) => void }) {
-  const sections = (["rules"] as const).filter((s) => s !== "rules" || can.rules);
-  const section = view.settings ?? "rules";
+  const sections = settingsFor(can);
+  const section = view.settings && sections.includes(view.settings) ? view.settings : sections[0];
   return (
     <div className={cn("grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13.5rem_1fr] md:grid-rows-1", view.rule ? "grid-rows-1" : "grid-rows-[auto_1fr]")}>
       <nav aria-label={m.settings_title()} className={cn("min-h-0 flex-col border-b bg-sidebar py-2 text-ui md:border-r md:border-b-0", view.rule ? "hidden md:flex" : "flex")}>
@@ -54,7 +69,10 @@ export function SettingsPage({ view, can, go, onOpenMessage }: { view: View; can
         {sections.length === 0 && <p className="px-3 text-small text-muted-foreground">{m.settings_nothing()}</p>}
       </nav>
       <main className="min-h-0 min-w-0 overflow-y-auto">
-        {section === "rules" && can.rules && <RulesSection view={view} go={go} onOpenMessage={onOpenMessage} />}
+        {section === "rules" && <RulesSection view={view} go={go} onOpenMessage={onOpenMessage} />}
+        {section === "credentials" && <CredentialsSection />}
+        {section === "identities" && <IdentitiesSection />}
+        {section === "grants" && <GrantsSection />}
       </main>
     </div>
   );

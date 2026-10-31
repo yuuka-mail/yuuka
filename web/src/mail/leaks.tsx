@@ -1,13 +1,16 @@
 import { ParaglideMessage } from "@inlang/paraglide-js-react";
+import { useState } from "react";
 
 import { markup } from "@/components/markup";
 import { usePrefixDetail, usePrefixes } from "@/api/queries";
-import type { Offense, Prefix } from "@/api/types";
+import type { CountedAs, Offense, Prefix } from "@/api/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Signature, system } from "@/components/voice";
 import { count, listTime, sender } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages.js";
+
+import { ClaimButton, CountedAsNotes, ExpectEditor, UnclaimButton } from "./prefix-actions";
 
 // The leak check of §3.3 as yuuka states it: which claimed prefixes got
 // mail from senders they were not given to (a leak) or mail claiming one
@@ -114,12 +117,16 @@ const shownOffenses = 3;
  * proved to send to it, and the latest mail that leaked or spoofed.
  * One line while nothing offended; unclaimed prefixes have no check.
  */
-export function PrefixFacts({ address, onOpen }: { address: string; onOpen: (message: string) => void }) {
+export function PrefixFacts({ address, manage, onOpen }: { address: string; manage: boolean; onOpen: (message: string) => void }) {
   const ps = usePrefixes();
   const p = ps.data?.prefixes.find((x) => x.address === address);
   const tone = p && leakTone(p);
   const detail = usePrefixDetail(address, !!tone);
-  if (!p) return null;
+  const [editing, setEditing] = useState(false);
+  const [counted, setCounted] = useState<CountedAs[]>([]);
+  // Only claimed prefixes are listed here; any other has no leak check,
+  // and claiming it is the decision on offer.
+  if (!p) return ps.data && manage ? <UnclaimedFacts address={address} /> : null;
   const expects = p.expected_domains.length ? p.expected_domains.join(", ") : undefined;
   return (
     <section
@@ -139,13 +146,32 @@ export function PrefixFacts({ address, onOpen }: { address: string; onOpen: (mes
               markup={markup}
             />
           </span>
+        ) : manage ? (
+          // The editor below does what `yuuka prefix expect` would.
+          <span className="text-muted-foreground">{m.leak_given_to_nobody_ui()}</span>
         ) : (
           <span className="text-muted-foreground">
             <ParaglideMessage message={m.leak_given_to_nobody} markup={markup} />
           </span>
         )}
         {tone && <LeakCounts p={p} />}
+        {manage && !editing && (
+          <button type="button" className="text-muted-foreground underline underline-offset-2 hover:text-foreground" onClick={() => setEditing(true)}>
+            {expects ? m.prefix_expect_edit() : m.prefix_expect_set()}
+          </button>
+        )}
       </p>
+      {editing && (
+        <ExpectEditor
+          address={address}
+          expected={p.expected_domains}
+          onClose={(c) => {
+            setEditing(false);
+            if (c) setCounted(c);
+          }}
+        />
+      )}
+      <CountedAsNotes counted={counted} />
       {p.observed.length > 0 && (
         <p className="wrap-anywhere text-muted-foreground">
           {m.leak_proven_senders()}{" "}
@@ -160,6 +186,22 @@ export function PrefixFacts({ address, onOpen }: { address: string; onOpen: (mes
         </p>
       )}
       {tone && <Offenses offenses={detail.data?.offenses} total={p.leaks + p.spoofs} onOpen={onOpen} />}
+      {manage && (
+        <div className="border-t border-system-border pt-1">
+          <UnclaimButton address={address} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** Above the mail of a prefix nobody claimed: why its mail is downgraded, and Claim. */
+function UnclaimedFacts({ address }: { address: string }) {
+  return (
+    <section aria-label={m.leak_facts_label()} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-system-border bg-system-surface px-2 py-1 text-small">
+      <Signature speaker={system} />
+      <span className="text-muted-foreground">{m.prefix_unclaimed_facts()}</span>
+      <ClaimButton address={address} />
     </section>
   );
 }

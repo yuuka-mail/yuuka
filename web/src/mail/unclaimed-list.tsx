@@ -4,9 +4,12 @@ import { useEffect, useRef } from "react";
 import { useUnclaimedPrefixes } from "@/api/queries";
 import { Skeleton } from "@/components/ui/skeleton";
 import { count, listTime } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages.js";
 import { ProblemLine } from "@/send/marks";
 import { problem } from "@/send/outgoing";
+
+import { ClaimButton } from "./prefix-actions";
 
 const rowHeight = 28;
 
@@ -15,7 +18,7 @@ const rowHeight = 28;
  * one near the top is either a leak or a service the operator forgot to
  * claim; the long tail is dictionary attacks. Picking one lists its mail.
  */
-export function UnclaimedList({ onPick }: { onPick: (address: string) => void }) {
+export function UnclaimedList({ canClaim, onPick }: { canClaim: boolean; onPick: (address: string) => void }) {
   const list = useUnclaimedPrefixes();
   const scroller = useRef<HTMLDivElement>(null);
   const rows = list.items.length + (list.hasMore ? 1 : 0);
@@ -55,15 +58,23 @@ export function UnclaimedList({ onPick }: { onPick: (address: string) => void })
           return (
             <li key={it.key} className="absolute top-0 left-0 w-full" style={{ height: it.size, transform: `translateY(${it.start}px)` }}>
               {p ? (
-                <button
-                  type="button"
-                  onClick={() => onPick(p.address)}
-                  className="flex h-full w-full items-center gap-3 px-3 text-left outline-none hover:bg-muted focus-visible:bg-muted"
-                >
-                  <span className="min-w-0 flex-1 truncate font-mono text-small">{p.address}</span>
-                  <span className="shrink-0 text-meta text-muted-foreground tabular-nums">{count(p.messages)}</span>
-                  <span className="w-14 shrink-0 text-right text-meta text-muted-foreground tabular-nums">{p.last_seen ? listTime(p.last_seen) : ""}</span>
-                </button>
+                // Claiming sits beside the row, not in it: a button in a button is not allowed.
+                <div className="flex h-full items-center hover:bg-muted">
+                  <button
+                    type="button"
+                    onClick={() => onPick(p.address)}
+                    className={cn("flex h-full min-w-0 flex-1 items-center gap-3 pl-3 text-left outline-none focus-visible:bg-muted", !canClaim && "pr-3")}
+                  >
+                    <span className="min-w-0 flex-1 truncate font-mono text-small">{p.address}</span>
+                    <span className="shrink-0 text-meta text-muted-foreground tabular-nums">{count(p.messages)}</span>
+                    <span className="w-14 shrink-0 text-right text-meta text-muted-foreground tabular-nums">{p.last_seen ? listTime(p.last_seen) : ""}</span>
+                  </button>
+                  {canClaim && (
+                    <span className="shrink-0 px-2">
+                      <ClaimButton address={p.address} />
+                    </span>
+                  )}
+                </div>
               ) : (
                 <div className="flex h-full items-center px-3 text-small text-muted-foreground">{m.leak_loading_more()}</div>
               )}

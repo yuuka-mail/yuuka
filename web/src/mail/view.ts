@@ -45,9 +45,9 @@ export interface View {
   rule?: string;
 }
 
-/** The sections of the settings page; credentials, identities and grants join later (§13.10). */
-export type SettingsSection = "rules";
-export const settingsSections: readonly SettingsSection[] = ["rules"];
+/** The sections of the settings page: rules, then who may do what (§13.10). */
+export type SettingsSection = "rules" | "credentials" | "identities" | "grants";
+export const settingsSections: readonly SettingsSection[] = ["rules", "credentials", "identities", "grants"];
 
 /**
  * The sidebar's entries (§12.9). Conversations and notifications are the

@@ -19,7 +19,7 @@ import { OutboxList, parseOutboxFilter } from "@/send/outbox-list";
 import { OutboxPane } from "@/send/outbox-pane";
 import { abilities, outboxFilters, type OutboxFilter } from "@/send/outgoing";
 
-import { SettingsPage } from "@/settings/settings-page";
+import { SettingsPage, settingsFor } from "@/settings/settings-page";
 
 import { AccountMenu } from "./account-menu";
 import { areaTitle } from "./areas";
@@ -43,6 +43,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
   const [showPrefixes, setShowPrefixes] = useState(false);
   const searchBox = useRef<HTMLInputElement>(null);
   const can = abilities(session);
+  const settings = settingsFor(can);
   // The composer stays mounted when its first save puts the new draft's
   // id in the URL: the fields are already in it, mid-typing.
   const [adopted, setAdopted] = useState<{ key: string; id: string }>();
@@ -97,7 +98,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
             <span className="max-sm:sr-only">{msg.shell_compose()}</span>
           </Button>
         )}
-        <AccountMenu session={session} className="ml-auto" onSettings={can.rules ? () => go({ settings: "rules", rule: undefined }) : undefined} />
+        <AccountMenu session={session} className="ml-auto" onSettings={settings[0] ? () => go({ settings: settings[0], rule: undefined }) : undefined} />
       </header>
 
       {view.settings ? (
@@ -115,9 +116,9 @@ export function MailShell({ session }: { session: SessionInfo }) {
             </div>
           )}
           <div className={cn("min-h-0 flex-1 flex-col", showPrefixes ? "hidden lg:flex" : "flex")}>
-            <ListHeader view={view} list={list} go={go} pick={pick} />
+            <ListHeader view={view} list={list} go={go} pick={pick} managePrefixes={can.prefixes} />
             {unclaimed ? (
-              <UnclaimedList onPick={(prefix) => go({ prefix, m: undefined })} />
+              <UnclaimedList canClaim={can.prefixes} onPick={(prefix) => go({ prefix, m: undefined })} />
             ) : leaks ? (
               <LeakList onPick={(prefix) => go({ prefix, m: undefined })} />
             ) : drafts ? (
@@ -219,11 +220,14 @@ function ListHeader({
   list,
   go,
   pick,
+  managePrefixes,
 }: {
   view: View;
   list: MailList;
   go: (next: Partial<View>, replace?: boolean) => void;
   pick: (next: Partial<View>) => void;
+  /** Claiming, unclaiming and expected domains, beside the prefix's mail (§12.12). */
+  managePrefixes: boolean;
 }) {
   const browsing = !view.q && !view.prefix && !view.label;
   const title = view.q ? msg.shell_search_title({ q: view.q }) : view.prefix ? view.prefix : view.label ? msg.shell_label_title({ label: view.label }) : areaTitle(view.area);
@@ -282,7 +286,7 @@ function ListHeader({
         )}
       </div>
       {hint && <p className="text-small text-muted-foreground">{hint}</p>}
-      {view.prefix && !view.q && <PrefixFacts address={view.prefix} onOpen={(m) => go({ m }, true)} />}
+      {view.prefix && !view.q && <PrefixFacts address={view.prefix} manage={managePrefixes} onOpen={(m) => go({ m }, true)} />}
       {browsing && view.area === "drafts" && <DraftFilter st={view.st} onChange={(st) => go({ st, d: undefined })} />}
       {browsing && view.area === "outbox" && <OutboxFilterBar st={view.st} onChange={(st) => go({ st, o: undefined })} />}
     </div>

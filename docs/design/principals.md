@@ -599,5 +599,6 @@ CLI 只能记 `system` 加 `host_user`（§13.7）。信任根之外的动作值
   停用 pattern 本身总是收紧
 - **凭据只列 `token` 和 `smtp_password`**，和 `yuuka token ls` 是同一个查询，从不带秘密；会话不列，由登出结束。
   吊销和 CLI 走同一个 [`authn.RevokeToken`](../../internal/authn/authn.go)
+- 界面在设置页的凭据、身份、授权三节，怎么只给出更紧的值见 §12.12
 - 授权的每次写入（界面的收紧、删除，CLI 的 `grant set` / `rm`）都先取提交判定用的那把授权锁（`lockGrant`）再锁行：
   返回时，已经没有基于旧授权的判定还在进行，暂停在按下的那一刻之后就成立
