@@ -306,7 +306,11 @@ handler 在 [`internal/api/sending.go`](../../internal/api/sending.go)；界面�
   选项文字里带「sends (auto)」或「held: owner cap」，选中项下面一行是 yuuka 署名的预览：「Send queues it · auto · to any recipient · 10/hour」
   或「Held as a draft: drafts only」加服务端的 `hold_detail` 原文。原因的短语按 `hold_reason` 定，不按 `hold_detail` 的文字分支——
   后者是给人看的，会改。`*@zone` 这种模式身份要再填本地部分，因为 From 只能是地址。
-  `sends` 只是预览：收件人范围和限额在提交时才算，所以「会发出」可能变成停在草稿，反过来不会
+  `sends` 只是预览：收件人范围和限额在提交时才算，所以「会发出」可能变成停在草稿，反过来不会。
+  自己的草稿 From 用的身份不在 `/identities` 里（档位 none）时，预览和下面「agent 写的草稿」一样取草稿上的 `identity_owner`：
+  属于另一个人就写「Held: only bob can send as this address」，否则写「Held as a draft: no grant」和它属于谁；
+  选择器里保留这个地址作为一项并标上同样的话，不让下拉框显示成列表里的第一个身份——那会让人以为 From 是别的地址。
+  这里只是把服务端会做的决定提前说出来，不多出任何发信的路
 - **停在草稿是正常结果**（§8.9）：提交返回 `queued: false` 时，表单上方出一个系统声音的框，写原因和「什么都没发出」，
   草稿留着，可以改了再发。原因只说一次：From 下面的预览行若要说的是同一个原因，就不再出现；
   owner 封顶时框里直接写只有谁能确认。不弹错误框、不用错误色。`queued: true` 时表单变只读，框里是 outbox 这一行的事实，

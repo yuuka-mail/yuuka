@@ -5,7 +5,7 @@ import type { Message, SendingIdentity, View } from "@/api/types";
 import { isQuiet, systemFacts } from "@/mail/facts";
 
 import { parseDraftFilter } from "./drafts-list";
-import { abilities, badAddrs, draftBody, holdLabel, onlyConfirmer, outboxMoves, outboxState, parseAddrs, problem, replyBody, replySubject, standing } from "./outgoing";
+import { abilities, badAddrs, draftBody, holdLabel, onlyConfirmer, outboxMoves, outboxState, parseAddrs, problem, replyBody, replySubject, standing, strangerStanding } from "./outgoing";
 
 const identity = (over: Partial<SendingIdentity>): SendingIdentity => ({
   id: "i",
@@ -41,6 +41,14 @@ describe("standing", () => {
     expect(onlyConfirmer(owned("human", "alice"), s)).toBe("alice");
     expect(onlyConfirmer(owned("human", "operator"), s)).toBeUndefined();
     expect(onlyConfirmer(owned("agent", "arisu"), s)).toBeUndefined();
+  });
+  it("says whose a From is when no usable identity covers it, and that it stops at the draft", () => {
+    const s = { principal: "human:operator", credential_id: "c", credential_kind: "session", scopes: [] };
+    const person = strangerStanding(owned("human", "alice").identity_owner, s);
+    expect(person).toMatchObject({ reason: "owner", note: "held: owner cap", headline: "Held: only alice can send as this address" });
+    const agent = strangerStanding(owned("agent", "arisu").identity_owner, s);
+    expect(agent).toMatchObject({ reason: "policy", note: "held: no grant" });
+    expect(agent.detail).toContain("agent:arisu's");
   });
 });
 

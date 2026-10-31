@@ -14,7 +14,7 @@ import { useMessage } from "@/mail/reading-data";
 
 import { AuthorMark, OutgoingMark, ProblemLine } from "./marks";
 import { OutboxFacts } from "./outbox-facts";
-import { abilities, badAddrs, draftBody, holdLabel, isMine, onlyConfirmer, problem, replyBody, replySubject, standing } from "./outgoing";
+import { abilities, badAddrs, draftBody, holdLabel, isMine, onlyConfirmer, problem, replyBody, replySubject, standing, strangerStanding } from "./outgoing";
 
 // The composer (§12.1, §12.10): Markdown in a textarea, saved as a draft
 // as it is typed (create once, then PUT the whole draft), and Send, which
@@ -254,6 +254,9 @@ function Editor({
   const readOnly = inOutbox || !!d?.smtp;
   const confirming = !!d && !isMine(d.author, session);
   const identity = identityFor(f.from, identities, candidates) ?? identities.find((i) => i.id === d?.identity_id);
+  // The draft's From as saved, when no identity the viewer may use
+  // covers it: the draft itself names whose it is (§8.9).
+  const stranger = !identity && d?.identity_id && d.from.toLowerCase() === f.from.toLowerCase() ? strangerStanding(d.identity_owner, session) : undefined;
   const bad = [...badAddrs(f.to), ...badAddrs(f.cc), ...badAddrs(f.bcc)];
   const noRecipients = !f.to.trim() && !f.cc.trim() && !f.bcc.trim();
   const canSend = can.compose && !inOutbox && !sending && !!f.from && !isPattern(f.from) && bad.length === 0 && !noRecipients;
@@ -361,10 +364,12 @@ function Editor({
             {readOnly || confirming ? (
               <span className="font-mono">{f.from}</span>
             ) : (
-              <FromPicker value={f.from} identities={identities} candidates={candidates} onChange={(from) => edit({ from })} />
+              <FromPicker value={f.from} identities={identities} candidates={candidates} stranger={stranger?.note} onChange={(from) => edit({ from })} />
             )}
           </Row>
-          {!inOutbox && <Standing identity={identity} confirming={confirming ? d : undefined} session={session} from={f.from} held={held?.hold_reason} />}
+          {!inOutbox && (
+            <Standing identity={identity} stranger={stranger} confirming={confirming ? d : undefined} session={session} from={f.from} held={held?.hold_reason} />
+          )}
           <Row label="To">
             <AddrInput value={f.to} readOnly={readOnly} onChange={(to) => edit({ to })} label="To" autoFocus={!initial.to && !readOnly} />
             {!showCc && !readOnly && (
@@ -475,15 +480,29 @@ function AddrInput({ value, onChange, label, readOnly, autoFocus }: { value: str
 /**
  * From: the reply candidates first (the address the mail came in
  * through), then every identity. A pattern identity (*@zone) asks for the
- * local part, since only an address can be a From.
+ * local part, since only an address can be a From. A saved From that no
+ * usable identity covers stays an option, noted with what it would do
+ * (stranger), so the picker never shows an address the draft is not from.
  */
-function FromPicker({ value, identities, candidates, onChange }: { value: string; identities: SendingIdentity[]; candidates: ReplyIdentity[]; onChange: (v: string) => void }) {
-  const opts: { value: string; identity: SendingIdentity }[] = [];
+function FromPicker({
+  value,
+  identities,
+  candidates,
+  stranger,
+  onChange,
+}: {
+  value: string;
+  identities: SendingIdentity[];
+  candidates: ReplyIdentity[];
+  stranger?: string;
+  onChange: (v: string) => void;
+}) {
+  const opts: { value: string; note: string }[] = [];
   const seen = new Set<string>();
-  const add = (v: string, identity: SendingIdentity) => {
+  const add = (v: string, i: SendingIdentity | string) => {
     if (seen.has(v.toLowerCase())) return;
     seen.add(v.toLowerCase());
-    opts.push({ value: v, identity });
+    opts.push({ value: v, note: typeof i === "string" ? i : i.sends ? `sends (${i.tier})` : `held: ${holdLabel(i.hold_reason)}` });
   };
   // The pattern picked, while its local part is being typed.
   const [patternChoice, setPatternChoice] = useState<string>();
@@ -492,6 +511,7 @@ function FromPicker({ value, identities, candidates, onChange }: { value: string
   // An address only a pattern covers, as a saved draft or a reply has it.
   const covering = identityFor(value, identities, candidates);
   if (value && !choosingPattern && covering && isPattern(covering.address)) add(value, covering);
+  if (value && !choosingPattern && !covering) add(value, stranger ?? "no identity");
   for (const i of identities) add(i.address, i);
 
   if (opts.length === 0) {
@@ -516,7 +536,7 @@ function FromPicker({ value, identities, candidates, onChange }: { value: string
       >
         {opts.map((o) => (
           <option key={o.value} value={o.value}>
-            {o.value} — {o.identity.sends ? `sends (${o.identity.tier})` : `held: ${holdLabel(o.identity.hold_reason)}`}
+            {o.value} — {o.note}
           </option>
         ))}
       </select>
@@ -546,12 +566,15 @@ function FromPicker({ value, identities, candidates, onChange }: { value: string
  */
 function Standing({
   identity,
+  stranger,
   confirming,
   session,
   from,
   held,
 }: {
   identity?: SendingIdentity;
+  /** What it would do as the draft's own From, when no usable identity covers it. */
+  stranger?: ReturnType<typeof strangerStanding>;
   confirming?: Draft;
   session: SessionInfo;
   from: string;
@@ -571,6 +594,9 @@ function Standing({
     detail = owner ? "owner cap (§8.9)" : "it is queued with you as the approver (§8.9)";
   } else if (!from || isPattern(from)) {
     return null;
+  } else if (!identity && stranger) {
+    sends = false;
+    ({ headline, detail, reason } = stranger);
   } else if (!identity) {
     sends = false;
     headline = "No identity covers this address";

@@ -131,6 +131,30 @@ export function onlyConfirmer(d: Pick<Draft, "identity_owner">, s: SessionInfo):
   return o.kind === "human" && !isMine(o, s) ? o.name : undefined;
 }
 
+/**
+ * What Send would do as an address whose identity the viewer has no
+ * tier on, so /identities leaves it out and only the draft names its
+ * owner. A person's address is theirs alone (§8.9 owner cap); anyone
+ * else's needs a grant. Either way the submission stops at the draft.
+ */
+export function strangerStanding(owner: Actor, s: SessionInfo): { reason: HoldReason; note: string; headline: string; detail: string } {
+  if (owner.kind === "human" && !isMine(owner, s)) {
+    return {
+      reason: "owner",
+      note: `held: ${holdLabel("owner")}`,
+      headline: `Held: only ${owner.name} can send as this address`,
+      detail: `it is ${owner.name}'s, and you cannot send as it (§8.9)`,
+    };
+  }
+  const whose = isMine(owner, s) ? "yours" : `${principal(owner)}'s`;
+  return {
+    reason: "policy",
+    note: "held: no grant",
+    headline: "Held as a draft: no grant",
+    detail: `the address is ${whose}, and you have no grant to send as it`,
+  };
+}
+
 export function isHuman(s: SessionInfo) {
   return s.principal.startsWith("human:");
 }
