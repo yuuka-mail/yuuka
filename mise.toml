@@ -26,7 +26,7 @@ run = """
 docker container inspect yuuka-test-pg >/dev/null 2>&1 || \
   docker run -d --rm --name yuuka-test-pg \
     -e POSTGRES_PASSWORD=yuuka -e POSTGRES_DB=yuuka_test \
-    -p 127.0.0.1:31432:5432 postgres:18-alpine >/dev/null
+    -p 127.0.0.1:31432:5432 postgres:18-alpine -c max_connections=300 >/dev/null
 until docker exec yuuka-test-pg pg_isready -U postgres -q; do sleep 0.5; done
 """
 
