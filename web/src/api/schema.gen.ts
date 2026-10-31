@@ -1042,12 +1042,14 @@ export interface paths {
             };
         };
         post?: never;
-        /** Delete one's note on a message or its thread */
+        /** Delete one's note on a message or its thread; a person may delete anyone's */
         delete: {
             parameters: {
                 query?: {
                     /** @description message, or thread: the note about the message's thread */
                     scope?: components["schemas"]["AnnotateScope"];
+                    /** @description the principal id of the note's author; absent is your own; only a person may delete another's note */
+                    author?: string;
                 };
                 header?: never;
                 path: {
@@ -3205,7 +3207,7 @@ export interface components {
             scope?: components["schemas"]["AnnotateScope"];
             /** @description the note; at most 4000 characters, not empty */
             text: string;
-            /** @description required, at least one: the passages the note relies on */
+            /** @description required, 1 to 32: the passages the note relies on; each quote at most 1000 characters */
             cites: components["schemas"]["Cite"][];
         };
         /** @enum {string} */
@@ -3376,7 +3378,7 @@ export interface components {
             actions: components["schemas"]["RuleAction"][];
             /** @description why, for the person who decides; at most 4000 characters */
             rationale?: string;
-            /** @description the passages it relies on */
+            /** @description the passages it relies on; at most 32, each quote at most 1000 characters */
             cites?: components["schemas"]["Cite"][];
         };
         ProposalCreated: {

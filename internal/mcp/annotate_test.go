@@ -155,6 +155,10 @@ func TestProposeTools(t *testing.T) {
 		"pending": {"kind": "annotate", "target": uri, "rationale": "x", "payload": map[string]any{
 			"actions": []map[string]any{{"kind": "label", "label": "codes"}},
 		}},
+		// Cites are bounded as a note's are (agentview.CheckCites).
+		"cites[0].quote": {"kind": "annotate", "target": uri, "rationale": "x", "payload": map[string]any{
+			"actions": []map[string]any{{"kind": "label", "label": "long"}},
+		}, "cites": []map[string]any{{"uri": uri, "quote": strings.Repeat("q", agentview.MaxQuoteChars+1)}}},
 	} {
 		if r := callTool(t, cs, "propose", args); !r.isError || !strings.Contains(r.text, want) {
 			t.Errorf("%v: %+v, want %q", args, r, want)

@@ -23,7 +23,7 @@ import (
 type NoteInput struct {
 	URI   string                  `json:"uri" jsonschema:"yuuka://message/<id> of the message"`
 	Text  string                  `json:"text" jsonschema:"the note, at most 4000 characters; it replaces your earlier note on the same target"`
-	Cites []Cite                  `json:"cites" jsonschema:"required, at least one: the passages the note relies on, as get_message anchors them"`
+	Cites []Cite                  `json:"cites" jsonschema:"required, 1 to 32: the passages the note relies on, as get_message anchors them, each quote at most 1000 characters"`
 	Scope agentview.AnnotateScope `json:"scope,omitempty" jsonschema:"message (default), or thread: one note about the whole thread of the message"`
 }
 
@@ -81,10 +81,10 @@ func (s *Server) writeNote(ctx context.Context, v *auth.Viewer, in NoteInput) (r
 	}
 	cites := make([]store.Cite, len(in.Cites))
 	for i, c := range in.Cites {
-		if _, _, err := agentview.ParseURI(c.URI); err != nil {
-			return result{}, refuse("cites[%d]: %v", i, err)
-		}
 		cites[i] = store.Cite{URI: c.URI, Quote: c.Quote}
+	}
+	if err := agentview.CheckCites(cites); err != nil {
+		return result{}, refuse("%v", err)
 	}
 	n, created, err := s.db.WriteNote(ctx, v, store.NewNote{MessageID: id, Scope: noteScope(in.Scope), Text: in.Text, Cites: cites},
 		s.action(v, "note", in.auditArgs()))
@@ -117,7 +117,9 @@ func (s *Server) deleteNote(ctx context.Context, v *auth.Viewer, in DeleteNoteIn
 		return result{}, refuse("%v", err)
 	}
 	scope := noteScope(in.Scope)
-	err = s.db.DeleteNote(ctx, v, id, scope, s.action(v, "delete_note", in))
+	// Own notes only, whoever the caller is: deleting a note of another
+	// is a person's act in the WebUI, never a model's.
+	err = s.db.DeleteNote(ctx, v, id, scope, "", s.action(v, "delete_note", in))
 	if errors.Is(err, store.ErrNotFound) {
 		return result{}, refuse("you have no %s note on %s", scope, agentview.MessageURI(id))
 	}

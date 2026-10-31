@@ -16,7 +16,8 @@ import (
 // Notes (§8.10): a principal's signed text on a message or its thread,
 // one per author per target, overwritten in place and taken back by
 // deleting it. A person sees every note on mail they can see, anyone
-// else only its own (§13.8), which the store decides. Notes are the
+// else only its own (§13.8), which the store decides. Anyone deletes
+// its own notes; a person also anyone else's they can see. Notes are the
 // author's words, written after reading mail: untrusted, and they drive
 // nothing.
 
@@ -41,7 +42,7 @@ type Note struct {
 type NoteBody struct {
 	Scope agentview.AnnotateScope `json:"scope,omitempty" jsonschema:"message (default), or thread: one note about the message's whole thread"`
 	Text  string                  `json:"text" jsonschema:"the note; at most 4000 characters, not empty"`
-	Cites []Cite                  `json:"cites" jsonschema:"required, at least one: the passages the note relies on"`
+	Cites []Cite                  `json:"cites" jsonschema:"required, 1 to 32: the passages the note relies on; each quote at most 1000 characters"`
 }
 
 // NoteParams are the parameters of PUT /api/v1/messages/{id}/note.
@@ -54,6 +55,9 @@ type NoteParams struct {
 type DeleteNoteParams struct {
 	ID    string                  `path:"id"`
 	Scope agentview.AnnotateScope `query:"scope" default:"message" jsonschema:"message, or thread: the note about the message's thread"`
+	// Author is whose note: absent for one's own. Only a person may name
+	// someone else, to take back a wrong or injected agent note.
+	Author string `query:"author" jsonschema:"the principal id of the note's author; absent is your own; only a person may delete another's note"`
 }
 
 func noteOut(n store.Note) Note {
@@ -77,6 +81,16 @@ func notesOut(ns []store.Note) []Note {
 	return out
 }
 
+// citesIn are the cites of a request body as the store holds them, for
+// agentview.CheckCites, which proposals and notes share.
+func citesIn(cs []Cite) []store.Cite {
+	out := make([]store.Cite, len(cs))
+	for i, c := range cs {
+		out[i] = store.Cite{URI: c.URI, Quote: c.Quote}
+	}
+	return out
+}
+
 func noteScope(s agentview.AnnotateScope) string {
 	if s == "thread" {
 		return store.ScopeThread
@@ -86,12 +100,9 @@ func noteScope(s agentview.AnnotateScope) string {
 
 func (a *API) writeNote(ctx context.Context, v *auth.Viewer, p NoteParams) (Note, error) {
 	b := p.Body
-	cites := make([]store.Cite, len(b.Cites))
-	for i, c := range b.Cites {
-		if _, _, err := agentview.ParseURI(c.URI); err != nil {
-			return Note{}, openapi.Errorf(http.StatusBadRequest, openapi.CodeInvalidBody, "cites[%d]: %v", i, err)
-		}
-		cites[i] = store.Cite{URI: c.URI, Quote: c.Quote}
+	cites := citesIn(b.Cites)
+	if err := agentview.CheckCites(cites); err != nil {
+		return Note{}, openapi.Errorf(http.StatusBadRequest, openapi.CodeInvalidBody, "%v", err)
 	}
 	scope := noteScope(b.Scope)
 	// The shape of the note, never its text or quotes: the audit log is
@@ -105,5 +116,10 @@ func (a *API) writeNote(ctx context.Context, v *auth.Viewer, p NoteParams) (Note
 }
 
 func (a *API) deleteNote(ctx context.Context, v *auth.Viewer, p DeleteNoteParams) (struct{}, error) {
-	return struct{}{}, a.db.DeleteNote(ctx, v, p.ID, noteScope(p.Scope), action(v, "note.delete", nil))
+	if p.Author != "" && p.Author != v.PrincipalID {
+		if err := peopleOnly(v, "deletes another's note"); err != nil {
+			return struct{}{}, err
+		}
+	}
+	return struct{}{}, a.db.DeleteNote(ctx, v, p.ID, noteScope(p.Scope), p.Author, action(v, "note.delete", nil))
 }

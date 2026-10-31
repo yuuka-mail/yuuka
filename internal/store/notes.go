@@ -39,7 +39,9 @@ type NewNote struct {
 	MessageID string
 	Scope     string // ScopeMessage or ScopeThread
 	Text      string
-	// Cites are required: at least one, as for a proposal (§8.5).
+	// Cites are required: at least one. Their shape and bounds are
+	// agentview.CheckCites, shared with proposals, which REST and MCP
+	// apply before calling.
 	Cites []Cite
 }
 
@@ -57,8 +59,10 @@ func (n NewNote) validate() error {
 		return fmt.Errorf("%w: cites: at least one passage the note relies on", ErrInvalidNote)
 	}
 	for i, c := range n.Cites {
-		if c.URI == "" || strings.ContainsRune(c.URI+c.Quote, 0) {
-			return fmt.Errorf("%w: cites[%d]: want a uri, and no NUL", ErrInvalidNote, i)
+		// jsonb cannot hold NUL; refused here rather than as a
+		// database error.
+		if strings.ContainsRune(c.URI+c.Quote, 0) {
+			return fmt.Errorf("%w: cites[%d] contains NUL", ErrInvalidNote, i)
 		}
 	}
 	return nil
@@ -199,15 +203,26 @@ func (db *DB) WriteNote(ctx context.Context, v *auth.Viewer, n NewNote, a Action
 	return out, created, nil
 }
 
-// DeleteNote deletes v's note on message, or for ScopeThread v's note
-// of its thread, and records a. Only the author deletes a note. v must
-// see the message; ErrNotFound if it cannot, or has no such note.
-func (db *DB) DeleteNote(ctx context.Context, v *auth.Viewer, message, scope string, a Action) error {
+// DeleteNote deletes author's note on message, or for ScopeThread
+// author's note of its thread, as v, and records a. author "" is v. An
+// agent or service deletes only its own notes (ErrNotPermitted for
+// anyone else's); a person deletes anyone's they can see, which a
+// wrong or injected agent note calls for, recorded as the person's
+// action with the author in its args. v must see the message, and a
+// thread note's anchor; ErrNotFound if it cannot, or there is no such
+// note.
+func (db *DB) DeleteNote(ctx context.Context, v *auth.Viewer, message, scope, author string, a Action) error {
 	if err := needViewer(v, "delete note"); err != nil {
 		return err
 	}
 	if scope != ScopeMessage && scope != ScopeThread {
 		return fmt.Errorf("delete note: %w: scope %q: want message or thread", ErrInvalidNote, scope)
+	}
+	if author == "" {
+		author = v.PrincipalID
+	}
+	if author != v.PrincipalID && !seesEveryNote(v) {
+		return fmt.Errorf("delete %s's note as %s: %w", author, v, ErrNotPermitted)
 	}
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, contentLock); err != nil {
@@ -221,8 +236,9 @@ func (db *DB) DeleteNote(ctx context.Context, v *auth.Viewer, message, scope str
 		if scope == ScopeThread {
 			target = sameThread
 		}
-		rows, err := tx.Query(ctx, `DELETE FROM notes n WHERE n.author_id = $1 AND n.scope = $3 AND `+target+` RETURNING n.id`,
-			v.PrincipalID, id, scope)
+		// noteVisible takes v's id as $1; the author is $4.
+		rows, err := tx.Query(ctx, `DELETE FROM notes n WHERE n.author_id = $4 AND n.scope = $3 AND `+target+`
+			AND `+db.noteVisible(v)+` RETURNING n.id`, v.PrincipalID, id, scope, author)
 		if err != nil {
 			return err
 		}
@@ -233,7 +249,7 @@ func (db *DB) DeleteNote(ctx context.Context, v *auth.Viewer, message, scope str
 		if len(ids) == 0 {
 			return ErrNotFound
 		}
-		a.Args = withArg(withArg(a.Args, "message", id), "scope", scope)
+		a.Args = withArg(withArg(withArg(a.Args, "message", id), "scope", scope), "author", author)
 		a.Result = map[string]any{"deleted": ids}
 		if err := insertAction(ctx, tx, a); err != nil {
 			return err

@@ -208,9 +208,9 @@ func (s *spy) WriteNote(ctx context.Context, v *auth.Viewer, n store.NewNote, a 
 	return s.DB.WriteNote(ctx, v, n, a)
 }
 
-func (s *spy) DeleteNote(ctx context.Context, v *auth.Viewer, message, scope string, a store.Action) error {
+func (s *spy) DeleteNote(ctx context.Context, v *auth.Viewer, message, scope, author string, a store.Action) error {
 	s.saw("DeleteNote", v)
-	return s.DB.DeleteNote(ctx, v, message, scope, a)
+	return s.DB.DeleteNote(ctx, v, message, scope, author, a)
 }
 
 func (s *spy) PreviewRule(ctx context.Context, v *auth.Viewer, spec []byte, q store.PreviewQuery) (store.Preview, error) {

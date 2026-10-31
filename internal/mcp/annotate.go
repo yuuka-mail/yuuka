@@ -173,7 +173,7 @@ type ProposeInput struct {
 	Target    string         `json:"target,omitempty" jsonschema:"yuuka://message/<id>: the message to annotate (annotate), or an example the rule matches (rule)"`
 	Payload   ProposePayload `json:"payload"`
 	Rationale string         `json:"rationale" jsonschema:"why, for the person who decides; at most 4000 characters"`
-	Cites     []Cite         `json:"cites,omitempty" jsonschema:"the passages it relies on, as get_message anchors them"`
+	Cites     []Cite         `json:"cites,omitempty" jsonschema:"the passages it relies on, as get_message anchors them; at most 32, each quote at most 1000 characters"`
 }
 
 // ProposePayload is what is proposed.
@@ -231,18 +231,16 @@ func (s *Server) propose(ctx context.Context, v *auth.Viewer, in ProposeInput) (
 		}
 		message = id
 	}
-	for _, c := range in.Cites {
-		if _, _, err := agentview.ParseURI(c.URI); err != nil {
-			return result{}, refuse("cites: %v", err)
-		}
+	cites := make([]store.Cite, len(in.Cites))
+	for i, c := range in.Cites {
+		cites[i] = store.Cite{URI: c.URI, Quote: c.Quote}
+	}
+	if err := agentview.CheckCites(cites); err != nil {
+		return result{}, refuse("%v", err)
 	}
 	payload, err := agentview.ProposalPayload(in.Kind, in.Payload.Scope, in.Payload.Match, in.Payload.Actions)
 	if err != nil {
 		return result{}, refuse("payload: %v", err)
-	}
-	cites := make([]store.Cite, len(in.Cites))
-	for i, c := range in.Cites {
-		cites[i] = store.Cite{URI: c.URI, Quote: c.Quote}
 	}
 	p, warns, err := s.db.CreateProposal(ctx, v, store.NewProposal{
 		Kind: string(in.Kind), MessageID: message, Payload: payload, Rationale: in.Rationale, Cites: cites,

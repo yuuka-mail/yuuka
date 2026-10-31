@@ -104,23 +104,38 @@ func TestNotes(t *testing.T) {
 		t.Errorf("note on a missing message: %v", err)
 	}
 
-	// Only the author deletes its note: momoi has no message note of
-	// arisu's to delete, and the person none of their own.
-	if err := e.db.DeleteNote(ctx, operator, m, store.ScopeMessage, e.action("test.delete")); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("person deleting a note they did not write: %v", err)
+	// An agent deletes only its own notes: naming another author is not
+	// permitted, and the person has none of their own here.
+	if err := e.db.DeleteNote(ctx, operator, m, store.ScopeMessage, "", e.action("test.delete")); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("person deleting their own note, which does not exist: %v", err)
 	}
-	if err := e.db.DeleteNote(ctx, arisu, m, store.ScopeMessage, e.action("test.delete")); err != nil {
+	if err := e.db.DeleteNote(ctx, momoi, m, store.ScopeMessage, arisu.PrincipalID, e.action("test.delete")); !errors.Is(err, store.ErrNotPermitted) {
+		t.Errorf("agent deleting another's note: %v", err)
+	}
+	if err := e.db.DeleteNote(ctx, arisu, m, store.ScopeMessage, "", e.action("test.delete")); err != nil {
 		t.Fatal(err)
 	}
 	if ns, _ := e.db.Notes(ctx, operator, m); strings.Join(noteTexts(ns), "|") != "momoi on message|momoi on thread" {
 		t.Errorf("after delete: %q", noteTexts(ns))
 	}
-	if err := e.db.DeleteNote(ctx, arisu, m, store.ScopeMessage, e.action("test.delete")); !errors.Is(err, store.ErrNotFound) {
+	if err := e.db.DeleteNote(ctx, arisu, m, store.ScopeMessage, "", e.action("test.delete")); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("deleting twice: %v", err)
 	}
-	// A thread note is deleted from any message of the thread.
-	if err := e.db.DeleteNote(ctx, momoi, m, store.ScopeThread, e.action("test.delete")); err != nil {
-		t.Errorf("delete thread note through another message: %v", err)
+	// A person deletes an agent's note, here a thread note through
+	// another message of the thread, as their own action naming the
+	// author.
+	byPerson := e.action("test.delete")
+	byPerson.Actor = operator.PrincipalID
+	if err := e.db.DeleteNote(ctx, operator, m, store.ScopeThread, momoi.PrincipalID, byPerson); err != nil {
+		t.Errorf("person deleting an agent's thread note: %v", err)
+	}
+	if ns, _ := e.db.Notes(ctx, operator, m); strings.Join(noteTexts(ns), "|") != "momoi on message" {
+		t.Errorf("after the person's delete: %q", noteTexts(ns))
+	}
+	var actor, author string
+	if err := e.pool.QueryRow(ctx, `SELECT actor, args->>'author' FROM actions WHERE id = $1`, byPerson.ID).Scan(&actor, &author); err != nil ||
+		actor != operator.PrincipalID || author != momoi.PrincipalID {
+		t.Errorf("the person's delete recorded as %s, author %s: %v", actor, author, err)
 	}
 
 	// The audit log records each write's shape, never the text.

@@ -33,7 +33,8 @@ WebUI 用的是浏览器会话，程序不要模仿它。
 - 决定提案和管理规则只有人能做，别的主体即使 scope 齐全也回 `403 forbidden`；
   一个提议者待决的提案到了上限（50 个）回 `429 rate_limited`
 - **笔记**（`PUT` / `DELETE /api/v1/messages/{id}/note`，`message:annotate`）：每个主体在每封信、每个线程上各一条，
-  再写就覆盖，删掉就是撤回，只能删自己的。`cites` 至少一处。读笔记在消息详情 `GET /api/v1/messages/{id}` 的 `notes` 里：
+  再写就覆盖，删掉就是撤回。`cites` 至少一处、最多 32 处，每处摘录最多 1000 字符（提案的 `cites` 同样）。
+  agent 只能删自己的；人还能带 `author=<主体 id>` 删他看得见的信上别人的笔记，记成人的动作。读笔记在消息详情 `GET /api/v1/messages/{id}` 的 `notes` 里：
   人看到全部，agent 只看到自己的。笔记是作者的话、不是 yuuka 的事实，展示时署作者名，当不可信内容对待
 - `/api/v1/admin/` 下的端点（凭据、身份、授权）只认人在 WebUI 里的会话：bearer token 即使带着 `admin` 和其他全部 scope
   也回 `403 forbidden`，程序用不了它们。它们只能查看和收紧；会让某个主体能做更多的改动回 `403 widening_requires_cli`，

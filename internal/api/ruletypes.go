@@ -271,7 +271,7 @@ type ProposalBody struct {
 	Match     agentview.RuleMatch     `json:"match,omitempty" jsonschema:"rule: the match tree"`
 	Actions   []agentview.RuleAction  `json:"actions"`
 	Rationale string                  `json:"rationale,omitempty" jsonschema:"why, for the person who decides; at most 4000 characters"`
-	Cites     []Cite                  `json:"cites,omitempty" jsonschema:"the passages it relies on"`
+	Cites     []Cite                  `json:"cites,omitempty" jsonschema:"the passages it relies on; at most 32, each quote at most 1000 characters"`
 }
 
 // CreateProposalParams are the parameters of POST /api/v1/proposals.

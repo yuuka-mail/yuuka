@@ -1671,7 +1671,7 @@
             "items": {
               "$ref": "#/components/schemas/Cite"
             },
-            "description": "required, at least one: the passages the note relies on"
+            "description": "required, 1 to 32: the passages the note relies on; each quote at most 1000 characters"
           }
         },
         "required": [
@@ -2276,7 +2276,7 @@
             "items": {
               "$ref": "#/components/schemas/Cite"
             },
-            "description": "the passages it relies on"
+            "description": "the passages it relies on; at most 32, each quote at most 1000 characters"
           }
         },
         "required": [
@@ -4714,7 +4714,7 @@
     },
     "/api/v1/messages/{id}/note": {
       "delete": {
-        "summary": "Delete one's note on a message or its thread",
+        "summary": "Delete one's note on a message or its thread; a person may delete anyone's",
         "security": [
           {
             "bearer": [
@@ -4743,6 +4743,14 @@
             "schema": {
               "$ref": "#/components/schemas/AnnotateScope",
               "default": "message"
+            }
+          },
+          {
+            "name": "author",
+            "in": "query",
+            "description": "the principal id of the note's author; absent is your own; only a person may delete another's note",
+            "schema": {
+              "type": "string"
             }
           }
         ],

@@ -77,10 +77,11 @@ type Store interface {
 	RejectProposal(ctx context.Context, v *auth.Viewer, id string, a store.Action) error
 	WithdrawProposal(ctx context.Context, v *auth.Viewer, id string, a store.Action) error
 	// Notes (§8.10): a person reads every note on visible mail, anyone
-	// else its own; only the author writes or deletes one.
+	// else its own; only the author writes one, and deletes it, as does
+	// a person.
 	Notes(ctx context.Context, v *auth.Viewer, id string) ([]store.Note, error)
 	WriteNote(ctx context.Context, v *auth.Viewer, n store.NewNote, a store.Action) (store.Note, bool, error)
-	DeleteNote(ctx context.Context, v *auth.Viewer, message, scope string, a store.Action) error
+	DeleteNote(ctx context.Context, v *auth.Viewer, message, scope, author string, a store.Action) error
 
 	// Rules are the operator's configuration: only a person manages
 	// them, which the handlers check, and their reads take no viewer.
@@ -253,7 +254,8 @@ var routes = []route{
 	jsonRoute(http.MethodPut, "/api/v1/messages/{id}/note",
 		"Write one's note on a message or its thread, replacing one's earlier note there; untrusted, it drives nothing",
 		annotate, (*API).writeNote),
-	jsonRoute(http.MethodDelete, "/api/v1/messages/{id}/note", "Delete one's note on a message or its thread",
+	jsonRoute(http.MethodDelete, "/api/v1/messages/{id}/note",
+		"Delete one's note on a message or its thread; a person may delete anyone's",
 		annotate, (*API).deleteNote),
 	jsonRoute(http.MethodGet, "/api/v1/rules", "List rules in evaluation order; people only", ruleManage, (*API).rules),
 	jsonRoute(http.MethodPost, "/api/v1/rules", "Create a rule; it runs on mail arriving from now on; people only",

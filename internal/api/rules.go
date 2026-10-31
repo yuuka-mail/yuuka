@@ -361,18 +361,13 @@ func (a *API) proposal(ctx context.Context, v *auth.Viewer, p IDParams) (Proposa
 
 func (a *API) createProposal(ctx context.Context, v *auth.Viewer, p CreateProposalParams) (ProposalCreated, error) {
 	b := p.Body
-	for _, c := range b.Cites {
-		if _, _, err := agentview.ParseURI(c.URI); err != nil {
-			return ProposalCreated{}, openapi.Errorf(http.StatusBadRequest, openapi.CodeInvalidBody, "cites: %v", err)
-		}
+	cites := citesIn(b.Cites)
+	if err := agentview.CheckCites(cites); err != nil {
+		return ProposalCreated{}, openapi.Errorf(http.StatusBadRequest, openapi.CodeInvalidBody, "%v", err)
 	}
 	payload, err := agentview.ProposalPayload(b.Kind, b.Scope, b.Match, b.Actions)
 	if err != nil {
 		return ProposalCreated{}, openapi.Errorf(http.StatusBadRequest, openapi.CodeInvalidBody, "%v", err)
-	}
-	cites := make([]store.Cite, len(b.Cites))
-	for i, c := range b.Cites {
-		cites[i] = store.Cite{URI: c.URI, Quote: c.Quote}
 	}
 	pr, warns, err := a.db.CreateProposal(ctx, v, store.NewProposal{
 		Kind: string(b.Kind), MessageID: b.MessageID, Payload: payload, Rationale: b.Rationale, Cites: cites,

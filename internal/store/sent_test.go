@@ -473,7 +473,7 @@ func TestVisibility(t *testing.T) {
 	goneNote := writeNote(restricted, msgs["in-open"])
 	{
 		now := time.Now()
-		if err := db.DeleteNote(ctx, restricted, msgs["in-open"], store.ScopeMessage,
+		if err := db.DeleteNote(ctx, restricted, msgs["in-open"], store.ScopeMessage, "",
 			store.Action{ID: ulid.New(now), Actor: agent.ID, Tool: "test.note", At: now}); err != nil {
 			t.Fatal(err)
 		}
@@ -956,5 +956,35 @@ func TestVisibility(t *testing.T) {
 				}
 			}
 		})
+	}
+
+	// Deleting a note of someone else's (§8.10), after the reads above:
+	// an agent may not; a person may, only on mail they can see. This
+	// person reads the open account only.
+	person, err := db.EnsurePrincipal(ctx, store.Principal{ID: ulid.New(time.Now()), Kind: "human", Name: "auditor", DisplayName: "auditor", CreatedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO account_access (account_id, principal_id, can_read) VALUES ($1, $3, true), ($2, $3, false)`,
+		open, closed, person.ID); err != nil {
+		t.Fatal(err)
+	}
+	auditor := &auth.Viewer{PrincipalID: person.ID, PrincipalKind: "human", PrincipalName: "auditor"}
+	del := func(v *auth.Viewer, n, author string) error {
+		now := time.Now()
+		return db.DeleteNote(ctx, v, msgs[n], store.ScopeMessage, author,
+			store.Action{ID: ulid.New(now), Actor: v.PrincipalID, Tool: "test.note", At: now})
+	}
+	if err := del(restricted, "in-open", systemID); !errors.Is(err, store.ErrNotPermitted) {
+		t.Errorf("agent deleting the operator's note: %v", err)
+	}
+	if err := del(auditor, "in-closed", agent.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("person deleting a note on mail they cannot see: %v", err)
+	}
+	if err := del(auditor, "in-open", agent.ID); err != nil {
+		t.Errorf("person deleting the agent's note on visible mail: %v", err)
+	}
+	if ns, err := db.Notes(ctx, restricted, msgs["in-open"]); err != nil || len(ns) != 0 {
+		t.Errorf("the agent's notes on in-open after the person's delete: %+v %v", ns, err)
 	}
 }
