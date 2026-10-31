@@ -125,6 +125,18 @@ mise run fmt        # 就地格式化
 mise run db:down    # 用完后删掉测试用的 Postgres 容器（test 会自动拉起）
 ```
 
+本地开发环境（`yuuka_dev` 库 + `local/dev/`，都不进 git；R2 配置读 `mise.local.toml`）：
+
+```bash
+mise watch dev:serve --restart   # 后端 127.0.0.1:31480，改 Go 代码自动重编译重启
+mise run dev:web                 # 前端 http://localhost:31473，Vite 热更新，/api 与 /auth 转给后端
+mise run dev:enroll              # 首次：打印一次性 passkey 注册链接
+mise run dev:reset               # 清空开发库和原件，重新灌合成邮件
+```
+
+passkey 绑定浏览器看到的源，所以开发时一律从 `http://localhost:31473` 进，不要直接开 31480。
+截图、调试 UI 用这套环境，不要另起端口手拼环境变量。
+
 - **Node 的版本只写在 [`.node-version`](.node-version)**（Node 生态通用的文件，fnm、编辑器、CI 都认），
   mise 也从它读；其余工具的版本写在 `mise.toml`
 - **JS 一律用 pnpm**，`web/` 与 `worker/` 是同一个 workspace、一份 `pnpm-lock.yaml`。

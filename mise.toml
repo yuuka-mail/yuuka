@@ -6,6 +6,7 @@
 go = "1.27.3"
 golangci-lint = "2.15.0"
 pnpm = "12.14.0"
+watchexec = "2.8.0"
 # Node's version lives in .node-version, the file the Node ecosystem reads
 # (fnm, editors, CI services); mise reads it too.
 
@@ -66,10 +67,55 @@ dir = "web"
 depends = ["js:install"]
 run = "pnpm run build"
 
-[tasks."web:dev"]
-description = "Vite dev server on http://localhost:31473 proxying /api and /auth to yuuka serve (YUUKA_DEV_API, default http://127.0.0.1:31480)"
+# Local development. Open http://localhost:31473 (Vite with hot reload); it
+# proxies /api and /auth to `dev:serve` on 31480. Passkeys are bound to that
+# origin, so dev:serve's YUUKA_WEB_ORIGIN must stay http://localhost:31473.
+# dev:serve reads the R2 settings from mise.local.toml. Everything it writes
+# stays in the yuuka_dev database and the gitignored local/dev/.
+#
+#   mise watch dev:serve --restart   # Go: rebuild and restart on change
+#   mise run dev:web                 # WebUI: Vite with HMR
+#   mise run dev:enroll              # first time: one-time passkey link
+
+[tasks."dev:db"]
+description = "Create and seed the yuuka_dev database if it does not exist yet"
+depends = ["db:up"]
+run = """
+if ! docker exec yuuka-test-pg psql -U postgres -qtAc "SELECT 1 FROM pg_database WHERE datname='yuuka_dev'" | grep -q 1; then
+  docker exec yuuka-test-pg psql -U postgres -qc 'CREATE DATABASE yuuka_dev'
+  YUUKA_DATABASE_URL='postgres://postgres:yuuka@127.0.0.1:31432/yuuka_dev?sslmode=disable' \
+    go run ./internal/devseed/cmd -n 300 -data-dir local/dev/data
+fi
+"""
+
+[tasks."dev:reset"]
+description = "Drop the yuuka_dev database and local/dev/data, then seed again"
+depends = ["db:up"]
+run = [
+  "docker exec yuuka-test-pg psql -U postgres -qc 'DROP DATABASE IF EXISTS yuuka_dev WITH (FORCE)'",
+  "rm -rf local/dev/data",
+  "mise run dev:db",
+]
+
+[tasks."dev:serve"]
+description = "yuuka serve on 127.0.0.1:31480 against yuuka_dev (use with mise watch … --restart)"
+depends = ["dev:db"]
+sources = ["cmd/**/*.go", "internal/**/*.go", "go.mod", "go.sum"]
+env = { YUUKA_DATABASE_URL = "postgres://postgres:yuuka@127.0.0.1:31432/yuuka_dev?sslmode=disable", YUUKA_DATA_DIR = "{{config_root}}/local/dev/data", YUUKA_LISTEN = "127.0.0.1:31480", YUUKA_WEB_ORIGIN = "http://localhost:31473", YUUKA_WEBHOOK_SECRETS = "dev-only-webhook-secret-never-use-in-production", YUUKA_RECONCILE_INTERVAL = "1h" }
+run = "go run ./cmd/yuuka serve"
+
+[tasks."dev:web"]
+description = "Vite dev server with hot reload on http://localhost:31473, proxying /api and /auth to dev:serve"
 dir = "web"
+depends = ["js:install"]
+env = { YUUKA_DEV_API = "http://127.0.0.1:31480" }
 run = "pnpm run dev"
+
+[tasks."dev:enroll"]
+description = "Print a one-time passkey enrollment link (and recovery codes) for the dev WebUI"
+depends = ["dev:db"]
+env = { YUUKA_DATABASE_URL = "postgres://postgres:yuuka@127.0.0.1:31432/yuuka_dev?sslmode=disable", YUUKA_WEB_ORIGIN = "http://localhost:31473" }
+run = "go run ./cmd/yuuka admin enroll --ttl 60m"
 
 [tasks.check]
 description = "Everything CI runs; must pass before a change is done"
