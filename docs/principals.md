@@ -74,6 +74,16 @@ credentials(
 用本机 KEK（文件或 KMS）加密，和 `accounts.auth_ref` 用同一套密钥管理。
 `pg_dump` 因此含密文，备份按敏感数据保管（§7）。
 
+可校验的三类秘密都由服务端生成，从不接受人选的值，所以 `secret_hash` 用 SHA-256 而不是慢哈希：
+256 位的随机串没有可穷举的空间，慢哈希只会拖慢每个请求。交给持有者的字符串是
+`<前缀>_<凭据 id>_<秘密>`（`yks_` 会话、`ykt_` token、`yke_` 注册链接）：
+明文里带 id，按主键取行再做常量时间比较，而不是按哈希搜索；前缀让泄漏的串能被认出来，
+也让一类凭据不会被当成另一类接受。
+
+passkey 不是 `credentials` 的一行：它是产生 `session` 凭据的登录方式，本身不带 scope，
+私钥也从不离开验证器。它单独一张 `passkeys` 表，列按 WebAuthn 的 credential record 展开
+（公钥、签名计数、AAGUID、BE/BS 标志），不把任何库的序列化格式冻结进库里。
+
 ### 13.4 scope 是唯一的权限语言
 
 ```
@@ -188,7 +198,34 @@ agent 不是浏览器，拿不到那个 cookie。
     每个只能用一次，被人用了运维者会立刻知道
 - 可选「信任前置身份代理」：部署在 Cloudflare Access、oauth2-proxy 这类代理之后时，
   可以把代理的身份断言映射成运维者的 `session`。但**必须验签**（例如 Access 的 JWT 对照它的 JWKS），
-  不能只信一个请求头；验签失败就拒绝，而不是回落成无认证
+  不能只信一个请求头；验签失败就拒绝，而不是回落成无认证。M1 没有实现它
+
+M1 的落法（`internal/authn`），以及设计里没写死、实现时定下的几处：
+
+- **只有 passkey 登录产生会话**。注册链接、恢复码、注册 passkey 都不发会话：
+  恢复码换一个 10 分钟的一次性注册令牌（和 `admin enroll` 签发的是同一种，表 `enrollment_tokens`），
+  令牌换一次 passkey 注册，之后照常用新 passkey 登录。链路只有一条，「恢复码不等于登录」由结构保证
+- 注册链接是 `<origin>/enroll#<token>`：放在片段里，不进服务器和代理的访问日志，
+  由 WebUI 页面读出后提交给 `POST /auth/passkey/register/begin`。令牌在 begin 时校验、
+  在 finish 时与写入 passkey 同一事务里原子地消耗，所以并发的两次注册只有一次成功
+- 会话：不透明随机串，库里只存哈希；cookie 是 `__Host-yuuka-session`，
+  `HttpOnly; Secure; SameSite=Strict; Path=/`，绝对有效期 7 天，不滑动续期
+  （再登录只是摸一下验证器）；登出即撤销那一行。`last_used_at` 每分钟至多写一次
+- **CSRF**：`SameSite=Strict` 让跨站页面根本带不上 cookie；第二层是 `net/http` 的
+  `CrossOriginProtection`（先看 `Sec-Fetch-Site`，再看 `Origin` 对 `Host` 或配置的 origin），
+  作用于 `/auth/` 下所有写请求和所有以 cookie 认证的写请求；第三层是 POST 一律要求
+  `application/json`，HTML 表单跨域发不出来、`fetch` 跨域发它要先过 yuuka 从不应答的预检。
+  Bearer token 不是环境凭据，不需要这些。代价：从邮件或 TG 点链接进 WebUI 的第一次顶层导航不带 cookie，
+  WebUI 要按「页面壳不需要会话、数据走同源 fetch」来写
+- WebAuthn 要求可发现凭据（无用户名登录）和用户验证；不要 attestation。签名计数倒退
+  （可能是被克隆的验证器）直接拒绝登录并告警。每注册一把新 passkey 都推送告警，不只是恢复时
+- 限速：恢复入口全局限速（3 次突发，之后每 5 分钟 1 次）；登录与注册按对端地址限速。
+  不信任 `X-Forwarded-For` 之类的头（§2 不假设前面有什么）——在代理之后这些就退化成全局限速，
+  恢复入口被刷爆时运维者仍有 CLI
+- 进行中的 WebAuthn 仪式（challenge）放在内存里，键是一个 `HttpOnly` cookie，用一次即删。
+  重启只意味着重试一次；哪天要多副本部署再挪进 Postgres
+- WebAuthn 的 RP ID 与 origin 来自配置（`YUUKA_WEB_ORIGIN`、`YUUKA_WEBAUTHN_RP_ID`），
+  不从请求里推断：origin 必须是 https，或 http://localhost
 
 ### 13.8 ACL 的粒度到账户为止
 
@@ -252,9 +289,12 @@ account_access(account_id → accounts, principal_id → principals, can_read bo
 
 | 阶段 | 内容 |
 |---|---|
-| M1 | **`principals` / `credentials` / `identity_grants` 建表**，WebUI 内置 passkey 登录、走 session 凭据 |
-| M2 | SMTP submission 口（跟发信能力一起做）；MCP token |
-| M3.5 | `account_access`（跟多账户一起做） |
+| M1 | **`principals` / `credentials` / `identity_grants` / `account_access` / `actions` 建表**，WebUI 内置 passkey 登录、走 session 凭据（M1 只有 JSON 端点，页面在第二阶段） |
+| M2 | SMTP submission 口（跟发信能力一起做）；MCP token；`identities` 建表后给 `identity_grants` 补外键 |
+| M3.5 | `account_access` 生效：读路径按 §13.8 过滤（跟多账户一起做）；`accounts` 建表后补外键 |
+
+`identity_grants` 和 `account_access` 在 M1 只建表、不读：外键指向的 `identities`、`accounts`
+还不存在，所以这两列暂时是不带外键的文本，迁移里以 `M1:` 注明。
 
 和 §9.5 同样的理由：**表从 M1 就建**，因为主体模型是改起来最贵的部分。
 M0 不需要这一层——那时只有一个人和一个脚本。
