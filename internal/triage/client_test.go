@@ -91,14 +91,12 @@ func TestClientResponses(t *testing.T) {
 		{"kev.json", "kev-latest", map[string]score.Answer{
 			Kind:       {P: map[string]float64{"notification": 0.86, "conversation": 0.03, "marketing": 0.06, "spam": 0.05}},
 			Phishing:   {P: map[string]float64{"yes": 0.04, "no": 0.96}},
-			Injection:  {P: map[string]float64{"yes": 0.01, "no": 0.99}},
 			NeedsReply: {P: map[string]float64{"yes": 0.02, "no": 0.98}},
 		}},
 		{"laya.json", "multilingual", map[string]score.Answer{
 			Kind:       {P: map[string]float64{"notification": 0.05, "conversation": 0.02, "marketing": 0.13, "spam": 0.8}},
 			Phishing:   {P: map[string]float64{"yes": 0.93, "no": 0.07}},
-			Injection:  {Abstain: true},
-			NeedsReply: {P: map[string]float64{"yes": 0.01, "no": 0.99}},
+			NeedsReply: {Abstain: true},
 		}},
 	} {
 		srv, _, _ := backend(t, 200, fixture(t, c.file))
@@ -144,7 +142,7 @@ func TestClientRejectsInvalidAnswers(t *testing.T) {
 	for name, body := range map[string][]byte{
 		"missing answer":    edit(func(a map[string]any) { delete(a, "phishing") }),
 		"noul above 1":      edit(func(a map[string]any) { a["phishing"].(map[string]any)["noul"] = 1.2 }),
-		"noul negative":     edit(func(a map[string]any) { a["injection"].(map[string]any)["noul"] = -0.1 }),
+		"noul negative":     edit(func(a map[string]any) { a["needs_reply"].(map[string]any)["noul"] = -0.1 }),
 		"noul missing":      edit(func(a map[string]any) { delete(a["needs_reply"].(map[string]any), "noul") }),
 		"wrong type":        edit(func(a map[string]any) { a["phishing"].(map[string]any)["type"] = "choice" }),
 		"sum off":           edit(func(a map[string]any) { kind(a)["spam"] = 0.5 }),

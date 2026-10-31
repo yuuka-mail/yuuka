@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -45,7 +46,7 @@ func TestTriageStatus(t *testing.T) {
 	if err := h.triageStatus(t.Context(), triageConfig(t, srv.URL)); err != nil {
 		t.Fatal(err)
 	}
-	for _, s := range []string{"laya-ml-1 (questions v1)", "(local)", "0 scored, 0 to score", "probe       ok", "model kev-latest"} {
+	for _, s := range []string{fmt.Sprintf("laya-ml-1 (questions v%d)", triage.QuestionsVersion), "(local)", "0 scored, 0 to score", "probe       ok", "model kev-latest"} {
 		if !strings.Contains(out.String(), s) {
 			t.Errorf("status lacks %q:\n%s", s, out.String())
 		}

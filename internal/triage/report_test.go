@@ -14,9 +14,9 @@ func TestWriteReport(t *testing.T) {
 	err := WriteReport(&out, score.Profile{Scorer: "laya-ml-1", Questions: 1}, time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC), store.ScoreCounts{
 		Scored: 12, Unscored: 3,
 		Answers: map[string]map[string]int{
-			Kind:      {KindSpam: 2, KindNotification: 9, "": 1},
-			Injection: {No: 12},
-			"tone":    {"rude": 1},
+			Kind:       {KindSpam: 2, KindNotification: 9, "": 1},
+			NeedsReply: {No: 12},
+			"tone":     {"rude": 1},
 		},
 	})
 	if err != nil {

@@ -121,8 +121,7 @@ func (s *fakeScorer) Score(ctx context.Context, _ Input) (Result, error) {
 	return Result{Model: "fake-1", Answers: map[string]score.Answer{
 		Kind:       {P: map[string]float64{"notification": 1, "conversation": 0, "marketing": 0, "spam": 0}},
 		Phishing:   {P: map[string]float64{"yes": 0, "no": 1}},
-		Injection:  {Abstain: true},
-		NeedsReply: {P: map[string]float64{"yes": 0, "no": 1}},
+		NeedsReply: {Abstain: true},
 	}}, nil
 }
 
@@ -179,7 +178,7 @@ func TestRunnerSweeps(t *testing.T) {
 	s := st.scores[0]
 	st.mu.Unlock()
 	if s.Profile != fakeProfile || s.Model != "fake-1" || s.Input.Endpoint != score.EndpointLocal ||
-		s.ID == "" || s.ScoredAt.IsZero() || !s.Input.Facts.Claimed || !s.Answers[Injection].Abstain {
+		s.ID == "" || s.ScoredAt.IsZero() || !s.Input.Facts.Claimed || !s.Answers[NeedsReply].Abstain {
 		t.Errorf("score %+v", s)
 	}
 }

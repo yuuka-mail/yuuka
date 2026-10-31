@@ -22,16 +22,16 @@ import (
 var laya = score.Profile{Scorer: "laya-ml-1", Questions: triage.QuestionsVersion}
 
 // score stores a score of message id by laya, as the scorer writes it:
-// kind leans to notification, injection abstains.
+// kind leans to notification, needs_reply abstains.
 func (h *harness) score(id string, phishing float64) {
 	h.t.Helper()
 	at := time.Now()
 	if err := h.db.InsertScore(h.t.Context(), score.Score{
 		ID: ulid.New(at), MessageID: id, Profile: laya, Model: "laya-ml 0.3", ScoredAt: at,
 		Answers: map[string]score.Answer{
-			"phishing":  {P: map[string]float64{"yes": phishing, "no": 1 - phishing}},
-			"kind":      {P: map[string]float64{"notification": 0.7, "conversation": 0.1, "marketing": 0.1, "spam": 0.1}},
-			"injection": {Abstain: true},
+			"phishing":    {P: map[string]float64{"yes": phishing, "no": 1 - phishing}},
+			"kind":        {P: map[string]float64{"notification": 0.7, "conversation": 0.1, "marketing": 0.1, "spam": 0.1}},
+			"needs_reply": {Abstain: true},
 		},
 		Input: score.Input{
 			Endpoint: score.EndpointLocal, View: 1, Parser: 1, Chars: 100, SHA256: strings.Repeat("ab", 32),
@@ -52,7 +52,29 @@ func TestTriage(t *testing.T) {
 	phish, plain := h.find("Urgent: confirm your account"), h.find("Invoice and logo")
 	h.score(phish, 0.9)
 	h.score(plain, 0.1)
+	// A later score of plain by the previous question set (v1 asked
+	// injection) is kept but not current: nothing below shows, lists,
+	// finds or counts it.
+	at := time.Now()
+	if err := h.db.InsertScore(t.Context(), score.Score{
+		ID: ulid.New(at), MessageID: plain, Profile: score.Profile{Scorer: laya.Scorer, Questions: laya.Questions - 1},
+		Model: "laya-ml 0.3", ScoredAt: at,
+		Answers: map[string]score.Answer{
+			"phishing":  {P: map[string]float64{"yes": 0.95, "no": 0.05}},
+			"injection": {P: map[string]float64{"yes": 0.9, "no": 0.1}},
+		},
+		Input: score.Input{
+			Endpoint: score.EndpointLocal, View: 1, Parser: 1, Chars: 100, SHA256: strings.Repeat("ab", 32),
+			Facts: score.Facts{Auth: "spf=pass dkim=pass dmarc=pass", Claimed: true, Class: "machine"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	person := h.tokenFor(h.human, auth.MessageRead, auth.DeliveryRead)
+	if m := decode[Message](t, h.get("/api/v1/messages/"+plain, person)); m.TriageScore == nil || m.TriageScore.Questions != int(laya.Questions) ||
+		m.Triage["phishing"] != "no" || m.Triage["injection"] != "" {
+		t.Errorf("an older question set's score shown as current: %+v %v", m.TriageScore, m.Triage)
+	}
 
 	m := decode[Message](t, h.get("/api/v1/messages/"+phish, person))
 	if m.TriageScore == nil || m.TriageScore.Scorer != "laya-ml-1" || m.TriageScore.Notice != agentview.TriageNotice || m.TriageScore.Input == nil ||
@@ -102,7 +124,7 @@ func TestTriage(t *testing.T) {
 	if got := ids(res.Hits); res.Total != 1 || !slices.Equal(got, []string{plain}) {
 		t.Errorf("search triage=phishing:no: %d %q, want %s", res.Total, got, plain)
 	}
-	for _, bad := range []string{"phishing", "phish:yes", "phishing:maybe", ":yes"} {
+	for _, bad := range []string{"phishing", "phish:yes", "phishing:maybe", ":yes", "injection:yes"} {
 		w := h.get("/api/v1/messages?triage="+bad, person)
 		if w.Code != http.StatusBadRequest || problemOf(t, w).Code != openapi.CodeInvalidParam {
 			t.Errorf("triage=%s: %d %s", bad, w.Code, w.Body.String())
@@ -118,8 +140,8 @@ func TestTriage(t *testing.T) {
 	for _, a := range rep.Answers {
 		byQ[a.Question] = a
 	}
-	if p := byQ["phishing"]; len(p.Options) != 2 || p.Options[0].Messages != 1 || byQ["injection"].Abstained != 2 ||
-		rep.Answers[0].Question != "kind" {
+	if p := byQ["phishing"]; len(p.Options) != 2 || p.Options[0].Messages != 1 || byQ["needs_reply"].Abstained != 2 ||
+		rep.Answers[0].Question != "kind" || byQ["injection"].Question != "" {
 		t.Errorf("report answers %+v", rep.Answers)
 	}
 

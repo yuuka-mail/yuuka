@@ -143,7 +143,7 @@ YUUKA_TRANSPORT_CLOUDFLARE_CAPS=cloudflare
 |---|---|---|
 | `YUUKA_TRIAGE_URL` | 空（关闭） | 评分器的基础 URL，如 `http://127.0.0.1:31490`，yuuka 在后面加 `/v1/systemone`。没有下一项时只接受回环和私网地址，连接时按实际连到的地址再查一遍，主机名解析到公网也会被拒 |
 | `YUUKA_TRIAGE_HOSTED` | 空 | 设为 `1` 才允许第三方托管的评分器（如 Jev）。只接受 `https`，并且要有 token 文件。**见下文：信的内容会离开部署环境** |
-| `YUUKA_TRIAGE_NAME` | 有 URL 时必填 | 评分器的名字，写进每一条评分，如 `laya-ml-1`（小写字母、数字、`.`、`-`，最多 32 个）。**换模型就换名字**：只有当前名字的评分算数，新名字下的信会被重新评分，旧评分留着 |
+| `YUUKA_TRIAGE_NAME` | 有 URL 时必填 | 评分器的名字，写进每一条评分，如 `laya-ml-1`（小写字母、数字、`.`、`-`，最多 32 个）。**换模型就换名字**：只有当前名字的评分算数，新名字下的信会被重新评分，旧评分留着。升级时问题集换了版本（§15.3）效果相同，不用改名字 |
 | `YUUKA_TRIAGE_MODEL` | 空 | 请求里带的 `model`，如 Laya 的 `multilingual`。空就让后端自己选。实际用的模型以后端回报的为准，记在每条评分里 |
 | `YUUKA_TRIAGE_TOKEN_FILE` | 空 | 放评分器 bearer token 的文件路径，只在启动时读。token 不写在环境变量里 |
 | `YUUKA_TRIAGE_LOOKBACK` | `30d` | `serve` 补评多久以内的信。可以写天数（`30d`）或 Go 的时长。更早的信用 `yuuka triage rescore` 显式补 |

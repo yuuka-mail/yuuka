@@ -96,9 +96,9 @@ func newScore(message string, p score.Profile, at time.Time, phishing float64) s
 	return score.Score{
 		ID: ulid.New(at), MessageID: message, Profile: p, Model: "laya-ml 0.3", ScoredAt: at,
 		Answers: map[string]score.Answer{
-			"phishing":  {P: map[string]float64{"yes": phishing, "no": 1 - phishing}},
-			"kind":      {P: map[string]float64{"notification": 0.1, "conversation": 0.1, "marketing": 0.2, "spam": 0.6}},
-			"injection": {Abstain: true},
+			"phishing":    {P: map[string]float64{"yes": phishing, "no": 1 - phishing}},
+			"kind":        {P: map[string]float64{"notification": 0.1, "conversation": 0.1, "marketing": 0.2, "spam": 0.6}},
+			"needs_reply": {Abstain: true},
 		},
 		Input: score.Input{
 			Endpoint: score.EndpointLocal, View: 1, Parser: 1, Chars: 120,
@@ -168,7 +168,7 @@ func TestTriageScores(t *testing.T) {
 		t.Fatalf("LatestScore: %v, %v", got, err)
 	}
 	if got.ID != second.ID || got.Model != second.Model || got.Answers["phishing"].P["yes"] != 0.2 ||
-		!got.Answers["injection"].Abstain || got.InputWithheld || got.Input != second.Input || !got.ScoredAt.Equal(second.ScoredAt) {
+		!got.Answers["needs_reply"].Abstain || got.InputWithheld || got.Input != second.Input || !got.ScoredAt.Equal(second.ScoredAt) {
 		t.Errorf("LatestScore %+v, want %+v", got, second)
 	}
 	if got, err := e.db.LatestScore(ctx, person, hidden, laya); err != nil || got != nil {

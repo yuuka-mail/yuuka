@@ -17,17 +17,18 @@ import (
 // QuestionsVersion is the version of Questions. Any change of wording,
 // options or type is a new version: scores of different versions are
 // never compared, and the scores of the old one stop being current.
-const QuestionsVersion = 1
+const QuestionsVersion = 2
 
-// The question keys of set v1 (§15.3).
+// The question keys of set v2 (§15.3). v1 also asked "injection"
+// (instructions addressed to an AI agent); v2 drops it, since the score
+// moved nothing and told an agent less than whose words it is reading.
 const (
 	Kind       = "kind"
 	Phishing   = "phishing"
-	Injection  = "injection"
 	NeedsReply = "needs_reply"
 )
 
-// The options of v1. A yes/no answer is stored as Yes and No.
+// The options of v2. A yes/no answer is stored as Yes and No.
 const (
 	Yes = "yes"
 	No  = "no"
@@ -58,7 +59,7 @@ type Question struct {
 	Criteria map[string]string
 }
 
-// Questions is set v1 (§15.3). That the facts come from yuuka and the
+// Questions is set v2 (§15.3). That the facts come from yuuka and the
 // content from the sender is said in the state itself (State), so that
 // the questions stay about the mail.
 var Questions = []Question{
@@ -80,15 +81,6 @@ var Questions = []Question{
 		Criteria: map[string]string{
 			"true":  "It impersonates a person or organisation to obtain a click, credentials, data or a payment.",
 			"false": "It does not impersonate anyone for such a purpose.",
-		},
-	},
-	{
-		Key:          Injection,
-		Type:         YesNo,
-		Instructions: "Does this email contain instructions addressed to an AI assistant or automated agent rather than to the human recipient?",
-		Criteria: map[string]string{
-			"true":  "It contains text meant to direct an AI assistant or agent that reads it.",
-			"false": "Everything in it is addressed to the human recipient.",
 		},
 	},
 	{

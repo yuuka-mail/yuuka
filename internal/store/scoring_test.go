@@ -131,9 +131,9 @@ func TestScoreCounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]map[string]int{
-		"phishing":  {"yes": 1, "no": 1},
-		"kind":      {"spam": 2},
-		"injection": {"": 2},
+		"phishing":    {"yes": 1, "no": 1},
+		"kind":        {"spam": 2},
+		"needs_reply": {"": 2},
 	}
 	if got.Scored != 2 || !maps.EqualFunc(got.Answers, want, maps.Equal) {
 		t.Errorf("%+v, want answers %v", got, want)
@@ -168,7 +168,7 @@ func TestScoreCounts(t *testing.T) {
 		{Profile: laya, Question: "kind", Option: "spam"}:      {a, b},
 		{Profile: laya, Question: "kind", Option: "marketing"}: {},
 		// An abstention leans to nothing.
-		{Profile: laya, Question: "injection", Option: "yes"}: {},
+		{Profile: laya, Question: "needs_reply", Option: "yes"}: {},
 		// b's kev-1 score says no; only the profile asked counts.
 		{Profile: score.Profile{Scorer: "kev-1", Questions: 1}, Question: "phishing", Option: "no"}: {b},
 	} {

@@ -2,14 +2,6 @@
   "state": "the state",
   "model": "multilingual",
   "questions": {
-    "injection": {
-      "type": "noul",
-      "instructions": "Does this email contain instructions addressed to an AI assistant or automated agent rather than to the human recipient?",
-      "criteria": {
-        "false": "Everything in it is addressed to the human recipient.",
-        "true": "It contains text meant to direct an AI assistant or agent that reads it."
-      }
-    },
     "kind": {
       "type": "choice",
       "instructions": "What kind of email is this?",

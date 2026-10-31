@@ -241,7 +241,7 @@ func TestScoreIntoStore(t *testing.T) {
 	if err != nil || s == nil {
 		t.Fatalf("%v, %v", s, err)
 	}
-	if s.Model != "multilingual" || !s.Answers[Injection].Abstain || s.Answers[Phishing].P[Yes] != 0.93 ||
+	if s.Model != "multilingual" || !s.Answers[NeedsReply].Abstain || s.Answers[Phishing].P[Yes] != 0.93 ||
 		s.Input.Endpoint != score.EndpointLocal || !s.Input.Facts.HasCode || s.Input.Facts.Class != "machine" {
 		t.Errorf("stored %+v", s.Score)
 	}

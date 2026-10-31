@@ -19,7 +19,7 @@ type Score struct {
 	// Model is the backend's model and version, as it reported them.
 	Model string
 	// Answers are by question key (the scorer's question set, e.g. kind,
-	// phishing, injection, needs_reply).
+	// phishing, needs_reply).
 	Answers  map[string]Answer
 	Input    Input
 	ScoredAt time.Time
