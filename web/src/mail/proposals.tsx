@@ -187,7 +187,7 @@ function StateMark({ p }: { p: Proposal }) {
 }
 
 /** A passage the agent relied on: its quote as text, and the anchor to check it at. */
-function CiteLine({ c, onOpen }: { c: Cite; onOpen: (id: string, anchor?: string) => void }) {
+export function CiteLine({ c, onOpen }: { c: Cite; onOpen: (id: string, anchor?: string) => void }) {
   const hit = citePattern.exec(c.uri);
   return (
     <li className="flex min-w-0 items-baseline gap-1.5">

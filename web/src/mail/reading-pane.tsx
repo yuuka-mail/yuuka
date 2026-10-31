@@ -2,7 +2,7 @@ import { ArrowLeftIcon, ChevronDownIcon, ChevronUpIcon, OctagonAlertIcon, Paperc
 import { useState } from "react";
 
 import { useThread } from "@/api/queries";
-import type { Address, Facts, Message, MessageSummary } from "@/api/types";
+import type { Address, Facts, Message, MessageSummary, SessionInfo } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,6 +19,7 @@ import { shownExtraction } from "./extracted";
 import { ExtractedLine } from "./extracted-line";
 import { isQuiet, sentState, systemFacts, warnings, type Tone } from "./facts";
 import { ReadingBody } from "./reading-body";
+import { MessageNotes } from "./notes";
 import { MessageProposals } from "./proposals";
 import { useMessage, useReading } from "./reading-data";
 
@@ -34,6 +35,7 @@ interface Props {
   onReply?: () => void;
   /** Opens an outbox row; absent when the session may not read the outbox. */
   onOpenOutbox?: (id: string) => void;
+  session: SessionInfo;
   can: Abilities;
   /** A proposal picked in the proposals list, to mark among this message's. */
   proposal?: string;
@@ -76,7 +78,7 @@ const toneClass: Record<Tone, string> = {
   plain: "text-foreground",
 };
 
-function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox, can, proposal, onOpenRule }: { message: Message } & Omit<Props, "id" | "onBack">) {
+function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox, session, can, proposal, onOpenRule }: { message: Message } & Omit<Props, "id" | "onBack">) {
   const body = useReading(m.id);
   const facts = body.reading?.facts;
   return (
@@ -121,6 +123,8 @@ function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox, 
       <ExtractedBox message={m} />
 
       <MessageProposals id={m.id} highlight={proposal} can={can} onOpen={onOpen} />
+
+      <MessageNotes message={m} session={session} can={can} anchor={anchor} onOpen={onOpen} />
 
       <ThreadStrip message={m} onOpen={onOpen} />
 

@@ -169,6 +169,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
               onOpen={(m, a) => go({ m, a }, true)}
               onReply={can.compose ? () => compose({ reply: view.m }) : undefined}
               onOpenOutbox={can.outbox ? (o) => go({ area: "outbox", prefix: undefined, q: undefined, m: undefined, st: undefined, o }) : undefined}
+              session={session}
               can={can}
               proposal={view.p}
               onOpenRule={(rule) => go({ settings: "rules", rule })}
