@@ -166,6 +166,17 @@ func (h *host) alert(ctx context.Context, d *notify.Dispatcher, a notify.Alert) 
 	}
 }
 
+// alertWidening sends a security alert for a widening made by a command
+// that has no dispatcher of its own (§17.6), best effort like alert.
+func (h *host) alertWidening(ctx context.Context, a notify.Alert) {
+	d, _, err := h.channels()
+	if err != nil {
+		h.note("no security alert was sent for this: %v", err)
+		return
+	}
+	h.alert(ctx, d, a)
+}
+
 // by names who did something on the host, for alerts.
 func (h *host) by() string {
 	if h.user == "" {

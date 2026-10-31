@@ -5,9 +5,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
@@ -219,6 +221,20 @@ func (h *host) identitySetTransports(ctx context.Context, addr string, names []s
 	}
 	if err != nil {
 		return err
+	}
+	// Taking a fallback away or reordering behind the same primary only
+	// narrows where mail goes; anything else is a widening (§17.6).
+	widened := len(i.Transports) == 0 || names[0] != i.Transports[0]
+	for _, n := range names {
+		widened = widened || !slices.Contains(i.Transports, n)
+	}
+	if widened {
+		a := notify.Alert{Text: fmt.Sprintf("yuuka: %s now sends through %s (was %s), changed %s.",
+			shown(i.Address()), strings.Join(names, ", then "), strings.Join(i.Transports, ", then "), h.by())}
+		if i.OwnerKind == "human" {
+			a.Subject = i.OwnerID
+		}
+		h.alertWidening(ctx, a)
 	}
 	return h.say("%s now sends through %s", shown(i.Address()), strings.Join(names, ", then "))
 }

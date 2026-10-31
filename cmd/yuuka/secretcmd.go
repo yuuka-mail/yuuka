@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
 )
@@ -232,6 +233,10 @@ func (h *host) secretRewrap(ctx context.Context) error {
 		}
 		moved++
 		h.note("%s: %s:%s -> %s", sec.ID, sec.Wrapper, sec.KeyRef, key)
+	}
+	if moved > 0 {
+		h.alertWidening(ctx, notify.Alert{Text: fmt.Sprintf("yuuka: %d third-party secrets were rewrapped under %s %s.",
+			moved, key, h.by())})
 	}
 	if err := h.say("rewrapped %d, already current %d, failed %d", moved, current, failed); err != nil {
 		return err

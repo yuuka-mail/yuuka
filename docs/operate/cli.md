@@ -93,6 +93,7 @@ yuuka transport rm relay
 
 每次 `add`、`set` 记一条审计（`transport.add`、`transport.set`），参数是名字、主机、端口、认证方式、用户名、caps，
 以及新密码的 id、audience、包装器和钥匙引用；`rm` 记 `transport.rm`。审计里从不出现密码或它的哈希。
+`add`、`set` 还会给管理员推一条安全告警（要 `YUUKA_KEK_FILE`，没有时命令会说没发出去）；`rm` 是收紧，不推。
 
 ```bash
 yuuka secret ls
@@ -107,7 +108,7 @@ yuuka secret rewrap
   `audience mismatch`（出口的去向在加密之后被改过，没经过 `transport set`：重新 `set` 一次密码）、
   `tampered`（密文对不上：被改过或损坏，当作安全事件查），以及少见的 `wrong kind`、`no owner`（库被绕过 yuuka 改过）。有任何一条不是 `ok` 时命令以非零退出
 - `rewrap` 把每条机密的数据钥匙改用当前的 KEK 重新包装，密文本身不动；已经在当前 KEK 下的跳过。
-  每改一条记一条审计（`secret.rewrap`，带新旧钥匙引用）。换 KEK 的步骤见[第三方机密](secrets.md#换-kek)
+  每改一条记一条审计（`secret.rewrap`，带新旧钥匙引用），改了任何一条就给管理员推一条安全告警。换 KEK 的步骤见[第三方机密](secrets.md#换-kek)
 
 ## 通知渠道
 
@@ -147,7 +148,7 @@ yuuka channel rm tg
 `ls` 列出渠道（bot、状态、版本）和绑定（id、渠道、人、chat、按钮用户、订阅、最后一次按按钮的时间）。
 每次 `add` 记 `channel.add`（bot id、用户名、audience、包装器、钥匙引用，从不含 token），
 `bind` 记 `channel.bind.begin` 和 `channel.bind.confirm`（chat、按钮用户），其余记 `channel.unbind`、`channel.subscribe`、
-`channel.unsubscribe`、`channel.rm`。没有 `YUUKA_KEK_FILE` 时 `add`、`bind` 的安全告警发不出去，命令会说
+`channel.unsubscribe`、`channel.rm`。`add`、`bind` 还会给管理员推一条安全告警；没有 `YUUKA_KEK_FILE` 时发不出去，命令会说
 
 ## 发信地址与授权
 
@@ -171,7 +172,8 @@ yuuka identity rm alerts@example.com
   还在用环境变量时，`YUUKA_TRANSPORTS` 里的名字会自动建成占位），打错的名字报错而不是凭空建一个出口。
   `identity ls` 的 TRANSPORT 列是出口链，主出口在前
 - `set --transports 主,备…` 整个替换出口链，最多 8 个，主出口在前；`add --transport NAME` 等于只有一个成员的链。
-  换出口链改变了信的去向，记一条审计（`identity.route`，带新旧两条链）
+  换出口链改变了信的去向，记一条审计（`identity.route`，带新旧两条链）；加了出口或换了主出口时，
+  还给管理员和这个地址的主人推一条安全告警（只去掉备用不推）
 - 发信时按链的顺序用第一个能用的出口：主出口连不上或认证被拒而暂停时、被 `transport rm` 时、密码上锁时、还只是占位时，走下一个。
   信已经交给出口、只是没拿到结论（`unknown`）时不换出口重发。入队时按链上所有已配置出口里最严的 caps 去掉信头，
   所以链上有 `cloudflare` 这类出口时，经主出口发的信也不带自己的 `Message-ID`

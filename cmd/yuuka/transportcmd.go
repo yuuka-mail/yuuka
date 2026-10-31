@@ -15,6 +15,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/transport"
@@ -232,6 +233,12 @@ func (h *host) transportWrite(ctx context.Context, add bool, name string, f tran
 	if exists && cur.DisabledAt != nil {
 		verb = "configured and enabled again"
 	}
+	what := "changed"
+	if sealed != nil {
+		what = "changed, with a new password,"
+	}
+	h.alertWidening(ctx, notify.Alert{Text: fmt.Sprintf("yuuka: transport %s was %s %s: %s, caps %s.",
+		t.Name, what, h.by(), destination(c), capsText(t.Caps))})
 	return h.say("%s transport %s (%s): %s, caps %s", verb, t.Name, t.ID, destination(c), capsText(t.Caps))
 }
 

@@ -199,8 +199,10 @@ KEK 丢了（或 Vault 里的钥匙被删）要重新输入所有第三方机密
 - **每次按按钮现查**：`BindingForPress` 按（渠道，chat，按的人）找一条未撤销、渠道启用、属于启用中的人的绑定，
   同一条语句里记下 `last_used_at`；找不到就不回应。`/start <码>` 也由这个轮询者收，只记下报来的身份，什么都不授予
 - **CLI 的 `channel bind` 不轮询 Telegram**，等库里的码被兑现（一个 bot 只能有一个轮询者）。所以绑定要 `serve` 在跑、且有 KEK
-- **安全告警从 CLI 也能发**：主机上的 `channel add`、`channel bind` 有 KEK 时自己建一个分发器推告警；
-  没有 KEK 时命令会说告警没发出去。出口的 CLI（P4）目前只写审计行，接上告警只要在那几个命令里同样建一个分发器调 `Security`
+- **安全告警从 CLI 也能发**：主机上放宽的命令（`channel add`、`channel bind`、`transport add` / `set`、
+  加了出口或换了主出口的 `identity set`、实际改了行的 `secret rewrap`）有 KEK 时自己建一个分发器推告警；
+  没有 KEK 时命令会说告警没发出去。`transport rm`、去掉备用这类收紧不推。没选「分发器扫 `actions` 表找放宽」：
+  直接调用简单，也不用再判断一遍哪条审计算放宽
 - **没有 KEK 时什么都不跑**：管理协程只在有启用的渠道时每 10 分钟报一次 ERROR
 
 ### 17.6 谁能改，怎么改
@@ -215,8 +217,7 @@ KEK 丢了（或 Vault 里的钥匙被删）要重新输入所有第三方机密
 - **审计**：每次放宽写一条 `actions`（`transport.add`、`identity.route`、`channel.bind.confirm`、`secret.rewrap`、`config.import`……），
   参数含 id、名字、主机、端口、用户名、caps、audience、包装器和钥匙引用（出口的见 [`transportAuditArgs`](../../cmd/yuuka/transportcmd.go)），
   **从不含明文，也不含明文的哈希或指纹**：
-  人选的密码，哈希能被暴力破解。同时推一条 `security` 告警，发给管理员和当事人（§8.4、§13.10）。CLI 照旧记 `system` 加 `host_user`（§13.7）。
-  告警等 P5 的分发器：P4 的 CLI 只写审计，主机上还没有能推 `security` 的路径
+  人选的密码，哈希能被暴力破解。同时推一条 `security` 告警，发给管理员和当事人（§8.4、§13.10）。CLI 照旧记 `system` 加 `host_user`（§13.7），告警怎么从主机发出见 §17.5 的实现说明
 - **WebUI**：密码框只写不读，留空等于不改，从不回显；机密的状态只显示「已设 / 加密时间 / 正常 / 上锁」
 
 **命令**（名字是单向门，已定；用法见[运维文档](../operate/cli.md#出口与第三方机密)）：

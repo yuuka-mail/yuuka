@@ -7,6 +7,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,6 +17,7 @@ import (
 	"time"
 
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
@@ -274,5 +277,62 @@ func TestImportEnvTelegram(t *testing.T) {
 	}
 	if sealed, err := e.db.Secret(ctx, c.SecretID); err != nil || bytes.Contains(sealed.Payload, []byte("AAAAAAAA")) {
 		t.Errorf("token stored in the clear: %v", err)
+	}
+}
+
+// Widenings made on the host by commands without a dispatcher of their
+// own reach the administrators' chats (§17.6); narrowing does not.
+func TestWideningAlerts(t *testing.T) {
+	api := newFakeBotAPI(t)
+	e := newHostEnv(t)
+	ctx := t.Context()
+	e.env["YUUKA_KEK_FILE"] = writeKEK(t, "kek", 9)
+	storetest.Account(t, e.db)
+	alice, err := e.db.EnsurePrincipal(ctx, store.Principal{ID: ulid.New(time.Now()), Kind: "human", Name: "alice", DisplayName: "alice", CreatedAt: time.Now()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.mustChannel(strings.NewReader(testBotToken), "add", "tg", "--token-file", "-")
+	c, err := e.db.ChannelByName(ctx, "tg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &host{db: e.db, now: time.Now, user: "tester", getenv: func(k string) string { return e.env[k] }}
+	act := func(tool string) store.Action { return h.action(tool, nil) }
+	code, err := e.db.NewBindCode(ctx, c.ID, alice.ID, "", "widening-alert-code", act("channel.bind"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.RedeemBindCode(ctx, c.ID, "widening-alert-code", store.Seen{Address: "42", ActorID: "7", Label: "Alice", ChatKind: "private"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.db.ConfirmBindCode(ctx, code.ID, "", nil, act("channel.bind.confirm")); err != nil {
+		t.Fatal(err)
+	}
+	sent := func() []string { t.Helper(); return api.texts() }
+	before := len(sent())
+
+	pw := filepath.Join(t.TempDir(), "pw")
+	if err := os.WriteFile(pw, []byte("secret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.mustIn(nil, "transport", "add", "work", "--host", "smtp.example.com", "--username", "u", "--password-file", pw, "--caps", "standard")
+	e.mustIn(nil, "transport", "add", "spare", "--host", "smtp2.example.com", "--auth", "none", "--caps", "none")
+	got := sent()[before:]
+	if len(got) != 2 || !strings.Contains(got[0], "transport work was changed, with a new password, on the host by tester: u@smtp.example.com:465") ||
+		strings.Contains(strings.Join(got, "\n"), "secret") {
+		t.Fatalf("transport alerts %q", got)
+	}
+
+	e.must("identity", "add", "*@example.com", "--owner", "human:alice", "--transport", "work")
+	before = len(sent())
+	e.must("identity", "set", "*@example.com", "--transports", "work,spare")
+	if got := sent()[before:]; len(got) != 1 || !strings.Contains(got[0], "now sends through work, then spare (was work)") {
+		t.Errorf("widening the chain: %q", got)
+	}
+	before = len(sent())
+	e.must("identity", "set", "*@example.com", "--transports", "work")
+	if got := sent()[before:]; len(got) != 0 {
+		t.Errorf("dropping a fallback alerted: %q", got)
 	}
 }
