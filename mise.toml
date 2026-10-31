@@ -40,6 +40,25 @@ description = "Type-check and test the Email Worker"
 dir = "worker"
 run = ["npm ci --no-audit --no-fund", "npm run check"]
 
+[tasks.generate]
+description = "Regenerate generated code (the WebUI's TypeScript types from Go)"
+run = "go generate ./..."
+
+[tasks."web:check"]
+description = "Regenerate API types, then type-check, lint and test the WebUI"
+dir = "web"
+run = ["go generate ../internal/api", "npm ci --no-audit --no-fund", "npm run check"]
+
+[tasks."web:build"]
+description = "Build the WebUI into web/dist, which go:embed puts into the yuuka binary"
+dir = "web"
+run = ["npm ci --no-audit --no-fund", "npm run build"]
+
+[tasks."web:dev"]
+description = "Vite dev server on http://localhost:31473 proxying /api and /auth to yuuka serve (YUUKA_DEV_API, default http://127.0.0.1:31480)"
+dir = "web"
+run = "npm run dev"
+
 [tasks.check]
 description = "Everything CI runs; must pass before a change is done"
-depends = ["lint", "test", "worker:check"]
+depends = ["lint", "test", "worker:check", "web:check"]

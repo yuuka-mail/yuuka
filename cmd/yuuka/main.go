@@ -37,7 +37,8 @@
 //
 // The webhook is served at POST /ingest/cloudflare (HMAC, §2.2); the login
 // endpoints under /auth/ (see internal/authn); the REST API under /api/v1/
-// (see internal/api). Migrations are applied on start.
+// (see internal/api); the WebUI at / (see web). Migrations are applied on
+// start.
 package main
 
 import (
@@ -61,6 +62,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/r2"
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/web"
 )
 
 // version is set at build time via -ldflags.
@@ -303,6 +305,8 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		}
 		mux.Handle("/auth/", svc.Handler())
 		mux.Handle("/api/", api.New(a.db, log).Handler(svc))
+		// The page shell needs no session; it fetches /auth/session.
+		mux.Handle("/", web.Handler())
 	} else {
 		log.Info("YUUKA_WEB_ORIGIN not set; WebUI and REST API are off")
 	}

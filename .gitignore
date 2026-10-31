@@ -14,8 +14,9 @@
 node_modules/
 .wrangler/
 
-# 前端产物
-/web/dist/
+# 前端产物（web/embed.go 要求目录存在，只跟踪 .gitkeep）
+/web/dist/*
+!/web/dist/.gitkeep
 
 # 私有部署笔记与快照
 /local/
