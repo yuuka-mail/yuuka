@@ -45,6 +45,20 @@ type Answer struct {
 	Abstain bool               `json:"abstain,omitempty"`
 }
 
+// Top is the option a gives the highest probability, ties to the first
+// by name; "" when it abstained. It is no threshold: only which option
+// the model leaned to, however slightly. The store's SQL (topOption)
+// says the same, for the report and the triage= filter.
+func (a Answer) Top() string {
+	top := ""
+	for o, p := range a.P {
+		if top == "" || p > a.P[top] || p == a.P[top] && o < top {
+			top = o
+		}
+	}
+	return top
+}
+
 // Input records what the scorer was shown, never the content itself: the
 // facts it was given, how much text, a hash of the text, and where it was
 // sent. Facts change (a prefix claimed later), so a score keeps the ones

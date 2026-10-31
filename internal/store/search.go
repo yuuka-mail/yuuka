@@ -38,9 +38,10 @@ type SearchQuery struct {
 	Class *classify.Class
 	// Since, when set, keeps messages received at or after it.
 	Since time.Time
-	// Label and Archived narrow as in MessageFilter.
+	// Label, Archived and Answer narrow as in MessageFilter.
 	Label    string
 	Archived *bool
+	Answer   *AnswerFilter
 }
 
 // SearchHit is one message in a search result.
@@ -114,10 +115,17 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		args = append(args, q.Since)
 		where = append(where, fmt.Sprintf(`m.received_at >= $%d`, len(args)))
 	}
-	where = append(where, annotationFilter(q.Label, q.Archived, func(a any) string {
+	arg := func(a any) string {
 		args = append(args, a)
 		return fmt.Sprintf("$%d", len(args))
-	})...)
+	}
+	where = append(where, annotationFilter(q.Label, q.Archived, arg)...)
+	if q.Answer != nil {
+		if err := q.Answer.valid(); err != nil {
+			return SearchResult{}, fmt.Errorf("search: %w", err)
+		}
+		where = append(where, q.Answer.condition(arg))
+	}
 	if !q.IncludeDowngraded {
 		where = append(where, `NOT downgraded`)
 	}

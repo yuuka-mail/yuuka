@@ -143,6 +143,9 @@ type MessageFilter struct {
 	// unarchived (false) messages; nil means both.
 	Label    string
 	Archived *bool
+	// Answer, when set, keeps messages whose latest score leans to an
+	// option (§15): an observation to look through, not a verdict.
+	Answer *AnswerFilter
 }
 
 // MessageCursor is a position in the list order (received_at, id), both
@@ -285,6 +288,12 @@ func (db *DB) ListMessages(ctx context.Context, v *auth.Viewer, q MessageQuery) 
 		where = append(where, `coalesce(s.class_override, m.class) = ANY(`+arg(cs)+`)`)
 	}
 	where = append(where, annotationFilter(q.Label, q.Archived, arg)...)
+	if q.Answer != nil {
+		if err := q.Answer.valid(); err != nil {
+			return nil, fmt.Errorf("list messages: %w", err)
+		}
+		where = append(where, q.Answer.condition(arg))
+	}
 	switch q.Downgraded {
 	case HideDowngraded:
 		where = append(where, `NOT g.downgraded`)

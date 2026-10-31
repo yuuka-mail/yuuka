@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -657,6 +658,40 @@ func TestVisibility(t *testing.T) {
 				if s != nil && s.InputWithheld && s.Input != (score.Input{}) {
 					t.Errorf("LatestScore %s: withheld input %+v", n, s.Input)
 				}
+			}
+
+			// What the scores lean to, listed and filtered by, only
+			// for what v sees: every score here leans to spam.
+			tops, err := db.TopAnswers(ctx, v, laya, slices.Collect(maps.Values(msgs)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := names(slices.Collect(maps.Keys(tops))); !slices.Equal(got, want) {
+				t.Errorf("TopAnswers %q, want %q", got, want)
+			}
+			for id, top := range tops {
+				// phishing is a tie, 0.5 each: the first by name,
+				// as score.Answer.Top breaks it (TestAnswerTop).
+				if top["phishing"] != "no" || top["kind"] != "spam" {
+					t.Errorf("TopAnswers %s: %v", id, top)
+				}
+			}
+			spam := &store.AnswerFilter{Profile: laya, Question: "kind", Option: "spam"}
+			list, err = db.ListMessages(ctx, v, store.MessageQuery{MessageFilter: store.MessageFilter{
+				Downgraded: store.IncludeDowngraded, Answer: spam,
+			}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids = ids[:0]
+			for _, m := range list {
+				ids = append(ids, m.ID)
+			}
+			if got := names(ids); !slices.Equal(got, want) {
+				t.Errorf("ListMessages triage=kind:spam %q, want %q", got, want)
+			}
+			if res, err := db.Search(ctx, v, store.SearchQuery{IncludeDowngraded: true, Answer: spam}); err != nil || res.Total != len(want) {
+				t.Errorf("Search triage=kind:spam: %d, %v; want %d", res.Total, err, len(want))
 			}
 
 			// The report counts the scores of what v sees, and the

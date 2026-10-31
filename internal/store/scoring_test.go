@@ -144,4 +144,73 @@ func TestScoreCounts(t *testing.T) {
 	if _, err := db.ScoreCounts(ctx, nil, laya, time.Time{}); err == nil {
 		t.Error("nil viewer accepted")
 	}
+
+	// Lists show, and triage= finds, what the latest score of the
+	// profile leans to, the way the report counts it: a's earlier yes
+	// and b's score by another scorer are not current.
+	tops, err := db.TopAnswers(ctx, everyone, laya, []string{a, b, ulid.New(at)})
+	want2 := map[string]map[string]string{
+		a: {"phishing": "no", "kind": "spam"},
+		b: {"phishing": "yes", "kind": "spam"},
+	}
+	if err != nil || !maps.EqualFunc(tops, want2, maps.Equal) {
+		t.Errorf("TopAnswers %v, %v; want %v (no abstention, no unknown id)", tops, err, want2)
+	}
+	if tops, err := db.TopAnswers(ctx, everyone, laya, nil); err != nil || len(tops) != 0 {
+		t.Errorf("TopAnswers of none: %v, %v", tops, err)
+	}
+	if _, err := db.TopAnswers(ctx, nil, laya, []string{a}); err == nil {
+		t.Error("TopAnswers: nil viewer accepted")
+	}
+	for f, want := range map[store.AnswerFilter][]string{
+		{Profile: laya, Question: "phishing", Option: "yes"}:   {b},
+		{Profile: laya, Question: "phishing", Option: "no"}:    {a},
+		{Profile: laya, Question: "kind", Option: "spam"}:      {a, b},
+		{Profile: laya, Question: "kind", Option: "marketing"}: {},
+		// An abstention leans to nothing.
+		{Profile: laya, Question: "injection", Option: "yes"}: {},
+		// b's kev-1 score says no; only the profile asked counts.
+		{Profile: score.Profile{Scorer: "kev-1", Questions: 1}, Question: "phishing", Option: "no"}: {b},
+	} {
+		list, err := db.ListMessages(ctx, everyone, store.MessageQuery{MessageFilter: store.MessageFilter{
+			Downgraded: store.IncludeDowngraded, Answer: &f,
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := []string{}
+		for _, m := range list {
+			got = append(got, m.ID)
+		}
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			t.Errorf("ListMessages %s:%s by %s: %q, want %q", f.Question, f.Option, f.Scorer, got, want)
+		}
+		res, err := db.Search(ctx, everyone, store.SearchQuery{IncludeDowngraded: true, Answer: &f})
+		if err != nil || res.Total != len(want) || len(res.Hits) != len(want) {
+			t.Errorf("Search %s:%s by %s: %+v, %v; want %d", f.Question, f.Option, f.Scorer, res, err, len(want))
+		}
+	}
+	bad := store.AnswerFilter{Profile: laya, Question: "phishing'--", Option: "yes"}
+	if _, err := db.ListMessages(ctx, everyone, store.MessageQuery{MessageFilter: store.MessageFilter{Answer: &bad}}); !errors.Is(err, store.ErrInvalidScore) {
+		t.Errorf("a malformed filter: %v", err)
+	}
+}
+
+// Top is what the store's topOption picks: the highest probability,
+// ties to the first by name, nothing for an abstention.
+func TestAnswerTop(t *testing.T) {
+	for _, c := range []struct {
+		a    score.Answer
+		want string
+	}{
+		{score.Answer{P: map[string]float64{"yes": 0.9, "no": 0.1}}, "yes"},
+		{score.Answer{P: map[string]float64{"yes": 0.5, "no": 0.5}}, "no"},
+		{score.Answer{P: map[string]float64{"spam": 0.3, "marketing": 0.3, "conversation": 0.2}}, "marketing"},
+		{score.Answer{Abstain: true}, ""},
+	} {
+		if got := c.a.Top(); got != c.want {
+			t.Errorf("%+v: %q, want %q", c.a, got, c.want)
+		}
+	}
 }
