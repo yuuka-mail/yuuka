@@ -66,7 +66,7 @@ func newEnv(t *testing.T) *env {
 	}
 	e.in = New(Config{
 		Raw: e.raw, Pending: e.pending, Local: e.local, DB: db,
-		Account: "cf-test", Notifier: e.notes,
+		Account: "cf-test", TrustedAuthservID: "mx.cloudflare.net", Notifier: e.notes,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Now: func() time.Time { return e.now },
 	})
@@ -88,6 +88,20 @@ func (e *env) marker(at time.Time, from, to string, body []byte) contract.Marker
 	return contract.Marker{
 		ID: id, ReceivedAt: at, EnvelopeFrom: from, EnvelopeTo: to,
 		RawKey: contract.RawKey(at, id), RawSize: int64(len(body)),
+	}
+}
+
+// claim marks prefixes of example.com as claimed, so their mail escapes
+// the §4.3 downgrade and is notified.
+func (e *env) claim(t *testing.T, prefixes ...string) {
+	t.Helper()
+	for _, p := range prefixes {
+		_, err := e.pool.Exec(t.Context(), `
+			INSERT INTO prefixes (zone, prefix, first_seen, last_seen, state) VALUES ('example.com', $1, $2, $2, 1)
+			ON CONFLICT (zone, prefix) DO UPDATE SET state = 1`, p, e.now)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
@@ -122,6 +136,7 @@ func corpus(t *testing.T, name string) []byte {
 func TestIngestEndToEnd(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
+	e.claim(t, "github")
 	body := message("GitHub@Example.COM", "tx1")
 	m := e.deliver(t, e.now, "alice@example.net", "GitHub@Example.COM", body)
 
@@ -174,6 +189,7 @@ func TestIngestEndToEnd(t *testing.T) {
 func TestRedeliveryIsDeduped(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
+	e.claim(t, "github")
 	first := e.deliver(t, e.now, "alice@example.net", "github@example.com", corpus(t, "cloudflare-a.eml"))
 	second := e.deliver(t, e.now.Add(10*time.Minute), "alice@example.net", "github@example.com", corpus(t, "cloudflare-a-redelivered.eml"))
 
@@ -207,6 +223,7 @@ func TestRedeliveryIsDeduped(t *testing.T) {
 func TestTwoRecipientsTwoDeliveries(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
+	e.claim(t, "a", "b")
 	a := e.deliver(t, e.now, "alice@example.net", "a@example.com", message("a@example.com", "tx1"))
 	b := e.deliver(t, e.now, "alice@example.net", "b@example.com", message("b@example.com", "tx1"))
 	for _, m := range []contract.Marker{a, b} {
@@ -252,6 +269,7 @@ func TestIdenticalBytesUnderDifferentIDs(t *testing.T) {
 func TestByteIdenticalReingestIsNoop(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
+	e.claim(t, "a")
 	body := message("a@example.com", "tx1")
 	m := e.deliver(t, e.now, "", "a@example.com", body)
 	if _, err := e.in.Ingest(t.Context(), m); err != nil {

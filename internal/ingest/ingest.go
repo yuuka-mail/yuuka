@@ -50,6 +50,9 @@ type Config struct {
 	// Account is the configured key of the Cloudflare account (M0 has no
 	// accounts table; see the 0001 migration).
 	Account string
+	// TrustedAuthservID is the authserv-id of the account's trusted
+	// receiver (§10.1.1); empty means no authentication facts are taken.
+	TrustedAuthservID string
 	// Notifier is optional.
 	Notifier Notifier
 	Log      *slog.Logger
@@ -104,7 +107,7 @@ func (in *Ingester) commit(ctx context.Context, m contract.Marker, body []byte) 
 		return 0, fmt.Errorf("ingest %s: %w", m.ID, err)
 	}
 	zone, prefix := splitAddress(m.EnvelopeTo)
-	out, err := in.cfg.DB.CommitIngest(ctx, store.Ingest{
+	rec := store.Ingest{
 		RawID:        m.ID,
 		R2Key:        m.RawKey,
 		LocalPath:    m.RawKey,
@@ -118,7 +121,8 @@ func (in *Ingester) commit(ctx context.Context, m contract.Marker, body []byte) 
 		Prefix:       prefix,
 		EnvelopeFrom: m.EnvelopeFrom,
 		EnvelopeTo:   m.EnvelopeTo,
-	})
+	}
+	out, err := in.cfg.DB.CommitIngest(ctx, rec)
 	if err != nil {
 		return 0, fmt.Errorf("ingest %s: %w", m.ID, err)
 	}
@@ -130,7 +134,22 @@ func (in *Ingester) commit(ctx context.Context, m contract.Marker, body []byte) 
 	// Addresses and subjects stay out of the log on purpose; the id is
 	// enough to find everything else.
 	in.cfg.Log.Info("ingested", "id", m.ID, "outcome", out.String(), "size", m.RawSize)
-	if out == store.Delivered {
+	if out != store.Delivered {
+		return out, nil
+	}
+	// The content step runs after the commit point, so the mail is safe
+	// whatever happens here. If it fails, the delivery stays without a
+	// message for the backlog pass, and nobody is notified: whether the
+	// mail is downgraded (§4.3) could not be decided.
+	f, err := in.fold(ctx, store.RawRef{
+		DeliveryID: rec.DeliveryID, RawID: rec.RawID, R2Key: rec.R2Key, LocalPath: rec.LocalPath,
+		ContentHash: rec.ContentHash[:], Zone: zone, Prefix: prefix, ReceivedAt: rec.ReceivedAt,
+	}, body)
+	if err != nil {
+		in.cfg.Log.Error("content step failed; left for the backlog pass", "id", m.ID, "err", err)
+		return out, nil
+	}
+	if f.Notify {
 		in.notify(ctx, notify.Summary(zone, prefix, body))
 	}
 	return out, nil

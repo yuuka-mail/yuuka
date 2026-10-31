@@ -60,6 +60,20 @@ func (d Dir) Put(key string, data []byte) error {
 	return syncDir(dir)
 }
 
+// Get returns the bytes stored under key; a missing key is an error
+// wrapping fs.ErrNotExist.
+func (d Dir) Get(key string) ([]byte, error) {
+	path, err := d.Path(key)
+	if err != nil {
+		return nil, err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("localraw: %w", err)
+	}
+	return b, nil
+}
+
 // writeTemp writes data to a new read-only temp file in dir and fsyncs it.
 func writeTemp(dir string, data []byte) (name string, err error) {
 	f, err := os.CreateTemp(dir, ".tmp-*")

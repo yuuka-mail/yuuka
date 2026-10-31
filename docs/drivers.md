@@ -135,8 +135,14 @@ type Expunger interface {
   `Received`（`by` 是可信主机的最上面一条；它下面的都是发件方一侧写的，不可信）里取；
   `MAIL FROM` 取信封。它在 ingest 时算一次，结果连同查询时间存进 `deliveries.spf_recheck`，
   不覆盖可信接收方的结论，reparse 也不重算（§4.2）
-- 取不到可信接收方的头，就**没有认证事实**：`auth` 记为 `none`，泄漏检测和 agent 视图都按「未验证」处理。
-  宁可没有判断，也不要基于伪造输入的判断
+- 取不到可信接收方的头，就**没有认证事实**：`auth` 记为 `{"trusted": false, "reason": …}`，
+  不带任何结果，泄漏检测和 agent 视图都按「未验证」处理。最上面一条的 authserv-id 不是可信的那个，
+  同样按未验证处理，不往下找——下面的都可能是发件人写的。宁可没有判断，也不要基于伪造输入的判断
+- `X-CF-SpamH-Score` 只从原件最顶上那一段接收方字段里取（`Received` 只算第一条，
+  其余是 `ARC-*`、`Received-SPF`、`Authentication-Results`、它自己）；同名字段出现在更下面就是发件人写的，忽略。
+  Cloudflare 没加而发件人恰好把它写在自己头部第一行时分辨不出，它只是信号、不单独决定任何事，可以接受
+- M1 还没有 `accounts` 表，`trusted_authserv_id` 暂时是进程配置（`YUUKA_TRUSTED_AUTHSERV_ID`，
+  默认 `mx.cloudflare.net`），一个进程对应一个账户。`spf_recheck` 在 M1 恒为空，二次 SPF 判定还没接
 
 这些都是头部解析，在 Go 侧做，不违反「driver 不解析 MIME」。
 

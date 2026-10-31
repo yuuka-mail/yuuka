@@ -29,7 +29,8 @@ func TestLoadConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(c.WebhookSecrets) != 2 || c.Listen != "127.0.0.1:31480" || c.Account != "cloudflare" {
+	if len(c.WebhookSecrets) != 2 || c.Listen != "127.0.0.1:31480" || c.Account != "cloudflare" ||
+		c.TrustedAuthservID != "mx.cloudflare.net" {
 		t.Fatalf("%+v", c)
 	}
 	if c.Raw.AccessKeyID != "rk" || c.Pending.AccessKeyID != "pk" || c.Raw.Endpoint != c.Pending.Endpoint {

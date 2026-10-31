@@ -4,6 +4,8 @@
 //
 //	yuuka serve              webhook endpoint + periodic reconcile
 //	yuuka reconcile [--full] one reconcile pass; --full also scans raw/
+//	yuuka reparse [--since T] rebuild derived content of messages received
+//	                         at or after T (RFC 3339 or YYYY-MM-DD; default all)
 //	yuuka version
 //
 // Configuration comes from the environment:
@@ -21,6 +23,7 @@
 //	                                    several are accepted during rotation (serve only, required)
 //	YUUKA_LISTEN                        HTTP listen address (default 127.0.0.1:31480)
 //	YUUKA_ACCOUNT                       key of the Cloudflare account in deliveries (default "cloudflare")
+//	YUUKA_TRUSTED_AUTHSERV_ID           authserv-id of the account's trusted receiver (default "mx.cloudflare.net")
 //	YUUKA_TELEGRAM_BOT_TOKEN            Telegram bot token (optional; set together with the chat id)
 //	YUUKA_TELEGRAM_CHAT_ID              Telegram chat id
 //	YUUKA_RECONCILE_INTERVAL            pending/ reconcile period for serve (default 5m)
@@ -66,7 +69,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka serve | yuuka reconcile [--full] | yuuka version")
+	return errors.New("usage: yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -92,6 +95,17 @@ func run(args []string, log *slog.Logger) error {
 			return err
 		}
 		return reconcileOnce(ctx, log, *full)
+	case "reparse":
+		fs := flag.NewFlagSet("reparse", flag.ContinueOnError)
+		since := fs.String("since", "", "only messages received at or after this time (RFC 3339 or YYYY-MM-DD)")
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		t, err := parseSince(*since)
+		if err != nil {
+			return err
+		}
+		return reparse(ctx, log, t)
 	}
 	return usage()
 }
@@ -127,7 +141,9 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 		DB:       db,
 		Account:  cfg.Account,
 		Notifier: notifier,
-		Log:      log,
+		// Each process has one account until accounts exist (§10.1.1).
+		TrustedAuthservID: cfg.TrustedAuthservID,
+		Log:               log,
 	})
 	return &app{cfg: cfg, pool: pool, in: in}, nil
 }
@@ -150,6 +166,12 @@ func reconcileOnce(ctx context.Context, log *slog.Logger, full bool) error {
 		return err
 	}
 	failed := st.Failed
+	bl, err := a.in.ProcessBacklog(ctx)
+	log.Info("content backlog", "processed", bl.Processed, "failed", bl.Failed)
+	if err != nil {
+		return err
+	}
+	failed += bl.Failed
 	if full {
 		sc, err := a.in.FullScan(ctx)
 		log.Info("full scan", "raw_objects", sc.RawObjects, "missing", sc.Missing, "recovered", sc.Recovered, "failed", sc.Failed)
@@ -160,6 +182,40 @@ func reconcileOnce(ctx context.Context, log *slog.Logger, full bool) error {
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d item(s) failed; see log", failed)
+	}
+	return nil
+}
+
+// parseSince reads --since: empty is the beginning of time.
+func parseSince(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	t, err := time.Parse(time.DateOnly, s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("--since %q: want RFC 3339 or YYYY-MM-DD", s)
+	}
+	return t, nil
+}
+
+func reparse(ctx context.Context, log *slog.Logger, since time.Time) error {
+	a, err := setup(ctx, log, false)
+	if err != nil {
+		return err
+	}
+	defer a.close()
+	st, err := a.in.Reparse(ctx, since)
+	log.Info("reparse", "backlog_processed", st.Backlog.Processed, "backlog_failed", st.Backlog.Failed,
+		"messages", st.Messages, "changed", st.Changed, "failed", st.Failed,
+		"threads", st.Threads.Threads, "moved", st.Threads.Moved)
+	if err != nil {
+		return err
+	}
+	if n := st.Failed + st.Backlog.Failed; n > 0 {
+		return fmt.Errorf("%d item(s) failed; see log", n)
 	}
 	return nil
 }
@@ -224,6 +280,11 @@ func background(ctx context.Context, log *slog.Logger, in *ingest.Ingester, inte
 		} else if st.Markers > 0 {
 			log.Info("reconcile", "markers", st.Markers, "ingested", st.Ingested, "waiting", st.Waiting,
 				"orphaned", st.Orphaned, "failed", st.Failed)
+		}
+		if bl, err := in.ProcessBacklog(ctx); err != nil {
+			log.Error("content backlog", "err", err)
+		} else if bl.Processed+bl.Failed > 0 {
+			log.Info("content backlog", "processed", bl.Processed, "failed", bl.Failed)
 		}
 		if time.Since(lastFull) >= fullScanInterval {
 			sc, err := in.FullScan(ctx)
