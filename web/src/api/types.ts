@@ -16,6 +16,11 @@ export type Delivery = S["Delivery"];
 export type Thread = S["Thread"];
 export type Prefix = S["Prefix"];
 export type PrefixList = S["PrefixList"];
+export type PrefixDetail = S["PrefixDetail"];
+export type ObservedDomain = S["ObservedDomain"];
+export type Offense = S["Offense"];
+export type LeakCheck = S["LeakCheck"];
+export type LeakVerdict = S["LeakVerdict"];
 export type SearchResult = S["SearchResult"];
 
 /** The query of GET /api/v1/messages. */

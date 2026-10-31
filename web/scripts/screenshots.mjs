@@ -110,6 +110,11 @@ if (enrollURL) {
   const outbox = await get("/api/v1/outbox?limit=1");
   const unknown = (await get("/api/v1/outbox?state=unknown&limit=1"))?.entries[0]?.id;
   const sent = (await get("/api/v1/messages?limit=200"))?.messages.find((m) => m.outgoing)?.id;
+  // The leak check (§3.3): a claimed prefix whose mail leaked or was
+  // spoofed, and one message of each kind.
+  const flagged = prefixes.prefixes.find((x) => x.leaks + x.spoofs > 0)?.address;
+  const offenses = flagged ? ((await get(`/api/v1/prefixes/${encodeURIComponent(flagged)}`))?.offenses ?? []) : [];
+  const offending = { leak: offenses.find((o) => o.verdict === "leak")?.message.id, spoof: offenses.find((o) => o.verdict === "spoof")?.message.id };
   await p.close();
 
   for (const scheme of ["light", "dark"]) {
@@ -128,6 +133,20 @@ if (enrollURL) {
       await s.goto(base + "/?area=unclaimed");
       await s.getByRole("list", { name: "Unclaimed prefixes" }).waitFor();
       await shot(s, `area-unclaimed-${tag}`);
+      await s.goto(base + "/?area=leaks");
+      await s.getByRole("heading", { name: "Leaks & spoofs" }).waitFor();
+      await shot(s, `area-leaks-${tag}`);
+      if (flagged) {
+        await s.goto(base + `/?prefix=${encodeURIComponent(flagged)}`);
+        await s.getByRole("list", { name: "Offending mail" }).waitFor();
+        await shot(s, `prefix-leaks-${tag}`);
+        for (const [verdict, id] of Object.entries(offending)) {
+          if (!id) continue;
+          await s.goto(base + `/?prefix=${encodeURIComponent(flagged)}&m=${id}`);
+          await s.getByText("Prefix", { exact: true }).waitFor();
+          await shot(s, `reading-${verdict}-${tag}`);
+        }
+      }
       await s.goto(base + `/?m=${lunch}`);
       await s.getByRole("heading", { name: /lunch on friday/i }).waitFor();
       await shot(s, `reading-${tag}`);

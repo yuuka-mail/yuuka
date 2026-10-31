@@ -18,6 +18,7 @@ import { OutboxList, parseOutboxFilter } from "@/send/outbox-list";
 import { OutboxPane } from "@/send/outbox-pane";
 import { abilities, outboxFilters, type OutboxFilter } from "@/send/outgoing";
 
+import { LeakList, PrefixFacts, useFlaggedCount } from "./leaks";
 import { MessageList } from "./message-list";
 import { PrefixPane } from "./prefix-pane";
 import { ReadingPane } from "./reading-pane";
@@ -65,13 +66,14 @@ export function MailShell({ session }: { session: SessionInfo }) {
   const searching = !!view.q;
   const browsing = !searching && !view.prefix;
   const unclaimed = browsing && view.area === "unclaimed";
+  const leaks = browsing && view.area === "leaks";
   const drafts = browsing && view.area === "drafts";
   const outbox = browsing && view.area === "outbox";
   const messages = useMessageList(view, !searching);
   const hits = useSearchList(view.q ?? "", view.dg, searching);
   const list = searching ? hits : messages;
 
-  useKeys(drafts || outbox || unclaimed ? noList : list, view, go, searchBox, can.compose ? startNew : undefined);
+  useKeys(drafts || outbox || unclaimed || leaks ? noList : list, view, go, searchBox, can.compose ? startNew : undefined);
 
   return (
     <div className="flex h-full flex-col">
@@ -106,6 +108,8 @@ export function MailShell({ session }: { session: SessionInfo }) {
             <ListHeader view={view} list={list} go={go} pick={pick} />
             {unclaimed ? (
               <UnclaimedList onPick={(prefix) => go({ prefix, m: undefined })} />
+            ) : leaks ? (
+              <LeakList onPick={(prefix) => go({ prefix, m: undefined })} />
             ) : drafts ? (
               <DraftsList session={session} states={parseDraftFilter(view.st)} selected={view.d} onSelect={(d) => compose({ d, m: undefined })} />
             ) : outbox ? (
@@ -154,7 +158,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
             />
           ) : (
             <div className="m-auto text-center text-small text-muted-foreground">
-              {unclaimed ? (
+              {unclaimed || leaks ? (
                 <p>Pick a prefix to list its mail.</p>
               ) : drafts ? (
                 <p>No draft open.</p>
@@ -188,6 +192,7 @@ const areaTitles: Record<Area, string> = {
   outbox: "Outbox",
   downgraded: "Downgraded",
   unclaimed: "Unclaimed prefixes",
+  leaks: "Leaks & spoofs",
 };
 
 const areaHints: Partial<Record<Area, React.ReactNode>> = {
@@ -195,6 +200,12 @@ const areaHints: Partial<Record<Area, React.ReactNode>> = {
   unclaimed: (
     <>
       Addresses that got mail without being claimed. Claim one with <code className="font-mono">yuuka prefix claim</code>.
+    </>
+  ),
+  leaks: (
+    <>
+      Claimed prefixes that got mail from senders they were not given to, or mail pretending to be one of those senders. Set who a
+      prefix was given to with <code className="font-mono">yuuka prefix expect</code>.
     </>
   ),
 };
@@ -214,7 +225,13 @@ function ListHeader({
   const title = view.q ? `“${view.q}”` : view.prefix ? view.prefix : areaTitles[view.area];
   const prefixes = usePrefixes();
   const unclaimed = useUnclaimedPrefixes(browsing && view.area === "unclaimed");
-  const total = browsing && view.area === "unclaimed" ? unclaimed.total : (list.total ?? knownTotal(view, prefixes.data));
+  const flagged = useFlaggedCount();
+  const total =
+    browsing && view.area === "unclaimed"
+      ? unclaimed.total
+      : browsing && view.area === "leaks"
+        ? flagged
+        : (list.total ?? knownTotal(view, prefixes.data));
   const n = total ?? list.items.length;
   const more = total === undefined && list.hasMore;
   // The zones and the review group never show downgraded mail mixed in;
@@ -264,6 +281,7 @@ function ListHeader({
         )}
       </div>
       {hint && <p className="text-small text-muted-foreground">{hint}</p>}
+      {view.prefix && !view.q && <PrefixFacts address={view.prefix} onOpen={(m) => go({ m }, true)} />}
       {browsing && view.area === "drafts" && <DraftFilter st={view.st} onChange={(st) => go({ st, d: undefined })} />}
       {browsing && view.area === "outbox" && <OutboxFilterBar st={view.st} onChange={(st) => go({ st, o: undefined })} />}
     </div>

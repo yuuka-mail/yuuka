@@ -8,6 +8,7 @@ import { count } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Abilities } from "@/send/outgoing";
 
+import { LeakDot, leakSummary, leakTone, useFlaggedCount, type LeakTone } from "./leaks";
 import type { View } from "./view";
 
 // Past this many claimed prefixes the list gets a filter box: about what
@@ -29,6 +30,7 @@ export function PrefixPane({ view, can, onPick }: { view: View; can: Abilities; 
   // rows only a person can settle.
   const drafts = useDrafts(["draft", "held"]);
   const unknown = useOutbox(["unknown"], can.outbox);
+  const flaggedCount = useFlaggedCount();
   const browsing = !view.prefix && !view.q;
   const at = (area: View["area"]) => browsing && view.area === area;
 
@@ -62,6 +64,14 @@ export function PrefixPane({ view, can, onPick }: { view: View; can: Abilities; 
         <Heading>Review</Heading>
         <Item active={at("downgraded")} label="Downgraded" n={q.data?.downgraded} onClick={() => onPick({ area: "downgraded" })} />
         <Item active={at("unclaimed")} label="Unclaimed prefixes" n={unclaimed.total} onClick={() => onPick({ area: "unclaimed" })} />
+        <Item
+          active={at("leaks")}
+          label="Leaks & spoofs"
+          n={flaggedCount || undefined}
+          warn
+          title={flaggedCount ? "claimed prefixes that got mail from senders they were not given to" : undefined}
+          onClick={() => onPick({ area: "leaks" })}
+        />
       </div>
     </nav>
   );
@@ -99,6 +109,8 @@ function Claimed({ ps, active, onPick }: { ps?: Prefix[]; active?: string; onPic
             label={zones.size > 1 ? p.address : p.prefix}
             hint={p.label}
             mono
+            mark={leakTone(p)}
+            title={leakSummary(p) || undefined}
             n={p.messages - p.downgraded}
             onClick={() => onPick({ prefix: p.address })}
           />
@@ -113,7 +125,18 @@ function Heading({ children }: { children: string }) {
   return <h2 className="mt-2 mb-1 px-3 text-meta font-medium tracking-wide text-muted-foreground uppercase">{children}</h2>;
 }
 
-function Item(props: { active: boolean; label: string; hint?: string; n?: number; more?: boolean; warn?: boolean; title?: string; mono?: boolean; onClick: () => void }) {
+function Item(props: {
+  active: boolean;
+  label: string;
+  hint?: string;
+  n?: number;
+  more?: boolean;
+  warn?: boolean;
+  title?: string;
+  mono?: boolean;
+  mark?: LeakTone;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
@@ -127,8 +150,14 @@ function Item(props: { active: boolean; label: string; hint?: string; n?: number
     >
       <span className={cn("min-w-0 truncate", props.mono && "font-mono text-small")}>{props.label}</span>
       {props.hint && <span className="min-w-0 truncate text-meta text-muted-foreground">{props.hint}</span>}
+      {props.mark && (
+        <>
+          <LeakDot tone={props.mark} className="ml-auto" />
+          <span className="sr-only">{props.title}</span>
+        </>
+      )}
       {props.n !== undefined && (
-        <span className={cn("ml-auto shrink-0 text-meta tabular-nums", props.warn ? "font-medium text-warning" : "text-muted-foreground")}>
+        <span className={cn("shrink-0 text-meta tabular-nums", !props.mark && "ml-auto", props.warn ? "font-medium text-warning" : "text-muted-foreground")}>
           {count(props.n)}
           {props.more && "+"}
         </span>

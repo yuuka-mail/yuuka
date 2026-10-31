@@ -1,4 +1,4 @@
-import type { Auth, Facts, Message, Sent, Stripped } from "@/api/types";
+import type { Auth, Facts, LeakCheck, LeakVerdict, Message, Sent, Stripped } from "@/api/types";
 
 import { fullTime } from "@/lib/format";
 import { outboxState } from "@/send/outgoing";
@@ -39,6 +39,19 @@ function authParts(a: Auth): Part[] {
   return parts;
 }
 
+const verdictTone: Record<LeakVerdict, Tone> = { ok: "ok", leak: "warn", spoof: "bad" };
+
+/** One delivery's leak check (§3.3), e.g. "github@example.com" "leak" "from example.org". */
+export function leakParts(c: LeakCheck): Part[] {
+  const about =
+    c.verdict === "spoof" ? `claims ${c.domain} unproven` : c.domain ? `from ${c.domain}` : "from an unproven sender";
+  return [
+    { text: c.to, tone: "plain" },
+    { text: c.verdict, tone: verdictTone[c.verdict] },
+    { text: about, tone: "plain" },
+  ];
+}
+
 export function strippedText(s: Stripped): string {
   const out: string[] = [];
   const add = (n: number | undefined, one: string, many: string) => n && out.push(`${n} ${n === 1 ? one : many}`);
@@ -56,6 +69,7 @@ export function systemFacts(m: Message, f: Facts | undefined): Fact[] {
   if (m.parse_error) facts.push({ label: "Parse error", parts: [{ text: m.parse_error, tone: "bad" }] });
   if (f?.sent) facts.push({ label: "Sent", parts: sentParts(f.sent) });
   if (f) facts.push({ label: "Auth", parts: authParts(f.auth) });
+  if (f?.leak_checks?.length) facts.push({ label: "Prefix", parts: f.leak_checks.flatMap(leakParts) });
   facts.push({ label: f?.auth.not_received ? "Submitted" : "Received", parts: [{ text: fullTime(m.received_at), tone: "plain" }] });
   facts.push({ label: "Class", parts: [{ text: m.class, tone: "plain" }] });
   const stripped = f && strippedText(f.stripped);
@@ -72,16 +86,18 @@ export interface Warning {
 
 /**
  * The view's warnings, split at their keyword. A forged sender and a
- * broken parse are errors; an unproven sender or a downgrade are
- * cautions.
+ * broken parse are errors; an unproven sender, a leaked address or a
+ * downgrade are cautions.
  */
 export function warnings(f: Facts | undefined): Warning[] {
   return (f?.warnings ?? []).map((w) => {
     const i = w.indexOf(": ");
     const key = i > 0 ? w.slice(0, i) : w;
-    return { key, text: i > 0 ? w.slice(i + 2) : "", tone: key === "dmarc=fail" || key === "quarantined" ? "bad" : "warn" };
+    return { key, text: i > 0 ? w.slice(i + 2) : "", tone: badWarnings.has(key) ? "bad" : "warn" };
   });
 }
+
+const badWarnings = new Set(["dmarc=fail", "quarantined", "spoof"]);
 
 /**
  * Whether the facts say nothing to act on: the trusted receiver passed

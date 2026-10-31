@@ -91,7 +91,7 @@ describe("list totals", () => {
     messages: 10,
     downgraded: 3,
     total: 1,
-    prefixes: [{ zone: "example.com", prefix: "github", address: "github@example.com", claimed: true, label: "", first_seen: "", last_seen: "", messages: 2, downgraded: 0 }],
+    prefixes: [{ zone: "example.com", prefix: "github", address: "github@example.com", claimed: true, label: "", first_seen: "", last_seen: "", messages: 2, downgraded: 0, expected_domains: [], observed: [], leaks: 0, unverified: 0, spoofs: 0 }],
   };
   const all = { area: "all" as const, dg: false };
   it("comes from the prefix aggregation", () => {

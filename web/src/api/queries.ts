@@ -37,6 +37,19 @@ export function usePrefixes() {
   return $api.useQuery("get", "/api/v1/prefixes", { params: { query: { state: "claimed" } } }, { staleTime: 30_000 });
 }
 
+/**
+ * One prefix with its leak check (§3.3) and the latest mail that leaked
+ * or spoofed; only claimed prefixes have one.
+ */
+export function usePrefixDetail(address: string | undefined, enabled = true) {
+  return $api.useQuery(
+    "get",
+    "/api/v1/prefixes/{address}",
+    { params: { path: { address: address ?? "" } } },
+    { staleTime: 30_000, enabled: enabled && !!address },
+  );
+}
+
 const pageSize = 100;
 
 /**

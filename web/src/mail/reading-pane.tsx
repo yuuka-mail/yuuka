@@ -209,6 +209,8 @@ function SystemFacts({ message: m, facts, onOpenOutbox }: { message: Message; fa
           facts && (
             <span className="truncate">
               <span className="text-system-foreground">dmarc=pass</span> {facts.auth.from_domain}
+              {/* Quiet mail only ever has ok verdicts: a leak or spoof warns. */}
+              {facts.leak_checks?.length ? <span className="text-muted-foreground"> · expected sender</span> : null}
             </span>
           )
         )}
@@ -244,7 +246,7 @@ function SystemFacts({ message: m, facts, onOpenOutbox }: { message: Message; fa
       {warns.length > 0 && (
         <ul className="mb-1.5 flex flex-col gap-0.5 border-b border-system-border pb-1.5">
           {warns.map((w) => (
-            <li key={w.key} className={cn("flex items-baseline gap-1.5", w.tone === "bad" ? "text-destructive" : "text-warning")}>
+            <li key={`${w.key} ${w.text}`} className={cn("flex items-baseline gap-1.5", w.tone === "bad" ? "text-destructive" : "text-warning")}>
               {w.tone === "bad" ? (
                 <OctagonAlertIcon aria-hidden className="size-3 shrink-0 self-center" />
               ) : (

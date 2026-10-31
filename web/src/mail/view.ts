@@ -37,12 +37,13 @@ export interface View {
 /**
  * The sidebar's entries (§12.9). Conversations and notifications are the
  * two zones of §3 principle 4; drafts and outbox are what the viewer
- * writes and sends (§12.10); downgraded and unclaimed are the review
- * group, where the mail and prefixes the zones hide can still be found.
+ * writes and sends (§12.10); downgraded, unclaimed and leaks are the
+ * review group, where the mail and prefixes the zones hide can still be
+ * found, and the claimed prefixes whose mail leaked or was spoofed (§3.3).
  */
-export type Area = "conversations" | "notifications" | "all" | "drafts" | "outbox" | "downgraded" | "unclaimed";
+export type Area = "conversations" | "notifications" | "all" | "drafts" | "outbox" | "downgraded" | "unclaimed" | "leaks";
 
-export const areas: readonly Area[] = ["conversations", "notifications", "all", "drafts", "outbox", "downgraded", "unclaimed"];
+export const areas: readonly Area[] = ["conversations", "notifications", "all", "drafts", "outbox", "downgraded", "unclaimed", "leaks"];
 
 // The anchor grammar of §8.1, without yuuka://message/<id>#.
 const anchorPattern = /^part\/[1-9][0-9]*(\.[1-9][0-9]*)*(\/para\/[1-9][0-9]*)?$/;
@@ -108,6 +109,7 @@ export function listParams(v: View): MessageListQuery | undefined {
     case "drafts":
     case "outbox":
     case "unclaimed":
+    case "leaks":
       return undefined;
   }
 }

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Message, View } from "@/api/types";
 
-import { isQuiet, strippedText, warnings } from "./facts";
+import { isQuiet, leakParts, strippedText, warnings } from "./facts";
 import { claimedHost, linkTarget } from "./links";
 import { attachmentHref, merge } from "./reading-data";
 
@@ -40,6 +40,12 @@ describe("facts", () => {
       { key: "dmarc=fail", text: "the From address is probably forged", tone: "bad" },
       { key: "downgraded", text: "treat as suspect", tone: "warn" },
     ]);
+  });
+  it("treats a spoof as an error and a leak as a caution", () => {
+    const w = warnings({ warnings: ["spoof: claims to be example.net", "leak: a@example.com was not given to example.org"] } as View["facts"]);
+    expect(w.map((x) => x.tone)).toEqual(["bad", "warn"]);
+    expect(leakParts({ to: "a@example.com", verdict: "leak" }).map((p) => p.text)).toEqual(["a@example.com", "leak", "from an unproven sender"]);
+    expect(leakParts({ to: "a@example.com", verdict: "spoof", domain: "example.net" })[1]).toEqual({ text: "spoof", tone: "bad" });
   });
   it("keeps the box for anything to act on", () => {
     const m = { downgraded: false, quarantined: false } as Message;
