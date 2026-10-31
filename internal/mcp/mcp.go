@@ -2,7 +2,8 @@
 // semantic tools over the same store, scopes and audit log as every other
 // shell (§8), never a projection of REST.
 //
-// Reading: search_messages, get_message and list_prefixes. Writing
+// Reading: search_messages, get_message, list_prefixes and
+// changes_since, which follows the change log (§8.6). Writing
 // (M2): list_identities, create_draft, update_draft and submit_draft,
 // which decides through the submission core like every other path
 // (§8.9). Annotating (M3, §8.5): annotate, undo, propose and
@@ -115,6 +116,19 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 			"counts and the operator's labels. Needs prefix:read.",
 		Annotations: readOnly,
 	}, tool(s, viewerOf, "list_prefixes", auth.PrefixRead, s.listPrefixes))
+	sdk.AddTool(srv, &sdk.Tool{
+		Name:        "changes_since",
+		InputSchema: input[ChangesInput](),
+		Description: "Follow what changes in the mailbox, old mail included: new mail, and a later classification, " +
+			"re-extracted codes and links, labels, class or archived set by a person or a rule (also a rule run over " +
+			"past mail), decisions on your proposals, your drafts and their sending. Searching by date sees new mail " +
+			"only; this sees the rest. Returns kinds and ids (yuuka:// URIs for messages), oldest first, never content: " +
+			"read what you care about with get_message or list_proposals. Call once without cursor to start from now, " +
+			"then pass back the cursor each call returns; if more is true, call again right away. On cursor_expired " +
+			"start again without a cursor. Needs message:read; delivery and outbox changes also need delivery:read, " +
+			"prefix changes prefix:read.",
+		Annotations: readOnly,
+	}, tool(s, viewerOf, "changes_since", auth.MessageRead, s.changesSince))
 
 	// The write tools need draft:create. submit_draft needs nothing more
 	// to be called: without submission:send the decision holds the draft
@@ -213,8 +227,9 @@ func refuse(format string, args ...any) error { return &userError{fmt.Sprintf(fo
 
 // result is what a tool body returns: the structured output, the text a
 // model reads, and what goes into the audit log (never mail content).
-// recorded: the store wrote the call's action itself (an annotation is
-// its own undo handle), so tool does not write another.
+// recorded: tool writes no action, because the store wrote the call's
+// action itself (an annotation is its own undo handle) or there is
+// nothing to record (an empty poll of changes_since).
 type result struct {
 	structured any
 	text       string

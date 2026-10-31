@@ -34,7 +34,7 @@ stdio 形态没有发件队列，不提供 `submit_draft`：只能起草，提�
 
 | scope | 能做什么 |
 |---|---|
-| `message:read` | `search_messages`、`get_message`、`list_proposals` |
+| `message:read` | `search_messages`、`get_message`、`list_proposals`、`changes_since` |
 | `delivery:read` | `get_message` 里多出投递事实：收件人、SPF / DKIM / DMARC 结果 |
 | `prefix:read` | `list_prefixes` |
 | `message:annotate` | `annotate`、`undo`、`propose` |
@@ -63,6 +63,7 @@ agent 不用预先知道这些，`list_identities` 会告诉它。
 | `undo` | 撤销你自己的一次 `annotate`。之后又被改过的项原样留着，计为 `superseded` |
 | `propose` | 提议让人决定：`kind=annotate` 是对一封信或线程的标注，`kind=rule` 是一条以后自动标注的规则。附理由，引用用锚点 |
 | `list_proposals` | 你自己的提案和人的决定：`pending`、`accepted`（建了规则的带 `rule_id`）、`rejected`、`withdrawn`、`expired` |
+| `changes_since` | 跟上邮箱里的变化，旧信也算：晚到的分类、重算的验证码和链接、人或规则改的标签和归档、对你提案的决定、你的草稿和它的发送。只给 kind 和 id（信给 `yuuka://` URI），不给内容，要看再用 `get_message`。先不带 `cursor` 调一次拿到起点，之后每次把返回的 `cursor` 传回；`more` 为真就接着调；报 `cursor_expired` 就从头开始。投递和发件队列的变化要 `delivery:read`，前缀的要 `prefix:read` |
 
 ### 锚点
 

@@ -248,16 +248,44 @@ agent 没有任何管理规则的工具，`propose` 是它影响规则的唯一�
 和 JMAP 的 `Email/queryChanges` 用同一套状态机——**人和 agent 共用一套增量同步**，
 不维护两份。agent 断线重连只拉差量。
 
-拉取和推送分两步落地：**M3 先给游标的拉取**（REST 和 MCP 各一个 `list_changes(since_state)`），
-M4 再在同一个游标上加 SSE 推送。M3 就要它，因为提案闭环和 §15 的「模型拿不准的信交给 agent」
+拉取和推送分两步落地：**M3 先给游标的拉取**，M4 再在同一个游标上加 SSE 推送。M3 就要它，因为提案闭环和 §15 的「模型拿不准的信交给 agent」
 都要求 agent 跟上旧信上的变化（评分晚到、提取重算、改判、规则回溯），
 而按 `received_at` 轮询 `search_messages` 只看得到新到的信。也不做 yuuka 主动回调 agent：
 那是一条要鉴权、重试、登记目标的新外发通道，而无状态 HTTP 的 MCP 客户端本来就要拉。
 
-- 游标就是 `changes.seq`。它能当游标，是因为每个写 `changes` 的事务都先拿内容层那把咨询锁（§4.5），
-  `seq` 因此按提交顺序分配，读者不会在跳过一个尚未提交的号之后前进。新加 `changes` 的写入方必须照做
-- 流里只有 `(seq, kind, target_id)`，不带头部和内容；要看再调读工具。读它走 `Viewer`（§13.8）、进 ACL 测试表：
-  受限主体只看到它看得见的对象的变化
+拉取已落地：store 的 [`Changes`](../../internal/store/changes.go)，REST 的
+[`GET /api/v1/changes`](../../internal/api/changes.go)，MCP 的
+[`changes_since`](../../internal/mcp/changes.go)。形状以代码和 OpenAPI 为准，这里只留不变量和取舍：
+
+- **游标就是 `changes.seq`，靠的是一把锁。** `changes` 只有一处写入（`writer.flush`，
+  [`TestOneWayIntoChanges`](../../internal/store/changes_test.go) 守着），它在行取号之前自己拿内容层那把咨询锁（§4.5）。
+  锁从取号一直持到提交，`seq` 因此按提交顺序变得可见：读者看到 N+1 时 N 一定已提交或已回滚，
+  游标不会越过一个之后才提交的号。写入方本来就先拿这把锁，flush 再拿一次不花钱，
+  好处是顺序不再依赖每个写入方记得加锁。`TestChangesFollowCommitOrder` 用一个拿号后不提交的事务验证这一条，
+  去掉 flush 里的锁它就失败。审计时没有发现不拿锁写 `changes` 的写入方；草稿的写入（`logDraftChange`）
+  原先自己拼 `INSERT`、在改完行之后才拿锁，顺序上没问题，现在也改走 flush
+- **对外不透明。** 游标是 `c1 <seq>` 的 base64url（[`agentview/changes.go`](../../internal/agentview/changes.go)），
+  和 §5.1「会有新行插到头部的列表用不透明游标」一致。`c1` 留出余地：以后要在游标里加别的（比如区分恢复过的库的纪元）不用让客户端改
+- **起点是「现在」。** 不带游标调用只返回当前游标、不返回变化。客户端的正确顺序是先拿游标、再读它关心的现状、
+  再从游标跟：中间的变化会重复看到，但重读是幂等的，不会漏。不提供「从头回放」的公开入口：日志不是归档
+- **每次最多扫 1000 行**（`changeScan`），按 `limit` 截取可见的；游标越过看不见的行，下次不再扫。
+  于是一页可能很短甚至为空而 `more` 为真，客户端照 `more` 接着要即可。一页内同一对象只出现一次，在它最后一次变化的位置
+- **流里只有 `kind`、对象 id、时间**，不带头部和内容；投递多给一个所属消息的 id（没有单独读投递的端点）。
+  要看再调读工具，那时看到的可能已是更新的状态，或者对象已不在（404），都正常
+- **可见性不新算，只组合**（§13.8）：消息、标注（`flag`）、线程按消息的规则，投递按投递的，outbox 按发信身份所属账户，
+  草稿按 `visibleDraft`，提案按 `proposalVisible`，规则只给人，前缀登记表本来对能列前缀的主体全可见。
+  已消失的对象只剩 id：被重排清空的线程只给能读所有账户的主体，删掉的草稿只给能看所有草稿的人。
+  取舍：别人删了 agent 的草稿，agent 从变化里看不到，要等它再读那份草稿拿到 404；
+  要做到需要记下作者，不值得为这个加列。`TestVisibility` 对每条变化断言「列出 ⟺ 对象自己的读路径可见」
+- **kind 按 scope 收窄。** 端点要 `message:read`；`delivery`、`outbox` 另要 `delivery:read`，`prefix` 要 `prefix:read`，
+  `rule` 要 `rule:manage`（[`ChangeKind.Scopes`](../../internal/agentview/changes.go)）。不指定 `kinds` 就是凭据够得着的全部；
+  显式要了够不着的 kind 回 `403 scope_required`，而不是悄悄滤掉——那样客户端会以为「没有变化」。
+  `kinds` 过滤掉的行游标照样越过，所以改 `kinds` 要从「现在」重新开始
+- **游标过期**：`changes` 目前不清理（个人量级每年 10^5～10^6 行，能接受）。
+  游标超过日志末尾（库从备份恢复了，或游标来自别的部署）回 `410 cursor_expired`，客户端从「现在」重来并重读手上的东西。
+  以后若要清理，清理方要记下清到了哪，读者对低于它的游标回同一个码。
+  没覆盖的情形：恢复之后日志又涨过了客户端的游标，这时检测不到，靠的是 `c1` 留下的余地以后加纪元
+- MCP 的空轮询不记 `actions`：它什么也没透露，而 agent 会频繁地拉；返回了变化的调用照常记（§8.8）
 
 ### 8.7 MCP 面要窄且语义化
 
@@ -268,6 +296,7 @@ search_messages(q, prefix?, class?, since?, limit)   -- 返回锚点 + snippet
 get_message(uri, level=snippet|sections|part)        -- 分层，省 token
 get_otp(prefix|thread)                               -- 高频意图直接成 tool
 list_prefixes(leak_suspect?)                         -- 前缀视角
+changes_since(cursor?, kinds?)                       -- 跟上旧信上的变化（§8.6），只给 kind + id
 propose(kind, target, payload, rationale)            -- 标注类的写入口
 create_draft(identity, ..., cites)                   -- 起草，cites 是 §8.9 审核的输入
 submit_draft(draft_id)                               -- 按授权决定结果：sent | held | drafted(原因)

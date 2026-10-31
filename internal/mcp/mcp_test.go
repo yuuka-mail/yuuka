@@ -428,7 +428,7 @@ func TestToolsWriteOnlyTheAuditLog(t *testing.T) {
 		}
 		names = append(names, tl.Name)
 	}
-	if strings.Join(names, ",") != "get_message,list_identities,list_prefixes,list_proposals,search_messages" {
+	if strings.Join(names, ",") != "changes_since,get_message,list_identities,list_prefixes,list_proposals,search_messages" {
 		t.Fatalf("read-only tools = %v; a new tool needs its own write test", names)
 	}
 	// The draft tools write drafts (TestDraftTools), the annotation
@@ -455,6 +455,8 @@ func TestToolsWriteOnlyTheAuditLog(t *testing.T) {
 		{"list_prefixes", map[string]any{}},
 		{"list_identities", map[string]any{}},
 		{"list_proposals", map[string]any{}},
+		// From the start of the log, so that it lists something.
+		{"changes_since", map[string]any{"cursor": agentview.ChangeCursor(0)}},
 	}
 	for _, c := range calls {
 		callTool(t, cs, c.tool, c.args)
