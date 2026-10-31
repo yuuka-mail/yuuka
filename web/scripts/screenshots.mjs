@@ -59,14 +59,12 @@ async function page(scheme, size, storageState, lang) {
     origin: new URL(base).origin,
   });
   const p = await ctx.newPage();
-  // A signed-out /auth/session is a 401 by design, and so is the 404 of
-  // the triage report without a scorer (§15); anything else is a problem.
+  // A signed-out /auth/session is a 401 by design; anything else is a problem.
   p.on(
     "console",
     (m) =>
       m.type() === "error" &&
       !/status of 401/.test(m.text()) &&
-      !(/status of 404/.test(m.text()) && m.location().url.includes("/api/v1/triage/report")) &&
       problems.push(`${scheme}/${size} ${p.url()}: ${m.text()}`),
   );
   p.on("pageerror", (e) => problems.push(`${scheme}/${size} ${p.url()}: ${e.message}`));
@@ -207,10 +205,10 @@ if (enrollURL) {
   // Who may do what (§13.10): only a person's own session with admin sees it.
   const admin = (await get("/auth/session"))?.scopes.includes("admin");
   const claimed = prefixes.prefixes.find((x) => x.claimed)?.address;
-  // A scorer's estimates (§15), when one is configured: the report answers
-  // 404 without one, and then none of the triage shots are taken. Scores
-  // come from whatever scorer the server was started with.
-  const triage = await get("/api/v1/triage/report");
+  // A scorer's estimates (§15), when one is configured (the counts say);
+  // without one none of the triage shots are taken. Scores come from
+  // whatever scorer the server was started with.
+  const triage = (await get("/api/v1/counts"))?.triage;
   const leaning =
     triage &&
     (await get("/api/v1/messages?triage=phishing:yes&downgraded=include&limit=1"))?.messages[0];

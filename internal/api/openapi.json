@@ -569,11 +569,15 @@
           },
           "drafts": {
             "$ref": "#/components/schemas/DraftCounts"
+          },
+          "triage": {
+            "type": "boolean"
           }
         },
         "required": [
           "proposals",
-          "drafts"
+          "drafts",
+          "triage"
         ],
         "additionalProperties": false
       },

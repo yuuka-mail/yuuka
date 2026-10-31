@@ -463,7 +463,7 @@ func (a *API) counts(ctx context.Context, v *auth.Viewer, _ struct{}) (Counts, e
 	if err != nil {
 		return Counts{}, err
 	}
-	out := Counts{Proposals: c.Proposals, Drafts: DraftCounts{Open: c.DraftsOpen, Held: c.DraftsHeld}}
+	out := Counts{Proposals: c.Proposals, Drafts: DraftCounts{Open: c.DraftsOpen, Held: c.DraftsHeld}, Triage: a.triage != nil}
 	if v.Has(auth.DeliveryRead) {
 		out.Outbox = &OutboxCounts{Held: c.OutboxHeld, Unknown: c.OutboxUnknown, Attention: c.OutboxAttention}
 	}

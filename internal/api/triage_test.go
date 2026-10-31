@@ -155,6 +155,12 @@ func TestTriage(t *testing.T) {
 	if w := off.get("/api/v1/triage/report", person); w.Code != http.StatusNotFound {
 		t.Errorf("report without a scorer: %d %s", w.Code, w.Body.String())
 	}
+	// The counts say whether there is one, to anyone who reads mail, so
+	// nobody has to ask the report and get the 404.
+	if !decode[Counts](t, h.get("/api/v1/counts", h.token(auth.MessageRead))).Triage ||
+		decode[Counts](t, off.get("/api/v1/counts", person)).Triage {
+		t.Error("counts.triage does not say whether a scorer is configured")
+	}
 	if page := decode[MessagePage](t, off.get("/api/v1/messages?downgraded=include", person)); slices.ContainsFunc(page.Messages,
 		func(m MessageSummary) bool { return m.Triage != nil }) {
 		t.Error("scores listed without a scorer")

@@ -452,6 +452,10 @@ type Counts struct {
 	// for an agent its own waiting on one.
 	Proposals int         `json:"proposals"`
 	Drafts    DraftCounts `json:"drafts"`
+	// Triage is whether a scorer is configured (§15): without one no
+	// mail is scored, triage= is refused and there is no report. It is
+	// here so a sidebar learns it from the request it makes anyway.
+	Triage bool `json:"triage"`
 }
 
 // OutboxCounts are the outbox rows that wait or went wrong.

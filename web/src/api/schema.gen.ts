@@ -3027,6 +3027,7 @@ export interface components {
             outbox?: components["schemas"]["OutboxCounts"];
             proposals: number;
             drafts: components["schemas"]["DraftCounts"];
+            triage: boolean;
         };
         /** @enum {string} */
         CredentialKind: "token" | "smtp_password";

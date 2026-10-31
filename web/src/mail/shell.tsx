@@ -115,8 +115,8 @@ export function MailShell({ session }: { session: SessionInfo }) {
   const messages = useMessageList(view, !searching);
   const hits = useSearchList(view.q ?? "", view.dg, searching, view.tr);
   const list = searching ? hits : messages;
-  // Whether a scorer is configured (§15): without one there is nothing to
-  // filter by, and the filter would answer 400.
+  // Whether a scorer is configured (§15), and its report: without one there
+  // is nothing to filter by, and the filter would answer 400.
   const triage = useTriageReport(undefined, can.triage);
 
   useKeys(

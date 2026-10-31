@@ -349,28 +349,29 @@ export function useThread(id: string | undefined) {
 
 /**
  * How the configured scorer's latest estimates fall over the mail the
- * viewer sees (§15.5); people only. It doubles as the question whether
- * there is a scorer at all: 404 means none is configured, and then the
- * WebUI offers no filter by estimate (the filter would answer 400).
+ * viewer sees (§15.5); people only. Whether there is a scorer at all comes
+ * from the counts the sidebar polls anyway: the report is asked only when
+ * there is one, and without one the WebUI offers no filter by estimate
+ * (the filter would answer 400).
  */
 export function useTriageReport(since: string | undefined, enabled = true) {
+  const scorer = useCounts().data?.triage;
   const q = $api.useQuery(
     "get",
     "/api/v1/triage/report",
     { params: { query: { since } } },
     {
-      enabled,
+      enabled: enabled && scorer === true,
       staleTime: 5 * 60_000,
-      // 404 (no scorer) and 403 are answers, not failures to retry.
+      // 403 is an answer, not a failure to retry.
       retry: (n, err) => !(err instanceof ApiError && err.status < 500) && n < 2,
     },
   );
-  const none = q.error instanceof ApiError && q.error.status === 404;
   return {
     report: q.data,
     /** Whether a scorer is configured; undefined until known, or when not asked. */
-    scorer: q.data ? true : none ? false : undefined,
-    error: none ? undefined : q.error,
+    scorer: enabled ? scorer : undefined,
+    error: q.error,
     isLoading: q.isLoading,
   };
 }
