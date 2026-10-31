@@ -8,24 +8,29 @@
 所以不带 `-mail` 后缀（先例：Docker 的吉祥物 Moby 后来成了开源项目名）。
 邮件只是第一个入口形态，§9 的设计迟早会接 IM / webhook / RSS，名字不该锁死在 mail。
 
+下面是命令面的名字登记：子命令名是对外标识（AGENTS.md 的单向门），新增要先在这里登记。
+已实现的子命令以 [`cmd/yuuka`](../cmd/yuuka/main.go) 为准，参数不在这里重复。
+
 ```
 github.com/yuuka-mail/yuuka             # module
 yuuka serve                             # 常驻：HTTP + ingest + 调度
+yuuka reconcile                         # 手动跑一轮 §2.1 的 reconcile，可选全量对账
 yuuka ingest --once                     # 手动跑一轮 pull driver
-yuuka reparse [--since …]               # 从不可变原件重建派生数据（§3.1）
-yuuka prefix ls|label|leaks             # 前缀注册表（§3.3）
-yuuka prefix ls [--state …] [--zone …]  # 列出前缀：状态、首次 / 末次投递、投递数
-yuuka prefix claim <local>@<zone>       # 认领前缀：其信不再降级，此后的新信推送（§4.3）
-yuuka prefix unclaim <local>@<zone>     # 取消认领，回到 discovered
-yuuka token issue --principal … --scope …  # 给 agent / service 签发 bearer token，只显示一次（§13.3）
-yuuka token ls [--principal …]          # 列出 token：主体、scope、各时间点，不含秘密
-yuuka token revoke <credential-id>      # 吊销 token，REST 与 MCP 下一次请求起失效
+yuuka reparse                           # 从不可变原件重建派生数据（§3.1、§4.2）
+yuuka prefix ls                         # 列出前缀：状态、首次 / 末次投递、投递数
+yuuka prefix claim                      # 认领前缀：其信不再降级，此后的新信推送（§4.3）
+yuuka prefix unclaim                    # 取消认领，回到 discovered
+yuuka prefix label|leaks                # 前缀注册表的标注与泄漏视图（§3.3）
+yuuka token issue                       # 给 agent / service 签发 bearer token，只显示一次（§13.3）
+yuuka token ls                          # 列出 token：主体、scope、各时间点，不含秘密
+yuuka token revoke                      # 吊销 token，REST 与 MCP 下一次请求起失效
 yuuka outbox ls|retry|dead              # 出口状态机（§3.6）
 yuuka account add|sync|caps             # 多账户（§9）
 yuuka doctor                            # DNS / SPF / DKIM / 出口授权自检（§10.4.4）
 yuuka admin enroll                      # 签发一次性 passkey 注册链接与离线恢复码（§13.7）
-yuuka://message/<ulid>#part/2/para/7    # agent 锚点 scheme（§8.1）
 yuuka mcp --stdio                       # 本地 stdio 形态的 MCP（§8.7）；HTTP 形态内置在 serve
+yuuka version                           # 打印版本
+yuuka://message/<ulid>#part/2/para/7    # agent 锚点 scheme（§8.1）
 ```
 
 ### 11.2 名字不进邮件头
@@ -61,22 +66,12 @@ package 声明是 `yuuka`，binary 由 `cmd/yuuka` 决定。
 
 ```
 yuuka-mail/yuuka
-├─ cmd/yuuka/             # CLI + server 入口（§11）
-├─ internal/
-│  ├─ ingest/             # driver 契约（§10.1）
-│  │  ├─ cfworker/        #   push driver
-│  │  └─ imap/            #   pull driver（M3.5）
-│  ├─ transport/          # smtp driver，一个实现通吃（§10.2）
-│  ├─ mimeparse/          # go-message 封装，唯一一份解析实现
-│  ├─ store/              # raw store(R2+本地) + Postgres
-│  ├─ classify/ rules/    # 双区分流（§3.4）
-│  ├─ outbox/             # 出口状态机（§3.6）
-│  ├─ notify/             # TG 等，yuuka 署名（§8.4、§11.1）
-│  └─ api/                # REST + JMAP 子集 + MCP（§8.7）
-├─ worker/                # Cloudflare Email Worker（TS，~150 行）
-├─ web/                   # 前端，产物 embed 进二进制
-├─ docs/                  # 设计文档，按 § 拆分，索引见 docs/README.md
-└─ testdata/              # .eml 契约语料（§10.5）
+├─ cmd/yuuka/      # CLI + server 入口（§11）
+├─ internal/       # Go 包；怎么分包是双向门，以代码为准
+├─ worker/         # Cloudflare Email Worker（TS）
+├─ web/            # 前端，产物 embed 进二进制
+├─ docs/           # 设计文档，按 § 拆分，索引见 docs/README.md
+└─ testdata/       # .eml 语料（§10.5）与 Worker ↔ Go 契约向量（§2.2）
 ```
 
 `ix64/spf` 直接 `require` 进来用于 §3.3 的辅助 SPF 判定（不参与 From 身份判断）；

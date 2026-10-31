@@ -205,17 +205,16 @@ M1 的落法（`internal/mcp`）：
     它保证的是 agent 走 API 时的 scope 和审计。不可信的 agent 应该用 HTTP 形态，拿不到数据库凭据
 - MCP 库用官方 Go SDK（`github.com/modelcontextprotocol/go-sdk`）：MCP 组织与 Go 团队共同维护，
   跟着协议版本走；自己实现要长期追协议协商、streamable HTTP 和 SSE 的变化，不值得
-- **agent 怎么拿到 token**：运维者在主机上跑
-  `yuuka token issue --principal agent:arisu --scope message:read,delivery:read,prefix:read --label <用在哪>`
-  （主体不存在会建；scope 逐个写明，没有默认值，§13.3、§13.4）。stdout 上那一行就是 token，只出现这一次：
-  HTTP 形态放进客户端的 `Authorization: Bearer <token>`，stdio 形态放进启动 `yuuka mcp --stdio` 的环境变量
-  `YUUKA_MCP_TOKEN`。只读的三件工具用不到别的 scope，多给的也不会让它多做什么，只会扩大泄漏面。
-  `yuuka token ls` 看哪把还在用，`yuuka token revoke <id>` 收回，下一次调用起失效。WebUI 入口还没有
+- **agent 怎么拿到 token**：运维者在主机上用 `yuuka token issue` 签发（§13.3），scope 只给
+  `message:read` `delivery:read` `prefix:read`：只读的三件工具用不到别的 scope，多给的也不会让它多做什么，
+  只会扩大泄漏面。HTTP 形态放进 `Authorization: Bearer`，stdio 形态放进上面那个环境变量。
+  `yuuka token revoke` 收回，下一次调用起失效。WebUI 入口还没有
 
 ### 8.8 审计与回放
 
-`actions(id, actor → principals.id, credential_id → credentials.id, tool, args, result, undo_token, at)`
-（主体模型见 §13.2）记录每一次动作。`credential_id` 回答「是哪一把凭据干的」——一个主体可以有多把（§13.3）。
+`actions`（表定义见 [`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)，主体模型见 §13.2）
+记录每一次动作：谁（`actor`）、用哪一把凭据（`credential_id`）、做了什么、结果、撤销用的 `undo_token`。
+`credential_id` 回答「是哪一把凭据干的」——一个主体可以有多把（§13.3）。
 认证事件也写在这里（登录、登出、注册 passkey、恢复码、越权被拒）；
 还没认证成功的调用方（登录失败、错误的恢复码）没有主体，`actor` 为空。可以随时回答"昨天 agent 干了什么"，并一键回滚标注类动作。
 配合 §3.1 的不可变原件：agent 够不到原件，**收件侧的一切都可恢复**。

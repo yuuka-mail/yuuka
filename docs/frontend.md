@@ -122,36 +122,28 @@ iframe 里是原信自己的 HTML，我们无法在其中挂稳定 id。所以 a
 
 M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里没写死、实现时定下的几处：
 
-- **REST 只读、按路由声明 scope**。`/api/v1/` 下七个端点：`messages`（列表，过滤 prefix / class /
-  降级，`(received_at, id)` 键集游标）、`messages/{id}`、`messages/{id}/view`（§8.1 的结构化视图，
-  `level=snippet|sections|part`，默认 `part`；`anchor=part/<section>[/para/<n>]`，不带 `#`）、
-  `messages/{id}/attachments/{part}`（附件下载，见下）、`threads/{id}`、`prefixes`（聚合计数）、`search`。`prefixes` 要 `prefix:read`，其余要 `message:read`；
-  `messages/{id}` 里的投递事实（信封、认证结果）另要 `delivery:read`，没有就不给，
-  `view` 里的 `facts.delivered_to` 和 `facts.auth` 同理（标 `withheld`，§8.1）。路由和 scope 写在一张表里，
-  ACL 测试遍历这张表，漏一条测试就失败。列表用键集而不是 offset，是因为新信到达时 offset 分页会重复或跳行
-- **附件只下载，不渲染**（§8.3、§12.2）。`messages/{id}/attachments/{part}` 的 `{part}` 是结构化视图
-  `content.attachments` 里报的 IMAP section 号；要 `message:read`，经 `MessageByID` 按 Viewer 取信、
-  原件只从可见的投递读（§13.8）。什么算附件只由解析器的 `Attachment` 判定决定，和列表同源：
-  正文、`multipart` 容器、以 Content-ID 内嵌在 HTML 里的图片一律 404。字节只解传输编码（base64 / QP），
-  不做字符集转换——下载的是发件人附上的原样文件；base64 解不开就 422，而不是给一个悄悄变短的文件。
-  响应头固定：`Content-Disposition: attachment`，文件名按 RFC 6266 给两份（ASCII 回退的 `filename=`
-  和 RFC 8187 百分号编码的 `filename*=UTF-8''`），先去掉路径、控制字符和双向格式字符（防 `txt.exe`
-  显示成 `exe.txt`）、开头的点，限 200 字节且保留扩展名；`X-Content-Type-Options: nosniff`、
-  `Content-Security-Policy: default-src 'none'; sandbox`、`Cross-Origin-Resource-Policy: same-origin`、
-  `Cache-Control: no-store`。`Content-Type` 只在声明类型属于 `application/pdf`、`image/png`、
-  `image/jpeg`、`image/gif`、`image/webp` 时照用，其余一律 `application/octet-stream`：
-  反正不会内联显示，类型只影响保存下来的文件被系统认成什么；这几种是最常见、打开时不执行脚本的格式，
-  HTML、SVG、XML、脚本和 `text/*`（声明的字符集可能是错的）都不在内。
-  每次下载记一条 `actions`（`api.attachment.download`：谁、哪封、哪个 part、字节数；不记内容和文件名），
-  记不下来就不给下载。agent 侧还没有对应的 MCP 工具，`get_message` 里附件仍标「此处不可读」
-- **类型由 `tygo` 生成**，覆盖 `internal/api/types.go` 和 `internal/authn/wire.go`
-  （`/auth/` 的响应体）以及 `internal/agentview/types.go`（结构化视图），`mise run web:check` 先 `go generate` 再类型检查，Go 侧改了字段 TS 立刻报错
+- **REST 只读、按路由声明 scope**。端点和各自要的 scope 写在 [`internal/api/api.go`](../internal/api/api.go)
+  的 `routes` 一张表里，ACL 测试遍历这张表，漏一条测试就失败。投递事实（信封、认证结果）另要
+  `delivery:read`，没有就不给，结构化视图里的 `facts.delivered_to` 和 `facts.auth` 同理（标 `withheld`，§8.1）。
+  列表用 `(received_at, id)` 键集游标而不是 offset，是因为新信到达时 offset 分页会重复或跳行
+- **附件只下载，不渲染**（§8.3、§12.2），实现见 [`internal/api/attachment.go`](../internal/api/attachment.go)。
+  按 Viewer 取信、原件只从可见的投递读（§13.8）；什么算附件只由解析器的判定决定，和视图里列出的同源，
+  正文和内嵌图片不算。几条取舍：
+  - 字节只解传输编码，不做字符集转换——下载的是发件人附上的原样文件；解不开就报错，而不是给一个悄悄变短的文件
+  - 文件名去掉路径、控制字符和双向格式字符（防 `txt.exe` 显示成 `exe.txt`），保留扩展名
+  - 响应头一律按下载处理（`attachment`、`nosniff`、沙箱 CSP、`no-store`）。`Content-Type` 只对少数
+    打开时不执行脚本的常见格式照用声明值，其余一律 `application/octet-stream`：反正不会内联显示，
+    类型只影响保存下来的文件被系统认成什么；HTML、SVG、XML、脚本和 `text/*`（声明的字符集可能是错的）都不在内
+  - 每次下载记一条 `actions`（谁、哪封、哪个 part、字节数；不记内容和文件名），记不下来就不给下载
+  agent 侧还没有对应的 MCP 工具，`get_message` 里附件仍标「此处不可读」
+- **类型由 `tygo` 生成**，覆盖哪些 Go 文件见 [`internal/api/tygo.yaml`](../internal/api/tygo.yaml)；
+  前端检查先 `go generate` 再类型检查，Go 侧改了字段 TS 立刻报错
 - **页面壳不需要会话**。`go:embed` 的 `index.html` 对任何非文件路径都返回（`no-store`），
   哈希命名的 `assets/` 缓存一年；壳加载后再同源 `fetch /auth/session`，401 就原地显示登录，
   URL 不变，所以从 TG 链接点进来、登录后直接落在那封信上。视图状态全部在 query string 里
   （`prefix` `class` `dg` `q` `m`，以及 `a`：打开的信里的锚点），不引路由库
 - **`web/dist/` 只跟踪 `.gitkeep`**，让新克隆不先构建前端也能编译 Go；这样的二进制对页面请求回 503
-  并提示 `mise run web:build`。代价是 Vite 不能清空输出目录，改为构建前只删 `dist/assets`
+  并提示先构建前端。代价是 Vite 不能清空输出目录，改为构建前只删 `dist/assets`
 - **CSP** 是 `default-src 'none'` 加 self 的脚本、样式、图片、连接，`frame-ancestors 'none'`。
   M2 加 iframe 时在这里开 `frame-src`
 - **登录页不链接恢复入口**（§13.7：恢复码不出现在日常登录路径上）；`/recover` 换到令牌后直接跳
@@ -173,8 +165,8 @@ M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里�
 - **lint 用 oxlint 而不是 ESLint**：仓库固定 TypeScript 7（与 Worker 一致），typescript-eslint
   还不支持它；oxlint 不依赖 TS 的 JS API，一个依赖就带齐 React hooks 规则。typescript-eslint
   支持 TS 7 之后可以换回去，规则集不变
-- **开发**：`mise run web:dev` 在 `localhost:31473` 起 Vite，把 `/api`、`/auth` 代理到
-  `YUUKA_DEV_API`（默认 `127.0.0.1:31480`）；那个 `yuuka serve` 的 `YUUKA_WEB_ORIGIN` 要设成
-  `http://localhost:31473`，WebAuthn 和跨源检查才认。`go run ./internal/devseed/cmd` 把合成语料
-  和生成的变体灌进开发库，原件写进 `YUUKA_DATA_DIR`（或 `-data-dir`），结构化视图从那里读；`pnpm run screenshots`（`web/scripts/screenshots.mjs`）用 Chrome 的虚拟
-  认证器走完注册和登录，截亮、暗、窄屏三套图
+- **开发**：Vite 开发服务器把 `/api`、`/auth` 代理到一个本地的 `yuuka serve`（任务与端口见
+  [`mise.toml`](../mise.toml)）；那个 `serve` 配置的 WebUI origin 要设成 Vite 的地址，WebAuthn 和跨源检查才认。
+  [`internal/devseed`](../internal/devseed/) 把合成语料和生成的变体灌进开发库；
+  [`web/scripts/screenshots.mjs`](../web/scripts/screenshots.mjs) 用 Chrome 的虚拟认证器走完注册和登录，
+  截亮、暗、窄屏三套图

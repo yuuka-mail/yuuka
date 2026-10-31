@@ -15,6 +15,11 @@ driver **一律不解析 MIME**——这是契约里最重要的一条。
 
 ### 10.1 收：Push 和 Pull 两种形状，一个产出
 
+**实现现状**：下面的 driver 接口还没有落成代码。目前只有 Cloudflare 一个 push 来源，
+它直接实现在 [`internal/ingest`](../internal/ingest/ingest.go)（§2.1 的 Go 侧），
+写库入口是 [`store.CommitIngest`](../internal/store/store.go)，`source_key` 由 `store.PushSourceKey` 算出。
+接口和 `InboundRef` 仍是设计，等第二种来源（IMAP，M3.5）接入时再从现有代码里抽出来。
+
 ```go
 // 所有 driver 的唯一产出：原件引用 + 稳定标识 + 远端定位 + 来源
 type InboundRef struct {
@@ -94,10 +99,10 @@ type Expunger interface {
   | Gmail（IMAP 或 API） | `X-GM-MSGID`〔待核实：与 Gmail API 的 message id 是否为同一个 64 位数，是则统一存一种写法，换 driver 不用迁移〕 | 稳定 | 稳定 |
   | 支持 OBJECTID（RFC 8474）的 IMAP | `EMAILID` | 稳定 | 稳定 |
   | 其他 IMAP | 定位本身：`<mailbox>/<uidvalidity>/<uid>` | 变 | 变（见下） |
-  | push 来源（Worker 等） | `(envelope_to, content_hash)`，ingest 算完 `content_hash` 后填 | — | — |
+  | push 来源（Worker 等） | `content_hash` + `envelope_to`（`store.PushSourceKey`），ingest 算完 `content_hash` 后填 | — | — |
 
   push 来源用内容而不是 Worker 的调用 id，是因为调用 id 每次重投都会变：用它做键，重投去重就只能先查后插。
-  用 `(envelope_to, content_hash)` 做键，重投直接撞上唯一约束（§4.1）。调用 id 仍然是 `raw_objects.id`。
+  用收件地址加内容哈希做键，重投直接撞上唯一约束（§4.1）。调用 id 仍然是 `raw_objects.id`。
 - **对远端的每个操作都先验证定位**（`FetchBody` / `SetFlags` / `Expunge` 一样）：
   1. `SELECT` 后 UIDVALIDITY 与 `Loc` 不同 → 不动作，返回 `ErrStaleLoc`
   2. `SourceKey` 是稳定 id 的来源，再 `UID FETCH <uid> (X-GM-MSGID)`（或 `EMAILID`）确认对得上
@@ -124,7 +129,7 @@ type Expunger interface {
 
 `Authentication-Results`、`Received`、`Received-SPF` 都是普通的头，
 **发件人可以在信里预先写好任意一份**。catch-all 下这不是理论风险。所以认证事实不由 driver 上报，
-而由 Go 侧 ingest 按账户配置的可信接收方提取：
+而由 Go 侧 ingest 按账户配置的可信接收方提取（实现见 [`internal/authres`](../internal/authres/authres.go)）：
 
 - 每个账户配 `trusted_authserv_id`（Cloudflare Email Routing 的、`mx.google.com`、工作邮箱服务器的），
   外部账户的取值是 M3.5 接入时的实测项
@@ -141,8 +146,8 @@ type Expunger interface {
 - `X-CF-SpamH-Score` 只从原件最顶上那一段接收方字段里取（`Received` 只算第一条，
   其余是 `ARC-*`、`Received-SPF`、`Authentication-Results`、它自己）；同名字段出现在更下面就是发件人写的，忽略。
   Cloudflare 没加而发件人恰好把它写在自己头部第一行时分辨不出，它只是信号、不单独决定任何事，可以接受
-- M1 还没有 `accounts` 表，`trusted_authserv_id` 暂时是进程配置（`YUUKA_TRUSTED_AUTHSERV_ID`，
-  默认 `mx.cloudflare.net`），一个进程对应一个账户。`spf_recheck` 在 M1 恒为空，二次 SPF 判定还没接
+- M1 还没有 `accounts` 表，`trusted_authserv_id` 暂时是进程配置（见 [`cmd/yuuka/config.go`](../cmd/yuuka/config.go)，
+  默认是下文实测的 Cloudflare 取值），一个进程对应一个账户。`spf_recheck` 在 M1 恒为空，二次 SPF 判定还没接
 
 这些都是头部解析，在 Go 侧做，不违反「driver 不解析 MIME」。
 

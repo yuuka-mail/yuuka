@@ -28,15 +28,8 @@ per-user 配额、角色（role）层。权限只用扁平 scope 表达，不要
 ### 13.2 principals
 
 `actions.actor`（§8.8）此前是字符串，现在升为一等实体，`actor` 变成外键。
-
-```sql
-principals(
-  id, kind, name, display_name,
-  owner_id → principals,      -- 服务凭据归属于哪个 human，构成可撤销链
-  created_at, disabled_at
-)
--- kind: human | agent | service | rule | system
-```
+表定义见 [`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)：`kind` 是 human / agent / service / rule / system 五种之一；
+`owner_id` 让服务凭据归属于某个 human，构成可撤销链。
 
 实际会有的主体：
 
@@ -54,16 +47,8 @@ principals(
 
 ### 13.3 credentials：和主体分离
 
-一个主体可以有多把凭据，各自独立撤销：
-
-```sql
-credentials(
-  id, principal_id → principals, kind, label,
-  secret_hash, scopes text[],
-  expires_at, last_used_at, revoked_at
-)
--- kind: session | token | smtp_password | oauth
-```
+一个主体可以有多把凭据，各自独立撤销。`kind` 分 session / token / smtp_password / oauth 四种，
+表定义见 [`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)。
 
 分离的好处很具体：给某台机器发一把只能发信的 SMTP 密码，换机器时撤销这一把，
 不影响同一主体的其他凭据，也不用改 principal 本身。
@@ -76,7 +61,7 @@ credentials(
 
 可校验的三类秘密都由服务端生成，从不接受人选的值，所以 `secret_hash` 用 SHA-256 而不是慢哈希：
 256 位的随机串没有可穷举的空间，慢哈希只会拖慢每个请求。交给持有者的字符串是
-`<前缀>_<凭据 id>_<秘密>`（`yks_` 会话、`ykt_` token、`yke_` 注册链接）：
+`<前缀>_<凭据 id>_<秘密>`，每类凭据一个前缀（格式见 [`internal/auth/secret.go`](../internal/auth/secret.go)）：
 明文里带 id，按主键取行再做常量时间比较，而不是按哈希搜索；前缀让泄漏的串能被认出来，
 也让一类凭据不会被当成另一类接受。
 
@@ -84,13 +69,8 @@ passkey 不是 `credentials` 的一行：它是产生 `session` 凭据的登录�
 私钥也从不离开验证器。它单独一张 `passkeys` 表，列按 WebAuthn 的 credential record 展开
 （公钥、签名计数、AAGUID、BE/BS 标志），不把任何库的序列化格式冻结进库里。
 
-**`token` 的签发（M1）**：只有主机上的 CLI 能签发，WebUI 入口还没有（§13.7 的 CLI 规则）。
-
-```
-yuuka token issue --principal agent:arisu --scope message:read,prefix:read [--label L] [--ttl D]
-yuuka token ls [--principal agent:arisu]
-yuuka token revoke <credential-id>
-```
+**`token` 的签发（M1）**：只有主机上的 CLI 能签发（`yuuka token issue` / `ls` / `revoke`，
+参数见 [`cmd/yuuka/token.go`](../cmd/yuuka/token.go)），WebUI 入口还没有（§13.7 的 CLI 规则）。
 
 - 只发给 `agent` 和 `service`。`human` 的凭据只有 passkey 登录产生的 `session`，
   `issue` 遇到 human 直接拒绝并指向 `admin enroll`：给人发一把长期 token，等于在 passkey 旁边开一扇不防钓鱼的后门。
@@ -98,18 +78,15 @@ yuuka token revoke <credential-id>
 - 指名的主体不存在就建（`display_name` 先等于 name），建主体本身记一条 `principal.create`
 - token 明文只打印一次，单独一行写到 stdout（说明写 stderr），便于直接重定向进密钥文件；库里只有哈希，丢了只能吊销重发。
   `--ttl` 缺省为不过期：token 靠显式吊销收回，`ls` 的 `last_used_at` 让闲置的那把看得见
-- `ls` 列出 id、主体、label、scope、创建 / 过期 / 最后使用 / 吊销时间，已吊销的也列，永远不显示秘密
+- `ls` 连已吊销的也列出，永远不显示秘密
 - `revoke` 只收 `token` 类凭据（会话由登出撤销），记 `auth.credential.revoke`。
   吊销立即生效：REST 和 MCP 的 HTTP 形态每个请求重新认证，stdio 形态每次工具调用重新认证（§8.7），
   没有任何缓存的认证结果要等它过期
 
 ### 13.4 scope 是唯一的权限语言
 
-```
-message:read        delivery:read       prefix:read
-message:annotate    draft:create        submission:send
-prefix:manage       account:manage      rule:manage      admin
-```
+scope 是一张封闭的扁平列表，定义在 [`internal/auth/auth.go`](../internal/auth/auth.go)，
+库里 `credentials` 上的约束是同一份（[`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)）：加一个 scope 要写迁移，这正是目的。
 
 每把凭据持有一个 scope 子集。§8.2 的能力分级在这里落地：
 
@@ -131,17 +108,9 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 
 §9.3 已经把 identity 硬绑到 transport。现在再加一层：谁可以用这个 identity 发信。
 
-```sql
-identity_grants(
-  identity_id → identities, principal_id → principals,
-  send_policy,                    -- none | draft | review | auto（§8.9）
-  recipient_scope,                -- thread | allowlist | any
-  recipient_allowlist text[],     -- 地址或域
-  max_per_hour int, max_per_day int, max_new_recipients_per_day int,
-  hold_seconds int,               -- review 档的撤回窗口
-  suspended_at timestamptz        -- 熔断或人工暂停
-)
-```
+`identity_grants` 每行是一个（身份, 主体）对：档位 `send_policy`（§8.9）、收件人范围、各项限额、
+`review` 档的撤回窗口和熔断时间。**表已建**（[`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)），默认值取安全的一端；
+**还没有任何代码读它**：档位、限额、硬上限的执行随发信（M2）落在 API 层。
 
 于是 `service:monitoring` 只能以 `alerts@example.com` 发，**无法冒用运维者本人的地址**。
 服务凭据泄露的后果因此被限制在一个前缀内——这对 catch-all 尤其要紧，
@@ -225,14 +194,14 @@ agent 不是浏览器，拿不到那个 cookie。
 M1 的落法（`internal/authn`），以及设计里没写死、实现时定下的几处：
 
 - **只有 passkey 登录产生会话**。注册链接、恢复码、注册 passkey 都不发会话：
-  恢复码换一个 10 分钟的一次性注册令牌（和 `admin enroll` 签发的是同一种，表 `enrollment_tokens`），
+  恢复码换一个短时效的一次性注册令牌（和 `admin enroll` 签发的是同一种，表 `enrollment_tokens`），
   令牌换一次 passkey 注册，之后照常用新 passkey 登录。链路只有一条，「恢复码不等于登录」由结构保证
 - 注册链接是 `<origin>/enroll#<token>`：放在片段里，不进服务器和代理的访问日志，
-  由 WebUI 页面读出后提交给 `POST /auth/passkey/register/begin`。令牌在 begin 时校验、
+  由 WebUI 页面读出后提交给注册接口（路由见 [`internal/authn/handler.go`](../internal/authn/handler.go)）。令牌在 begin 时校验、
   在 finish 时与写入 passkey 同一事务里原子地消耗，所以并发的两次注册只有一次成功
-- 会话：不透明随机串，库里只存哈希；cookie 是 `__Host-yuuka-session`，
-  `HttpOnly; Secure; SameSite=Strict; Path=/`，绝对有效期 7 天，不滑动续期
-  （再登录只是摸一下验证器）；登出即撤销那一行。`last_used_at` 每分钟至多写一次
+- 会话：不透明随机串，库里只存哈希；cookie 用 `__Host-` 前缀、`HttpOnly`、`SameSite=Strict`，
+  有绝对有效期、不滑动续期（再登录只是摸一下验证器）；登出即撤销那一行。
+  cookie 属性、有效期和 `last_used_at` 的写入节流见 [`internal/authn`](../internal/authn/authn.go)
 - **CSRF**：`SameSite=Strict` 让跨站页面根本带不上 cookie；第二层是 `net/http` 的
   `CrossOriginProtection`（先看 `Sec-Fetch-Site`，再看 `Origin` 对 `Host` 或配置的 origin），
   作用于 `/auth/` 下所有写请求和所有以 cookie 认证的写请求；第三层是 POST 一律要求
@@ -241,7 +210,7 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
   WebUI 要按「页面壳不需要会话、数据走同源 fetch」来写
 - WebAuthn 要求可发现凭据（无用户名登录）和用户验证；不要 attestation。签名计数倒退
   （可能是被克隆的验证器）直接拒绝登录并告警。每注册一把新 passkey 都推送告警，不只是恢复时
-- 限速：恢复入口全局限速（3 次突发，之后每 5 分钟 1 次）；登录与注册按对端地址限速。
+- 限速：恢复入口全局限速（额度见 `internal/authn`）；登录与注册按对端地址限速。
   不信任 `X-Forwarded-For` 之类的头（§2 不假设前面有什么）——在代理之后这些就退化成全局限速，
   恢复入口被刷爆时运维者仍有 CLI
 - 进行中的 WebAuthn 仪式（challenge）放在内存里，键是一个 `HttpOnly` cookie，用一次即删。
@@ -251,17 +220,14 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
   `actor` 是 `system`、`credential_id` 为空；管理命令（`prefix`、`token`）还在 `args` 里带 `via: "cli"`
   和执行它的系统用户名 `host_user`。
   记成 `human:<operator>` 会凭空制造一次没有发生过的登录；多人共用一台主机时，`host_user` 才是真实可查的那一条线索
-- WebAuthn 的 RP ID 与 origin 来自配置（`YUUKA_WEB_ORIGIN`、`YUUKA_WEBAUTHN_RP_ID`），
+- WebAuthn 的 RP ID 与 origin 来自配置（[`cmd/yuuka/config.go`](../cmd/yuuka/config.go)），
   不从请求里推断：origin 必须是 https，或 http://localhost
 
 ### 13.8 ACL 的粒度到账户为止
 
 如果某些内容不该让某个主体看到（例如受合规约束的账户不该进 agent 的上下文，§9.4），
-用**账户级**开关表达，不要下沉到单封信：
-
-```sql
-account_access(account_id → accounts, principal_id → principals, can_read bool)
-```
+用**账户级**开关表达，不要下沉到单封信：`account_access` 每行是（账户, 主体, `can_read`）。
+表已建（[`0003_identity.sql`](../internal/store/migrations/0003_identity.sql)），按它过滤读路径随多账户（M3.5）一起做。
 
 **单封信级别的 ACL 一律不做。** 一旦允许"这封信某主体看不到"，
 就得在每个查询、每个聚合、每次搜索上带 ACL 过滤，复杂度跳一个台阶，

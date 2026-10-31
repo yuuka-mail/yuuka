@@ -2,12 +2,38 @@
 
 > yuuka 设计文档的一部分。节号沿用整份设计的全局编号，索引见 [docs/README.md](README.md)。
 
-## 4. 数据模型（Postgres，先给核心表）
+## 4. 数据模型（Postgres）
 
 一封信在模型里拆成**内容**和**投递**两层——因为同一封信可能同时落到
-`a@example.com`、`b@另一个域` 和 Gmail（CC 或多地址投递），内容只该存一份：
+`a@example.com`、`b@另一个域` 和 Gmail（CC 或多地址投递），内容只该存一份。
 
-主体、凭据与 identity 授权三张表见 §13.2–§13.5，此处不重复。
+已经建好的表，列、约束和索引以迁移为准：[`internal/store/migrations/`](../internal/store/migrations/)。
+这里只说每张表做什么、属于 §4.2 的哪一类：
+
+| 表 | 类别（§4.2） | 做什么 | 迁移 |
+|---|---|---|---|
+| `raw_objects` | 投递事实 | 原件存储里的每个对象一行，带 `sha256` 和 `content_hash`（§4.1）；发件方重投的那份照样落盘，用 `duplicate_of` 指向第一份，不再生成 delivery | [0001](../internal/store/migrations/0001_ingest.sql) |
+| `deliveries` | 投递事实；只有 `message_id`、`auth` 两列是派生 | 每次投递一行：信封、`(zone, prefix)`、这一路自己的原件（Received / ARC / DKIM 每一路都不同）和认证结果。投递是 ingest 记下的事实，不是从 MIME 派生的：信封、远端定位、卸载状态都不在原件里。`source_key` 是幂等键（§10.1） | [0001](../internal/store/migrations/0001_ingest.sql) |
+| `messages` | 派生（id 除外，id 跨 reparse 稳定） | 内容，按 `content_hash` 折叠；隔离状态 `parse_error` 也在这一层（§4.2） | [0002](../internal/store/migrations/0002_content.sql) |
+| `threads` | 派生 | 消息图的连通分量（§4.1）。reparse 整体重建，旧 id 能沿用就沿用，但不像 message id 那样承诺稳定 | [0002](../internal/store/migrations/0002_content.sql) |
+| `message_state` | 决定 | 人对一封信的标注、改判（`class_override`）、钉住（§9.6 卸载跳过）；本地标注层，远端永不覆盖（§9.2） | [0002](../internal/store/migrations/0002_content.sql) |
+| `message_aliases` | 决定 | 折叠算法换版本后被合并掉的旧 id 指向存活的 id，`yuuka://` 锚点和外键引用因此不失效 | [0002](../internal/store/migrations/0002_content.sql) |
+| `prefixes` | 决定；`first_seen` / `last_seen` 是观测值 | `(zone, prefix)` 注册表：我把它给了谁、实际谁在发、claimed / discovered 两态（§3.3、§4.3） | [0002](../internal/store/migrations/0002_content.sql)、[0004](../internal/store/migrations/0004_prefix_claim.sql) |
+| `changes` | 日志 | 全局变更日志：§8.6 的 `since_state`、JMAP `queryChanges`、前端 SSE 共用。M1 建表就开始写 | [0002](../internal/store/migrations/0002_content.sql) |
+| `principals` `credentials` `passkeys` `enrollment_tokens` `recovery_codes` | 配置与授权 | 主体、凭据、WebUI 登录（§13.2、§13.3、§13.7） | [0003](../internal/store/migrations/0003_identity.sql) |
+| `identity_grants` `account_access` | 配置与授权 | 谁能以哪个身份发信、发到哪一步（§13.5）；谁能读哪个账户（§13.8）。M1 只建表 | [0003](../internal/store/migrations/0003_identity.sql) |
+| `actions` | 决定 | 审计日志（§8.8） | [0003](../internal/store/migrations/0003_identity.sql) |
+
+`deliveries.auth` 的结构由 [`internal/authres`](../internal/authres/authres.go) 的 `Auth` 定义，只来自可信接收方（§10.1.1）。
+迁移里与本节设计不同的地方都以 `M0:` / `M1:` 注明，主要是两类：
+
+- 还没有 `accounts` 表。`deliveries` 暂用 `account_key`（进程配置的账户名）代替 `account_id → accounts`，
+  幂等约束暂为 `(account_key, source_key)`；`identity_grants.identity_id`、`account_access.account_id`
+  暂不带外键。建 `accounts` / `identities` 的迁移按注释里写好的步骤收口
+- 有几列已建、暂不写：`messages.spam_score`（§4.3 的降级现算）、`messages.body_html_key`、
+  `deliveries.spf_recheck`（二次 SPF 判定还没接）、`prefixes.observed_domains`（随泄漏检测，M3）
+
+尚未实现的表和列（设计）：
 
 ```sql
 -- 账户 / 身份 / 传输（多账户整合的地基，见 §9）
@@ -20,80 +46,15 @@ identities(id, address|pattern, zone, display_name, signature, transport_id, is_
 transports(id, kind, config_ref)   -- cf_smtp | gmail_smtp | m365 | ...
 zones(zone pk, account_id, catchall bool, sending_onboarded bool)
 
--- 原始件（不可变）
-raw_objects(id ulid pk, r2_key unique, local_path, size, sha256, received_at,
-            completeness smallint,  -- full | header_only（§4.4）；原件不可变，补全正文是另一份 raw
-            content_hash bytea,     -- 去掉传输头后的字节哈希：折叠与重投去重的键（§4.1）。
-                                    --   和 sha256 一样是原件的字节属性，ingest 时算一次；header_only 时为空
-            duplicate_of → raw_objects)  -- 发件方重投产生的第二份原件：照样落盘，但不再生成 delivery（§4.1）
-
--- 消息（派生，可重建；id 跨 reparse 稳定，见 §4.2）
-messages(
-  id ulid pk,
-  canonical_raw_id → raw_objects,  -- 展示/导出用的那份原件；每条投递各有自己的 raw（见 deliveries）
-  content_hash bytea unique,       -- 折叠键，取自 raw_objects.content_hash（§4.1）；为空的不参与折叠（§4.4）
-  message_id text,                 -- 原信 Message-ID，只用于线程；缺失时为空
-  in_reply_to text, refs text[],
-  thread_id ulid → threads,
-  date_header timestamptz,          -- 原信 Date
-  received_at timestamptz,          -- 实际到货，排序用这个
-  subject text, snippet text,
-  from_addr text, from_name text,
-  class smallint,                   -- 分类器 + 规则算出的 machine / human / unknown；人工改判不写这里
-  spam_score real,                  -- 来源见 §4.3；M1 恒为空，降级现算
-  has_attach bool, body_text text, body_html_key text,
-  parser_version int,               -- 哪个版本的解析器产出的这一行；段落锚点随它漂移（§4.2）
-  parse_error text                  -- 隔离（quarantine，§3 原则 5）：为空 = 解析干净；
-                                    --   否则记下出了什么错，其余列仍是能读出的部分
-)
-
--- 人对一封信做的决定：不可重建，reparse 不碰
-message_state(
-  message_id → messages pk,
-  flags bitmask, labels text[],     -- 本地标注层，§9.2 说它永不被远端覆盖
-  class_override smallint,          -- 人工改判；生效的 class = coalesce(class_override, messages.class)
-  pinned bool                       -- 钉住：§9.6 卸载跳过
-)
-
--- reparse 重新折叠时，被合并掉的旧 id 指向存活的 id，yuuka:// 锚点和外键引用因此不失效
-message_aliases(old_id ulid pk, new_id → messages)
-
-threads(id ulid pk, subject_norm, participants text[], first_at, last_at, n, class)
-  -- 派生。reparse 整体重建，能沿用的旧 id 尽量沿用，但不像 message id 那样承诺稳定
-
-prefixes(
-  zone text, prefix text, primary key(zone, prefix), label, note,
-  first_seen, last_seen,            -- 观测值：ingest 与 reparse 只会把区间放宽，不算决定；
-                                    --   收到第一封信之前就认领的前缀两者为空
-  expected_domains text[],          -- 我把它给了谁
-  observed_domains text[],          -- 实际谁在发
-  state smallint,                   -- claimed(我认领/给出去过) | discovered(只是有人往这投过)，§3.3
-  leak_suspect bool, active bool
-)
-
--- 投递：一封内容可以有多条（不同账户/不同前缀各收到一份）
--- 投递是 ingest 记下的事实，不是从 MIME 派生的：信封、远端定位、卸载状态都不在原件里
+-- deliveries 上还没加的列：账户外键，以及拉取与卸载的事实（§9.6、§10.1）
 deliveries(
-  id ulid pk,
-  account_id → accounts,
-  source_key text not null,          -- 这次投递在来源处的稳定标识，账户内唯一，即幂等键（§10.1）
-  raw_id → raw_objects,              -- 这一次投递自己的原件：Received / ARC / DKIM 每一路都不同
-  zone text, prefix text,            -- catch-all 的核心维度，落在这一层
-  envelope_from text, envelope_to text, delivered_to text[],
-  remote_mailbox text, remote_uidvalidity bigint, remote_uid bigint,
-                                     -- 远端定位：读正文、回写、卸载都按它找信，会变（§10.1）；push 来源为空
-  remote_labels text[], remote_flags bitmask, received_at timestamptz,
+  account_id → accounts,             -- 取代 account_key；幂等约束改为 unique(account_id, source_key)
+  delivered_to text[],
+  remote_labels text[], remote_flags bitmask,
   remote_state smallint,             -- present | offloaded（远端已按 §9.6 删除，本地是唯一副本）
-  offloaded_at timestamptz,
-  spf_recheck jsonb,                 -- ix64/spf 的辅助判定：ingest 时算一次，带查询时间；
-                                     --   依赖当时的 DNS，是事实不是派生，reparse 不重算（§3.3）
-  -- 以下两列是派生列，reparse 只重写这两列（§4.2）
-  message_id → messages,             -- 可空：notify 策略只留幂等桩，不建 message（§10.1）
-  auth jsonb,                        -- 只来自可信接收方（§10.1.1）：
-                                     --   {trusted, authserv_id, dmarc, results[{method, result, props}],
-                                     --    remote_ip, cf_spamh_score}；不可信时只有 {trusted:false, reason}
-  unique(account_id, source_key)
+  offloaded_at timestamptz
 )
+  -- message_id 可空的另一个原因：notify 策略只留幂等桩，不建 message（§4.4、§10.1）
 
 attachments(id ulid pk, message_id, filename, mime, size, sha256, content_id, disposition, blob_key)
 extractions(message_id, kind(otp|link|expiry|amount), value, confidence)  -- 通知区用
@@ -136,16 +97,14 @@ outbox_recipients(outbox_id → outbox, addr, kind(to|cc|bcc),
                   smtp_code, detail, updated_at,
                   primary key(outbox_id, addr))
 notifications(id, message_id, channel, state, sent_at)
-changes(seq bigserial pk, kind(message|delivery|thread|flag|prefix|proposal), target_id, at)
-  -- 全局变更日志：§8.6 的 since_state、JMAP queryChanges、前端 SSE 共用。M1 建表就开始写
 ```
 
 全文检索：Postgres 原生 FTS 对中文很弱。先用 `pg_trgm` 够个人用量，
 中文体验不行再上 PGroonga 或外置 bleve 索引（这是可替换的一层，不影响模型）。
-M1 的实现是对 `subject || from_name || from_addr || body_text` 这一个表达式建 trigram GIN 索引，
-查询按空白切词、每个词做 `ILIKE '%词%'` 且全部命中。子串匹配不需要分词，中文天然可用；
-少于三个字符的词用不上 trigram 索引，退化为顺序扫描，结果仍然正确，个人量级可以接受。
-`body_text` 截断在 1 MiB：它只服务检索和摘要，原件才是正文的来源。
+M1 做的是子串匹配：一个 trigram GIN 表达式索引（迁移 0002 的 `messages_search`），
+查询按空白切词、每个词都要命中（[`internal/store/search.go`](../internal/store/search.go)）。
+子串匹配不需要分词，中文天然可用；少于三个字符的词用不上 trigram 索引，退化为顺序扫描，
+结果仍然正确，个人量级可以接受。`body_text` 有长度上限：它只服务检索和摘要，原件才是正文的来源。
 
 ### 4.1 折叠键：内容哈希，不是 Message-ID
 
@@ -153,9 +112,8 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
 攻击者投一封 Message-ID 与已有邮件相同的信，就会被折叠进旧 message，新内容在索引层消失
 （raw 还在，但 UI 看不到）；另外大量垃圾信没有 Message-ID 或反复重用同一个。因此：
 
-- 折叠键是 `content_hash`：对去掉传输头
-  （`Received` / `Received-SPF` / `ARC-*` / `Authentication-Results` / `DKIM-Signature` /
-  `Return-Path` / `Delivered-To` / `X-*`）后的原件字节取 SHA-256。
+- 折叠键是 `content_hash`：对去掉传输头（每一跳、每次投递都会加或改写的字段，
+  v1 的剔除列表见 [`internal/contenthash`](../internal/contenthash/contenthash.go)）后的原件字节取 SHA-256。
   它只保证一个方向：**内容不同，哈希必然不同**，所以不会误合并。
   反方向只是「通常相同」：转发和邮件列表会改 Subject 或追加页脚，中继可能把 8bit 重编码成
   quoted-printable，这些都会让同一封信算出不同的哈希。**哈希不同就不合并**——
@@ -175,7 +133,7 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
   sha256 也认不出发件方重投：Cloudflare 每次接收都加一行带新事务 id 和时间戳的
   `Received`，重投的原件 sha256 必然不同（§2.1.1 实测）。跨路径折叠同理也不能靠它
 - **重投去重由唯一约束保证，不是先查后插**。push 来源（Cloudflare Worker 等）的
-  `deliveries.source_key` 由 `(envelope_to, content_hash)` 构成，同一账户内唯一（§10.1）。
+  `deliveries.source_key` 由 `content_hash` 和 `envelope_to` 拼成（`store.PushSourceKey`），同一账户内唯一（§10.1）。
   重投的第二份在插入 delivery 时撞键：原件照样落盘（不可变、可审计），
   `raw_objects.duplicate_of` 指向第一份，不生成新的 delivery——和第一份的写入在同一个事务里，
   webhook 与 reconcile 并发处理同一封信的两份也不会各建一条。
@@ -185,8 +143,8 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
   各自要有自己的定位才能回写和卸载，所以各是一条 delivery，只在 `messages` 层折叠
 - §1 沿用的 `subject + sender` 兜底线程匹配**只对 `class=human` 启用**：
   机器邮件里同一发件人的所有「Your verification code」会被它归成一条巨型线程。
-  M1 的具体规则：新信是 human、自己没有 `In-Reply-To` / `References`，
-  才去找 30 天内同一 `from_addr`、去掉 Re:/Fwd:/回复： 等前缀后主题相同、且不是 machine 的上一封。
+  M1 只在新信是 human、自己没有 `In-Reply-To` / `References` 时才找，而且限一个时间窗口，
+  具体规则见 [`internal/store/threads.go`](../internal/store/threads.go)。
   「sender」目前只是发件人本人：入库的只有收信，线程参与者只有发件人。
   M2 发出的信进 `messages` 后，要把它放宽成「线程的通信对方」，§10.4.1 断开的第一封才接得上
 - 线程是消息图的连通分量：Message-ID / In-Reply-To / References 互相指到的、Message-ID 相同的
@@ -244,7 +202,7 @@ Cloudflare Email Routing 基本不做内容过滤，`spam_score` 字段必须有
   不必 reparse；`spam_score` 因此在 M1 恒为空。未验证（取不到可信认证头）不算 `dmarc=fail`，不降级。
   推送只在 ingest 当场判断：这条投递不降级、且同一封信没有更早的不降级投递时推一次；
   解析步骤失败、或由补跑（backlog）处理的投递一律不推——前者判断不了降级，后者已经不是新信
-- 认领与取消认领（M1 只有 CLI：`yuuka prefix claim|unclaim <local>@<zone>`）只改 `prefixes.state`，
+- 认领与取消认领（M1 只有 CLI：`yuuka prefix claim` / `unclaim`，§11）只改 `prefixes.state`，
   记一条 `actions`、一条 `changes`（kind `prefix`），并和 ingest 的内容步骤持同一把锁，
   所以一次投递看到的要么是认领前、要么是认领后的状态。地址的大小写按 ingest 的规则折叠。
   因为降级现算，已有的信立刻不再降级；推送只对认领之后到达的信生效，不补推旧信——
