@@ -4,7 +4,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { listTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-import { OutgoingMark, toneText } from "./marks";
+import { AuthorMark, OutgoingMark, toneText } from "./marks";
 import { outboxFilters, problem, recipientState, type OutboxFilter } from "./outgoing";
 
 export function parseOutboxFilter(st: string | undefined): OutboxFilter {
@@ -62,29 +62,54 @@ function Row({ e, selected, onSelect }: { e: OutboxEntry; selected: boolean; onS
       )}
     >
       <span className="flex min-w-0 items-center gap-1.5 text-ui">
-        {/* The subject leads; the From address gets what room is left. */}
-        <span className="min-w-0 truncate">
-          <span className="font-medium">{e.subject || <span className="font-normal text-muted-foreground">(no subject)</span>}</span>
-          <span className="font-mono text-small text-muted-foreground"> · {e.from}</span>
+        {/* The subject leads. From follows it whole or not at all: when
+            it does not fit, it wraps onto a line that is clipped, since
+            a From cut to a few letters says nothing (the detail has it). */}
+        <span className="flex h-[1lh] min-w-0 flex-wrap items-baseline overflow-hidden">
+          <span className="min-w-0 truncate font-medium">{e.subject || <span className="font-normal text-muted-foreground">(no subject)</span>}</span>
+          <span className="shrink-0 font-mono text-small whitespace-pre text-muted-foreground"> · {e.from}</span>
         </span>
-        {e.submitted_by.kind !== "human" && <span className="shrink-0 text-meta text-muted-foreground">by {e.submitted_by.name}</span>}
+        {e.submitted_by.kind !== "human" && <AuthorMark author={e.submitted_by} />}
         <span className="ml-auto flex shrink-0 items-center gap-2 pl-2 text-meta text-muted-foreground tabular-nums">
           <OutgoingMark state={e.state} />
           {listTime(e.created_at)}
         </span>
       </span>
-      {/* Every recipient with its own state: a partial send is visible at a glance. */}
-      <span className="truncate text-small">
-        {e.recipients.map((r, i) => {
-          const s = recipientState(r.state);
-          return (
-            <span key={`${r.kind}:${r.addr}`}>
-              {i > 0 && <span className="text-muted-foreground">, </span>}
-              <span className="font-mono">{r.addr}</span> <span className={toneText[s.tone]}>{s.label}</span>
-            </span>
-          );
-        })}
-      </span>
+      <Recipients rs={e.recipients} />
     </button>
+  );
+}
+
+/**
+ * Every recipient with its own state: a partial send is visible at a
+ * glance. When they do not fit, the others give way first, down to an
+ * ellipsis, so the first address keeps its state however long it is.
+ */
+function Recipients({ rs }: { rs: OutboxEntry["recipients"] }) {
+  const [first, ...rest] = rs;
+  if (!first) return null;
+  return (
+    <span className="flex min-w-0 items-baseline text-small">
+      <Recipient r={first} className={cn("flex shrink-0 items-baseline gap-1", rest.length > 0 ? "max-w-[calc(100%-3ch)]" : "max-w-full")} />
+      {rest.length > 0 && (
+        <span className="min-w-0 truncate">
+          {rest.map((r) => (
+            <span key={`${r.kind}:${r.addr}`}>
+              <span className="text-muted-foreground">, </span>
+              <Recipient r={r} />
+            </span>
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function Recipient({ r, className }: { r: OutboxEntry["recipients"][number]; className?: string }) {
+  const s = recipientState(r.state);
+  return (
+    <span className={className}>
+      <span className="min-w-0 truncate font-mono">{r.addr}</span> <span className={cn("shrink-0", toneText[s.tone])}>{s.label}</span>
+    </span>
   );
 }
