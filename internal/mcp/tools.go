@@ -190,11 +190,23 @@ func (s *Server) getMessage(ctx context.Context, v *auth.Viewer, in GetInput) (r
 	if err != nil {
 		return result{}, err
 	}
-	audit := map[string]any{"uri": view.URI, "level": view.Level}
+	notes, err := s.ownNotes(ctx, v, id)
+	if err != nil {
+		return result{}, err
+	}
+	audit := map[string]any{"uri": view.URI, "level": view.Level, "notes": len(notes)}
 	if view.Content.More != "" {
 		audit["more"] = view.Content.More
 	}
-	return result{structured: view, text: view.Text(), audit: audit}, nil
+	return result{structured: MessageOutput{View: view, Notes: notes}, text: view.Text() + notesText(view.URI, notes), audit: audit}, nil
+}
+
+// MessageOutput is the structured result of get_message: the view of
+// §8.1 and, beside its facts and content, the caller's own notes
+// (§8.10). Notes are neither yuuka's facts nor the sender's content.
+type MessageOutput struct {
+	agentview.View
+	Notes []Note `json:"notes,omitempty"`
 }
 
 // PrefixesInput is the input of list_prefixes.

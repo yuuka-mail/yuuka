@@ -49,8 +49,9 @@ type Change struct {
 	// ID is the object's id: a ULID, or prefix@zone for a prefix. A
 	// flag change is the message's labels, class or archived state.
 	ID string `json:"id"`
-	// MessageID is the message a delivery belongs to; absent for other
-	// kinds.
+	// MessageID is the message a delivery belongs to, or the message a
+	// note is on (its notes are in GET /api/v1/messages/{id}); absent
+	// for other kinds and for a deleted note.
 	MessageID string    `json:"message_id,omitempty"`
 	At        time.Time `json:"at"`
 }

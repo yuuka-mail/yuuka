@@ -19,7 +19,7 @@ import (
 
 // ChangeKinds are the kinds of the change log (changes_kind_check), in
 // the order they were introduced.
-var ChangeKinds = []string{"message", "delivery", "thread", "flag", "prefix", "proposal", "draft", "outbox", "rule"}
+var ChangeKinds = []string{"message", "delivery", "thread", "flag", "prefix", "proposal", "draft", "outbox", "rule", "note"}
 
 // ErrCursorExpired: the cursor is not one this log issued, because it is
 // ahead of the log (the database was restored from a backup, or it
@@ -54,8 +54,9 @@ type Change struct {
 	// ID is a ULID, or prefix@zone for kind prefix. For message and flag
 	// it is the message id, for delivery the delivery id.
 	ID string
-	// MessageID is the message of a delivery, the object a client can
-	// read; "" for other kinds.
+	// MessageID is the message of a delivery, or the message a note is
+	// on (its anchor, for a thread note): the object a client can read.
+	// "" for other kinds and for a note that is gone.
 	MessageID string
 	At        time.Time
 }
@@ -78,14 +79,14 @@ type ChangePage struct {
 // they committed (§8.6). Visibility is each object's own (§13.8): a
 // message, flag or thread change goes to whom the message (some message
 // of the thread) is visible, a delivery's to whom the delivery is, an
-// outbox row's to whom the account it is sent from is readable, drafts
-// and proposals by their own rules (visibleDraft, proposalVisible),
-// rules to people only; the prefix registry is listed to everyone who
-// may list prefixes, so its changes are too. Of an object that is gone
-// only its id is left: a thread emptied by rethreading goes to a viewer
-// that reads every account, a deleted draft to one that sees every
-// draft. Which kinds a credential may follow at all is a matter of
-// scopes, decided by the caller.
+// outbox row's to whom the account it is sent from is readable; drafts,
+// proposals and notes by their own rules (visibleDraft, proposalVisible,
+// noteVisible), rules to people only; the prefix registry is listed to
+// everyone who may list prefixes, so its changes are too. Of an object
+// that is gone only its id is left: a thread emptied by rethreading goes
+// to a viewer that reads every account, a deleted draft or note to one
+// that sees every draft or note. Which kinds a credential may follow at
+// all is a matter of scopes, decided by the caller.
 func (db *DB) Changes(ctx context.Context, v *auth.Viewer, q ChangeQuery) (ChangePage, error) {
 	if err := needViewer(v, "changes"); err != nil {
 		return ChangePage{}, err
@@ -121,7 +122,8 @@ func (db *DB) Changes(ctx context.Context, v *auth.Viewer, q ChangeQuery) (Chang
 	// committed (flush), so nothing can appear behind the cursor later.
 	rows, err := db.pool.Query(ctx, `
 		SELECT c.seq, c.kind, c.target_id, c.at, c.kind = ANY($2) AND `+db.changeVisible(v)+`,
-			CASE WHEN c.kind = 'delivery' THEN (SELECT coalesce(d.message_id, '') FROM deliveries d WHERE d.id = c.target_id) END
+			CASE c.kind WHEN 'delivery' THEN (SELECT coalesce(d.message_id, '') FROM deliveries d WHERE d.id = c.target_id)
+				WHEN 'note' THEN (SELECT n.message_id FROM notes n WHERE n.id = c.target_id) END
 		FROM changes c
 		WHERE c.seq > $3
 		ORDER BY c.seq
@@ -172,6 +174,10 @@ func (db *DB) changeVisible(v *auth.Viewer) string {
 	if seesEveryDraft(v) {
 		draftGone = `NOT EXISTS (SELECT 1 FROM drafts dr WHERE dr.id = c.target_id)`
 	}
+	noteGone := "false"
+	if seesEveryNote(v) {
+		noteGone = `NOT EXISTS (SELECT 1 FROM notes n WHERE n.id = c.target_id)`
+	}
 	person := "false"
 	if isPerson(v) {
 		person = "true"
@@ -189,6 +195,8 @@ func (db *DB) changeVisible(v *auth.Viewer) string {
 		WHEN 'outbox' THEN EXISTS (SELECT 1 FROM outbox o JOIN identities i ON i.id = o.identity_id
 			WHERE o.id = c.target_id AND ` + db.readableAccount(v, "i.account_id") + `)
 		WHEN 'rule' THEN ` + person + `
+		WHEN 'note' THEN EXISTS (SELECT 1 FROM notes n WHERE n.id = c.target_id AND ` + db.noteVisible(v) + `)
+			OR ` + noteGone + `
 		ELSE false END`
 }
 

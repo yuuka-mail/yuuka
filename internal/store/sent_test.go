@@ -446,6 +446,39 @@ func TestVisibility(t *testing.T) {
 		ulid.New(time.Now()), agent.ID, msgs["in-closed"]); err != nil {
 		t.Fatal(err)
 	}
+	// Notes (§8.10) the same way: the operator's on every message, the
+	// agent's on what it sees, and one it wrote before it lost access to
+	// in-closed. A note of the agent's it deleted leaves only its id.
+	writeNote := func(v *auth.Viewer, id string) string {
+		now := time.Now()
+		n, _, err := db.WriteNote(ctx, v, store.NewNote{
+			MessageID: id, Scope: store.ScopeMessage, Text: "note by " + v.PrincipalName, Cites: []store.Cite{{URI: "yuuka://message/" + id}},
+		}, store.Action{ID: ulid.New(now), Actor: v.PrincipalID, Tool: "test.note", At: now})
+		if err != nil {
+			t.Fatalf("note on %s as %s: %v", id, v.PrincipalName, err)
+		}
+		return n.ID
+	}
+	for _, id := range msgs {
+		writeNote(everyone, id)
+	}
+	for _, n := range []string{"both", "in-open", "sent-open"} {
+		writeNote(restricted, msgs[n])
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO notes (id, author_id, message_id, scope, body, cites, created_at, updated_at)
+		VALUES ($1, $2, $3, 'message', 'before', '[{"uri":"x"}]', now(), now())`,
+		ulid.New(time.Now()), agent.ID, msgs["in-closed"]); err != nil {
+		t.Fatal(err)
+	}
+	goneNote := writeNote(restricted, msgs["in-open"])
+	{
+		now := time.Now()
+		if err := db.DeleteNote(ctx, restricted, msgs["in-open"], store.ScopeMessage,
+			store.Action{ID: ulid.New(now), Actor: agent.ID, Tool: "test.note", At: now}); err != nil {
+			t.Fatal(err)
+		}
+		writeNote(restricted, msgs["in-open"])
+	}
 	// The change log (§8.6) holds what the writers log above; the
 	// outbox rows and drafts here are written with plain SQL, so their
 	// changes are logged as their writers would. A draft of the agent's
@@ -566,6 +599,40 @@ func TestVisibility(t *testing.T) {
 			}
 			if got := names(ids); !slices.Equal(got, ownProposals[v]) {
 				t.Errorf("Proposals %q, want %q", got, ownProposals[v])
+			}
+			// Notes: a person reads every note on what they see, an
+			// agent its own on what it sees.
+			for n, id := range msgs {
+				ns, err := db.Notes(ctx, v, id)
+				if slices.Contains(want, n) != (err == nil) || err != nil && !errors.Is(err, store.ErrNotFound) {
+					t.Errorf("Notes %s: %v", n, err)
+				}
+				wantNotes := []string{}
+				switch {
+				case err != nil:
+				case v == everyone:
+					wantNotes = append(wantNotes, "note by operator")
+					if n == "in-closed" {
+						wantNotes = append(wantNotes, "before")
+					}
+					if slices.Contains(ownProposals[restricted], n) {
+						wantNotes = append(wantNotes, "note by arisu")
+					}
+				case v == restricted:
+					wantNotes = append(wantNotes, "note by arisu")
+				}
+				got := []string{}
+				for _, x := range ns {
+					got = append(got, x.Text)
+					if _, err := db.NoteByID(ctx, v, x.ID); err != nil {
+						t.Errorf("NoteByID %s: %v", x.ID, err)
+					}
+				}
+				slices.Sort(got)
+				slices.Sort(wantNotes)
+				if !slices.Equal(got, wantNotes) {
+					t.Errorf("Notes %s: %q, want %q", n, got, wantNotes)
+				}
 			}
 
 			// What a draft rule is generalized from: the deliveries v
@@ -863,6 +930,9 @@ func TestVisibility(t *testing.T) {
 				case "outbox":
 					_, err = db.OutboxByID(ctx, v, e.id)
 					visible = err == nil
+				case "note":
+					_, err = db.NoteByID(ctx, v, e.id)
+					visible = err == nil || e.id == goneNote && v == everyone
 				default:
 					return fmt.Errorf("no visibility check for kind %s", e.kind)
 				}
@@ -880,7 +950,7 @@ func TestVisibility(t *testing.T) {
 				t.Errorf("Changes lists what is not in the log: %v", got)
 			}
 			// The fixture covers every kind it can reach without a rule.
-			for _, k := range []string{"message", "delivery", "thread", "flag", "prefix", "proposal", "draft", "outbox"} {
+			for _, k := range []string{"message", "delivery", "thread", "flag", "prefix", "proposal", "draft", "outbox", "note"} {
 				if !slices.Contains(kinds, k) {
 					t.Errorf("no %s change in the fixture", k)
 				}

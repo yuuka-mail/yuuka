@@ -73,6 +73,11 @@ type Store interface {
 	AcceptProposal(ctx context.Context, v *auth.Viewer, id string, rule *store.NewRule, a store.Action) (store.Accepted, error)
 	RejectProposal(ctx context.Context, v *auth.Viewer, id string, a store.Action) error
 	WithdrawProposal(ctx context.Context, v *auth.Viewer, id string, a store.Action) error
+	// Notes (§8.10): a person reads every note on visible mail, anyone
+	// else its own; only the author writes or deletes one.
+	Notes(ctx context.Context, v *auth.Viewer, id string) ([]store.Note, error)
+	WriteNote(ctx context.Context, v *auth.Viewer, n store.NewNote, a store.Action) (store.Note, bool, error)
+	DeleteNote(ctx context.Context, v *auth.Viewer, message, scope string, a store.Action) error
 
 	// Rules are the operator's configuration: only a person manages
 	// them, which the handlers check, and their reads take no viewer.
@@ -220,6 +225,12 @@ var routes = []route{
 		"Accept a proposal, optionally creating a rule from it (rule:manage); people only", annotate, (*API).acceptProposal),
 	jsonRoute(http.MethodPost, "/api/v1/proposals/{id}/reject", "Reject a proposal; people only", annotate, (*API).rejectProposal),
 	jsonRoute(http.MethodPost, "/api/v1/proposals/{id}/withdraw", "Withdraw one's own proposal", annotate, (*API).withdrawProposal),
+	// Reading notes is part of GET /api/v1/messages/{id}.
+	jsonRoute(http.MethodPut, "/api/v1/messages/{id}/note",
+		"Write one's note on a message or its thread, replacing one's earlier note there; untrusted, it drives nothing",
+		annotate, (*API).writeNote),
+	jsonRoute(http.MethodDelete, "/api/v1/messages/{id}/note", "Delete one's note on a message or its thread",
+		annotate, (*API).deleteNote),
 	jsonRoute(http.MethodGet, "/api/v1/rules", "List rules in evaluation order; people only", ruleManage, (*API).rules),
 	jsonRoute(http.MethodPost, "/api/v1/rules", "Create a rule; it runs on mail arriving from now on; people only",
 		ruleManage, (*API).createRule).withStatus(http.StatusCreated),
@@ -374,6 +385,7 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 		{store.ErrNotPermitted, http.StatusForbidden, openapi.CodeForbidden, ""},
 		{store.ErrNotPending, http.StatusConflict, openapi.CodeConflict, "the proposal is no longer pending"},
 		{store.ErrDuplicate, http.StatusConflict, openapi.CodeConflict, "the same proposal is pending already"},
+		{store.ErrInvalidNote, http.StatusBadRequest, openapi.CodeInvalidBody, ""},
 		{store.ErrTooManyProposals, http.StatusTooManyRequests, openapi.CodeRateLimited, "too many pending proposals; withdraw some or wait for a decision"},
 		{store.ErrRuleChanged, http.StatusConflict, openapi.CodeConflict, ""},
 		{store.ErrCursorExpired, http.StatusGone, openapi.CodeCursorExpired, "the cursor cannot be continued; start again without since and reread what you hold"},
@@ -442,12 +454,17 @@ func (a *API) message(ctx context.Context, v *auth.Viewer, p IDParams) (Message,
 		return Message{}, err
 	}
 	rc := mimeparse.ParseRecipients(raw)
+	notes, err := a.db.Notes(ctx, v, d.ID)
+	if err != nil {
+		return Message{}, err
+	}
 	out := Message{
 		MessageSummary: summary(v, d.MessageSummary),
 		Extractions:    make([]agentview.Extraction, len(d.Extractions)),
 		MessageID:      d.MessageID, InReplyTo: d.InReplyTo, References: nonNil(d.References),
 		Date: d.Date, BodyText: d.BodyText, ParseError: d.ParseError,
 		To: addressesOf(rc.To), Cc: addressesOf(rc.Cc), ReplyTo: addressesOf(rc.ReplyTo),
+		Notes: notesOut(notes),
 	}
 	for i, x := range d.Extractions {
 		out.Extractions[i] = agentview.ExtractionOf(x)

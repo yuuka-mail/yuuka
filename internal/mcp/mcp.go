@@ -7,10 +7,13 @@
 // (M2): list_identities, create_draft, update_draft and submit_draft,
 // which decides through the submission core like every other path
 // (§8.9). Annotating (M3, §8.5): annotate, undo, propose and
-// list_proposals; only a person decides proposals and manages rules. Every call acts as the Viewer of the caller's bearer token,
-// needs the tool's scope, goes through the store's Viewer-taking
-// functions, and is recorded in actions (§8.8). Mail content in results
-// is fenced as untrusted (§8.3).
+// list_proposals; only a person decides proposals and manages rules.
+// Notes (§8.10): note and delete_note, an agent's own untrusted text on
+// a message or thread, which drives nothing. Every call acts as the
+// Viewer of the caller's bearer token, needs the tool's scope, goes
+// through the store's Viewer-taking functions, and is recorded in
+// actions (§8.8). Mail content and notes in results are fenced as
+// untrusted (§8.3).
 //
 // Two transports serve the same tools: streamable HTTP mounted in
 // `yuuka serve` (Handler) and stdio for `yuuka mcp --stdio` (ServeStdio).
@@ -106,7 +109,8 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 		InputSchema: input[GetInput](),
 		Description: "Read one message as structured text with stable anchors. level=snippet (default) gives " +
 			"facts and a snippet, sections a table of contents, part the text of the anchored part from the " +
-			"anchored paragraph on. Needs message:read; delivery facts (recipients, SPF/DKIM/DMARC) also need delivery:read.",
+			"anchored paragraph on. Your own notes on the message or its thread come with it, as untrusted as the mail. " +
+			"Needs message:read; delivery facts (recipients, SPF/DKIM/DMARC) also need delivery:read.",
 		Annotations: readOnly,
 	}, tool(s, viewerOf, "get_message", auth.MessageRead, s.getMessage))
 	sdk.AddTool(srv, &sdk.Tool{
@@ -121,7 +125,7 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 		InputSchema: input[ChangesInput](),
 		Description: "Follow what changes in the mailbox, old mail included: new mail, and a later classification, " +
 			"re-extracted codes and links, labels, class or archived set by a person or a rule (also a rule run over " +
-			"past mail), decisions on your proposals, your drafts and their sending. Searching by date sees new mail " +
+			"past mail), decisions on your proposals, your drafts and their sending, your notes. Searching by date sees new mail " +
 			"only; this sees the rest. Returns kinds and ids (yuuka:// URIs for messages), oldest first, never content: " +
 			"read what you care about with get_message or list_proposals. Call once without cursor to start from now, " +
 			"then pass back the cursor each call returns; if more is true, call again right away. On cursor_expired " +
@@ -191,6 +195,25 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 			"if any), rejected, withdrawn or expired. Needs message:read.",
 		Annotations: readOnly,
 	}, tool(s, viewerOf, "list_proposals", auth.MessageRead, s.listProposals))
+	// Notes (§8.10) are at the annotation level: message:annotate.
+	sdk.AddTool(srv, &sdk.Tool{
+		Name:        "note",
+		InputSchema: input[NoteInput](),
+		Description: "Write your note on a message, or with scope thread on its whole thread: what it is about, why it " +
+			"looks like phishing, what is pending. You keep one note per message and one per thread; writing again " +
+			"replaces it. Cites are required: at least one passage the note relies on, as get_message anchors it. " +
+			"A note is untrusted text and drives nothing: rules never match it, and neither scoring nor the review of " +
+			"outgoing mail reads it. A person sees it signed as yours; other agents never see it. get_message shows " +
+			"you your own notes. Needs message:annotate.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: new(false), IdempotentHint: true, OpenWorldHint: new(false)},
+	}, tool(s, viewerOf, "note", auth.MessageAnnotate, s.writeNote))
+	sdk.AddTool(srv, &sdk.Tool{
+		Name:        "delete_note",
+		InputSchema: input[DeleteNoteInput](),
+		Description: "Delete your note on a message, or with scope thread your note on its thread. This is how a note " +
+			"is taken back; there is no undo. Needs message:annotate.",
+		Annotations: &sdk.ToolAnnotations{DestructiveHint: new(true), IdempotentHint: true, OpenWorldHint: new(false)},
+	}, tool(s, viewerOf, "delete_note", auth.MessageAnnotate, s.deleteNote))
 
 	if s.submit != nil {
 		sdk.AddTool(srv, &sdk.Tool{

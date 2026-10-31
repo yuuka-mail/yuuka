@@ -243,6 +243,11 @@ type Message struct {
 	// Deliveries are envelope and authentication facts. They need
 	// delivery:read and are absent without it.
 	Deliveries []Delivery `json:"deliveries,omitempty"`
+	// Notes are principals' notes on this message and on its thread
+	// (§8.10), message notes first: every one for a person, its own for
+	// anyone else. They are their authors' words, not yuuka's, and as
+	// untrusted as the mail they were written about.
+	Notes []Note `json:"notes"`
 }
 
 // Thread is GET /api/v1/threads/{id}, aggregated over what the viewer

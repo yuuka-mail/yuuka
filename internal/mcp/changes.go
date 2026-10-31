@@ -33,7 +33,8 @@ type Change struct {
 	Kind agentview.ChangeKind `json:"kind"`
 	ID   string               `json:"id"`
 	// URI is the message to read with get_message: of a message or flag
-	// change, or the message a delivery belongs to.
+	// change, the message a delivery belongs to, or the one a note is
+	// on.
 	URI string    `json:"uri,omitempty"`
 	At  time.Time `json:"at"`
 }

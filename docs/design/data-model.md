@@ -27,6 +27,7 @@
 | `actions` | 决定 | 审计日志（§8.8） | [0003](../../internal/store/migrations/0003_identity.sql) |
 | `rules` | 决定 | 规则（§8.5）：匹配树和动作存规范化的 JSON，`revision` 每次改动加一，软删除。每条规则有自己的 `rule:<id>` 主体 | [0009](../../internal/store/migrations/0009_rules.sql) |
 | `proposals` | 决定 | agent 的提案和人的决定（§8.5）；`expired` 读时现算 | [0009](../../internal/store/migrations/0009_rules.sql) |
+| `notes` | 决定 | 主体在一封信或一个线程上的笔记，每个作者每个目标一条、覆盖写；不可信，不驱动任何东西（§8.10） | [0012](../../internal/store/migrations/0012_notes.sql) |
 | `annotation_log` | 决定 | 对 class / archived / 每个标签的每次改动：谁、什么等级、前后值。来源追溯、撤销和优先级都靠它（§8.5） | [0009](../../internal/store/migrations/0009_rules.sql) |
 | `identities` | 配置与授权 | 能用来发信的地址（精确地址或 `*@zone`）、所属账户、出口名、归属主体（§9.3、§8.9） | [0005](../../internal/store/migrations/0005_sending.sql) |
 | `drafts` | 决定 | 写好了、没发出的信；提交超出授权时停在这里，`hold_reason` 说明原因（§8.9） | [0005](../../internal/store/migrations/0005_sending.sql) |
@@ -178,7 +179,7 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
 | **派生** | `messages`（除 id 外的列）、`threads`、`attachments`、`extractions`、`deliveries.message_id`、`deliveries.auth` | 从 `deliveries.raw_id → raw_objects`、`outbox.raw_id → raw_objects`（Sent 副本，§4.6）、`send_attempts` 记下的 id（线程）和账户配置重算 |
 | **投递事实** | `raw_objects`（含 `content_hash`、`duplicate_of`）；`deliveries` 的其余列（`source_key`、信封、远端定位、`remote_state`、`offloaded_at`、`spf_recheck`） | 不碰。它们来自 ingest 当时的 `InboundRef` 和当时的外部状态 |
 | **发送事实** | `send_attempts`、`outbox_recipients`：远端当时怎么回答、什么时候；Sent 副本本身是 `raw_objects` 里的投递事实 | 不碰 |
-| **决定** | `message_state`、`message_aliases`、`prefixes`（label / note / expected_domains / state）、`rules`、`proposals`、`annotation_log`、`actions`、`drafts`、`outbox`、`notifications` | 不碰；也不重跑规则，规则的效果是到达时做的决定（§8.5） |
+| **决定** | `message_state`、`message_aliases`、`prefixes`（label / note / expected_domains / state）、`rules`、`proposals`、`annotation_log`、`actions`、`drafts`、`notes`、`outbox`、`notifications` | 不碰；也不重跑规则，规则的效果是到达时做的决定（§8.5） |
 | **配置与授权** | `principals` / `credentials` / `identity_grants` / `account_access`（§13）、`accounts` / `identities` | 不碰 |
 
 后四类**无法从原件重建**，备份要按正经数据库来（§7）。CF 来源的投递事实能从 R2 对象的

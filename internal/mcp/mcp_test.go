@@ -433,9 +433,9 @@ func TestToolsWriteOnlyTheAuditLog(t *testing.T) {
 	}
 	// The draft tools write drafts (TestDraftTools), the annotation
 	// tools annotations and proposals (TestAnnotateTools,
-	// TestProposeTools). submit_draft is absent: this server has no
-	// submission core.
-	if strings.Join(writers, ",") != "annotate,create_draft,propose,undo,update_draft" {
+	// TestProposeTools), the note tools notes (TestNoteTools).
+	// submit_draft is absent: this server has no submission core.
+	if strings.Join(writers, ",") != "annotate,create_draft,delete_note,note,propose,undo,update_draft" {
 		t.Fatalf("writing tools = %v; a new one needs its own test", writers)
 	}
 	before := snapshot(t, e.pool)

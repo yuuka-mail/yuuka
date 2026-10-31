@@ -288,11 +288,11 @@ agent 没有任何管理规则的工具，`propose` 是它影响规则的唯一�
   再从游标跟：中间的变化会重复看到，但重读是幂等的，不会漏。不提供「从头回放」的公开入口：日志不是归档
 - **每次最多扫 1000 行**（`changeScan`），按 `limit` 截取可见的；游标越过看不见的行，下次不再扫。
   于是一页可能很短甚至为空而 `more` 为真，客户端照 `more` 接着要即可。一页内同一对象只出现一次，在它最后一次变化的位置
-- **流里只有 `kind`、对象 id、时间**，不带头部和内容；投递多给一个所属消息的 id（没有单独读投递的端点）。
+- **流里只有 `kind`、对象 id、时间**，不带头部和内容；投递和笔记多给一个所属消息的 id（没有单独读投递或笔记的端点，笔记随消息详情读）。
   要看再调读工具，那时看到的可能已是更新的状态，或者对象已不在（404），都正常
 - **可见性不新算，只组合**（§13.8）：消息、标注（`flag`）、线程按消息的规则，投递按投递的，outbox 按发信身份所属账户，
-  草稿按 `visibleDraft`，提案按 `proposalVisible`，规则只给人，前缀登记表本来对能列前缀的主体全可见。
-  已消失的对象只剩 id：被重排清空的线程只给能读所有账户的主体，删掉的草稿只给能看所有草稿的人。
+  草稿按 `visibleDraft`，提案按 `proposalVisible`，笔记按 `noteVisible`（§8.10），规则只给人，前缀登记表本来对能列前缀的主体全可见。
+  已消失的对象只剩 id：被重排清空的线程只给能读所有账户的主体，删掉的草稿和笔记只给能看所有草稿、所有笔记的人。
   取舍：别人删了 agent 的草稿，agent 从变化里看不到，要等它再读那份草稿拿到 404；
   要做到需要记下作者，不值得为这个加列。`TestVisibility` 对每条变化断言「列出 ⟺ 对象自己的读路径可见」
 - **kind 按 scope 收窄。** 端点要 `message:read`；`delivery`、`outbox` 另要 `delivery:read`，`prefix` 要 `prefix:read`，
@@ -316,6 +316,7 @@ get_otp(prefix|thread)                               -- 高频意图直接成 to
 list_prefixes(leak_suspect?)                         -- 前缀视角
 changes_since(cursor?, kinds?)                       -- 跟上旧信上的变化（§8.6），只给 kind + id
 propose(kind, target, payload, rationale)            -- 标注类的写入口
+note(uri, text, cites, scope?)                       -- agent 自己的笔记（§8.10），不驱动任何东西
 create_draft(identity, ..., cites)                   -- 起草，cites 是 §8.9 审核的输入
 submit_draft(draft_id)                               -- 按授权决定结果：sent | held | drafted(原因)
 ```
@@ -393,6 +394,11 @@ M3 的标注工具（[`internal/mcp/annotate.go`](../../internal/mcp/annotate.go
 和被拒的调用照常由工具层记一行。`propose` 的审计只记形状和引用个数，不记理由和引文。
 `search_messages` 多了 `label` 过滤，命中带 `labels` 和 `archived`：它们是标注，不是信的内容。
 工具描述里写明：只能标注、永不外发；提案由人决定；`overruled` 和被拒绝都是正常结果。
+
+笔记的两件工具（[`internal/mcp/notes.go`](../../internal/mcp/notes.go)，§8.10）都要 `message:annotate`：
+`note(uri, text, cites, scope?)` 写或覆盖自己的笔记，`delete_note(uri, scope?)` 删掉它。
+`get_message` 的结构化结果在视图旁边多一个 `notes`（不在 `facts` 里，也不在 `content` 里），只放调用方自己的；
+文本里作者、目标、时间列在边界外，正文和引文在第二个不可信边界里，提示语是笔记专用的 `NoteNotice`。
 
 ### 8.8 审计与回放
 
@@ -644,6 +650,10 @@ agent 能写的有标注（结构化的标签、分类、归档）、提案（�
 但「这封信讲了什么」「这封像钓鱼，因为……」没有地方放。§8.4 的 TG 卡片和 §12.5 的 arisu 摘要都假定有，
 所以给 agent 一种**笔记**：署名的一段文字，挂在一封信或一个线程上。
 
+已落地：表见 [`0012_notes.sql`](../../internal/store/migrations/0012_notes.sql)，存取和可见性见
+[`internal/store/notes.go`](../../internal/store/notes.go)，MCP 工具见 [`internal/mcp/notes.go`](../../internal/mcp/notes.go)，
+REST 见 [`internal/api/notes.go`](../../internal/api/notes.go)。形状以代码和 OpenAPI 为准，这里只留理由、不变量和取舍。
+
 - **每个作者对每个目标一条，覆盖写**。不分摘要、备注、分诊意见：「arisu 对这封信的看法」本来就是单数，
   覆盖写也省掉版本和列表界面。要撤回就删掉，不需要 undo token：§13.4 要求标注级动作可撤销，
   是因为它们改的是信的状态，而笔记不改信的任何状态，覆盖掉的只是作者自己先前的文字。审计照草稿的做法只记形状和引用个数，
@@ -661,11 +671,26 @@ agent 能写的有标注（结构化的标签、分类、归档）、提案（�
 - **v1 没有结构化字段**（金额、截止日、单号）。能被查询的字段会被当成事实用——「本周到期的发票」——
   而它是 agent 的推测。真有需要时作为笔记带类型的附加字段再加，仍然署名、仍然不进规则。
   确定的提取（`amount` 等）在 extractions 里，那是系统的声音
-- **工具**：`note(uri, text, cites, scope?)` 写或覆盖调用方自己的笔记，`delete_note(uri, scope?)` 删掉它，
-  都要 `message:annotate`——笔记属于 §8.2 的标注级别。`get_message` 带回调用方自己的笔记，同样在不可信边界里
+- **工具**：`note` / `delete_note`（§8.7），都要 `message:annotate`——笔记属于 §8.2 的标注级别。
+  `get_message` 带回调用方自己的笔记，同样在不可信边界里。即便调用方是人的凭据，`get_message` 也只给它自己的：
+  MCP 的另一端是模型，别人的笔记照样是二阶注入。REST 是 `PUT` / `DELETE /api/v1/messages/{id}/note`，
+  读在消息详情的 `notes` 里（给 WebUI 渲染）。人也能写自己的笔记，同一个入口；删只能删自己的，
+  人要清掉 agent 的一条笔记目前没有入口（见下）
+- **线程笔记锚在一封信上**，和 `scope=thread` 的标注提案一样：消息 id 跨 reparse 稳定，线程 id 不稳定，
+  重排可能合并、拆开、重新编号线程。读的时候按锚点那封信现在的 `thread_id` 算它属于哪个线程，所以笔记跟着信走。
+  「每个作者每个线程一条」唯一索引表达不了（它看不到 `thread_id`），由写入方维持：写线程笔记时把作者在这个线程里已有的那条
+  移到所点名的信上、保留 id，其余的删掉——只有两个线程合并才会留下第二条。代价是合并之后、作者再写之前，
+  读者会看到同一作者的两条线程笔记；不值得为此在重排里加一步
+- **进变更日志**（§8.6），kind `note`，目标是笔记 id，变更另带所在信的 id：笔记出现在旧信上正是游标要解决的事，
+  阅读区和通知卡片都要跟。可见性按 `noteVisible`；删掉的笔记只剩 id，只给能看所有笔记的人，和删掉的草稿一样
+- **审计**只记目标、scope、引用个数、字数和笔记 id（store 自己补上目标和 id，调用方给的参数里不放正文），
+  `TestNoteTools`、REST 的 `TestNotes` 和 store 的 `TestNotes` 都断言审计里找不到正文
 
 放弃的做法：让 agent 把它发现的、正则漏掉的验证码补进 §8.9 外泄检查的输入。
 起草外发信的正是可能被注入的那个 agent，它不报，检查照样漏，这个输入靠不住；外泄检查只认确定的提取。
+
+还没定的：人能不能删 agent 的笔记。现在不能，人能做的是不看它（UI 折叠）或吊销那个 agent。
+若要加，应当是只有人能调的删除，并在审计里记成人的动作，而不是放宽「只删自己的」。
 
 ---
 

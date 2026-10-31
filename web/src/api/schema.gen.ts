@@ -997,6 +997,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/messages/{id}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Write one's note on a message or its thread, replacing one's earlier note there; untrusted, it drives nothing */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["NoteBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Note"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Delete one's note on a message or its thread */
+        delete: {
+            parameters: {
+                query?: {
+                    /** @description message, or thread: the note about the message's thread */
+                    scope?: components["schemas"]["AnnotateScope"];
+                };
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/messages/{id}/reply-identities": {
         parameters: {
             query?: never;
@@ -2757,7 +2840,7 @@ export interface components {
             at: string;
         };
         /** @enum {string} */
-        ChangeKind: "message" | "delivery" | "thread" | "flag" | "prefix" | "proposal" | "draft" | "outbox" | "rule";
+        ChangeKind: "message" | "delivery" | "thread" | "flag" | "prefix" | "proposal" | "draft" | "outbox" | "rule" | "note";
         ChangePage: {
             changes: components["schemas"]["Change"][];
             cursor: string;
@@ -3025,6 +3108,7 @@ export interface components {
             cc: components["schemas"]["Address"][];
             reply_to: components["schemas"]["Address"][];
             deliveries?: components["schemas"]["Delivery"][];
+            notes: components["schemas"]["Note"][];
         };
         MessageOutcomes: {
             message_id: string;
@@ -3053,6 +3137,26 @@ export interface components {
             sender_verified?: boolean;
             labels: string[];
             archived: boolean;
+        };
+        Note: {
+            id: string;
+            author: components["schemas"]["Actor"];
+            message_id: string;
+            scope: components["schemas"]["AnnotateScope"];
+            text: string;
+            cites: components["schemas"]["Cite"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        NoteBody: {
+            /** @description message (default), or thread: one note about the message's whole thread */
+            scope?: components["schemas"]["AnnotateScope"];
+            /** @description the note; at most 4000 characters, not empty */
+            text: string;
+            /** @description required, at least one: the passages the note relies on */
+            cites: components["schemas"]["Cite"][];
         };
         /** @enum {string} */
         NotifyLevel: "off" | "silent" | "normal";

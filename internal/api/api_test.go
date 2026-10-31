@@ -193,6 +193,21 @@ func (s *spy) WithdrawProposal(ctx context.Context, v *auth.Viewer, id string, a
 	return s.DB.WithdrawProposal(ctx, v, id, a)
 }
 
+func (s *spy) Notes(ctx context.Context, v *auth.Viewer, id string) ([]store.Note, error) {
+	s.saw("Notes", v)
+	return s.DB.Notes(ctx, v, id)
+}
+
+func (s *spy) WriteNote(ctx context.Context, v *auth.Viewer, n store.NewNote, a store.Action) (store.Note, bool, error) {
+	s.saw("WriteNote", v)
+	return s.DB.WriteNote(ctx, v, n, a)
+}
+
+func (s *spy) DeleteNote(ctx context.Context, v *auth.Viewer, message, scope string, a store.Action) error {
+	s.saw("DeleteNote", v)
+	return s.DB.DeleteNote(ctx, v, message, scope, a)
+}
+
 func (s *spy) PreviewRule(ctx context.Context, v *auth.Viewer, spec []byte, q store.PreviewQuery) (store.Preview, error) {
 	s.saw("PreviewRule", v)
 	return s.DB.PreviewRule(ctx, v, spec, q)
@@ -546,6 +561,7 @@ func TestACL(t *testing.T) {
 	arisuID, star := h.identityAt("arisu@example.com").ID, h.identityAt("*@example.com").ID
 	h.grant(store.Grant{IdentityID: arisuID, PrincipalID: h.agent.ID, Policy: sendpolicy.Auto, RecipientScope: sendpolicy.ScopeAny})
 	h.grant(store.Grant{IdentityID: star, PrincipalID: h.agent.ID, Policy: sendpolicy.Draft, RecipientScope: sendpolicy.ScopeThread})
+	noted := h.note(h.agent, msg.ID, store.ScopeThread, "arisu's thread note")
 	h.spy.take()
 
 	// How to call each route, and the store methods it must go through.
@@ -567,7 +583,7 @@ func TestACL(t *testing.T) {
 	}
 	calls := map[string]call{
 		"GET /api/v1/messages":                         {path: "/api/v1/messages?prefix=github@example.com", reads: []string{"ListMessages"}},
-		"GET /api/v1/messages/{id}":                    {path: "/api/v1/messages/" + msg.ID, reads: []string{"MessageByID"}},
+		"GET /api/v1/messages/{id}":                    {path: "/api/v1/messages/" + msg.ID, reads: []string{"MessageByID", "Notes"}},
 		"GET /api/v1/messages/{id}/view":               {path: "/api/v1/messages/" + msg.ID + "/view?level=sections", reads: []string{"MessageByID"}},
 		"GET /api/v1/messages/{id}/attachments/{part}": {path: "/api/v1/messages/" + att + "/attachments/2", reads: []string{"MessageByID"}},
 		"GET /api/v1/threads/{id}":                     {path: "/api/v1/threads/" + msg.ThreadID, reads: []string{"ThreadByID"}},
@@ -627,6 +643,15 @@ func TestACL(t *testing.T) {
 		"POST /api/v1/proposals/{id}/withdraw": {
 			method: http.MethodPost, path: "/api/v1/proposals/" + withdraw + "/withdraw",
 			reads: []string{"WithdrawProposal", "ProposalByID"}, private: true,
+		},
+		// Any principal writes its own note; another agent has none to
+		// delete, which looks like a missing message.
+		"PUT /api/v1/messages/{id}/note": {
+			method: http.MethodPut, path: "/api/v1/messages/" + msg.ID + "/note",
+			body: `{"text":"acl","cites":[{"uri":"yuuka://message/` + msg.ID + `"}]}`, reads: []string{"WriteNote"},
+		},
+		"DELETE /api/v1/messages/{id}/note": {
+			method: http.MethodDelete, path: "/api/v1/messages/" + noted + "/note?scope=thread", reads: []string{"DeleteNote"}, private: true,
 		},
 		"GET /api/v1/rules": {path: "/api/v1/rules?deleted=true", as: h.human, reads: []string{"Rules"}, people: true},
 		"POST /api/v1/rules": {
@@ -829,6 +854,18 @@ func (h *harness) proposal(p store.Principal, message, label string) string {
 		h.t.Fatal(err)
 	}
 	return pr.ID
+}
+
+// note writes p's note on message (or its thread) through the store and
+// returns the message.
+func (h *harness) note(p store.Principal, message, scope, text string) string {
+	h.t.Helper()
+	if _, _, err := h.db.WriteNote(h.t.Context(), viewer(p), store.NewNote{
+		MessageID: message, Scope: scope, Text: text, Cites: []store.Cite{{URI: agentview.MessageURI(message), Quote: "q"}},
+	}, store.Action{ID: ulid.New(time.Now()), Actor: p.ID, Tool: "test.note", At: time.Now()}); err != nil {
+		h.t.Fatal(err)
+	}
+	return message
 }
 
 // rule is a rule the operator created that labels verified mail from

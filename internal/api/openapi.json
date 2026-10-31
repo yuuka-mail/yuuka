@@ -399,7 +399,8 @@
           "proposal",
           "draft",
           "outbox",
-          "rule"
+          "rule",
+          "note"
         ]
       },
       "ChangePage": {
@@ -1444,6 +1445,12 @@
             "items": {
               "$ref": "#/components/schemas/Delivery"
             }
+          },
+          "notes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Note"
+            }
           }
         },
         "required": [
@@ -1468,7 +1475,8 @@
           "extractions",
           "to",
           "cc",
-          "reply_to"
+          "reply_to",
+          "notes"
         ],
         "additionalProperties": false
       },
@@ -1586,6 +1594,76 @@
           "recipients",
           "labels",
           "archived"
+        ],
+        "additionalProperties": false
+      },
+      "Note": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "author": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/AnnotateScope"
+          },
+          "text": {
+            "type": "string"
+          },
+          "cites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Cite"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "author",
+          "message_id",
+          "scope",
+          "text",
+          "cites",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "NoteBody": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "$ref": "#/components/schemas/AnnotateScope",
+            "description": "message (default), or thread: one note about the message's whole thread"
+          },
+          "text": {
+            "type": "string",
+            "description": "the note; at most 4000 characters, not empty"
+          },
+          "cites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Cite"
+            },
+            "description": "required, at least one: the passages the note relies on"
+          }
+        },
+        "required": [
+          "text",
+          "cites"
         ],
         "additionalProperties": false
       },
@@ -4404,6 +4482,114 @@
             "description": "OK",
             "content": {
               "application/octet-stream": {}
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/messages/{id}/note": {
+      "delete": {
+        "summary": "Delete one's note on a message or its thread",
+        "security": [
+          {
+            "bearer": [
+              "message:annotate"
+            ]
+          },
+          {
+            "session": [
+              "message:annotate"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "description": "message, or thread: the note about the message's thread",
+            "schema": {
+              "$ref": "#/components/schemas/AnnotateScope",
+              "default": "message"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Write one's note on a message or its thread, replacing one's earlier note there; untrusted, it drives nothing",
+        "security": [
+          {
+            "bearer": [
+              "message:annotate"
+            ]
+          },
+          {
+            "session": [
+              "message:annotate"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Note"
+                }
+              }
             }
           },
           "default": {
