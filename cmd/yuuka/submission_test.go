@@ -34,19 +34,24 @@ func TestLoadSubmissionConfig(t *testing.T) {
 		"proxy TLS":        {"YUUKA_SUBMISSION_LISTEN": "0.0.0.0:31465", "YUUKA_SUBMISSION_PROXIES": "10.213.77.0/24"},
 		"both":             {"YUUKA_SUBMISSION_LISTEN": ":465", "YUUKA_SUBMISSION_TLS_CERT_FILE": "c.pem", "YUUKA_SUBMISSION_TLS_KEY_FILE": "k.pem", "YUUKA_SUBMISSION_PROXIES": "127.0.0.1"},
 		"own HTTP proxies": {"YUUKA_SUBMISSION_LISTEN": ":465", "YUUKA_SUBMISSION_PROXIES": "127.0.0.1", "YUUKA_TRUSTED_PROXIES": "10.0.0.0/8"},
+		"hostname":         {"YUUKA_SUBMISSION_LISTEN": ":465", "YUUKA_SUBMISSION_PROXIES": "127.0.0.1", "YUUKA_SUBMISSION_HOSTNAME": "smtp.example.com"},
 	} {
 		if _, err := loadConfig(env(over), true); err != nil {
 			t.Errorf("%s: %v", name, err)
 		}
 	}
 	for name, over := range map[string]map[string]string{
-		"no TLS, no proxy":   {"YUUKA_SUBMISSION_LISTEN": ":465"},
-		"HTTP proxies only":  {"YUUKA_SUBMISSION_LISTEN": ":465", "YUUKA_TRUSTED_PROXIES": "10.0.0.0/8"},
-		"cert without key":   {"YUUKA_SUBMISSION_LISTEN": ":465", "YUUKA_SUBMISSION_TLS_CERT_FILE": "c.pem"},
-		"cert without port":  {"YUUKA_SUBMISSION_TLS_CERT_FILE": "c.pem", "YUUKA_SUBMISSION_TLS_KEY_FILE": "k.pem"},
-		"proxy without port": {"YUUKA_SUBMISSION_PROXIES": "127.0.0.1"},
-		"bad proxy":          {"YUUKA_SUBMISSION_LISTEN": ":465", "YUUKA_SUBMISSION_PROXIES": "proxy.example.com"},
-		"bad address":        {"YUUKA_SUBMISSION_LISTEN": "465", "YUUKA_SUBMISSION_PROXIES": "127.0.0.1"},
+		"no TLS, no proxy":    {"YUUKA_SUBMISSION_LISTEN": ":465"},
+		"HTTP proxies only":   {"YUUKA_SUBMISSION_LISTEN": ":465", "YUUKA_TRUSTED_PROXIES": "10.0.0.0/8"},
+		"cert without key":    {"YUUKA_SUBMISSION_LISTEN": ":465", "YUUKA_SUBMISSION_TLS_CERT_FILE": "c.pem"},
+		"cert without port":   {"YUUKA_SUBMISSION_TLS_CERT_FILE": "c.pem", "YUUKA_SUBMISSION_TLS_KEY_FILE": "k.pem"},
+		"proxy without port":  {"YUUKA_SUBMISSION_PROXIES": "127.0.0.1"},
+		"bad proxy":           {"YUUKA_SUBMISSION_LISTEN": ":465", "YUUKA_SUBMISSION_PROXIES": "proxy.example.com"},
+		"bad address":         {"YUUKA_SUBMISSION_LISTEN": "465", "YUUKA_SUBMISSION_PROXIES": "127.0.0.1"},
+		"hostname, no port":   {"YUUKA_SUBMISSION_HOSTNAME": "smtp.example.com"},
+		"hostname with port":  {"YUUKA_SUBMISSION_LISTEN": ":465", "YUUKA_SUBMISSION_PROXIES": "127.0.0.1", "YUUKA_SUBMISSION_HOSTNAME": "smtp.example.com:465"},
+		"wildcard hostname":   {"YUUKA_SUBMISSION_LISTEN": ":465", "YUUKA_SUBMISSION_PROXIES": "127.0.0.1", "YUUKA_SUBMISSION_HOSTNAME": "*.example.com"},
+		"hostname with space": {"YUUKA_SUBMISSION_LISTEN": ":465", "YUUKA_SUBMISSION_PROXIES": "127.0.0.1", "YUUKA_SUBMISSION_HOSTNAME": "smtp example"},
 	} {
 		if _, err := loadConfig(env(over), true); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -94,6 +99,61 @@ type noCore struct{}
 
 func (noCore) SubmitRaw(context.Context, *auth.Viewer, string, []string, []byte) (smtpd.Result, error) {
 	return smtpd.Result{}, nil
+}
+
+// The greeting names the submission host: the configured name, else the
+// certificate's, and the WebUI's host only when neither says.
+func TestSubmissionGreeting(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile, pool := testCert(t, dir)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for _, tc := range []struct {
+		name     string
+		hostname string
+		want     string
+	}{
+		{"from the certificate", "", "mail.example.com"},
+		{"configured", "smtp.example.net", "smtp.example.net"},
+	} {
+		addr := freeAddr(t)
+		cfg := submissionConfig{Listen: addr, CertFile: certFile, KeyFile: keyFile, Hostname: tc.hostname}
+		stop, errc, err := startSubmission(cfg, noCore{}, nil, "web.example.com", log)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c, err := (&tls.Dialer{Config: &tls.Config{RootCAs: pool, ServerName: "mail.example.com", MinVersion: tls.VersionTLS12}}).DialContext(t.Context(), "tcp", addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line, err := bufio.NewReader(c).ReadString('\n')
+		if err != nil || !strings.HasPrefix(line, "220 "+tc.want+" ") {
+			t.Errorf("%s: greeting %q %v, want 220 %s", tc.name, line, err, tc.want)
+		}
+		_ = c.Close()
+		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+		if err := stop(ctx); err != nil {
+			t.Error(err)
+		}
+		cancel()
+		if err := <-errc; err != nil {
+			t.Errorf("%s: serve: %v", tc.name, err)
+		}
+	}
+
+	if got := certHostname(filepath.Join(dir, "missing.pem")); got != "" {
+		t.Errorf("missing file: %q", got)
+	}
+}
+
+func freeAddr(t *testing.T) string {
+	t.Helper()
+	probe, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := probe.Addr().String()
+	_ = probe.Close()
+	return addr
 }
 
 // With certificate files the port terminates TLS itself and greets with

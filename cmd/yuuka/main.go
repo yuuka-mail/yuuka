@@ -99,6 +99,8 @@
 //	                                    They must send the PROXY protocol (v1 or v2), and only they
 //	                                    may; required without the TLS files. A separate list from
 //	                                    YUUKA_TRUSTED_PROXIES (§13.6)
+//	YUUKA_SUBMISSION_HOSTNAME           name in the port's greeting (default: the first DNS name on
+//	                                    the TLS certificate, else the WebUI's host)
 //
 // `yuuka migrate`, `yuuka prefix`, `yuuka token`, `yuuka outbox`,
 // `yuuka identity` and `yuuka grant` only need the database URLs;

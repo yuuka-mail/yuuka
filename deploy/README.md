@@ -197,7 +197,9 @@ docker compose run --rm yuuka grant set --identity alerts@example.com --principa
 docker compose run --rm yuuka token issue --kind smtp --principal service:monitoring --label alertmanager
 ```
 
-客户端配置：主机名是证书上的名字（如 `mail.example.com`），端口 465，「SSL/TLS」或「implicit TLS」（不是 STARTTLS），
+客户端配置：主机名是证书上的名字（如 `mail.example.com`）。yuuka 自己终结 TLS 时，问候（`220 …`）里报的也是这个名字；
+代理终结 TLS 时 yuuka 看不到证书，用 `YUUKA_SUBMISSION_HOSTNAME` 写上，否则报的是 WebUI 的主机名
+（它常在 CDN 后面，和提交口不是同一个名字）。端口 465，「SSL/TLS」或「implicit TLS」（不是 STARTTLS），
 AUTH PLAIN。停在草稿或待审核的信同样回 `250`，回复里带 outbox / 草稿 id；被策略拒绝回 `550 5.7.1` 和原因。
 
 ### TLS 由谁终结
