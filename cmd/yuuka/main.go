@@ -2,10 +2,12 @@
 //
 // Usage:
 //
-//	yuuka serve              webhook endpoint + periodic reconcile
+//	yuuka serve              webhook endpoint + periodic reconcile (+ WebUI login)
 //	yuuka reconcile [--full] one reconcile pass; --full also scans raw/
 //	yuuka reparse [--since T] rebuild derived content of messages received
 //	                         at or after T (RFC 3339 or YYYY-MM-DD; default all)
+//	yuuka admin enroll [--name NAME] [--ttl 15m]
+//	                         one-time passkey enrollment link + new recovery codes
 //	yuuka version
 //
 // Configuration comes from the environment:
@@ -27,9 +29,15 @@
 //	YUUKA_TELEGRAM_BOT_TOKEN            Telegram bot token (optional; set together with the chat id)
 //	YUUKA_TELEGRAM_CHAT_ID              Telegram chat id
 //	YUUKA_RECONCILE_INTERVAL            pending/ reconcile period for serve (default 5m)
+//	YUUKA_WEB_ORIGIN                    WebUI origin as the browser sees it, e.g. https://mail.example.com;
+//	                                    enables the login endpoints (required by admin enroll)
+//	YUUKA_WEBAUTHN_RP_ID                WebAuthn relying party id (default: the origin's host)
 //
-// The webhook is served at POST /ingest/cloudflare. Migrations are applied
-// on start.
+// `yuuka admin` only needs YUUKA_DATABASE_URL and YUUKA_WEB_ORIGIN.
+//
+// The webhook is served at POST /ingest/cloudflare (HMAC, §2.2); the login
+// endpoints under /auth/ (see internal/authn). Migrations are applied on
+// start.
 package main
 
 import (
@@ -46,6 +54,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/ingest"
 	"github.com/yuuka-mail/yuuka/internal/localraw"
 	"github.com/yuuka-mail/yuuka/internal/notify"
@@ -69,7 +78,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka version")
+	return errors.New("usage: yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -106,14 +115,64 @@ func run(args []string, log *slog.Logger) error {
 			return err
 		}
 		return reparse(ctx, log, t)
+	case "admin":
+		if len(args) < 2 || args[1] != "enroll" {
+			return usage()
+		}
+		fs := flag.NewFlagSet("admin enroll", flag.ContinueOnError)
+		name := fs.String("name", "", "human principal to enroll (default: the only one, or a new human:operator)")
+		ttl := fs.Duration("ttl", authn.DefaultEnrollTTL, "how long the enrollment link stays valid")
+		if err := fs.Parse(args[2:]); err != nil {
+			return err
+		}
+		return enroll(ctx, log, *name, *ttl)
 	}
 	return usage()
 }
 
+// enroll prints a one-time passkey enrollment link and a fresh set of
+// recovery codes for a human principal (§13.7). Being able to run this on
+// the host is the highest authority there is, so it needs no login.
+func enroll(ctx context.Context, log *slog.Logger, name string, ttl time.Duration) error {
+	cfg, err := loadAdminConfig(os.Getenv)
+	if err != nil {
+		return err
+	}
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("database: %w", err)
+	}
+	defer pool.Close()
+	db := store.New(pool)
+	if err := db.Migrate(ctx); err != nil {
+		return err
+	}
+	svc, err := authn.New(authn.Config{DB: db, Origin: cfg.Web.Origin, RPID: cfg.Web.RPID, Log: log})
+	if err != nil {
+		return err
+	}
+	e, err := svc.Enroll(ctx, name, ttl)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Passkey enrollment link for human:%s\n", e.Principal.Name)
+	fmt.Printf("Single use, valid until %s:\n\n  %s\n\n", e.ExpiresAt.UTC().Format(time.RFC3339), e.URL)
+	fmt.Println("Recovery codes. Each works once and can only start a new passkey")
+	fmt.Println("registration, never a login. Store them offline; they are not shown")
+	fmt.Println("again, and every earlier code is now void:")
+	fmt.Println()
+	for _, c := range e.RecoveryCodes {
+		fmt.Printf("  %s\n", c)
+	}
+	return nil
+}
+
 type app struct {
-	cfg  config
-	pool *pgxpool.Pool
-	in   *ingest.Ingester
+	cfg     config
+	pool    *pgxpool.Pool
+	db      *store.DB
+	in      *ingest.Ingester
+	alerter authn.Alerter // nil without Telegram
 }
 
 func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error) {
@@ -131,8 +190,10 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 		return nil, err
 	}
 	var notifier ingest.Notifier
+	var alerter authn.Alerter
 	if cfg.TelegramToken != "" {
-		notifier = &notify.Telegram{Token: cfg.TelegramToken, ChatID: cfg.TelegramChat, Client: &http.Client{Timeout: 15 * time.Second}}
+		tg := &notify.Telegram{Token: cfg.TelegramToken, ChatID: cfg.TelegramChat, Client: &http.Client{Timeout: 15 * time.Second}}
+		notifier, alerter = tg, tg
 	}
 	in := ingest.New(ingest.Config{
 		Raw:      r2.NewRawBucket(cfg.Raw),
@@ -145,7 +206,7 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 		TrustedAuthservID: cfg.TrustedAuthservID,
 		Log:               log,
 	})
-	return &app{cfg: cfg, pool: pool, in: in}, nil
+	return &app{cfg: cfg, pool: pool, db: db, in: in, alerter: alerter}, nil
 }
 
 func (a *app) close() {
@@ -232,7 +293,17 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	defer cancel()
 
 	mux := http.NewServeMux()
+	// The webhook authenticates by HMAC (§2.2), never by session.
 	mux.Handle("POST /ingest/cloudflare", &ingest.Handler{Secrets: a.cfg.WebhookSecrets, Ingester: a.in, Log: log})
+	if a.cfg.Web.Origin != "" {
+		svc, err := authn.New(authn.Config{DB: a.db, Origin: a.cfg.Web.Origin, RPID: a.cfg.Web.RPID, Alerter: a.alerter, Log: log})
+		if err != nil {
+			return err
+		}
+		mux.Handle("/auth/", svc.Handler())
+	} else {
+		log.Info("YUUKA_WEB_ORIGIN not set; WebUI login endpoints are off")
+	}
 	srv := &http.Server{
 		Addr:              a.cfg.Listen,
 		Handler:           mux,

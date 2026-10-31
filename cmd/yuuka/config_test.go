@@ -46,6 +46,8 @@ func TestLoadConfigRejects(t *testing.T) {
 		"half telegram":  {"YUUKA_TELEGRAM_BOT_TOKEN": "t"},
 		"bad interval":   {"YUUKA_RECONCILE_INTERVAL": "-1m"},
 		"missing raw id": {"YUUKA_R2_RAW_ACCESS_KEY_ID": ""},
+		"http origin":    {"YUUKA_WEB_ORIGIN": "http://mail.example.com"},
+		"rp id alone":    {"YUUKA_WEBAUTHN_RP_ID": "example.com"},
 	} {
 		if _, err := loadConfig(env(over), true); err == nil {
 			t.Errorf("%s: accepted", name)
@@ -53,5 +55,31 @@ func TestLoadConfigRejects(t *testing.T) {
 	}
 	if _, err := loadConfig(env(map[string]string{"YUUKA_WEBHOOK_SECRETS": ""}), false); err != nil {
 		t.Errorf("reconcile must not need webhook secrets: %v", err)
+	}
+}
+
+func TestWebConfig(t *testing.T) {
+	c, err := loadConfig(env(nil), true)
+	if err != nil || c.Web.Origin != "" {
+		t.Fatalf("serve must run without the WebUI: %+v %v", c.Web, err)
+	}
+	c, err = loadConfig(env(map[string]string{"YUUKA_WEB_ORIGIN": "https://mail.example.com"}), true)
+	if err != nil || c.Web.Origin != "https://mail.example.com" {
+		t.Fatalf("%+v %v", c.Web, err)
+	}
+}
+
+func TestLoadAdminConfig(t *testing.T) {
+	// No R2 or webhook settings needed, but an origin is.
+	only := func(m map[string]string) func(string) string { return func(k string) string { return m[k] } }
+	c, err := loadAdminConfig(only(map[string]string{
+		"YUUKA_DATABASE_URL": "postgres://localhost/yuuka",
+		"YUUKA_WEB_ORIGIN":   "https://mail.example.com",
+	}))
+	if err != nil || c.Web.Origin != "https://mail.example.com" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if _, err := loadAdminConfig(only(map[string]string{"YUUKA_DATABASE_URL": "postgres://localhost/yuuka"})); err == nil {
+		t.Error("admin accepted without YUUKA_WEB_ORIGIN")
 	}
 }

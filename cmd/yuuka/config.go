@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/r2"
 )
 
@@ -24,6 +25,50 @@ type config struct {
 	TelegramToken     string
 	TelegramChat      string
 	ReconcileInterval time.Duration
+	Web               webConfig
+}
+
+// webConfig is the WebUI login, shared by serve and admin. An empty
+// Origin means serve runs without it (ingest only).
+type webConfig struct {
+	Origin string
+	RPID   string
+}
+
+func loadWebConfig(getenv func(string) string) (webConfig, error) {
+	w := webConfig{Origin: getenv("YUUKA_WEB_ORIGIN"), RPID: getenv("YUUKA_WEBAUTHN_RP_ID")}
+	if w.Origin == "" {
+		if w.RPID != "" {
+			return w, errors.New("YUUKA_WEBAUTHN_RP_ID needs YUUKA_WEB_ORIGIN")
+		}
+		return w, nil
+	}
+	if _, _, err := authn.ParseOrigin(w.Origin); err != nil {
+		return w, fmt.Errorf("YUUKA_WEB_ORIGIN: %w", err)
+	}
+	return w, nil
+}
+
+// adminConfig is what `yuuka admin` needs: no R2, no webhook secrets.
+type adminConfig struct {
+	DatabaseURL string
+	Web         webConfig
+}
+
+func loadAdminConfig(getenv func(string) string) (adminConfig, error) {
+	var errs []error
+	c := adminConfig{DatabaseURL: getenv("YUUKA_DATABASE_URL")}
+	if c.DatabaseURL == "" {
+		errs = append(errs, errors.New("YUUKA_DATABASE_URL is required"))
+	}
+	w, err := loadWebConfig(getenv)
+	c.Web = w
+	if err != nil {
+		errs = append(errs, err)
+	} else if w.Origin == "" {
+		errs = append(errs, errors.New("YUUKA_WEB_ORIGIN is required: enrollment links point at the WebUI"))
+	}
+	return c, errors.Join(errs...)
 }
 
 // loadConfig reads the environment (see the package comment for the list).
@@ -78,6 +123,9 @@ func loadConfig(getenv func(string) string, needSecrets bool) (config, error) {
 		errs = append(errs, fmt.Errorf("YUUKA_RECONCILE_INTERVAL: want a positive duration like 5m"))
 	}
 	c.ReconcileInterval = interval
+	if c.Web, err = loadWebConfig(getenv); err != nil {
+		errs = append(errs, err)
+	}
 
 	if needSecrets {
 		for i, s := range strings.Split(req("YUUKA_WEBHOOK_SECRETS"), ",") {
