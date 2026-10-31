@@ -28,6 +28,7 @@ type config struct {
 	ReconcileInterval time.Duration
 	Web               webConfig
 	Proxies           clientip.Proxies
+	Outbox            outboxConfig
 }
 
 // webConfig is the WebUI login, shared by serve and admin. An empty
@@ -135,6 +136,9 @@ func loadConfig(getenv func(string) string, needSecrets bool) (config, error) {
 	}
 	if c.Proxies, err = clientip.ParseProxies(getenv("YUUKA_TRUSTED_PROXIES")); err != nil {
 		errs = append(errs, fmt.Errorf("YUUKA_TRUSTED_PROXIES: %w", err))
+	}
+	if c.Outbox, err = loadOutboxConfig(getenv); err != nil {
+		errs = append(errs, err)
 	}
 
 	if needSecrets {

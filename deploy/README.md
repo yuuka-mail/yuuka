@@ -70,6 +70,36 @@ raw 令牌要写权限，是因为发出的信（Sent 副本）也存在 raw buc
 早先的部署给 raw bucket 的是 Object Read only 令牌。只收信时它仍然够用；启用发信（M2）之前换成 Object Read & Write，
 否则 Sent 副本写不进去。
 
+## 发信
+
+出口（transport）按名字写在 `yuuka.env` 里（§10.2）：`YUUKA_TRANSPORTS` 列名字，每个名字一组
+`YUUKA_TRANSPORT_<名字>_HOST` / `_PORT` / `_USERNAME` / `_PASSWORD_FILE` / `_CAPS`，模板里有 Cloudflare 的例子。
+identity 只引用名字；名字在配置里找不到时信留在队列里不发，日志报错（§4.5）。
+
+SMTP 密码只放在文件里，变量写的是容器里的路径。用 Compose 的 secret 挂进去，写在
+`compose.override.yaml`（和 `compose.yaml` 放一起，Compose 会自动叠加；用了 `COMPOSE_FILE` 时把它加进列表）：
+
+```yaml
+services:
+  yuuka:
+    secrets: [cloudflare-smtp]
+secrets:
+  cloudflare-smtp:
+    file: ./secrets/cloudflare-smtp   # chmod 600；secrets/ 和这个文件都在 .gitignore 里
+```
+
+容器里的路径是 `/run/secrets/cloudflare-smtp`。文件只在启动时读，换密码后 `docker compose up -d yuuka`。
+凭据失效（`AUTH` 被拒）、连不上出口时，yuuka 暂停这个出口而不是把信判死，信留在队列里，
+出口恢复后（换了密码则在重启后）接着发；在 `docker compose logs yuuka` 里找 `transport paused`。
+
+```bash
+docker compose run --rm yuuka outbox ls                     # 队列、状态、最后的错误
+docker compose run --rm yuuka outbox ls --state unknown     # 可能已发出、等人决定的信
+docker compose run --rm yuuka outbox resolve <id> --sent    # 或 --resend / --abandon（§4.5）
+```
+
+停止或重启 `yuuka` 时，已经越过提交点的发送会等服务器的最终回复，所以 `compose.yaml` 给了 1 分钟的停止宽限期。
+
 ## 数据库角色
 
 yuuka 不以超级用户连库。[`postgres-roles.sh`](postgres-roles.sh) 在 Postgres 第一次初始化空数据目录时建三个角色，

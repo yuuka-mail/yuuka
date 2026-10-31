@@ -322,10 +322,57 @@ stateDiagram-v2
 崩溃造成的 `unknown` 往往连 `provider_id` 都没拿到，这时交给人：UI 标「可能已发出」，
 人选择「确认已送出」「接受可能重复，重发」或「放弃」，选择记入 `actions`。
 
+#### 执行器（已实现）
+
+入队和执行器在 [`internal/outbox`](../internal/outbox/)，状态转换的 SQL 在
+[`internal/store/outbox.go`](../internal/store/outbox.go)，随 `yuuka serve` 运行。
+上面的步骤原样落地，下面只记实现时定下的规则和取舍：
+
+- **提交点的守卫在库里**：写 `committed_at` 的那条 `UPDATE` 要求尝试仍未结束、属于这个执行者、
+  租约未过期，恢复要求租约已过期，两者对同一行加锁，至多一个成功。所以卡住的执行者回来后
+  连提交点都过不去，更发不出去。比较时间一律用数据库的 `now()`，多台机器上的执行者对「谁的租约过期了」看法一致。
+  租约默认 2 分钟、每 40 秒续一次，恢复每分钟跑一次
+- **晚到的结论**：被恢复记成 `unknown` 的尝试，执行者带着结论回来时写进这条尝试；
+  只有当 outbox 仍是 `unknown`、且这就是它最近的一次尝试时，才同时改收件人、推进状态。
+  人已经 resolve 过、或已开始新尝试时，只留在尝试行上作证据。被记成 `abandoned` 的尝试没有越过提交点，
+  它的结论没有新信息，直接忽略
+- **`abandoned` 不只来自崩溃**：凡是在提交点之前因为和这封信无关的原因结束的尝试都记 `abandoned`——
+  执行者失联、进程停止、出口不可用（见下条）、提交点没能落库、Sent 副本读不出或 sha256 对不上。
+  它们**不计入重试上限**，收件人保持原状，outbox 回 `queued`。
+  代价是一封真正有毒的信（比如每次都让进程崩溃）会无限重排而不是变 `dead`；Go 的执行器不会因为一封信崩溃，
+  这种情况出现时再给 `abandoned` 计数
+- **重试上限与退避**：`failed` 和 `partial` 的尝试才计数，第 n 次之后等 `5m·3^(n-1)`、封顶 6 小时
+  （5m、15m、45m、2h15m，之后每 6 小时），第 10 次之后放弃：没人收下就是 `dead`，有人收下就停在 `partial`，
+  `next_retry_at` 清空，没送到的收件人保持 `deferred`。从第一次到放弃大约一天半。
+  出口是会自己重试投递的 submission 服务器，它回的 4xx 是它自己的麻烦（限速、队列满），
+  不是远端信箱的；一天半能等过一晚上的故障，人第二天就能看到 `dead`，而不是一周后。
+  `partial` 之后只给仍是 `pending` / `deferred` 的收件人发，已收下的不再发
+- **出口失败暂停整个出口，不烧信**：连不上（拒绝、超时、证书校验失败）、问候 / `EHLO` / `AUTH`
+  被拒（`535` 凭据失效、`454`、没有 `AUTH PLAIN`）都发生在 `MAIL` 之前，服务器还没听到这封信的任何事，
+  由 [`transport.ExitFailure`](../internal/transport/transport.go) 判断。按回复码 `535` 会把每个收件人记成 rejected，
+  照常处理就会把队列里的信逐封判死；所以执行器把这次尝试记 `abandoned`，**暂停这个出口**：
+  暂停期间不领取它的任何信，信都留在 `queued`，暂停 1 分钟起、连续失败时翻倍、封顶 30 分钟，
+  出口一旦走到 `MAIL` 就复位，日志里每次暂停都报错。暂停状态只在进程内存里，重启即清零，最坏是多试一次。
+  代价是凭据坏掉时信不会失败、只会等着，靠日志和 `yuuka outbox ls` 里的错误被人发现；
+  这比一次换密钥就把整个队列判死好
+- **出口不在配置里**：identity 指名的出口在进程配置里找不到，是配置错误而不是这封信的结论。
+  到期的行不被领取、不建尝试、不计数，每 10 分钟顺延一次，`outbox.error` 写明原因，日志报错。
+  入队时就找不到出口则直接拒绝入队（剥哪些头取决于出口的 caps，字节没法准备）
+- **停机**：`serve` 收到停止信号后不再领取。还没到提交点的尝试立即取消，`commit` 回调拒绝，
+  记 `abandoned` 并立刻到期，下一个进程马上重发；已过提交点的等最终回复（最长一次发送的超时），
+  所以正常停机本身不会制造 `unknown`。容器的停止宽限期要够等一次最终回复
+- **人工 resolve**：`yuuka outbox resolve <id> --sent | --resend | --abandon`，只对 `unknown`：
+  `--sent` 把 `unknown` 的收件人记为收下、按收件人推进（还有 `deferred` 的照常重试）；
+  `--resend` 把它们改回 `pending`、立刻排队；`--abandon` 记 `dead`。动作记进 `actions`，
+  `yuuka outbox ls` 列出状态、收件人、尝试次数和最后的错误
+- **每次状态变化都写一条 `changes`**（kind `outbox`，目标是 outbox id）。写 `changes` 的事务和内容层一样
+  先拿同一把咨询锁，`changes.seq` 因此仍按提交顺序；`commit` 和续租不改状态，不拿锁也不写 `changes`
+
 ### 4.6 发出的信：Sent 副本、消息与可见性
 
 发出的信和收到的信走同一条内容管线：我们交给出口的字节（Sent 副本，§10.2）
-在建 outbox 行之前写进原件存储的 `sent/YYYY/MM/<id>.eml`，同样写一次永不改，
+在建 outbox 行之前写进原件存储的 `sent/YYYY/MM/<id>.eml`（R2 和本地副本各一份，
+`ErrExists` 时读回比对；实现见 [`outbox.Enqueue`](../internal/outbox/outbox.go)），同样写一次永不改，
 在 `raw_objects` 里有自己的一行，`outbox.raw_id` 指向它；然后像收信一样解析进 `messages`，
 所以自己的回复出现在线程、搜索里，`reparse` 也能重建它。字节在建 outbox 行时组装（submission 口收进来的是规范化）一次，
 之后每次尝试都提交这同一份：审核（M3）看到的就是发出去的。
@@ -356,7 +403,7 @@ UI 在消息旁边显示 outbox 的状态（「排队中」「发送失败」「
 
 **收件人地址原样保存，按折叠后的地址去重**：`outbox_recipients.addr` 是写进 `RCPT TO` 的原文——
 RFC 5321 规定本地部分区分大小写，yuuka 不替发件人改写；`addr_fold` 是它的小写形式
-（和 ingest 折叠前缀用同一个函数），一封信内按它去重、首次联系和新收件人限额按它查。
+（[`store.FoldAddr`](../internal/store/outbox.go)，和 ingest 折叠前缀是同一种小写），一封信内按它去重、首次联系和新收件人限额按它查。
 `A@example.net` 和 `a@example.net` 实际几乎总是同一个信箱，所以同一封信只发一份，用先给出的那种写法。
 `addr_fold` 由写入方算，不用 `lower()` 生成列：`lower()` 对非 ASCII 的结果取决于数据库的 locale，
 恢复到另一种 locale 的库里会变。

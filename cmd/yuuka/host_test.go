@@ -34,6 +34,8 @@ func (e *hostEnv) run(cmd string, args ...string) (string, string, error) {
 		err = h.prefixCmd(e.t.Context(), args)
 	case "token":
 		err = h.tokenCmd(e.t.Context(), args)
+	case "outbox":
+		err = h.outboxCmd(e.t.Context(), args)
 	default:
 		e.t.Fatalf("no command %s", cmd)
 	}

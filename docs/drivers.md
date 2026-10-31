@@ -172,7 +172,7 @@ type Expunger interface {
 SMTP 出口实现在 [`internal/transport`](../internal/transport/smtp.go)：`SMTP.Send(ctx, Envelope, raw, commit)`
 返回 `SendResult`（`Outcome`、逐收件人结果、`Committed`、最终回复原文、`ProviderID`、`MessageID`），
 出口能力是配置里的 [`Caps`](../internal/transport/transport.go)。目前只有这一个实现，
-所以没有 `Transport` 接口；outbox 在消费方按它用到的方法（`Name`、`Caps`、`Send`）定义一个小接口，
+所以没有 `Transport` 接口；outbox 在消费方按它用到的方法（`Caps`、`Send`）定义一个小接口（[`outbox.Transport`](../internal/outbox/outbox.go)），
 第二个 driver（API 型出口）出现时形状不变。
 
 **提交点**。`commit` 恰好调用一次，时机是正文全部写完并 flush 到连接之后、正文结束符 `<CRLF>.<CRLF>` 之前；
@@ -203,8 +203,19 @@ SMTP 出口实现在 [`internal/transport`](../internal/transport/smtp.go)：`SM
 `partial` 之后只重试 deferred 的那几个（§4.5）。`Send` 总是返回结果，
 `accepted` / `partial` 时 error 为空，否则 error 说明原因（服务器回复包成 `*textproto.Error`）。
 按码分类意味着 `AUTH` 回 `535` 是 rejected：重发同样的字节不会有不同结果，
-但它其实是出口配置坏了而不是这封信有问题。outbox 若不想让一次凭据失效把队列里的信逐封判死，
-要在出口层面暂停，而不是靠改这里的分类。
+但它其实是出口配置坏了而不是这封信有问题。所以分类不改，另给调用方一个判断：
+会话开始之后的失败都是带阶段（`Stage`）的 `*transport.Error`，`ExitFailure` 对连接、TLS、问候、
+`EHLO`、`AUTH` 这几个 `MAIL` 之前的阶段返回 true。outbox 据此暂停整个出口、信留在队列里，
+不让一次凭据失效把队列逐封判死（§4.5「执行器」）。
+
+**出口的配置**在进程环境里，按名字一组变量（`YUUKA_TRANSPORTS` 列名字，每个名字有
+`_HOST`、`_PORT`、`_USERNAME`、`_PASSWORD_FILE`、`_CAPS`，清单和默认值见
+[`cmd/yuuka/main.go`](../cmd/yuuka/main.go) 的头注释，解析在 [`transports.go`](../cmd/yuuka/transports.go)）。
+密码只能放在文件里、变量里写文件路径：环境会出现在 `docker inspect`、`/proc/<pid>/environ` 和配置转储里，
+文件可以单独设权限、单独挂载。文件只在启动时读一次，换密码要重启。
+`_CAPS` 必填，可选预设 `cloudflare`（全部 false）、`standard`（`message-id,return-path`）、`none`，或显式列出；
+不给默认值，是因为 caps 决定从每封信里剥掉哪些头，默认错了会悄悄改掉别人的信。
+envelope 的反向路径用 outbox 的 `from_addr`；VERP（§10.4.2）还没做，`CallerReturnPath` 目前不改变行为。
 
 **校验而不修复**。`DotWriter` 会把裸 LF 悄悄改成 CRLF，于是出口收到的字节和 outbox 存下的 Sent 副本不一致；
 裸 CR、超长行则在后面某一跳被拒或被改写。这些都是组装方的 bug，所以 transport 在连接之前检查、

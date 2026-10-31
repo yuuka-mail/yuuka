@@ -75,6 +75,10 @@ services:
     # run one. The proxy checks GET /healthz instead (Caddyfile).
     read_only: true
     cap_drop: [ALL]
+    # On stop, a send past its commit point waits for the server's final
+    # reply (seconds); a kill before it turns into an unknown that a
+    # person must resolve (§4.5).
+    stop_grace_period: 1m
     env_file: [yuuka.env]
     # These follow from the shape of this file, so they are set here and
     # override anything in yuuka.env.

@@ -18,7 +18,12 @@
 //	                         bearer token for an agent or service; printed once
 //	yuuka token ls [--principal <kind>:<name>]
 //	yuuka token revoke <credential-id>
-//	yuuka mcp --stdio        read-only MCP server on stdin/stdout, acting as the
+//	yuuka outbox ls [--state S] [--limit N]
+//	                         outgoing mail: state, recipients, attempts, last error
+//	yuuka outbox resolve <id> --sent|--resend|--abandon
+//	                         decide an unknown send (§4.5): it was delivered, send
+//	                         it again, or give up
+//	yuuka mcp --stdio       read-only MCP server on stdin/stdout, acting as the
 //	                         bearer token in YUUKA_MCP_TOKEN (§8.7)
 //	yuuka version
 //
@@ -58,11 +63,25 @@
 //	                                    e.g. 127.0.0.1/32,::1/128 (default: none; the TCP peer is the
 //	                                    client and the header is ignored). See internal/clientip
 //	YUUKA_MCP_TOKEN                     bearer token `yuuka mcp --stdio` acts as (required there)
+//	YUUKA_TRANSPORTS                    comma-separated names of the outgoing transports, as
+//	                                    identities.transport names them (default: none; serve
+//	                                    then sends nothing). Each name NAME has, with NAME
+//	                                    uppercased and '.' and '-' turned into '_':
+//	YUUKA_TRANSPORT_<NAME>_HOST         SMTP server; implicit TLS only (required)
+//	YUUKA_TRANSPORT_<NAME>_PORT         default 465
+//	YUUKA_TRANSPORT_<NAME>_USERNAME     AUTH PLAIN user (optional)
+//	YUUKA_TRANSPORT_<NAME>_PASSWORD_FILE file holding the password; required with USERNAME.
+//	                                    Never the password itself in the environment
+//	YUUKA_TRANSPORT_<NAME>_CAPS         what the exit lets us set (required): cloudflare,
+//	                                    standard (message-id,return-path), none, or a list of
+//	                                    message-id, return-path, dkim, status-query (§10.2)
+//	YUUKA_OUTBOX_WORKERS                concurrent send attempts in serve (default 2)
+//	YUUKA_OUTBOX_POLL_INTERVAL          how often serve looks for due mail (default 30s)
 //
-// `yuuka migrate`, `yuuka prefix` and `yuuka token` only need the database
-// URLs; `yuuka admin` the database URLs and YUUKA_WEB_ORIGIN. The last
-// three run on the host without a login; host.go says how their actions
-// are recorded.
+// `yuuka migrate`, `yuuka prefix`, `yuuka token` and `yuuka outbox` only
+// need the database URLs; `yuuka admin` the database URLs and
+// YUUKA_WEB_ORIGIN. All but migrate run on the host without a login;
+// host.go says how their actions are recorded.
 //
 // The webhook is served at POST /ingest/cloudflare (HMAC, §2.2); the login
 // endpoints under /auth/ (see internal/authn); the REST API under /api/v1/
@@ -98,6 +117,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/localraw"
 	"github.com/yuuka-mail/yuuka/internal/mcp"
 	"github.com/yuuka-mail/yuuka/internal/notify"
+	"github.com/yuuka-mail/yuuka/internal/outbox"
 	"github.com/yuuka-mail/yuuka/internal/r2"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/web"
@@ -119,7 +139,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka mcp --stdio | yuuka version")
+	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka mcp --stdio | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -191,6 +211,8 @@ func run(args []string, log *slog.Logger) error {
 		return withHost(ctx, func(h *host) error { return h.prefixCmd(ctx, args[1:]) })
 	case "token":
 		return withHost(ctx, func(h *host) error { return h.tokenCmd(ctx, args[1:]) })
+	case "outbox":
+		return withHost(ctx, func(h *host) error { return h.outboxCmd(ctx, args[1:]) })
 	}
 	return usage()
 }
@@ -233,7 +255,31 @@ type app struct {
 	pool    *pgxpool.Pool
 	db      *store.DB
 	in      *ingest.Ingester
-	alerter authn.Alerter // nil without Telegram
+	alerter authn.Alerter   // nil without Telegram
+	outbox  *outbox.Service // serve only; see openOutbox
+}
+
+// openOutbox builds the outbox from the configured transports, reading
+// their password files. Only serve sends, so only serve needs them.
+func (a *app) openOutbox(log *slog.Logger) error {
+	trs, err := openTransports(a.cfg.Outbox.Transports, os.ReadFile)
+	if err != nil {
+		return err
+	}
+	if len(trs) == 0 {
+		log.Info("YUUKA_TRANSPORTS not set; queued mail waits until a transport is configured")
+	}
+	a.outbox = outbox.New(outbox.Config{
+		DB:           a.db,
+		Raw:          r2.NewRawBucket(a.cfg.Raw),
+		Local:        localraw.Dir{Root: a.cfg.DataDir},
+		Transports:   trs,
+		IndexSent:    a.in.IndexSent,
+		Workers:      a.cfg.Outbox.Workers,
+		PollInterval: a.cfg.Outbox.PollInterval,
+		Log:          log,
+	})
+	return nil
 }
 
 func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error) {
@@ -370,6 +416,9 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	if err := a.openOutbox(log); err != nil {
+		return err
+	}
 	rs, err := a.routes(log)
 	if err != nil {
 		return err
@@ -391,6 +440,14 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		defer close(loopDone)
 		background(ctx, log, a.in, a.cfg.ReconcileInterval)
 	}()
+	// The outbox stops claiming on cancel and returns once every attempt
+	// in flight is recorded: those short of the commit point are abandoned
+	// at once, those past it wait for their final reply (outbox.Run).
+	outboxDone := make(chan struct{})
+	go func() {
+		defer close(outboxDone)
+		a.outbox.Run(ctx)
+	}()
 
 	errc := make(chan error, 1)
 	go func() {
@@ -401,6 +458,7 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	case err := <-errc:
 		cancel()
 		<-loopDone
+		<-outboxDone
 		return fmt.Errorf("http: %w", err)
 	case <-ctx.Done():
 	}
@@ -408,6 +466,7 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	defer cancelShutdown()
 	err = srv.Shutdown(shutdownCtx)
 	<-loopDone
+	<-outboxDone
 	return err
 }
 

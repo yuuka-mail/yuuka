@@ -48,7 +48,7 @@ identity → 出口必须是硬绑定：
   服务主体无法冒用运维者的地址。
 - outbox 每条带 `identity_id`，路由由 identity 决定，不给调用方选 transport 的机会；
   identity 可配 primary + fallback 传输链，前提是 DNS 已为两者授权（§10.4.4）。
-- 出口按名字定义在进程配置里（主机、端口、caps、凭据文件路径），`identities.transport` 只存名字，
+- 出口按名字定义在进程配置里（主机、端口、caps、凭据文件路径；变量形状见 §10.2），`identities.transport` 只存名字，
   不建 `transports` 表（理由见 §4 的迁移说明）。传输链也在配置里按名字定义，identity 照样只引用一个名字。
 - identity 是精确地址或 `*@zone`。精确地址压过同 zone 的通配：给服务的授权应当落在精确地址上，
   `*@zone` 上的授权碰不到别人单独拥有的地址（表见 [0005](../internal/store/migrations/0005_sending.sql)）。
