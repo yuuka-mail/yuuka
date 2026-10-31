@@ -121,7 +121,8 @@ if (enrollURL) {
     const r = await fetch(u);
     return r.ok ? r.json() : undefined;
   }, path);
-  const heldFrom = (await get("/api/v1/identities"))?.identities.find((i) => !i.sends && !i.address.startsWith("*@"))?.address;
+  // Not one that goes to the review: sends is false there too, and Send would hold real mail.
+  const heldFrom = (await get("/api/v1/identities"))?.identities.find((i) => !i.sends && i.hold_reason !== "review" && !i.address.startsWith("*@"))?.address;
   const agentDraft = (await get("/api/v1/drafts"))?.drafts.find((d) => d.author.kind !== "human")?.id;
   // The outbox needs delivery:read; without it the view is not offered.
   const outbox = await get("/api/v1/outbox?limit=1");
@@ -140,6 +141,20 @@ if (enrollURL) {
   const proposals = (await get("/api/v1/proposals?state=pending"))?.proposals ?? [];
   const ruleProposal = proposals.find((x) => x.kind === "rule" && x.message_id);
   const annotateProposal = proposals.find((x) => x.kind === "annotate" && x.message_id);
+  // The review tier (§8.9): mail held for its recall window, a draft the
+  // checks escalated, and an identity whose submissions go to the checks.
+  // None of it is required; the shots that need it are skipped without.
+  const held = (await get("/api/v1/outbox?state=held&limit=1"))?.entries[0]?.id;
+  const escalated = (await get("/api/v1/drafts?state=held"))?.drafts.find((d) => d.hold_reason === "review" && d.review)?.id;
+  const reviewFrom = (await get("/api/v1/identities"))?.identities.find((i) => i.hold_reason === "review" && i.hold_seconds !== undefined && !i.address.startsWith("*@"))?.address;
+  // Notes (§8.10): the first of these messages that has any.
+  let noted;
+  for (const id of [lunch, otp]) {
+    if (id && !noted && (await get(`/api/v1/messages/${id}`))?.notes?.length) noted = id;
+  }
+  // Who may do what (§13.10): only a person's own session with admin sees it.
+  const admin = (await get("/auth/session"))?.scopes.includes("admin");
+  const claimed = prefixes.prefixes.find((x) => x.claimed)?.address;
   await p.close();
 
   for (const scheme of ["light", "dark"]) {
@@ -322,6 +337,62 @@ if (enrollURL) {
         await shot(s, `settings-rule-${tag}`);
       }
 
+      // The review tier: held mail and its recall (the second press is
+      // shown, never made), a draft the checks escalated, the preview.
+      if (held) {
+        await s.goto(base + "/?area=outbox&st=held");
+        await s.getByRole("list", { name: "Outbox" }).waitFor();
+        await shot(s, `outbox-held-${tag}`);
+        await s.goto(base + `/?area=outbox&st=held&o=${held}`);
+        await s.getByRole("button", { name: "Recall…" }).click();
+        await s.getByRole("button", { name: "Recall it" }).waitFor();
+        await shot(s, `outbox-held-recall-${tag}`);
+      }
+      if (escalated) {
+        await s.goto(base + `/?area=drafts&d=${escalated}`);
+        await s.getByRole("list", { name: "Checks that escalated it" }).waitFor();
+        await shot(s, `drafts-escalated-${tag}`);
+      }
+      if (reviewFrom) {
+        await s.goto(base + "/?compose=1");
+        await s.getByLabel("From", { exact: true }).selectOption(reviewFrom);
+        await s.getByText("Send runs the review").waitFor();
+        await shot(s, `compose-review-${tag}`);
+      }
+      // Notes beside the mail, and writing one's own (§8.10).
+      if (noted) {
+        await s.goto(base + `/?m=${noted}`);
+        await s.getByRole("region", { name: "Notes" }).waitFor();
+        await shot(s, `reading-notes-${tag}`);
+        if (await s.getByRole("button", { name: "Add a note" }).count()) {
+          await s.getByRole("button", { name: "Add a note" }).click();
+          await s.getByRole("textbox", { name: "Note" }).waitFor();
+          await shot(s, `reading-note-editor-${tag}`);
+        }
+      }
+      // Whom a claimed prefix was given to, edited where its mail is (§12.12).
+      if (claimed) {
+        await s.goto(base + `/?prefix=${encodeURIComponent(claimed)}`);
+        await s.getByRole("region", { name: "Prefix facts" }).getByRole("button", { name: /^(Edit|Set expected domains)$/ }).click();
+        await s.getByLabel("Given to").waitFor();
+        await shot(s, `prefix-expect-${tag}`);
+      }
+      // Who may do what: look and tighten; the second press is shown, never made.
+      if (admin) {
+        for (const section of ["credentials", "identities", "grants"]) {
+          await s.goto(base + `/?settings=${section}`);
+          await s.locator("main h2").waitFor();
+          await shot(s, `settings-${section}-${tag}`);
+        }
+        if (await s.getByRole("button", { name: "Tighten…" }).count()) {
+          await s.getByRole("button", { name: "Tighten…" }).first().click();
+          await s.getByRole("radio").first().check();
+          await s.getByRole("button", { name: "Tighten", exact: true }).click();
+          await s.getByRole("button", { name: "Tighten it" }).waitFor();
+          await shot(s, `settings-grant-tighten-${tag}`);
+        }
+      }
+
       // The account menu: who is signed in, the language, signing out.
       await s.goto(base + "/");
       await s.getByRole("button", { name: "Account" }).click();
@@ -376,6 +447,48 @@ if (enrollURL) {
           await s.getByRole("region", { name: t.rule_preview_label }).waitFor();
           await s.waitForLoadState("networkidle");
           await shot(s, `proposal-rule-${tag}`);
+        }
+        if (held) {
+          await s.goto(base + `/?area=outbox&st=held&o=${held}`);
+          await s.getByRole("button", { name: t.review_recall }).click();
+          await s.getByRole("button", { name: t.review_recall_confirm }).waitFor();
+          await shot(s, `outbox-held-recall-${tag}`);
+        }
+        if (escalated) {
+          await s.goto(base + `/?area=drafts&d=${escalated}`);
+          await s.getByRole("list", { name: t.review_escalated_label }).waitFor();
+          await shot(s, `drafts-escalated-${tag}`);
+        }
+        if (reviewFrom) {
+          await s.goto(base + "/?compose=1");
+          await s.getByLabel(t.send_field_from, { exact: true }).selectOption(reviewFrom);
+          await s.getByText(t.send_reviews_it).waitFor();
+          await shot(s, `compose-review-${tag}`);
+        }
+        if (noted) {
+          await s.goto(base + `/?m=${noted}`);
+          await s.getByRole("region", { name: t.notes_label }).waitFor();
+          await shot(s, `reading-notes-${tag}`);
+        }
+        if (claimed) {
+          await s.goto(base + `/?prefix=${encodeURIComponent(claimed)}`);
+          await s.getByRole("region", { name: t.leak_facts_label }).waitFor();
+          await s.waitForLoadState("networkidle");
+          await shot(s, `prefix-facts-${tag}`);
+        }
+        if (admin) {
+          for (const section of ["credentials", "identities", "grants"]) {
+            await s.goto(base + `/?settings=${section}`);
+            await s.locator("main h2").waitFor();
+            await shot(s, `settings-${section}-${tag}`);
+          }
+          if (await s.getByRole("button", { name: t.grants_tighten }).count()) {
+            await s.getByRole("button", { name: t.grants_tighten }).first().click();
+            await s.getByRole("radio").first().check();
+            await s.getByRole("button", { name: t.grants_tighten_apply, exact: true }).click();
+            await s.getByRole("button", { name: t.grants_tighten_confirm }).waitFor();
+            await shot(s, `settings-grant-tighten-${tag}`);
+          }
         }
         await s.goto(base + "/?settings=rules");
         await s.locator("main h2").waitFor();
