@@ -562,6 +562,22 @@ func TestExtracted(t *testing.T) {
 	if otp.SenderVerified == nil || !*otp.SenderVerified {
 		t.Errorf("sender_verified %v, want true (dmarc=pass)", otp.SenderVerified)
 	}
+	// Search hits from the notification zone carry their code too; others
+	// never do.
+	res := decode[SearchResult](t, h.get("/api/v1/search?downgraded=include&limit=500&q=verification", full))
+	found := false
+	for _, hit := range res.Hits {
+		if hit.ID == id {
+			found = hit.Extracted != nil && hit.Extracted.Code != nil && hit.Extracted.Code.Value == "482913" &&
+				hit.SenderVerified != nil && *hit.SenderVerified
+		}
+		if hit.Class != "machine" && (hit.Extracted != nil || hit.SenderVerified != nil) {
+			t.Errorf("search hit %s (%s) carries %+v", hit.ID, hit.Class, hit.Extracted)
+		}
+	}
+	if !found {
+		t.Error("the code mail's search hit has no code")
+	}
 	m := decode[Message](t, h.get("/api/v1/messages/"+id, read))
 	if m.SenderVerified != nil {
 		t.Error("sender_verified without delivery:read")

@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils";
 
 import { OutgoingMark } from "@/send/marks";
 
+import { shownExtraction } from "./extracted";
+import { ExtractedLine } from "./extracted-line";
 import { isQuiet, sentState, systemFacts, warnings, type Tone } from "./facts";
 import { ReadingBody } from "./reading-body";
 import { useMessage, useReading } from "./reading-data";
@@ -103,6 +105,8 @@ function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox }
 
       <SystemFacts message={m} facts={facts} onOpenOutbox={onOpenOutbox} />
 
+      <ExtractedBox message={m} />
+
       <ThreadStrip message={m} onOpen={onOpen} />
 
       {body.reading ? (
@@ -127,6 +131,21 @@ function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox }
 
       {m.message_id && <p className="font-mono text-meta break-all text-muted-foreground">Message-ID &lt;{m.message_id}&gt;</p>}
     </div>
+  );
+}
+
+/**
+ * The code of a notification, above its text (§12.9): yuuka says what it
+ * found, in one line, so the code is at hand without reading the mail.
+ */
+function ExtractedBox({ message: m }: { message: Message }) {
+  const x = shownExtraction(m);
+  if (!x) return null;
+  return (
+    <section aria-label="Extracted by yuuka" className="flex max-w-full min-w-0 items-center gap-2 self-start rounded-md border border-system-border bg-system-surface px-2 py-0.5">
+      <Signature speaker={system} />
+      <ExtractedLine x={x} verified={m.sender_verified} mark={false} />
+    </section>
   );
 }
 

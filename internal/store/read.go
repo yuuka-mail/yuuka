@@ -194,15 +194,24 @@ func (db *DB) summaryFrom(v *auth.Viewer) string {
 		CROSS JOIN LATERAL (
 			SELECT ob.id IS NULL AND NOT coalesce(bool_or(` + notDowngraded + `), false) AS downgraded,
 				coalesce(array_agg(DISTINCT d.prefix || '@' || d.zone ORDER BY d.prefix || '@' || d.zone), '{}') AS recipients,
-				bool_or(coalesce(d.auth->>'trusted', '') = 'true' AND coalesce(d.auth->>'dmarc', '') = 'pass') AS sender_verified
+				bool_or(` + senderVerified + `) AS sender_verified
 			FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
-			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + `) g
+			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + `) g` + bestExtractions + `
+		WHERE ` + db.visibleMessage(v, "m")
+}
+
+// senderVerified is true for a delivery d whose trusted receiver
+// reported dmarc=pass: its From domain is proven (§10.1.1).
+const senderVerified = `coalesce(d.auth->>'trusted', '') = 'true' AND coalesce(d.auth->>'dmarc', '') = 'pass'`
+
+// bestExtractions joins ex.items, the best extraction of each kind of
+// message m as a JSON array in extractor order. The rows belong to m, so
+// they are visible exactly when m is.
+const bestExtractions = `
 		CROSS JOIN LATERAL (
 			SELECT coalesce(jsonb_agg(to_jsonb(e) ORDER BY e.ord), '[]') AS items
 			FROM (SELECT DISTINCT ON (kind) ord, ` + extractionCols + ` FROM extractions
-			      WHERE message_id = m.id ORDER BY kind, ord) e) ex
-		WHERE ` + db.visibleMessage(v, "m")
-}
+			      WHERE message_id = m.id ORDER BY kind, ord) e) ex`
 
 func scanSummary(r pgx.CollectableRow) (MessageSummary, error) {
 	var m MessageSummary

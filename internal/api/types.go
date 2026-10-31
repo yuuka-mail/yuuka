@@ -140,12 +140,14 @@ type MessageSummary struct {
 	Outgoing *Outgoing `json:"outgoing,omitempty"`
 	// Extracted is what the notification zone shows in place of the
 	// subject (§12.9): the message's best code and link and how long
-	// they last. Absent when nothing was found, and in search hits.
+	// they last. Absent when nothing was found; in search hits, given
+	// for machine mail only.
 	Extracted *Extracted `json:"extracted,omitempty"`
 	// SenderVerified: the trusted receiver reported dmarc=pass on a
 	// delivery, so the From domain is genuine (§10.1.1). Absent for mail
-	// nobody received (only sent from here), in search hits, and without
-	// delivery:read: it is an authentication fact.
+	// nobody received (only sent from here), in search hits that are not
+	// machine mail, and without delivery:read: it is an authentication
+	// fact.
 	SenderVerified *bool `json:"sender_verified,omitempty"`
 }
 

@@ -54,6 +54,9 @@ type SearchHit struct {
 	Quarantined bool
 	// Outgoing is set for our own mail (§4.6), as in MessageSummary.
 	Outgoing *Outgoing
+	// Extracted and SenderVerified are as in MessageSummary.
+	Extracted      []Extraction
+	SenderVerified *bool
 }
 
 // SearchResult is a page of hits, newest first, and the total number of
@@ -110,20 +113,22 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 	where = append([]string{db.visibleMessage(v, "m")}, where...)
 	// downgraded is a lateral column so the filter can use it by name.
 	// As in the list, our own mail is never downgraded.
-	from := `
+	joins := `
 		FROM messages m
 		LEFT JOIN message_state s ON s.message_id = m.id` + db.outgoingJoin(v) + `
 		CROSS JOIN LATERAL (SELECT ob.id IS NULL AND NOT EXISTS (
 			SELECT 1 FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
-			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + ` AND ` + notDowngraded + `) AS downgraded) g
+			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + ` AND ` + notDowngraded + `) AS downgraded) g`
+	filter := `
 		WHERE ` + strings.Join(where, " AND ")
 
 	var res SearchResult
 	err := pgx.BeginTxFunc(ctx, db.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT count(*) `+from, args...).Scan(&res.Total); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT count(*) `+joins+filter, args...).Scan(&res.Total); err != nil {
 			return err
 		}
-		page, pageArgs := from, slices.Clone(args)
+		// Only the page needs the extractions, not the count.
+		page, pageArgs := joins+hitExtras(db, v)+filter, slices.Clone(args)
 		if q.Before != nil {
 			pageArgs = append(pageArgs, q.Before.ReceivedAt, q.Before.ID)
 			page += fmt.Sprintf(` AND (m.received_at, m.id) < ($%d, $%d)`, len(pageArgs)-1, len(pageArgs))
@@ -131,7 +136,8 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		pageArgs = append(pageArgs, limit)
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 			SELECT m.id, m.thread_id, m.received_at, m.subject, m.from_addr, m.from_name, m.snippet,
-				coalesce(s.class_override, m.class), downgraded, m.parse_error IS NOT NULL, ob.id, ob.state, ob.from_addr
+				coalesce(s.class_override, m.class), downgraded, m.parse_error IS NOT NULL, ob.id, ob.state, ob.from_addr,
+				hx.items, hx.sender_verified
 			%s
 			ORDER BY m.received_at DESC, m.id DESC
 			LIMIT $%d`, page, len(pageArgs)), pageArgs...)
@@ -142,7 +148,8 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 			var h SearchHit
 			var obID, obState, obFrom *string
 			err := r.Scan(&h.ID, &h.ThreadID, &h.ReceivedAt, &h.Subject, &h.FromAddr, &h.FromName,
-				&h.Snippet, &h.Class, &h.Downgraded, &h.Quarantined, &obID, &obState, &obFrom)
+				&h.Snippet, &h.Class, &h.Downgraded, &h.Quarantined, &obID, &obState, &obFrom,
+				&h.Extracted, &h.SenderVerified)
 			h.Outgoing = outgoing(obID, obState, obFrom)
 			return h, err
 		})
@@ -152,6 +159,14 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		return SearchResult{}, fmt.Errorf("search: %w", err)
 	}
 	return res, nil
+}
+
+// hitExtras joins hx for a page of hits: the best extractions and
+// whether a visible delivery proved the sender, as summaries have them.
+func hitExtras(db *DB, v *auth.Viewer) string {
+	return bestExtractions + `
+		CROSS JOIN LATERAL (SELECT ex.items, (SELECT bool_or(` + senderVerified + `) FROM deliveries d
+			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + `) AS sender_verified) hx`
 }
 
 // likeEscape makes a search term literal inside an ILIKE pattern, whose

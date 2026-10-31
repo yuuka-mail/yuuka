@@ -16,7 +16,7 @@ import { openable, timeLeft } from "./extracted";
  * Nothing here opens a link by itself: "open" is a plain link a person
  * presses, in a new tab, without a referrer.
  */
-export function ExtractedLine({ x, verified, subject }: { x: Extracted; verified?: boolean; subject: string }) {
+export function ExtractedLine({ x, verified, subject, mark = true }: { x: Extracted; verified?: boolean; subject?: string; mark?: boolean }) {
   const now = useNow(x.expires_at ? 15_000 : 0);
   const left = x.expires_at ? timeLeft(x.expires_at, now) : undefined;
   const expired = left?.expired ?? x.expired;
@@ -25,7 +25,7 @@ export function ExtractedLine({ x, verified, subject }: { x: Extracted; verified
   const tone = expired ? "text-muted-foreground" : "text-system-foreground";
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-ui">
-      <span aria-hidden className={cn("size-1.5 shrink-0 rounded-[1px]", expired ? "bg-muted-foreground" : "bg-system")} />
+      {mark && <span aria-hidden className={cn("size-1.5 shrink-0 rounded-[1px]", expired ? "bg-muted-foreground" : "bg-system")} />}
       {x.code ? (
         <>
           <span
@@ -60,7 +60,7 @@ export function ExtractedLine({ x, verified, subject }: { x: Extracted; verified
           unverified
         </span>
       )}
-      <span className="min-w-0 truncate text-muted-foreground">{subject}</span>
+      {subject !== undefined && <span className="min-w-0 truncate text-muted-foreground">{subject}</span>}
     </span>
   );
 }

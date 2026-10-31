@@ -433,6 +433,14 @@ func (a *API) search(ctx context.Context, v *auth.Viewer, p SearchParams) (Searc
 			Downgraded: h.Downgraded, Quarantined: h.Quarantined, Recipients: []string{},
 			Outgoing: outgoingOut(h.Outgoing),
 		}
+		// A hit from the notification zone shows its code there too
+		// (§12.9); other mail is found by its words, not its numbers.
+		if h.Class == classify.Machine {
+			out.Hits[i].Extracted = extracted(h.Extracted, time.Now())
+			if v.Has(auth.DeliveryRead) {
+				out.Hits[i].SenderVerified = h.SenderVerified
+			}
+		}
 	}
 	if len(res.Hits) == p.Limit {
 		last := res.Hits[len(res.Hits)-1]

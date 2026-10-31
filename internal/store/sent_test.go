@@ -471,6 +471,15 @@ func TestVisibility(t *testing.T) {
 					codes[x.Value] = true
 				}
 			}
+			coded, err := db.Search(ctx, v, store.SearchQuery{Text: "verification", IncludeDowngraded: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, h := range coded.Hits {
+				for _, x := range h.Extracted {
+					codes[x.Value] = true
+				}
+			}
 			for _, id := range msgs {
 				if d, err := db.MessageByID(ctx, v, id); err == nil {
 					for _, x := range append(d.Extractions, d.Extracted...) {
