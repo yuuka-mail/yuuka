@@ -3,7 +3,15 @@ import { describe, expect, it } from "vitest";
 import { knownTotal, listParams, parseView, viewHref } from "@/mail/view";
 
 import { listTime, localPart } from "./format";
+import { cn } from "./utils";
 import { creationOptions, fromB64url, requestOptions, toB64url } from "./webauthn";
+
+describe("cn", () => {
+  it("knows the type roles are sizes, not colours", () => {
+    expect(cn("text-primary-foreground", "text-ui")).toBe("text-primary-foreground text-ui");
+    expect(cn("text-small", "text-ui")).toBe("text-ui");
+  });
+});
 
 describe("base64url", () => {
   it("round-trips every length", () => {
