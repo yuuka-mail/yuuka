@@ -2,7 +2,7 @@ import { ArrowLeftIcon, ChevronDownIcon, ChevronUpIcon, OctagonAlertIcon, Paperc
 import { useState } from "react";
 
 import { useThread } from "@/api/queries";
-import type { Facts, Message, MessageSummary } from "@/api/types";
+import type { Address, Facts, Message, MessageSummary } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -82,9 +82,10 @@ function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox }
           <span className="font-medium">{sender(m.from_name, m.from_addr)}</span>
           {m.from_name && <span className="text-muted-foreground">&lt;{m.from_addr}&gt;</span>}
         </div>
+        <HeaderAddresses message={m} />
         <div className="flex flex-wrap items-center gap-1.5 text-small text-muted-foreground">
           {/* Mail we only sent has no delivery here, so no prefix it came to. */}
-          {m.recipients.length > 0 && <span>to</span>}
+          {m.recipients.length > 0 && <span>delivered to</span>}
           {m.recipients.map((r) => (
             <Badge key={r} variant="outline" className="font-mono font-normal">
               {r}
@@ -126,6 +127,58 @@ function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox }
 
       {m.message_id && <p className="font-mono text-meta break-all text-muted-foreground">Message-ID &lt;{m.message_id}&gt;</p>}
     </div>
+  );
+}
+
+/** How many addresses of one field show before "+n more". */
+const addrsShown = 3;
+
+/**
+ * To, Cc and Reply-To as the sender wrote them, names first: one compact
+ * line, long lists cut to a few with the rest a click away. These are
+ * header text, unverified like the rest of it; where the mail actually
+ * arrived is the delivered-to line below.
+ */
+function HeaderAddresses({ message: m }: { message: Message }) {
+  const [all, setAll] = useState(false);
+  const fields = [
+    ["To", m.to],
+    ["Cc", m.cc],
+    ["Reply-To", m.reply_to],
+  ] as const;
+  if (fields.every(([, l]) => l.length === 0)) return null;
+  const hidden = fields.reduce((n, [, l]) => n + Math.max(0, l.length - addrsShown), 0);
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-small">
+      {fields.map(
+        ([label, l]) =>
+          l.length > 0 && (
+            <span key={label} className="min-w-0 break-words">
+              <span className="text-muted-foreground">{label} </span>
+              {(all ? l : l.slice(0, addrsShown)).map((a, i) => (
+                <span key={`${i}:${a.addr}`}>
+                  {i > 0 && <span className="text-muted-foreground">, </span>}
+                  <AddressText a={a} />
+                </span>
+              ))}
+            </span>
+          ),
+      )}
+      {hidden > 0 && !all && (
+        <button type="button" className="text-muted-foreground underline underline-offset-2 hover:text-foreground" onClick={() => setAll(true)}>
+          +{hidden} more
+        </button>
+      )}
+    </div>
+  );
+}
+
+function AddressText({ a }: { a: Address }) {
+  if (!a.name) return <span className="font-mono">{a.addr}</span>;
+  return (
+    <span title={a.addr}>
+      {a.name} <span className="text-muted-foreground">&lt;{a.addr}&gt;</span>
+    </span>
   );
 }
 

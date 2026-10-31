@@ -5,7 +5,7 @@ import type { Message, SendingIdentity, View } from "@/api/types";
 import { isQuiet, systemFacts } from "@/mail/facts";
 
 import { parseDraftFilter } from "./drafts-list";
-import { abilities, badAddrs, draftBody, holdLabel, outboxMoves, outboxState, parseAddrs, problem, replyBody, replySubject, standing } from "./outgoing";
+import { abilities, badAddrs, draftBody, holdLabel, onlyConfirmer, outboxMoves, outboxState, parseAddrs, problem, replyBody, replySubject, standing } from "./outgoing";
 
 const identity = (over: Partial<SendingIdentity>): SendingIdentity => ({
   id: "i",
@@ -23,6 +23,8 @@ const identity = (over: Partial<SendingIdentity>): SendingIdentity => ({
   ...over,
 });
 
+const owned = (kind: string, name: string) => ({ identity_owner: { id: "x", kind, name } });
+
 describe("standing", () => {
   it("says a send queues, within what", () => {
     expect(standing(identity({}))).toEqual({ sends: true, headline: "Send queues it", detail: "auto · to any recipient · 10/hour · 50/day" });
@@ -33,6 +35,12 @@ describe("standing", () => {
     expect(s).toEqual({ sends: false, headline: "Held as a draft: owner cap", detail: "whatever the server says" });
     expect(holdLabel("policy")).toBe("drafts only");
     expect(holdLabel("review")).toBe("review not available yet");
+  });
+  it("names the one person who may confirm a draft on another person's address", () => {
+    const s = { principal: "human:operator", credential_id: "c", credential_kind: "session", scopes: [] };
+    expect(onlyConfirmer(owned("human", "alice"), s)).toBe("alice");
+    expect(onlyConfirmer(owned("human", "operator"), s)).toBeUndefined();
+    expect(onlyConfirmer(owned("agent", "arisu"), s)).toBeUndefined();
   });
 });
 

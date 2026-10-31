@@ -1,5 +1,5 @@
 import { ApiError } from "@/api/client";
-import type { Actor, Code, DraftBody, HoldReason, Message, OutboxEntry, OutboxState, RecipientState, SendingIdentity, SessionInfo, Tier } from "@/api/types";
+import type { Actor, Code, Draft, DraftBody, HoldReason, Message, OutboxEntry, OutboxState, RecipientState, SendingIdentity, SessionInfo, Tier } from "@/api/types";
 import { fullTime, sender } from "@/lib/format";
 
 // What yuuka says about outgoing mail, as words and tones. Everything
@@ -118,6 +118,17 @@ export const principal = (a: Actor) => `${a.kind}:${a.name}`;
 
 export function isMine(a: Actor, s: SessionInfo) {
   return principal(a) === s.principal;
+}
+
+/**
+ * The one person who may confirm draft d when that is not the viewer:
+ * the owner of a person's identity (§8.9 owner cap). The draft names the
+ * owner itself, since the viewer may have no tier on the identity and
+ * /identities then leaves it out.
+ */
+export function onlyConfirmer(d: Pick<Draft, "identity_owner">, s: SessionInfo): string | undefined {
+  const o = d.identity_owner;
+  return o.kind === "human" && !isMine(o, s) ? o.name : undefined;
 }
 
 export function isHuman(s: SessionInfo) {

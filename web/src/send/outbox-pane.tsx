@@ -9,8 +9,6 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { system, Voice } from "@/components/voice";
 import { cn } from "@/lib/utils";
-import { useMessage } from "@/mail/reading-data";
-
 
 import { ProblemLine } from "./marks";
 import { OutboxFacts } from "./outbox-facts";
@@ -32,7 +30,6 @@ export function OutboxPane({
 }) {
   const q = useOutboxEntry(id);
   const e = q.data;
-  const copy = useMessage(e?.message_id ?? "", !!e?.message_id);
   const s = e && outboxState(e.state);
   return (
     <article className="flex h-full min-h-0 flex-col">
@@ -47,7 +44,7 @@ export function OutboxPane({
           <div className="flex max-w-[56rem] flex-col gap-4 px-4 py-4 md:px-6">
             <header className="flex flex-col gap-1">
               <h1 className="text-title font-semibold break-words">
-                {copy.data ? copy.data.subject || <span className="text-muted-foreground">(no subject)</span> : <span className="text-muted-foreground">Outbox {e.id}</span>}
+                {e.subject || <span className="text-muted-foreground">{e.message_id ? "(no subject)" : `Outbox ${e.id}`}</span>}
               </h1>
               <p className="flex flex-wrap gap-x-3 text-small text-muted-foreground">
                 {e.message_id && (

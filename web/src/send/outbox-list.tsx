@@ -13,8 +13,7 @@ export function parseOutboxFilter(st: string | undefined): OutboxFilter {
 
 /**
  * Outgoing mail, newest first, each row with every recipient's state.
- * The outbox has no subject of its own (the sent copy has it), so a row
- * names who it went to and from where; the detail opens the sent copy.
+ * The subject is the sent copy's, which the server reads for the row.
  */
 export function OutboxList({ filter, selected, onSelect }: { filter: OutboxFilter; selected?: string; onSelect: (id: string) => void }) {
   const states = outboxFilters[filter].states;
@@ -63,7 +62,11 @@ function Row({ e, selected, onSelect }: { e: OutboxEntry; selected: boolean; onS
       )}
     >
       <span className="flex min-w-0 items-center gap-1.5 text-ui">
-        <span className="min-w-0 truncate font-mono text-small">{e.from}</span>
+        {/* The subject leads; the From address gets what room is left. */}
+        <span className="min-w-0 truncate">
+          <span className="font-medium">{e.subject || <span className="font-normal text-muted-foreground">(no subject)</span>}</span>
+          <span className="font-mono text-small text-muted-foreground"> · {e.from}</span>
+        </span>
         {e.submitted_by.kind !== "human" && <span className="shrink-0 text-meta text-muted-foreground">by {e.submitted_by.name}</span>}
         <span className="ml-auto flex shrink-0 items-center gap-2 pl-2 text-meta text-muted-foreground tabular-nums">
           <OutgoingMark state={e.state} />

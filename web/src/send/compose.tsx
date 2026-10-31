@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { $api, api, data } from "@/api/client";
 import { useDraft, useIdentities, useOutboxEntry, useReplyIdentities } from "@/api/queries";
-import type { Cite, Draft, Message, ReplyIdentity, SendingIdentity, SessionInfo, SubmitResult } from "@/api/types";
+import type { Cite, Draft, HoldReason, Message, ReplyIdentity, SendingIdentity, SessionInfo, SubmitResult } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Signature, system, Voice } from "@/components/voice";
@@ -14,7 +14,7 @@ import { useMessage } from "@/mail/reading-data";
 
 import { AuthorMark, OutgoingMark, ProblemLine } from "./marks";
 import { OutboxFacts } from "./outbox-facts";
-import { abilities, badAddrs, draftBody, holdLabel, isMine, problem, replyBody, replySubject, standing } from "./outgoing";
+import { abilities, badAddrs, draftBody, holdLabel, isMine, onlyConfirmer, problem, replyBody, replySubject, standing } from "./outgoing";
 
 // The composer (§12.1, §12.10): Markdown in a textarea, saved as a draft
 // as it is typed (create once, then PUT the whole draft), and Send, which
@@ -344,7 +344,13 @@ function Editor({
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="flex flex-col gap-2 px-4 pt-3 empty:hidden md:px-6">
           {d && d.author.kind !== "human" && <AgentNote draft={d} onOpenMessage={onOpenMessage} />}
-          {held && <HeldNote reason={held.hold_reason} detail={held.hold_detail} />}
+          {held && (
+            <HeldNote
+              reason={held.hold_reason}
+              detail={held.hold_detail}
+              confirmer={held.hold_reason === "owner" && d ? onlyConfirmer(d, session) : undefined}
+            />
+          )}
           {inOutbox && outboxId && <QueuedNote outboxId={outboxId} fallback={d?.outbox?.state} canSeeOutbox={can.outbox} onOpenOutbox={onOpenOutbox} />}
         </div>
 
@@ -358,7 +364,7 @@ function Editor({
               <FromPicker value={f.from} identities={identities} candidates={candidates} onChange={(from) => edit({ from })} />
             )}
           </Row>
-          {!inOutbox && <Standing identity={identity} confirming={confirming ? d : undefined} session={session} from={f.from} />}
+          {!inOutbox && <Standing identity={identity} confirming={confirming ? d : undefined} session={session} from={f.from} held={held?.hold_reason} />}
           <Row label="To">
             <AddrInput value={f.to} readOnly={readOnly} onChange={(to) => edit({ to })} label="To" autoFocus={!initial.to && !readOnly} />
             {!showCc && !readOnly && (
@@ -534,20 +540,35 @@ function FromPicker({ value, identities, candidates, onChange }: { value: string
 
 /**
  * What pressing Send would do, before it is pressed (§12.10): yuuka's
- * preview of the decision, in the system voice.
+ * preview of the decision, in the system voice. When it would be held
+ * for the reason the last submission was (held), the box above already
+ * says so and this line is left out.
  */
-function Standing({ identity, confirming, session, from }: { identity?: SendingIdentity; confirming?: Draft; session: SessionInfo; from: string }) {
+function Standing({
+  identity,
+  confirming,
+  session,
+  from,
+  held,
+}: {
+  identity?: SendingIdentity;
+  confirming?: Draft;
+  session: SessionInfo;
+  from: string;
+  held?: HoldReason;
+}) {
   let sends: boolean;
   let headline: string;
   let detail = "";
+  let reason: HoldReason | undefined;
   if (confirming) {
     // §8.9 rule 2: a person confirming someone else's draft replaces the
     // tier; only the owner may confirm mail as a person's own address.
-    const owner = identity?.owner;
-    const othersAddress = owner?.kind === "human" && `${owner.kind}:${owner.name}` !== session.principal;
-    sends = !othersAddress;
-    headline = othersAddress ? `Held: only ${owner.name} can confirm mail as this address` : `Send confirms ${confirming.author.name}'s draft`;
-    detail = othersAddress ? "owner cap (§8.9)" : "it is queued with you as the approver (§8.9)";
+    const owner = onlyConfirmer(confirming, session);
+    sends = !owner;
+    reason = owner ? "owner" : undefined;
+    headline = owner ? `Held: only ${owner} can confirm mail as this address` : `Send confirms ${confirming.author.name}'s draft`;
+    detail = owner ? "owner cap (§8.9)" : "it is queued with you as the approver (§8.9)";
   } else if (!from || isPattern(from)) {
     return null;
   } else if (!identity) {
@@ -556,7 +577,9 @@ function Standing({ identity, confirming, session, from }: { identity?: SendingI
     detail = "the draft is kept, but it cannot be sent as it is";
   } else {
     ({ sends, headline, detail } = standing(identity));
+    reason = sends ? undefined : identity.hold_reason;
   }
+  if (!sends && reason && reason === held) return null;
   return (
     <div className="flex min-h-7 flex-wrap items-center gap-x-2 border-b py-1 text-small">
       <Signature speaker={system} />
@@ -604,15 +627,20 @@ function CiteItem({ cite, onOpen }: { cite: Cite; onOpen: (id: string, anchor?: 
   );
 }
 
-/** A submission that stopped at the draft, and why (§8.9). */
-function HeldNote({ reason, detail }: { reason?: Draft["hold_reason"]; detail?: string }) {
+/**
+ * A submission that stopped at the draft, and why (§8.9). confirmer is
+ * the one person who may confirm it, when the owner cap says so.
+ */
+function HeldNote({ reason, detail, confirmer }: { reason?: HoldReason; detail?: string; confirmer?: string }) {
   return (
     <Voice speaker={system} title="held as a draft">
       <p>
         <span className="font-semibold">{holdLabel(reason)}</span>
         {detail && <span className="text-muted-foreground"> · {detail}</span>}
       </p>
-      <p className="mt-0.5 text-muted-foreground">Nothing was sent. The draft stays in Drafts; a person can confirm it there.</p>
+      <p className="mt-0.5 text-muted-foreground">
+        Nothing was sent. The draft stays in Drafts; {confirmer ? `only ${confirmer} can confirm it.` : "a person can confirm it there."}
+      </p>
     </Voice>
   );
 }
