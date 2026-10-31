@@ -91,13 +91,18 @@ accounts.offload_policy = off | after(age=90d, require_flags=seen, exclude_label
 **删除闸门**（每一步都要留痕，缺一步不删）：
 
 1. 该投递的 raw 已落 **R2 和本地两处**，`raw_objects.sha256` 已记录
-2. **二次独立校验**：卸载前重新 `BODY.PEEK[]` 拉一遍远端原件，sha256 与库里一致才继续——
-   防的是首次拉取时的截断、编码损坏、或者远端这封信在拉取后被改过（Gmail 会改 label 不改正文，但要确认）
+2. **二次独立校验，和删除在同一个会话、同一个已验证的定位上完成**：`SELECT` 后核对 UIDVALIDITY
+   （有稳定 id 的来源再核对 `X-GM-MSGID` / `EMAILID`）→ 按 UID 重拉 `BODY.PEEK[]`，
+   sha256 与库里一致 → `UID STORE +FLAGS (\Deleted)` → `UID EXPUNGE`（§10.1）。
+   防的是首次拉取时的截断、编码损坏，以及定位已经指向别的信。校验和删除分在两个会话做，
+   中间 UIDVALIDITY 一变，校验过的和删掉的就可能不是同一封；同一个会话里同一个 UID 的内容不可变，
+   校验过的就是删掉的
 3. 该 raw 已被至少一次 **Postgres 备份快照覆盖**（§7 的备份是正经备份，这里是它的直接消费者）：
    卸载的信在库里的 `deliveries` 行是它存在过的唯一凭据
 4. 命中 `offload_policy` 的年龄/标志/排除条件；`message_state.pinned`（钉住）的不删
 5. 删除动作本身走 driver 的 `Expunger`（§10.1），记入 `actions`，actor 是 `system`，
-   `deliveries.remote_state = offloaded` 并保留完整的远端定位 `(mailbox, uidvalidity, source_uid)`——以后在那边看到同一封不会误判为新信
+   `deliveries.remote_state = offloaded`，`source_key` 和最后一次验证过的定位都保留——
+   信从 Trash 恢复、或在别的文件夹再出现时，按 `source_key` 认得出是同一封，不会误判为新信
 
 **没有任何 API 能按单封触发远端删除。** 卸载是策略驱动的系统批处理，不是 MCP tool，
 也不是 WebUI 按钮；§13.4 的 scope 里没有它，agent 和服务主体连提案都提不了。

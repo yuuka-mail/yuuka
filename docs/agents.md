@@ -19,7 +19,8 @@ MCP server 了事，它和 WebUI 一样是一等外壳。三条外壳（WebUI / 
 - 分层获取，token 预算可控：`snippet(200字) → sections(目录) → part(按需)`
   一次不灌 200KB HTML，这是最常见的 agent 上下文浪费
 - 头部带认证事实：`spf=pass dkim=pass dmarc=pass from_domain=github.com`
-  （含 `ix64/spf` 的二次判定）。只来自可信接收方（§10.1.1），取不到就明确标「未验证」
+  只来自可信接收方（§10.1.1），取不到就明确标「未验证」。`from_domain` 是否可信只看 dmarc；
+  `ix64/spf` 的二次判定单列为辅助证据，不并进这一行
 
 稳定锚点是"人机流畅"的关键机制：agent 说的每个结论都能带一个 URI，
 人在 WebUI 里一点就跳到原文那一段。**agent 的输出可被当场验证**，

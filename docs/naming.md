@@ -73,7 +73,7 @@ yuuka-mail/yuuka
 └─ testdata/              # .eml 契约语料（§10.5）
 ```
 
-`ix64/spf` 直接 `require` 进来用于 §3.3 的二次 SPF 判定；
+`ix64/spf` 直接 `require` 进来用于 §3.3 的辅助 SPF 判定（不参与 From 身份判断）；
 org profile README 放 `yuuka-mail/.github/profile/README.md`。
 
 ---

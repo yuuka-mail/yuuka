@@ -16,20 +16,33 @@ driver **一律不解析 MIME**——这是契约里最重要的一条。
 ### 10.1 收：Push 和 Pull 两种形状，一个产出
 
 ```go
-// 所有 driver 的唯一产出：原件引用 + 幂等键 + 来源
+// 所有 driver 的唯一产出：原件引用 + 稳定标识 + 远端定位 + 来源
 type InboundRef struct {
-    AccountID   AccountID
-    RawKey      string      // 已落 RawStore 的 key；Completeness=None 时为空
+    AccountID    AccountID
+    SourceKey    string       // 来源处的稳定标识，账户内唯一，即幂等键；push 来源留空，由 ingest 填（见要点）
+    Loc          RemoteLoc    // 远端定位；push 来源和 Gmail API 为零值
+    RawKey       string       // 已落 RawStore 的 key；Completeness=None 时为空
     Completeness Completeness // Full | HeaderOnly | None，由账户的 sync_policy 决定（§9.2）
-    Header      []byte      // 仅 None：只在内存里用于生成通知，不落盘
-    Size        int64
-    SHA256      [32]byte
-    Mailbox     string      // IMAP 文件夹；UID 只在它和 UIDValidity 之内有意义。其他 driver 填 ""
-    UIDValidity uint64      // IMAP 语义，其他 driver 填 0
-    SourceUID   string      // IMAP UID / Gmail X-GM-MSGID 或 API id / Worker 生成的 ULID
-    EnvelopeTo  []string    // RCPT TO，catch-all 判前缀靠它而不是 To 头
+    Header       []byte       // 仅 None：只在内存里用于生成通知，不落盘
+    Size         int64
+    SHA256       [32]byte
+    EnvelopeTo   []string     // RCPT TO，catch-all 判前缀靠它而不是 To 头；每个 RCPT 一条 delivery
     EnvelopeFrom string
-    ReceivedAt  time.Time
+    ReceivedAt   time.Time
+}
+
+// IMAP 的 UID 只在 (Mailbox, UIDValidity) 之内有意义，三者一起才是一个定位。
+// 定位会变（UIDVALIDITY 重置、信被移到别的文件夹），所以它不是标识。
+type RemoteLoc struct {
+    Mailbox     string
+    UIDValidity uint32
+    UID         uint32
+}
+
+// 对远端单封信做操作时传的完整引用：Loc 用来找到它，SourceKey 用来确认找到的就是它
+type RemoteRef struct {
+    SourceKey string
+    Loc       RemoteLoc
 }
 
 type Source interface {
@@ -50,15 +63,20 @@ type PullSource interface {
     Fetch(ctx context.Context, cur Cursor, limit int) ([]InboundRef, Cursor, error)
     Watch(ctx context.Context) (<-chan struct{}, error) // IMAP IDLE / Pub/Sub，可选
     // metadata 策略下按需取正文：流式返回，不进 RawStore，调用本身记入 actions（§9.4）
-    FetchBody(ctx context.Context, loc RemoteLoc) (io.ReadCloser, error) // loc = (mailbox, uidvalidity, uid)
+    FetchBody(ctx context.Context, ref RemoteRef) (io.ReadCloser, error)
 }
 
 // 可选：把本地的已读/归档写回远端（§9.2 默认关）
-type FlagWriter interface { SetFlags(ctx, []string, Flags) error }
+type FlagWriter interface {
+    SetFlags(ctx context.Context, ref RemoteRef, f Flags) error
+}
 
 // 可选：归档卸载（§9.6）。唯一不可逆的远端动作，只由系统批处理调用，没有 API 暴露它。
+// 在同一个会话里按 ref 重拉原件、sha256 等于 want 才删；任何一步对不上就什么都不做。
 // Caps.ExpungeSemantics 说明"删了之后容量什么时候真正释放"（IMAP 立即 / Gmail 进 Trash 30 天 / 不支持）
-type Expunger interface { Expunge(ctx, []string) error }
+type Expunger interface {
+    Expunge(ctx context.Context, ref RemoteRef, want [32]byte) error
+}
 ```
 
 要点：
@@ -66,13 +84,35 @@ type Expunger interface { Expunge(ctx, []string) error }
   R2 写成功就 ack，所以自建服务离线不丢信（§3.5）。
 - **Pull 的游标**：`Cursor` 对 IMAP 是每个文件夹一份 `(UIDVALIDITY, lastUID)`，
   对 Gmail API 是 `historyId`，对 Maildir 是 mtime+inode。
-- **幂等**：`unique(account_id, mailbox, uidvalidity, source_uid)` 在 `deliveries` 上（§4），
-  driver 不需要自己记"处理过没有"。只用 `(account_id, source_uid)` 是错的：
-  IMAP 的 UID 只在同一文件夹、同一 `UIDVALIDITY` 内唯一。
-- **`UIDVALIDITY` 变了**：该文件夹全量重扫，按 raw sha256 找到同一账户同一文件夹里已有的
-  delivery，**原地更新**它的 `uidvalidity / source_uid`，而不是插入新行。
-- **Gmail 走 IMAP 时只同步 `[Gmail]/All Mail`**，`SourceUID` 用 `X-GM-MSGID`（跨文件夹稳定），
-  label 用 `X-GM-LABELS` 取。否则同一封信在 INBOX 和 All Mail 里各算一次投递。
+- **稳定标识和定位是两件事**。`SourceKey` 回答「是不是同一封」，`RemoteLoc` 回答「现在去哪里找它」。
+  前者做幂等键，后者做操作；两者混用，要么幂等失效，要么操作落到别的信上。
+- **幂等**：`unique(account_id, source_key)` 在 `deliveries` 上（§4），driver 不需要自己记"处理过没有"。
+  `SourceKey` 的取值按来源能给出的最稳定的东西：
+
+  | 来源 | `SourceKey` | 跨文件夹移动 | 跨 UIDVALIDITY 重置 |
+  |---|---|---|---|
+  | Gmail（IMAP 或 API） | `X-GM-MSGID`〔待核实：与 Gmail API 的 message id 是否为同一个 64 位数，是则统一存一种写法，换 driver 不用迁移〕 | 稳定 | 稳定 |
+  | 支持 OBJECTID（RFC 8474）的 IMAP | `EMAILID` | 稳定 | 稳定 |
+  | 其他 IMAP | 定位本身：`<mailbox>/<uidvalidity>/<uid>` | 变 | 变（见下） |
+  | push 来源（Worker 等） | `(envelope_to, content_hash)`，ingest 算完 `content_hash` 后填 | — | — |
+
+  push 来源用内容而不是 Worker 的调用 id，是因为调用 id 每次重投都会变：用它做键，重投去重就只能先查后插。
+  用 `(envelope_to, content_hash)` 做键，重投直接撞上唯一约束（§4.1）。调用 id 仍然是 `raw_objects.id`。
+- **对远端的每个操作都先验证定位**（`FetchBody` / `SetFlags` / `Expunge` 一样）：
+  1. `SELECT` 后 UIDVALIDITY 与 `Loc` 不同 → 不动作，返回 `ErrStaleLoc`
+  2. `SourceKey` 是稳定 id 的来源，再 `UID FETCH <uid> (X-GM-MSGID)`（或 `EMAILID`）确认对得上
+  3. 动作只按 UID：`UID FETCH`、`UID STORE`、`UID EXPUNGE`（UIDPLUS，RFC 4315）或 `UID MOVE`（RFC 6851）。
+     不用普通 `EXPUNGE`：它会删掉该文件夹里所有带 `\Deleted` 的信，包括别的客户端标的。
+     服务器两者都不支持，`Caps` 里就没有 `Expunger`
+
+  `ErrStaleLoc` 由同步任务重新解析定位后再试，不在调用点猜。同一 UIDVALIDITY 下一个 UID 对应的内容不可变
+  （IMAP 的保证），所以验证通过之后在同一个会话里的动作作用的一定是验证过的那封。
+- **定位失效时**：有稳定 id 的来源按 id 找回当前 UID（Gmail 是 `UID SEARCH X-GM-MSGID <id>`，
+  OBJECTID 是 `UID SEARCH EMAILID <id>`），只改写定位，`source_key` 不变。
+  其他 IMAP 只能在 UIDVALIDITY 变化后全量重扫该文件夹，按 raw sha256 对上同一账户同一文件夹里已有的
+  delivery，**原地改写**它的定位和 `source_key`，而不是插入新行。
+- **Gmail 走 IMAP 时只同步 All Mail**：按 SPECIAL-USE 的 `\All`（RFC 6154）找，不写死 `[Gmail]/All Mail`——
+  文件夹名随界面语言变。label 用 `X-GM-LABELS` 取。否则同一封信在 INBOX 和 All Mail 里各算一次投递。
 - **`metadata` / `notify` 策略不是"拉下来再丢"**：
   - `metadata`：driver 用 `BODY.PEEK[HEADER]` 只拉头部，`Completeness=HeaderOnly`，
     头部照常落 RawStore，解析器据此只建头部索引；点开时走 `FetchBody` 实时取（§4.4）
@@ -89,9 +129,12 @@ type Expunger interface { Expunge(ctx, []string) error }
 - 每个账户配 `trusted_authserv_id`（Cloudflare Email Routing 的、`mx.google.com`、工作邮箱服务器的），
   外部账户的取值是 M3.5 接入时的实测项
 - 只采信**最上面一条**、且 authserv-id 匹配的 `Authentication-Results`；其余一律忽略
-- 二次 SPF 判定（§3.3、`ix64/spf`）需要的发信方 IP 与 HELO，只从可信接收方自己加的那一行
+- 可见 `From` 是不是真的，只看这条可信 `Authentication-Results` 里的 **dmarc**（§3.3）。
+  spf、dkim 的结果作为辅助证据一并记下，但 SPF 验证的是信封 `MAIL FROM` 域或 HELO，不是信头 `From`
+- 辅助的二次 SPF 判定（`ix64/spf`）需要的发信方 IP 与 HELO，只从可信接收方自己加的那一行
   `Received`（`by` 是可信主机的最上面一条；它下面的都是发件方一侧写的，不可信）里取；
-  `MAIL FROM` 取信封
+  `MAIL FROM` 取信封。它在 ingest 时算一次，结果连同查询时间存进 `deliveries.spf_recheck`，
+  不覆盖可信接收方的结论，reparse 也不重算（§4.2）
 - 取不到可信接收方的头，就**没有认证事实**：`auth` 记为 `none`，泄漏检测和 agent 视图都按「未验证」处理。
   宁可没有判断，也不要基于伪造输入的判断
 
@@ -119,11 +162,13 @@ type Expunger interface { Expunge(ctx, []string) error }
 type Transport interface {
     Name() string
     Caps() TransportCaps
-    // 入参是我们自己组装好的完整 MIME 字节，已按 Caps 去掉出口不允许调用方设置的头
-    Send(ctx context.Context, env Envelope, raw []byte) (*SendResult, error)
+    // 入参是我们自己组装好的完整 MIME 字节，已按 Caps 去掉出口不允许调用方设置的头。
+    // commit 必须在越过不可回头点之前调用一次（SMTP：发正文结束符之前；API：发请求之前），
+    // 调用方借它把「已提交」落库；commit 返回错误时 Send 放弃，什么都不发出（§4.5）
+    Send(ctx context.Context, env Envelope, raw []byte, commit func(context.Context) error) (*SendResult, error)
 }
 type SendResult struct {
-    Outcome    Outcome            // Accepted | Partial | Rejected | Unknown（DATA 后断开 / 超时）
+    Outcome    Outcome            // Accepted | Partial | Rejected | Unknown（commit 之后断开 / 超时）
     Recipients []RecipientResult  // 逐收件人的 SMTP 码，落 outbox_recipients
     ProviderID string
     MessageID  string             // 出口实际使用的 Message-ID；拿不到时为空，见 §10.4.1
@@ -210,8 +255,8 @@ multipart/mixed
    由它用自己的域生成；调用方带了这类头，整封请求会被拒（API 下是 `E_HEADER_NOT_ALLOWED`，
    SMTP 下是拒收还是改写，文档没写，要实测）。所以：
    - `CallerMessageID=false` 的出口，组装时**不写** `Message-ID`，发出后把出口实际用的那个
-     回填到 `outbox.sent_message_id`。线程匹配同时认我们自己的 id 和回填的 id，
-     否则对方回信的 `In-Reply-To` 对不上本地任何一条
+     回填到 `send_attempts.message_id`。平台每次发送都重新生成，`partial` 之后的重试会拿到另一个，
+     所以回填按尝试记、线程匹配认全部。否则对方回信的 `In-Reply-To` 对不上本地任何一条
    - 回填从哪里拿是实测项：SMTP 的 `250` 响应文本、事件订阅、Activity log。
      Cloudflare 的 Worker send binding 会返回一个 `messageId`，它是否等于 `Message-ID` 头也待实测；
      若 SMTP 拿不到而它能，CF 出口改走 Worker binding，多写一个 driver
@@ -250,7 +295,7 @@ multipart/mixed
    **CF 出口只能用它自己的签名**。所以「出口可替换」的 DNS 成本是：
    CF 的 DKIM 记录 + 每个备用出口的 DKIM（或自签 selector）+ 各自的 SPF include，都要**提前**配好。
    入口侧对应的成本是 MX 切换：catch-all 的 MX 只能指一家，迁移期双收靠
-   `(message_id, body_hash)` 折叠兜住（§4.1 的机制正好复用）。
+   `content_hash` 折叠兜住（§4.1 的机制正好复用）。
 
 ### 10.5 一致性测试
 

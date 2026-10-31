@@ -265,10 +265,15 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 3. **前缀注册表 + 泄漏检测**（现成项目全都没有，但这是 catch-all 的真正价值）
    每个前缀登记"我把它给了谁"。当 `github@` 收到非 GitHub 发件域的信，
    或某前缀的发件域集合突然变化 → 标记"可能泄漏/被转卖"。
-   这里可以复用 `ix64/spf`：对 `Authentication-Results` 之外再做一次
-   SPF 判定，用于"自称是 X 的信到底是不是 X"的判断。
-   前提是输入可信：发信方 IP、HELO 只从本账户可信接收方加的那一行 `Received` 里取，
-   任何认证头都可能是发件人伪造的（§10.1.1）。输入不齐时判定结果是 `none`，不是 `pass`。
+   这里要分清两个问题。**地址是否泄漏**不需要认证：任何意料之外的发件方都说明地址被别人知道了。
+   **「自称是 X 的信到底是不是 X」**看的是收件人看到的信头 `From`，能证明它的只有
+   可信接收方给出的 **DMARC** 结果（SPF 或 DKIM 通过且与 From 域对齐，§10.1.1）。
+   所以 `observed_domains` 只记 DMARC 通过的 From 组织域，这样泄漏才能归因到具体一方；
+   未验证的信照样计入泄漏信号，但不归因到任何域；自称是 `expected_domains` 却没过 DMARC 的，标为仿冒。
+   SPF 单独证明不了 From：它验证的是信封 `MAIL FROM` 域或 HELO，转发还会让它失败。
+   `ix64/spf` 的二次判定因此只是辅助信号——可信接收方没给 SPF 结果时补一个、给 agent 视图多一条证据，
+   不参与 From 身份判断，也不覆盖可信接收方的结论。它的输入只从可信那一行 `Received` 里取，
+   不齐时结果是 `none`；它依赖查询当时的 DNS，所以只在 ingest 时算一次、作为事实保存（§4.2）。
    前缀分两态：**claimed**（我认领过、给出去过）和 **discovered**（只是有人往这投过）。
    泄漏检测、TG 推送、聚合视图默认只看 claimed；discovered 主要是垃圾信字典攻击的产物，
    静默登记即可，认领是一个显式动作（§4.3、`prefixes.state`）。
@@ -284,7 +289,7 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 
 5. **不丢信**
    未知前缀照收；解析失败进 `quarantine` 并保留 raw；ingest 幂等
-   （折叠键 `(message_id, body_hash)` + 同路径 raw sha256 去重，见 §4.1；Email Worker 可能重投）;
+   （折叠键 `content_hash` + 同路径 raw sha256 去重，见 §4.1；Email Worker 可能重投）;
    Worker 侧只要 raw 写成功就算收下，自建服务离线数天也只是延迟入库。
    提交顺序、信封存放和 reconcile 规则见 §2.1，只有那一套，不留备选。
    「Worker 抛错 → Cloudflare 让发件方重投」是这条原则的基石。官方文档没有写，
@@ -297,6 +302,8 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
    **只在确定对方没收下时重试**：连接、认证、`RCPT` 阶段失败或 4xx 可以退避重试；
    正文（`DATA`）已经发出但没等到最终回复，就是 `unknown`——不自动重试，
    先用出口的状态查询或退信事件对账，对不上再交给人决定。盲目重试的代价是对方收到两封。
+   「确定」要有落库的证据：每次尝试在越过提交点之前先写 `committed_at`，
+   进程崩溃后凡是写过它的尝试都进 `unknown`，不能凭库里的 `sending` 重排（§4.5）。
    部分收件人被拒是 `partial`：只对 4xx 的那几个收件人重试，已收下的不再发。身份层支持任意 `From` 前缀（Cloudflare Email
    Sending 是域级 onboard，所以 `任意@example.com` 都能发），签名/显示名按前缀配置。
 
