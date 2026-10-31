@@ -85,7 +85,15 @@ services:
     secrets: [cloudflare-smtp]
 secrets:
   cloudflare-smtp:
-    file: ./secrets/cloudflare-smtp   # chmod 600；secrets/ 和这个文件都在 .gitignore 里
+    file: ./secrets/cloudflare-smtp   # secrets/ 和这个文件都在 .gitignore 里
+```
+
+文件型 secret 是原样绑定挂载进去的，宿主机上的属主和权限会带进容器；镜像以 `65532:65532`（distroless 的 nonroot）运行，
+所以文件要归它，只给 `chmod 600` 而属主是 root 时，yuuka 启动时读不到密码：
+
+```bash
+install -d -m 700 secrets
+install -m 400 -o 65532 -g 65532 /path/to/smtp-password secrets/cloudflare-smtp
 ```
 
 容器里的路径是 `/run/secrets/cloudflare-smtp`。文件只在启动时读，换密码后 `docker compose up -d yuuka`。
