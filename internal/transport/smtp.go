@@ -280,6 +280,12 @@ func (t *SMTP) Send(ctx context.Context, env Envelope, raw []byte, commit func(c
 	case 2:
 		a.settle(StatusAccepted, final)
 		a.res.ProviderID = parseProviderID(text)
+		if !t.cfg.Caps.CallerMessageID {
+			// The exit wrote its own Message-ID (§10.4.1). An exit that
+			// keeps ours needs no report, and a reply that merely looks
+			// like one must not override the id we sent.
+			a.res.MessageID = reportedMessageID(text)
+		}
 		return a.finish(nil)
 	case 4:
 		a.settle(StatusDeferred, final)
@@ -359,10 +365,20 @@ func (a *attempt) fail(stage string, err error) (*SendResult, error) {
 }
 
 // okMsgID is the whole final reply of Cloudflare Email Sending: an enhanced
-// status code, "Ok" and one msg-id in angle brackets (measured 2026-10,
-// §10.4.1). Only the complete form matches, so a free-text reply that
-// happens to contain brackets is not mistaken for an id.
+// status code, "Ok" and one msg-id in angle brackets. That id is the
+// Message-ID header the exit wrote into the delivered message (measured
+// 2026-10-31, §10.4.1). Only the complete form matches, so a free-text
+// reply that happens to contain brackets is not mistaken for an id.
 var okMsgID = regexp.MustCompile(`^(?:[245]\.[0-9]{1,3}\.[0-9]{1,3} )?(?i:ok) <([^<>@\s]+@[^<>@\s]+)>$`)
+
+// reportedMessageID returns the Message-ID an exit reports in its final
+// reply, without angle brackets, or "" when the reply has no such form.
+func reportedMessageID(text string) string {
+	if m := okMsgID.FindStringSubmatch(text); m != nil {
+		return m[1]
+	}
+	return ""
+}
 
 // parseProviderID extracts the exit's id for the message from the reply
 // forms that are unambiguous: Postfix's "queued as <id>", and Cloudflare's
@@ -370,8 +386,8 @@ var okMsgID = regexp.MustCompile(`^(?:[245]\.[0-9]{1,3}\.[0-9]{1,3} )?(?i:ok) <(
 // form yields "", and the verbatim reply in SendResult.Final remains for
 // study (§10.4.1).
 func parseProviderID(text string) string {
-	if m := okMsgID.FindStringSubmatch(text); m != nil {
-		return m[1]
+	if id := reportedMessageID(text); id != "" {
+		return id
 	}
 	const marker = "queued as "
 	for i := 0; i+len(marker) <= len(text); i++ {

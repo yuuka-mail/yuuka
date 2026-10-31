@@ -37,8 +37,11 @@ yuuka://message/<ulid>#part/2/para/7    # agent 锚点 scheme（§8.1）
 ### 11.2 名字不进邮件头
 
 - `Message-ID: <ulid@example.com>`——域名部分用真实域名，本地部分是 ULID，不含项目名。
-  只在允许自定 Message-ID 的出口上成立；Cloudflare 出口由平台生成（§10.4.1）
-- `X-Mailer` 默认**不发**（接入新出口时随 §10.4.1 的「发给自己比对字节」一并实测，部分 provider 会自己加）
+  只在允许自定 Message-ID 的出口上成立；Cloudflare 出口由平台生成，形如 `<36 位字母数字@From 的域>`，
+  同样不含项目名（§10.4.1）
+- `X-Mailer` 默认**不发**。Cloudflare 出口实测不加 `X-Mailer` / `User-Agent`，只加 `Feedback-ID` 和
+  一条 `Received: from authenticated-submission.invalid`，都不带我们的名字或主机（§10.4.1）；
+  其他出口接入时随「发给自己比对字节」一并实测，部分 provider 会自己加
 - 自建 MX 那天 `Received` 会带 `yuuka/<version>`，那是加在入站信上给自己看的
 
 ### 11.3 撞名备注

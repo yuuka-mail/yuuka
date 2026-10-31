@@ -44,12 +44,14 @@ type Caps struct {
 	StatusQuery bool
 }
 
-// CloudflareCaps are the caps of Cloudflare Email Sending. Message-ID,
-// DKIM-Signature and Return-Path are platform-controlled headers there
-// (§10.4.1, §10.4.2, §10.4.4), and there is no status query we use. Its
-// SMTP endpoint accepts a message carrying our Message-ID or DKIM-Signature,
-// but whether either reaches the recipient unchanged is unmeasured, so
-// both stay false.
+// CloudflareCaps are the caps of Cloudflare Email Sending, as measured on
+// its SMTP endpoint (§10.4.1). It replaces a Message-ID we send with its
+// own and reports that one in the final reply. The envelope sender becomes
+// a per-message address on a cf-bounce subdomain of ours, so no VERP. It
+// signs every message itself with d= the From domain. A DKIM-Signature of
+// ours is delivered untouched, but it adds nothing to that aligned
+// signature, so CallerDKIM stays false and StripHeaders keeps removing it.
+// There is no status query we use.
 func CloudflareCaps() Caps {
 	return Caps{
 		CallerMessageID:  false,
@@ -170,11 +172,11 @@ type SendResult struct {
 	// Final only when it has an unambiguous form: "queued as X" (Postfix)
 	// or "Ok <X>" (Cloudflare, X without the brackets).
 	ProviderID string
-	// MessageID is the Message-ID the exit actually used. It stays empty
-	// until a received copy shows that an exit reports it (§10.4.1).
-	// Cloudflare's "Ok <X>" looks like one but is not verified yet, so it
-	// goes to ProviderID only; guessing would break thread matching
-	// silently.
+	// MessageID is the Message-ID the exit wrote, without angle brackets,
+	// for an exit that generates its own (CallerMessageID false). It is set
+	// only from a reply form a received copy has confirmed: Cloudflare's
+	// "Ok <X>" (§10.4.1). Otherwise it is empty; guessing would break
+	// thread matching silently.
 	MessageID string
 }
 

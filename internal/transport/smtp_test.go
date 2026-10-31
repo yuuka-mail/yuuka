@@ -458,3 +458,36 @@ func TestParseProviderID(t *testing.T) {
 		}
 	}
 }
+
+// TestReportedMessageID covers the Cloudflare reply form end to end: the id
+// it reports is the Message-ID the exit wrote, so it fills MessageID, but
+// only when the exit generates its own (§10.4.1).
+func TestReportedMessageID(t *testing.T) {
+	const id = "Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAb7c@example.com"
+	for _, tt := range []struct {
+		name  string
+		final string
+		caps  Caps
+		want  string
+	}{
+		{name: "exit generates its own", final: "250 2.0.0 Ok <" + id + ">", caps: CloudflareCaps(), want: id},
+		{name: "exit keeps ours", final: "250 2.0.0 Ok <" + id + ">", caps: Caps{CallerMessageID: true}},
+		{name: "queued as is no Message-ID", final: "250 2.0.0 Ok: queued as ABC123", caps: CloudflareCaps()},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := newServer(t, behavior{final: tt.final})
+			cfg := srv.config()
+			cfg.Caps = tt.caps
+			res, err := send(t, cfg, t.Context(), []string{"rcpt@example.com"}, testRaw, func(context.Context) error { return nil })
+			if err != nil {
+				t.Fatal(err)
+			}
+			if res.MessageID != tt.want {
+				t.Errorf("MessageID = %q, want %q", res.MessageID, tt.want)
+			}
+			if res.ProviderID == "" {
+				t.Error("ProviderID is empty")
+			}
+		})
+	}
+}
