@@ -1,11 +1,31 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiError } from "@/api/client";
-import type { Message, SendingIdentity, View } from "@/api/types";
+import type { Message, SendingIdentity, SessionInfo, View } from "@/api/types";
 import { isQuiet, systemFacts } from "@/mail/facts";
 
 import { parseDraftFilter } from "./drafts-list";
-import { abilities, badAddrs, draftBody, holdLabel, onlyConfirmer, outboxMoves, outboxState, parseAddrs, problem, replyBody, replySubject, standing, strangerStanding } from "./outgoing";
+import {
+  abilities,
+  badAddrs,
+  checkLabel,
+  draftBody,
+  duration,
+  holdLabel,
+  onlyConfirmer,
+  outboxMoves,
+  outboxState,
+  parseAddrs,
+  problem,
+  recallable,
+  replyBody,
+  replySubject,
+  resumeCommand,
+  reviewText,
+  shellWord,
+  standing,
+  strangerStanding,
+} from "./outgoing";
 
 const identity = (over: Partial<SendingIdentity>): SendingIdentity => ({
   id: "i",
@@ -34,7 +54,17 @@ describe("standing", () => {
     const s = standing(identity({ sends: false, tier: "draft", hold_reason: "owner", hold_detail: "whatever the server says" }));
     expect(s).toEqual({ sends: false, headline: "Held as a draft: owner cap", detail: "whatever the server says" });
     expect(holdLabel("policy")).toBe("drafts only");
-    expect(holdLabel("review")).toBe("review not available yet");
+    expect(holdLabel("review")).toBe("escalated by the review");
+    expect(holdLabel("withdrawn")).toBe("recalled");
+  });
+  it("says the review tier goes to the checks, then waits its window", () => {
+    const review = { tier: "review", sends: false, hold_reason: "review", hold_detail: "reviewed first: …" } as const;
+    const s = standing(identity({ ...review, recipient_scope: "thread", limits: {}, hold_seconds: 600 }));
+    expect(s).toEqual({ sends: true, headline: "Send runs the review", detail: "review — held 10 min after the checks · to the thread's participants" });
+    expect(standing(identity({ ...review, hold_seconds: 3600 })).detail).toContain("held 1 h after the checks");
+    expect(standing(identity({ ...review, hold_seconds: 0 })).detail).toContain("sent right after the checks");
+    // Unset is the server's default window.
+    expect(reviewText(undefined)).toBe("review — held 10 min after the checks");
   });
   it("names the one person who may confirm a draft on another person's address", () => {
     const s = { principal: "human:operator", credential_id: "c", credential_kind: "session", scopes: [] };
@@ -78,6 +108,38 @@ describe("abilities", () => {
     expect(abilities({ ...s, scopes: [...s.scopes] })).toMatchObject({ annotate: true, decide: true, rules: true });
     expect(abilities({ ...s, principal: "agent:arisu", scopes: [...s.scopes] })).toMatchObject({ annotate: true, decide: false, rules: false });
     expect(abilities({ ...s, scopes: ["message:read", "message:annotate"] })).toMatchObject({ decide: true, rules: false });
+  });
+  it("offers who-may-do-what to a person's own session with admin, never a token", () => {
+    const s = { principal: "human:operator", credential_id: "c", credential_kind: "session", scopes: ["admin"] } as SessionInfo;
+    expect(abilities(s).authority).toBe(true);
+    expect(abilities({ ...s, credential_kind: "token" }).authority).toBe(false);
+    expect(abilities({ ...s, principal: "agent:arisu" }).authority).toBe(false);
+    expect(abilities({ ...s, scopes: ["message:read", "prefix:manage", "prefix:read"] })).toMatchObject({ authority: false, prefixes: true });
+  });
+  it("lets a person recall any held mail, anyone else only their own", () => {
+    const person = { principal: "human:operator", credential_id: "c", credential_kind: "session", scopes: ["submission:send"] } as SessionInfo;
+    const agent = { ...person, principal: "agent:arisu", credential_kind: "token" };
+    const row = { state: "held", submitted_by: { id: "a", kind: "agent", name: "arisu" } } as const;
+    expect(recallable(row, person, abilities(person))).toBe(true);
+    expect(recallable(row, agent, abilities(agent))).toBe(true);
+    expect(recallable({ ...row, submitted_by: { id: "b", kind: "service", name: "monitoring" } }, agent, abilities(agent))).toBe(false);
+    expect(recallable({ ...row, state: "queued" }, person, abilities(person))).toBe(false);
+    expect(recallable(row, { ...person, scopes: ["message:read"] }, abilities({ ...person, scopes: ["message:read"] }))).toBe(false);
+  });
+});
+
+describe("host commands", () => {
+  it("quote what a shell would expand, as the server does", () => {
+    expect(shellWord("arisu@example.com")).toBe("arisu@example.com");
+    expect(shellWord("*@example.com")).toBe("'*@example.com'");
+    expect(shellWord("it's")).toBe(`'it'\\''s'`);
+    expect(resumeCommand("*@example.com", "agent:arisu")).toBe("yuuka grant set --identity '*@example.com' --principal agent:arisu --resume");
+  });
+  it("names each review check", () => {
+    expect(checkLabel("extracted_values")).toBe("Codes from incoming mail");
+    expect(duration(45)).toBe("45 s");
+    expect(duration(90)).toBe("2 min");
+    expect(duration(7200)).toBe("2 h");
   });
 });
 

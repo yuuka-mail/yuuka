@@ -18,6 +18,7 @@ export function OutboxFacts({ e, className }: { e: OutboxEntry; className?: stri
   rows.push([m.send_fact_from(), <span key="from" className="font-mono">{e.from}</span>]);
   rows.push([m.send_fact_submitted(), m.send_fact_submitted_by({ time: fullTime(e.created_at), who: principal(e.submitted_by) })]);
   if (e.approved_by) rows.push([m.send_fact_approved_by(), principal(e.approved_by)]);
+  if (e.withdrawn_by) rows.push([m.send_fact_withdrawn_by(), principal(e.withdrawn_by)]);
   rows.push([
     m.send_fact_attempts(),
     e.attempts

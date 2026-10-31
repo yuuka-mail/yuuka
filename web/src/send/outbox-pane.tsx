@@ -4,7 +4,7 @@ import { useState } from "react";
 
 import { api, data } from "@/api/client";
 import { useOutboxEntry } from "@/api/queries";
-import type { OutboxEntry, Resolution } from "@/api/types";
+import type { OutboxEntry, Resolution, SessionInfo } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { system, Voice } from "@/components/voice";
@@ -13,17 +13,20 @@ import { m } from "@/paraglide/messages.js";
 
 import { ProblemLine } from "./marks";
 import { OutboxFacts } from "./outbox-facts";
-import { outboxState, problem, type Abilities } from "./outgoing";
+import { outboxState, principal, problem, recallable, type Abilities } from "./outgoing";
+import { HoldUntil, Recall, ReviewVerdict } from "./review";
 
 /** One outbox row: its facts, its sent copy, and for unknown delivery the decision (§4.5). */
 export function OutboxPane({
   id,
+  session,
   can,
   onBack,
   onOpenMessage,
   onOpenDraft,
 }: {
   id: string;
+  session: SessionInfo;
   can: Abilities;
   onBack: () => void;
   onOpenMessage: (id: string) => void;
@@ -31,6 +34,7 @@ export function OutboxPane({
 }) {
   const q = useOutboxEntry(id);
   const e = q.data;
+  const [recalled, setRecalled] = useState(false);
   const s = e && outboxState(e.state);
   return (
     <article className="flex h-full min-h-0 flex-col">
@@ -61,9 +65,19 @@ export function OutboxPane({
                 <span className="font-mono">{e.id}</span>
               </p>
             </header>
+            {/* First while it can still be stopped; kept after a recall, which
+                refetches the row as withdrawn, so what the recall did stays in view. */}
+            {(e.state === "held" || recalled) && (
+              <Held e={e} canRecall={recallable(e, session, can) || recalled} onRecalled={() => setRecalled(true)} onOpenMessage={onOpenMessage} onOpenDraft={onOpenDraft} />
+            )}
             <Voice speaker={system} title={m.send_outbox_voice_title()} className={cn(e.state === "unknown" && "border-warning/60", e.state === "dead" && "border-destructive/60")}>
               <OutboxFacts e={e} />
             </Voice>
+            {e.state !== "held" && !recalled && e.review && (
+              <Voice speaker={system} title={m.review_title()}>
+                <ReviewVerdict review={e.review} onOpenMessage={onOpenMessage} />
+              </Voice>
+            )}
             {e.state === "unknown" && <Unknown e={e} canResolve={can.resolve} />}
           </div>
         ) : q.error ? (
@@ -78,6 +92,38 @@ export function OutboxPane({
         )}
       </div>
     </article>
+  );
+}
+
+/**
+ * Mail the review let through, waiting out its recall window (§8.9):
+ * when it goes, what each check found, and Recall for whoever may.
+ */
+function Held({
+  e,
+  canRecall,
+  onRecalled,
+  onOpenMessage,
+  onOpenDraft,
+}: {
+  e: OutboxEntry;
+  canRecall: boolean;
+  onRecalled: () => void;
+  onOpenMessage: (id: string) => void;
+  onOpenDraft: (id: string) => void;
+}) {
+  return (
+    <Voice speaker={system} title={e.state === "held" ? m.review_held_title() : m.review_title()}>
+      <div className="flex flex-col gap-1.5">
+        {e.state === "held" && e.hold_until && (
+          <p>
+            <HoldUntil until={e.hold_until} />
+          </p>
+        )}
+        {e.review && <ReviewVerdict review={e.review} onOpenMessage={onOpenMessage} />}
+        {canRecall ? <Recall id={e.id} identity={e.identity} submitter={principal(e.submitted_by)} onRecalled={onRecalled} onOpenDraft={onOpenDraft} /> :<p className="text-muted-foreground">{m.review_recall_not_yours({ scope: "submission:send" })}</p>}
+      </div>
+    </Voice>
   );
 }
 

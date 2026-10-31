@@ -2,6 +2,7 @@ import { CheckIcon, CopyIcon, ExternalLinkIcon } from "lucide-react";
 import { useEffect, useState, type SyntheticEvent } from "react";
 
 import type { Extracted } from "@/api/types";
+import { useNow } from "@/lib/now";
 import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages.js";
 
@@ -93,15 +94,4 @@ function CopyButton({ value }: { value: string }) {
       {copied ? <CheckIcon className="size-3.5 text-system-foreground" /> : <CopyIcon className="size-3.5" />}
     </button>
   );
-}
-
-/** The current time, refreshed every ms milliseconds; never when ms is 0. */
-function useNow(ms: number): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!ms) return;
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [ms]);
-  return now;
 }

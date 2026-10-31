@@ -152,6 +152,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
             <OutboxPane
               key={view.o}
               id={view.o}
+              session={session}
               can={can}
               onBack={() => go({ o: undefined }, true)}
               onOpenMessage={(m) => go({ o: undefined, m })}

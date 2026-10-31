@@ -61,6 +61,29 @@ export type OutboxEntry = S["OutboxEntry"];
 export type RecipientState = S["RecipientState"];
 export type Resolution = S["Resolution"];
 export type Sent = S["Sent"];
+export type RecipientScope = S["RecipientScope"];
+export type Limits = S["Limits"];
+
+// The review tier and its recall window (§8.9).
+export type Review = S["Review"];
+export type ReviewCheck = S["ReviewCheck"];
+export type CheckName = S["CheckName"];
+export type Withdrawal = S["Withdrawal"];
+export type Suspension = S["Suspension"];
+
+// Notes (§8.10).
+export type Note = S["Note"];
+export type NoteBody = S["NoteBody"];
+
+// Management (§13.10): decisions prompted by mail, and who may do what.
+export type PrefixDecision = S["PrefixDecision"];
+export type ExpectResult = S["ExpectResult"];
+export type CountedAs = S["CountedAs"];
+export type ManagedCredential = S["ManagedCredential"];
+export type ManagedIdentity = S["ManagedIdentity"];
+export type ManagedGrant = S["ManagedGrant"];
+export type AppliedGrant = S["AppliedGrant"];
+export type TightenBody = S["TightenBody"];
 
 // Annotations, rules and proposals (M3, §8.5). A rule's match is typed by
 // hand in rules/match.ts: the contract says only "object" because the

@@ -1,5 +1,5 @@
 import { ApiError } from "@/api/client";
-import type { Actor, Code, Draft, DraftBody, HoldReason, Message, OutboxEntry, OutboxState, RecipientState, SendingIdentity, SessionInfo, Tier } from "@/api/types";
+import type { Actor, CheckName, Code, Draft, DraftBody, HoldReason, Message, OutboxEntry, OutboxState, RecipientScope, RecipientState, SendingIdentity, SessionInfo, Tier } from "@/api/types";
 import { fullTime, sender } from "@/lib/format";
 import { m as msg } from "@/paraglide/messages.js";
 
@@ -77,6 +77,14 @@ export const outboxFilters = {
     },
     states: undefined,
   },
+  // Held for the recall window (§8.9): the one moment a person can
+  // still stop mail the review let through.
+  held: {
+    get label() {
+      return msg.send_filter_held();
+    },
+    states: ["held"],
+  },
   attention: {
     get label() {
       return msg.send_filter_attention();
@@ -128,26 +136,84 @@ const scopes = {
   any: () => msg.send_scope_any(),
 } as const;
 
+/** Whom recipient_scope s lets mail go to, with the allowlist when it has one. */
+export function scopeText(s: RecipientScope, allowlist: string[]): string {
+  return s === "allowlist" && allowlist.length ? msg.send_scope_allowlist_some({ list: allowlist.join(", ") }) : (scopes[s]?.() ?? s);
+}
+
+/** A recall window as people say it: "10 min", "2 h", "45 s". */
+export function duration(seconds: number): string {
+  if (seconds < 60) return msg.duration_s({ n: seconds });
+  if (seconds % 3600 === 0) return msg.duration_h({ n: seconds / 3600 });
+  return msg.duration_min({ n: Math.round(seconds / 60) });
+}
+
+/** Whether a submission as i goes to the review's checks: the server gives the window only then. */
+export function goesToReview(i: Pick<SendingIdentity, "hold_reason" | "hold_seconds">): boolean {
+  return i.hold_reason === "review" && i.hold_seconds !== undefined;
+}
+
+/** What the From picker says beside identity i: "sends (auto)", "review, 10 min to recall", "held: drafts only". */
+export function identityNote(i: SendingIdentity): string {
+  if (goesToReview(i)) return msg.send_opt_review({ window: duration(i.hold_seconds ?? defaultHoldSeconds) });
+  return i.sends ? msg.send_opt_sends({ tier: i.tier }) : msg.send_note_held({ reason: holdLabel(i.hold_reason) });
+}
+
+/** sendpolicy.DefaultHoldSeconds: the window when a grant leaves it unset. */
+export const defaultHoldSeconds = 600;
+
+/** The review tier with its window: "review — held 10 min after the checks". */
+export function reviewText(holdSeconds: number | undefined): string {
+  const s = holdSeconds ?? defaultHoldSeconds;
+  return s > 0 ? msg.send_tier_review_hold({ window: duration(s) }) : msg.send_tier_review_now();
+}
+
 /**
  * What pressing Send as identity i would do, before anything is
  * submitted. sends is a preview: recipients and limits are checked on
  * submission, so a "queues" can still come back held, never the reverse.
+ * On the review tier it goes to the checks, and from them to the recall
+ * window or back to a person (§8.9): the server says so with hold_reason
+ * review and the window in hold_seconds, and sends false, since nothing
+ * goes out on the press itself. Here that counts as sending.
  */
 export function standing(i: SendingIdentity): { sends: boolean; headline: string; detail: string } {
-  if (!i.sends) return { sends: false, headline: msg.send_held_as_draft({ reason: holdLabel(i.hold_reason) }), detail: i.hold_detail ?? "" };
+  const review = goesToReview(i);
+  if (!i.sends && !review) return { sends: false, headline: msg.send_held_as_draft({ reason: holdLabel(i.hold_reason) }), detail: i.hold_detail ?? "" };
   const limits = [
     i.limits.max_per_hour && msg.send_limit_hour({ n: i.limits.max_per_hour }),
     i.limits.max_per_day && msg.send_limit_day({ n: i.limits.max_per_day }),
   ].filter(Boolean);
-  const scope =
-    i.recipient_scope === "allowlist" && i.allowlist.length
-      ? msg.send_scope_allowlist_some({ list: i.allowlist.join(", ") })
-      : (scopes[i.recipient_scope]?.() ?? i.recipient_scope);
   return {
     sends: true,
-    headline: msg.send_queues_it(),
-    detail: [`${tierLabel(i.tier)}`, msg.send_to_scope({ scope }), ...limits].join(" · "),
+    headline: review ? msg.send_reviews_it() : msg.send_queues_it(),
+    detail: [review ? reviewText(i.hold_seconds) : tierLabel(i.tier), msg.send_to_scope({ scope: scopeText(i.recipient_scope, i.allowlist) }), ...limits].join(" · "),
   };
+}
+
+const checks: Record<CheckName, () => string> = {
+  first_contact: () => msg.review_check_first_contact(),
+  extracted_values: () => msg.review_check_extracted(),
+  cross_thread: () => msg.review_check_cross_thread(),
+  link_domains: () => msg.review_check_links(),
+  readable: () => msg.review_check_readable(),
+};
+
+/** The name of a check of the review tier (§8.9). */
+export const checkLabel = (c: CheckName) => checks[c]?.() ?? c;
+
+/**
+ * s quoted for a POSIX shell where it needs it, as the server quotes the
+ * commands it names (*@zone does): a command shown is one to paste.
+ */
+export function shellWord(s: string): string {
+  if (/^[A-Za-z0-9@._+:,=/-]+$/.test(s)) return s;
+  return `'${s.replaceAll("'", `'\\''`)}'`;
+}
+
+/** The host command that resumes a suspended grant (§8.9). */
+export function resumeCommand(identity: string, principal: string): string {
+  return `yuuka grant set --identity ${shellWord(identity)} --principal ${shellWord(principal)} --resume`;
 }
 
 /** The principal as `kind:name`, the form the session names it in. */
@@ -191,6 +257,11 @@ export function strangerStanding(owner: Actor, s: SessionInfo): { reason: HoldRe
   };
 }
 
+/** Whether the session may recall held row e: a person any, others their own (§8.9). */
+export function recallable(e: Pick<OutboxEntry, "state" | "submitted_by">, s: SessionInfo, can: { recall: boolean }): boolean {
+  return e.state === "held" && can.recall && (isHuman(s) || isMine(e.submitted_by, s));
+}
+
 export function isHuman(s: SessionInfo) {
   return s.principal.startsWith("human:");
 }
@@ -214,6 +285,17 @@ export function abilities(s: SessionInfo) {
     decide: isHuman(s) && has("message:annotate"),
     // Rules are a standing capability: a person's, with rule:manage.
     rules: isHuman(s) && has("rule:manage") && has("message:read"),
+    // Held mail (§8.9): a person may recall any they can see; anyone
+    // else only their own, which recallable checks per row.
+    recall: has("submission:send"),
+    // Claiming a prefix and its expected domains follow the mail (§12.12).
+    prefixes: has("prefix:manage") && has("prefix:read"),
+    // Who may do what (§13.10): a person's own session, with admin. A
+    // token never, whatever its scopes; the server checks it again.
+    authority: isHuman(s) && s.credential_kind === "session" && s.scopes.includes("admin"),
+    // Anyone with the scope writes their own note; a person deletes anyone's (§8.10).
+    notes: has("message:annotate"),
+    deleteNotes: isHuman(s) && has("message:annotate"),
   };
 }
 export type Abilities = ReturnType<typeof abilities>;
@@ -287,10 +369,12 @@ const problems: Partial<Record<Code, () => string>> = {
   unauthenticated: () => msg.send_problem_unauthenticated(),
   body_too_large: () => msg.send_problem_body_too_large(),
   invalid_rule: () => msg.problem_invalid_rule(),
+  widening_requires_cli: () => msg.problem_widening(),
 };
 
-// The codes whose detail names what is wrong (a field, an address).
-const specific = new Set<Code>(["invalid_body", "invalid_param", "no_identity", "submission_rejected", "invalid_rule"]);
+// The codes whose detail names what is wrong (a field, an address), or
+// the host command that does it (widening_requires_cli).
+const specific = new Set<Code>(["invalid_body", "invalid_param", "no_identity", "submission_rejected", "invalid_rule", "widening_requires_cli"]);
 
 /**
  * An error as people read it: a sentence chosen by its stable code, and

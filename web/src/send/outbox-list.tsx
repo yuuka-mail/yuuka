@@ -7,6 +7,7 @@ import { m } from "@/paraglide/messages.js";
 
 import { AuthorMark, OutgoingMark, toneText } from "./marks";
 import { outboxFilters, problem, recipientState, type OutboxFilter } from "./outgoing";
+import { HeldLeft } from "./review";
 
 export function parseOutboxFilter(st: string | undefined): OutboxFilter {
   return st && st in outboxFilters ? (st as OutboxFilter) : "all";
@@ -73,7 +74,8 @@ function Row({ e, selected, onSelect }: { e: OutboxEntry; selected: boolean; onS
         {e.submitted_by.kind !== "human" && <AuthorMark author={e.submitted_by} />}
         <span className="ml-auto flex shrink-0 items-center gap-2 pl-2 text-meta text-muted-foreground tabular-nums">
           <OutgoingMark state={e.state} />
-          {listTime(e.created_at)}
+          {/* Held mail goes by itself: how long is left matters more than when it was submitted. */}
+          {e.state === "held" && e.hold_until ? <HeldLeft until={e.hold_until} /> : listTime(e.created_at)}
         </span>
       </span>
       <Recipients rs={e.recipients} />

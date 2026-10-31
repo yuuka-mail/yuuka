@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { markup } from "@/components/markup";
 import { $api, api, data } from "@/api/client";
 import { useDraft, useIdentities, useOutboxEntry, useReplyIdentities } from "@/api/queries";
-import type { Cite, Draft, HoldReason, Message, ReplyIdentity, SendingIdentity, SessionInfo, SubmitResult } from "@/api/types";
+import type { Cite, Draft, HoldReason, Message, ReplyIdentity, Review, SendingIdentity, SessionInfo, SubmitResult, Withdrawal } from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Signature, system, Voice } from "@/components/voice";
@@ -17,7 +17,8 @@ import { m as msg } from "@/paraglide/messages.js";
 
 import { AuthorMark, OutgoingMark, ProblemLine } from "./marks";
 import { OutboxFacts } from "./outbox-facts";
-import { abilities, badAddrs, draftBody, holdLabel, isMine, onlyConfirmer, problem, replyBody, replySubject, standing, strangerStanding } from "./outgoing";
+import { abilities, badAddrs, draftBody, goesToReview, holdLabel, identityNote, isMine, onlyConfirmer, principal, problem, replyBody, replySubject, standing, strangerStanding } from "./outgoing";
+import { HoldUntil, Recall, Recalled, ReviewVerdict } from "./review";
 
 // The composer (§12.1, §12.10): Markdown in a textarea, saved as a draft
 // as it is typed (create once, then PUT the whole draft), and Send, which
@@ -118,7 +119,7 @@ const isPattern = (a: string) => a.startsWith("*@");
 
 function defaultFrom(ids: SendingIdentity[]): string {
   const concrete = ids.filter((i) => !isPattern(i.address));
-  return (concrete.find((i) => i.sends) ?? concrete[0])?.address ?? "";
+  return (concrete.find((i) => i.sends || goesToReview(i)) ?? concrete[0])?.address ?? "";
 }
 
 /**
@@ -173,6 +174,7 @@ function Editor({
   const [sendErr, setSendErr] = useState<unknown>();
   const [showCc, setShowCc] = useState(!!(initial.cc || initial.bcc));
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [recalled, setRecalled] = useState<{ w: Withdrawal; identity: string }>();
 
   // Saving is a chain: each save waits for the one before, so a create
   // is never raced by a PUT, and the newest fields always win.
@@ -252,7 +254,8 @@ function Editor({
     }, 800);
   };
 
-  const inOutbox = d?.state === "outbox" || !!result?.queued;
+  // Held for the recall window is in the outbox too (§8.9): it goes by itself.
+  const inOutbox = d?.state === "outbox" || result?.state === "queued" || result?.state === "held";
   // An SMTP submission's bytes are what its client sent (§13.6).
   const readOnly = inOutbox || !!d?.smtp;
   const confirming = !!d && !isMine(d.author, session);
@@ -280,7 +283,7 @@ function Editor({
       setResult(r);
       refresh();
       void qc.invalidateQueries({ queryKey: ["get", "/api/v1/drafts/{id}"] });
-      if (r.queued) {
+      if (r.state !== "draft") {
         void qc.invalidateQueries({ queryKey: ["get", "/api/v1/outbox"] });
         void qc.invalidateQueries({ queryKey: ["get", "/api/v1/messages"] });
         void qc.invalidateQueries({ queryKey: ["get", "/api/v1/threads/{id}"] });
@@ -314,7 +317,7 @@ function Editor({
   const title = inOutbox ? msg.send_title_in_outbox() : f.inReplyTo ? msg.send_title_reply() : d ? msg.send_title_draft() : msg.send_title_new();
   const outboxId = result?.outbox_id ?? d?.outbox?.outbox_id;
   // The hold, from this submit or from the draft as stored.
-  const held = result && !result.queued ? result : !result && d?.state === "held" ? { hold_reason: d.hold_reason, hold_detail: d.hold_detail } : undefined;
+  const held = result?.state === "draft" ? result : !result && d?.state === "held" ? { hold_reason: d.hold_reason, hold_detail: d.hold_detail } : undefined;
 
   return (
     <>
@@ -350,14 +353,39 @@ function Editor({
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <div className="flex flex-col gap-2 px-4 pt-3 pb-2 empty:hidden md:px-6">
           {d && d.author.kind !== "human" && <AgentNote draft={d} onOpenMessage={onOpenMessage} />}
+          {recalled && (
+            <Voice speaker={system} title={msg.review_title()}>
+              <Recalled w={recalled.w} identity={recalled.identity} submitter={session.principal} />
+            </Voice>
+          )}
           {held && (
             <HeldNote
               reason={held.hold_reason}
               detail={held.hold_detail}
               confirmer={held.hold_reason === "owner" && d ? onlyConfirmer(d, session) : undefined}
+              review={held.hold_reason === "review" ? d?.review : undefined}
+              onOpenMessage={onOpenMessage}
             />
           )}
-          {inOutbox && outboxId && <QueuedNote outboxId={outboxId} fallback={d?.outbox?.state} canSeeOutbox={can.outbox} onOpenOutbox={onOpenOutbox} />}
+          {inOutbox && outboxId && (
+            <QueuedNote
+              outboxId={outboxId}
+              fallback={d?.outbox?.state ?? result?.state}
+              holdUntil={result?.hold_until}
+              canSeeOutbox={can.outbox}
+              canRecall={can.recall}
+              from={f.from}
+              submitter={session.principal}
+              onOpenOutbox={onOpenOutbox}
+              onRecalled={(w, grantIdentity) => {
+                // Back to a draft that can be edited and sent again; a
+                // suspension it tripped stays said above the form.
+                if (w.suspended) setRecalled({ w, identity: grantIdentity });
+                setResult(undefined);
+                void qc.invalidateQueries({ queryKey: ["get", "/api/v1/drafts/{id}"] });
+              }}
+            />
+          )}
         </div>
 
         <div className="flex flex-col px-4 md:px-6">
@@ -507,7 +535,7 @@ function FromPicker({
   const add = (v: string, i: SendingIdentity | string) => {
     if (seen.has(v.toLowerCase())) return;
     seen.add(v.toLowerCase());
-    opts.push({ value: v, note: typeof i === "string" ? i : i.sends ? msg.send_opt_sends({ tier: i.tier }) : msg.send_note_held({ reason: holdLabel(i.hold_reason) }) });
+    opts.push({ value: v, note: typeof i === "string" ? i : identityNote(i) });
   };
   // The pattern picked, while its local part is being typed.
   const [patternChoice, setPatternChoice] = useState<string>();
@@ -666,13 +694,32 @@ function CiteItem({ cite, onOpen }: { cite: Cite; onOpen: (id: string, anchor?: 
  * A submission that stopped at the draft, and why (§8.9). confirmer is
  * the one person who may confirm it, when the owner cap says so.
  */
-function HeldNote({ reason, detail, confirmer }: { reason?: HoldReason; detail?: string; confirmer?: string }) {
+function HeldNote({
+  reason,
+  detail,
+  confirmer,
+  review,
+  onOpenMessage,
+}: {
+  reason?: HoldReason;
+  detail?: string;
+  confirmer?: string;
+  /** What the review's checks found, when they escalated it (§8.9). */
+  review?: Review;
+  onOpenMessage: (id: string) => void;
+}) {
   return (
     <Voice speaker={system} title={msg.send_held_title()}>
       <p>
         <span className="font-semibold">{holdLabel(reason)}</span>
-        {detail && <span className="text-muted-foreground"> · {detail}</span>}
+        {/* The checks below say it check by check; the detail would say it again. */}
+        {detail && !review && <span className="text-muted-foreground"> · {detail}</span>}
       </p>
+      {review && (
+        <div className="mt-1">
+          <ReviewVerdict review={review} onOpenMessage={onOpenMessage} />
+        </div>
+      )}
       <p className="mt-0.5 text-muted-foreground">
         {confirmer ? msg.send_held_nothing_sent_owner({ name: confirmer }) : msg.send_held_nothing_sent()}
       </p>
@@ -684,20 +731,34 @@ function HeldNote({ reason, detail, confirmer }: { reason?: HoldReason; detail?:
 function QueuedNote({
   outboxId,
   fallback,
+  holdUntil,
   canSeeOutbox,
+  canRecall,
+  from,
+  submitter,
   onOpenOutbox,
+  onRecalled,
 }: {
   outboxId: string;
   fallback?: string;
+  /** The end of the recall window, as the submission reported it. */
+  holdUntil?: string;
   canSeeOutbox: boolean;
+  canRecall: boolean;
+  /** The From and the submitter, for when the outbox row is not in view. */
+  from: string;
+  submitter: string;
   onOpenOutbox: (id: string) => void;
+  /** identity is the address of the identity the grant is on, *@zone for a pattern. */
+  onRecalled: (w: Withdrawal, identity: string) => void;
 }) {
   const e = useOutboxEntry(outboxId, canSeeOutbox);
   const state = e.data?.state ?? fallback ?? "queued";
+  const until = e.data?.hold_until ?? holdUntil;
   return (
     <Voice
       speaker={system}
-      title={msg.send_submitted_title()}
+      title={state === "held" ? msg.review_held_title() : msg.send_submitted_title()}
       action={
         canSeeOutbox && (
           <button type="button" className="text-small underline underline-offset-2" onClick={() => onOpenOutbox(outboxId)}>
@@ -706,13 +767,23 @@ function QueuedNote({
         )
       }
     >
-      {e.data ? (
-        <OutboxFacts e={e.data} />
-      ) : (
-        <p className="flex items-center gap-2">
-          <OutgoingMark state={state} /> {msg.send_outbox_id({ id: outboxId })}
-        </p>
-      )}
+      <div className="flex flex-col gap-1.5">
+        {state === "held" && until && (
+          <p>
+            <HoldUntil until={until} />
+          </p>
+        )}
+        {e.data ? (
+          <OutboxFacts e={e.data} />
+        ) : (
+          <p className="flex items-center gap-2">
+            <OutgoingMark state={state} /> {msg.send_outbox_id({ id: outboxId })}
+          </p>
+        )}
+        {state === "held" && canRecall && (
+          <Recall id={outboxId} identity={e.data?.identity ?? from} submitter={e.data ? principal(e.data.submitted_by) : submitter} onRecalled={(w) => onRecalled(w, e.data?.identity ?? from)} />
+        )}
+      </div>
     </Voice>
   );
 }
