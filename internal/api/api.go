@@ -32,7 +32,7 @@ type Store interface {
 	ListMessages(ctx context.Context, v *auth.Viewer, q store.MessageQuery) ([]store.MessageSummary, error)
 	MessageByID(ctx context.Context, v *auth.Viewer, id string) (store.MessageDetail, error)
 	ThreadByID(ctx context.Context, v *auth.Viewer, id string) (store.ThreadView, error)
-	PrefixStats(ctx context.Context, v *auth.Viewer) ([]store.PrefixStat, error)
+	PrefixStats(ctx context.Context, v *auth.Viewer) (store.PrefixSummary, error)
 	Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (store.SearchResult, error)
 }
 
@@ -294,13 +294,13 @@ func (a *API) thread(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
 }
 
 func (a *API) prefixes(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
-	ps, err := a.db.PrefixStats(r.Context(), v)
+	sum, err := a.db.PrefixStats(r.Context(), v)
 	if err != nil {
 		a.fail(w, r, err)
 		return
 	}
-	out := PrefixList{Prefixes: make([]Prefix, len(ps))}
-	for i, p := range ps {
+	out := PrefixList{Messages: sum.Messages, Downgraded: sum.Downgraded, Prefixes: make([]Prefix, len(sum.Prefixes))}
+	for i, p := range sum.Prefixes {
 		out.Prefixes[i] = Prefix{
 			Zone: p.Zone, Prefix: p.Prefix, Address: p.Prefix + "@" + p.Zone,
 			Claimed: p.State == store.PrefixClaimed, Label: p.Label,

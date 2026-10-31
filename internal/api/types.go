@@ -116,9 +116,12 @@ type Prefix struct {
 	Downgraded int       `json:"downgraded"`
 }
 
-// PrefixList is GET /api/v1/prefixes.
+// PrefixList is GET /api/v1/prefixes. Messages and Downgraded are
+// distinct totals: mail sent to two prefixes counts once here.
 type PrefixList struct {
-	Prefixes []Prefix `json:"prefixes"`
+	Messages   int      `json:"messages"`
+	Downgraded int      `json:"downgraded"`
+	Prefixes   []Prefix `json:"prefixes"`
 }
 
 // SearchResult is GET /api/v1/search.

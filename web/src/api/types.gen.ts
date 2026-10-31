@@ -135,9 +135,12 @@ export interface Prefix {
   downgraded: number /* int */;
 }
 /**
- * PrefixList is GET /api/v1/prefixes.
+ * PrefixList is GET /api/v1/prefixes. Messages and Downgraded are
+ * distinct totals: mail sent to two prefixes counts once here.
  */
 export interface PrefixList {
+  messages: number /* int */;
+  downgraded: number /* int */;
   prefixes: Prefix[];
 }
 /**

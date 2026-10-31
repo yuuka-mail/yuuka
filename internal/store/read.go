@@ -303,36 +303,54 @@ type PrefixStat struct {
 	Downgraded int
 }
 
+// PrefixSummary is the aggregation view: the prefixes and the distinct
+// totals over all of them (a message sent to two prefixes counts once).
+type PrefixSummary struct {
+	Messages   int
+	Downgraded int
+	Prefixes   []PrefixStat
+}
+
 // PrefixStats returns every prefix with its counts, most recently used
-// first.
-func (db *DB) PrefixStats(ctx context.Context, v *auth.Viewer) ([]PrefixStat, error) {
+// first, and the totals.
+func (db *DB) PrefixStats(ctx context.Context, v *auth.Viewer) (PrefixSummary, error) {
 	if err := needViewer(v, "prefixes"); err != nil {
-		return nil, err
+		return PrefixSummary{}, err
 	}
-	rows, err := db.pool.Query(ctx, `
-		WITH md AS (
-			SELECT d.message_id, NOT bool_or(`+notDowngraded+`) AS downgraded
+	// md: each visible message once, with its downgrade over all its
+	// visible deliveries.
+	md := `WITH md AS (
+			SELECT d.message_id, NOT bool_or(` + notDowngraded + `) AS downgraded
 			FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
-			WHERE d.message_id IS NOT NULL AND `+visibleDelivery(v)+`
+			WHERE d.message_id IS NOT NULL AND ` + visibleDelivery(v) + `
 			GROUP BY d.message_id
-		)
-		SELECT p.zone, p.prefix, p.state, coalesce(p.label, ''), p.first_seen, p.last_seen,
-			count(DISTINCT md.message_id), count(DISTINCT md.message_id) FILTER (WHERE md.downgraded)
-		FROM prefixes p
-		LEFT JOIN deliveries d ON d.zone = p.zone AND d.prefix = p.prefix
-		LEFT JOIN md ON md.message_id = d.message_id
-		GROUP BY p.zone, p.prefix
-		ORDER BY p.last_seen DESC, p.zone, p.prefix`)
-	if err != nil {
-		return nil, fmt.Errorf("prefixes: %w", err)
-	}
-	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (PrefixStat, error) {
-		var p PrefixStat
-		err := r.Scan(&p.Zone, &p.Prefix, &p.State, &p.Label, &p.FirstSeen, &p.LastSeen, &p.Messages, &p.Downgraded)
-		return p, err
+		)`
+	var out PrefixSummary
+	err := pgx.BeginTxFunc(ctx, db.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, md+` SELECT count(*), count(*) FILTER (WHERE downgraded) FROM md`).Scan(&out.Messages, &out.Downgraded)
+		if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, md+`
+			SELECT p.zone, p.prefix, p.state, coalesce(p.label, ''), p.first_seen, p.last_seen,
+				count(DISTINCT md.message_id), count(DISTINCT md.message_id) FILTER (WHERE md.downgraded)
+			FROM prefixes p
+			LEFT JOIN deliveries d ON d.zone = p.zone AND d.prefix = p.prefix AND `+visibleDelivery(v)+`
+			LEFT JOIN md ON md.message_id = d.message_id
+			GROUP BY p.zone, p.prefix
+			ORDER BY p.last_seen DESC, p.zone, p.prefix`)
+		if err != nil {
+			return err
+		}
+		out.Prefixes, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (PrefixStat, error) {
+			var p PrefixStat
+			err := r.Scan(&p.Zone, &p.Prefix, &p.State, &p.Label, &p.FirstSeen, &p.LastSeen, &p.Messages, &p.Downgraded)
+			return p, err
+		})
+		return err
 	})
 	if err != nil {
-		return nil, fmt.Errorf("prefixes: %w", err)
+		return PrefixSummary{}, fmt.Errorf("prefixes: %w", err)
 	}
 	return out, nil
 }

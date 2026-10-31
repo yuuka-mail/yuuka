@@ -73,6 +73,7 @@ type Options struct {
 var (
 	subjectLine   = regexp.MustCompile(`(?m)^Subject:[^\r\n]*(\r?\n[ \t][^\r\n]*)*`)
 	messageIDLine = regexp.MustCompile(`(?mi)^Message-ID:[^\r\n]*`)
+	replyLines    = regexp.MustCompile(`(?mi)^(In-Reply-To|References):`)
 	toLine        = regexp.MustCompile(`(?mi)^To:[^\r\n]*?([A-Za-z0-9._+-]+)@`)
 )
 
@@ -109,11 +110,38 @@ func Load(ctx context.Context, db *store.DB, pool *pgxpool.Pool, o Options) (int
 		subject := fmt.Sprintf(variantSubjects[rng.IntN(len(variantSubjects))], rng.IntN(1000000))
 		raw := subjectLine.ReplaceAll(src, []byte("Subject: "+mime.BEncoding.Encode("utf-8", subject)))
 		raw = messageIDLine.ReplaceAll(raw, fmt.Appendf(nil, "Message-ID: <seed-%d-%d@example.net>", o.Seed, i))
+		// Variants of a reply would all join the conversation below.
+		raw = replyLines.ReplaceAll(raw, []byte("X-Seed-Was-$1:"))
 		at := o.Now.Add(-time.Duration(rng.Int64N(int64(90 * 24 * time.Hour))))
 		if err := deliver(ctx, db, raw, variantPrefixes[rng.IntN(len(variantPrefixes))], at); err != nil {
 			return n, err
 		}
 		n++
+	}
+	// A conversation around the corpus reply, so threads have more than
+	// one message: the question it answers, and an answer to it.
+	if reply, err := os.ReadFile(filepath.Join(o.Dir, "alternative-reply.eml")); err == nil {
+		turns := []struct {
+			r  *strings.Replacer
+			at time.Duration
+		}{
+			{strings.NewReplacer("From: Bob Example <Bob@Example.org>", "From: Alice <alice@example.com>",
+				"To: Alice <alice@example.com>", "To: Bob Example <bob@example.org>",
+				"Subject: Re: Lunch on Friday?", "Subject: Lunch on Friday?",
+				"<reply-2@example.org>", "<orig-1@example.com>",
+				"Friday works. Noon at the usual place?", "Are you free for lunch on Friday?"), -3 * time.Hour},
+			{strings.NewReplacer("From: Bob Example <Bob@Example.org>", "From: Alice <alice@example.com>",
+				"To: Alice <alice@example.com>", "To: Bob Example <bob@example.org>",
+				"Message-ID: <reply-2@example.org>", "Message-ID: <reply-3@example.com>",
+				"In-Reply-To: <orig-1@example.com>", "In-Reply-To: <reply-2@example.org>",
+				"Friday works. Noon at the usual place?", "Noon it is. I'll book a table for two."), 0},
+		}
+		for _, t := range turns {
+			if err := deliver(ctx, db, []byte(t.r.Replace(string(reply))), "alice", o.Now.Add(t.at)); err != nil {
+				return n, err
+			}
+			n++
+		}
 	}
 	// The corpus itself is the newest mail, a minute apart.
 	for i, raw := range corpus {

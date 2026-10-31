@@ -57,7 +57,7 @@ func (s *spy) ThreadByID(ctx context.Context, v *auth.Viewer, id string) (store.
 	return s.DB.ThreadByID(ctx, v, id)
 }
 
-func (s *spy) PrefixStats(ctx context.Context, v *auth.Viewer) ([]store.PrefixStat, error) {
+func (s *spy) PrefixStats(ctx context.Context, v *auth.Viewer) (store.PrefixSummary, error) {
 	s.saw("PrefixStats", v)
 	return s.DB.PrefixStats(ctx, v)
 }
@@ -267,8 +267,14 @@ func TestPrefixesAndSearch(t *testing.T) {
 	if p := byAddr["random456@example.com"]; p.Claimed || p.Downgraded != p.Messages || p.Messages == 0 {
 		t.Errorf("random456: %+v", p)
 	}
-	res := decode[SearchResult](t, h.get("/api/v1/search?q=Lunch", h.token(auth.MessageRead)))
+	read := h.token(auth.MessageRead)
+	res := decode[SearchResult](t, h.get("/api/v1/search?q=usual+place", read))
 	if res.Total != 1 || res.Hits[0].Subject != "Re: Lunch on Friday?" || res.Hits[0].Class != ClassHuman {
-		t.Errorf("search: %+v", res)
+		t.Fatalf("search: %+v", res)
+	}
+	// devseed adds the question and an answer around the corpus reply.
+	th := decode[Thread](t, h.get("/api/v1/threads/"+res.Hits[0].ThreadID, read))
+	if len(th.Messages) != 3 || th.Subject != "Lunch on Friday?" || len(th.Participants) != 2 {
+		t.Errorf("thread: %+v", th)
 	}
 }

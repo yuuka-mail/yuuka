@@ -202,10 +202,15 @@ func TestPrefixStats(t *testing.T) {
 	db, _ := load(t)
 	deliver(t, db, "plain-otp.eml", nil, "shop", time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
 	deliver(t, db, "plain-otp.eml", shipped, "shop", time.Date(2026, 11, 1, 0, 0, 1, 0, time.UTC))
-	ps, err := db.PrefixStats(t.Context(), operator)
+	sum, err := db.PrefixStats(t.Context(), operator)
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The OTP went to two prefixes and counts once.
+	if sum.Messages != 17 || sum.Downgraded != 3 {
+		t.Errorf("totals %d/%d, want 17/3", sum.Messages, sum.Downgraded)
+	}
+	ps := sum.Prefixes
 	got := map[string]store.PrefixStat{}
 	for _, p := range ps {
 		got[p.Prefix] = p
