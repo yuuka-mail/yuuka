@@ -27,3 +27,6 @@ mise.local.toml
 # Worker 的真实部署配置（含真实域名与 bucket），只提交 wrangler.example.toml
 /worker/wrangler.toml
 /worker/node_modules/
+
+# Claude Code agent worktrees
+/.claude/worktrees/
