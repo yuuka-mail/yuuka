@@ -77,11 +77,23 @@ func (db *DB) Migrate(ctx context.Context) error {
 		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrationLock)
 	}()
 
-	if _, err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
-		version    integer PRIMARY KEY,
-		name       text NOT NULL,
-		applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+	// Look before creating: CREATE TABLE IF NOT EXISTS needs CREATE on
+	// the schema even when the table is there, and the app role
+	// (deploy/postgres-roles.sh) has none. An up-to-date database thus
+	// migrates as a read-only version check under any role; only the
+	// owner can apply something.
+	var exists bool
+	if err := conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_tables
+		WHERE schemaname = current_schema() AND tablename = 'schema_migrations')`).Scan(&exists); err != nil {
 		return fmt.Errorf("migrate: %w", err)
+	}
+	if !exists {
+		if _, err := conn.Exec(ctx, `CREATE TABLE schema_migrations (
+			version    integer PRIMARY KEY,
+			name       text NOT NULL,
+			applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
+			return fmt.Errorf("migrate: %w", err)
+		}
 	}
 	var current int
 	if err := conn.QueryRow(ctx, `SELECT coalesce(max(version), 0) FROM schema_migrations`).Scan(&current); err != nil {

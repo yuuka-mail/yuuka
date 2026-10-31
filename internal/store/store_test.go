@@ -2,10 +2,13 @@ package store_test
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
@@ -36,6 +39,44 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	err := pool.QueryRow(t.Context(), `SELECT count(*), max(version) FROM schema_migrations`).Scan(&n, &maxVersion)
 	if err != nil || n == 0 || n != maxVersion {
 		t.Fatalf("schema_migrations rows = %d, max version %d, %v", n, maxVersion, err)
+	}
+}
+
+// storetest connects as an app role with row privileges only, as a
+// deployment does (deploy/postgres-roles.sh). Every other test in the
+// tree shows that runtime operations work under it; this one shows that
+// it really is that narrow: no DDL, and so no migrating either.
+func TestAppRoleRefusesDDL(t *testing.T) {
+	t.Parallel()
+	db, pool := storetest.New(t)
+	var super bool
+	if err := pool.QueryRow(t.Context(), `SELECT rolsuper FROM pg_roles WHERE rolname = current_user`).Scan(&super); err != nil || super {
+		t.Fatalf("app role is superuser: %v %v", super, err)
+	}
+	for _, q := range []string{
+		`CREATE TABLE intruder (a int)`,
+		`CREATE INDEX ON messages (id)`,
+		`ALTER TABLE messages ADD COLUMN intruder int`,
+		`DROP TABLE messages`,
+		`TRUNCATE deliveries`,
+		`CREATE SCHEMA intruder`,
+		`CREATE FUNCTION intruder() RETURNS int LANGUAGE sql AS 'SELECT 1'`,
+	} {
+		_, err := pool.Exec(t.Context(), q)
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); !ok || pgErr.Code != "42501" {
+			t.Errorf("%s: %v, want insufficient_privilege", q, err)
+		}
+	}
+
+	// Up to date, Migrate is a read-only version check the app role
+	// passes (TestMigrateIsIdempotent). With something left to apply it
+	// fails instead of half-applying.
+	if _, err := pool.Exec(t.Context(), `DELETE FROM schema_migrations WHERE version = (SELECT max(version) FROM schema_migrations)`); err != nil {
+		t.Fatal(err)
+	}
+	err := db.Migrate(t.Context())
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); !ok || pgErr.Code != "42501" {
+		t.Errorf("migrate as app role: %v, want insufficient_privilege", err)
 	}
 }
 
