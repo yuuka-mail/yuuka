@@ -78,14 +78,17 @@ run = "pnpm run build"
 #   mise run dev:enroll              # first time: one-time passkey link
 
 [tasks."dev:db"]
-description = "Create and seed the yuuka_dev database if it does not exist yet"
+description = "Create and seed the yuuka_dev database if missing, then bring its schema up to date"
 depends = ["db:up"]
+env = { YUUKA_DATABASE_URL = "postgres://postgres:yuuka@127.0.0.1:31432/yuuka_dev?sslmode=disable" }
 run = """
 if ! docker exec yuuka-test-pg psql -U postgres -qtAc "SELECT 1 FROM pg_database WHERE datname='yuuka_dev'" | grep -q 1; then
   docker exec yuuka-test-pg psql -U postgres -qc 'CREATE DATABASE yuuka_dev'
-  YUUKA_DATABASE_URL='postgres://postgres:yuuka@127.0.0.1:31432/yuuka_dev?sslmode=disable' \
-    go run ./internal/devseed/cmd -n 300 -data-dir local/dev/data
+  go run ./internal/devseed/cmd -n 300 -data-dir local/dev/data
 fi
+# serve never migrates on its own (one DSN means no auto-migration), so
+# every dev task that depends on this one starts from the current schema.
+go run ./cmd/yuuka migrate
 """
 
 [tasks."dev:reset"]
