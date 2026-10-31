@@ -7,12 +7,12 @@ Cloudflare Email Routing receives, Cloudflare Email Service sends. Everything in
 between — raw archive, MIME parsing, classification, search, the web UI and the
 agent surface — runs on hardware you control.
 
-> **Status: pre-release.** Receiving works end to end: the Cloudflare Email Worker,
-> ingest with redelivery dedupe, MIME parsing, threads and search, a WebUI with
-> passkey login, and a read-only MCP surface for agents. Sending (M2) is next, and
-> there are no released images yet. The design is in [`docs/`](docs/) (in Chinese),
-> [`docs/roadmap.md`](docs/roadmap.md) has the milestones, and
-> [`deploy/`](deploy/) has a Docker Compose setup.
+> **Status: pre-release.** Receiving and sending work end to end: the Cloudflare
+> Email Worker, ingest with redelivery dedupe, MIME parsing, threads and search, a
+> WebUI with passkey login and compose, an MCP surface for agents, an outbox with
+> crash recovery, per-identity send grants, and an SMTP submission port for other
+> services. The rule engine, zones and code extraction (M3) are next, and there are
+> no released images yet.
 
 ## Design highlights
 
