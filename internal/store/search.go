@@ -24,6 +24,14 @@ type SearchQuery struct {
 	// IncludeDowngraded also returns mail the §4.3 minimal downgrade
 	// hides from aggregate views (discovered prefixes, dmarc=fail).
 	IncludeDowngraded bool
+	// Prefix and Zone, when set, keep messages with a delivery to that
+	// local part (and domain).
+	Prefix string
+	Zone   string
+	// Class, when set, keeps messages of that effective class.
+	Class *classify.Class
+	// Since, when set, keeps messages received at or after it.
+	Since time.Time
 }
 
 // SearchHit is one message in a search result.
@@ -76,6 +84,19 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 	for term := range strings.FieldsSeq(q.Text) {
 		args = append(args, "%"+likeEscape(term)+"%")
 		where = append(where, fmt.Sprintf("%s ILIKE $%d", searchDoc, len(args)))
+	}
+	if q.Prefix != "" || q.Zone != "" {
+		args = append(args, q.Prefix, q.Zone)
+		where = append(where, fmt.Sprintf(`EXISTS (SELECT 1 FROM deliveries d WHERE d.message_id = m.id
+			AND ($%d = '' OR d.prefix = $%[1]d) AND ($%d = '' OR d.zone = $%[2]d))`, len(args)-1, len(args)))
+	}
+	if q.Class != nil {
+		args = append(args, *q.Class)
+		where = append(where, fmt.Sprintf(`coalesce(s.class_override, m.class) = $%d`, len(args)))
+	}
+	if !q.Since.IsZero() {
+		args = append(args, q.Since)
+		where = append(where, fmt.Sprintf(`m.received_at >= $%d`, len(args)))
 	}
 	if !q.IncludeDowngraded {
 		where = append(where, `NOT downgraded`)
