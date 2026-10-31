@@ -19,6 +19,7 @@ type SearchInput struct {
 	Prefix string          `json:"prefix,omitempty" jsonschema:"only mail delivered to this local part, or to local@domain"`
 	Class  agentview.Class `json:"class,omitempty" jsonschema:"only mail of this class"`
 	Since  string          `json:"since,omitempty" jsonschema:"only mail received at or after this time, RFC 3339 or YYYY-MM-DD"`
+	Label  string          `json:"label,omitempty" jsonschema:"only mail carrying this label (exact, case-sensitive)"`
 	Limit  int             `json:"limit,omitempty" jsonschema:"at most this many hits, default 20, at most 100"`
 	// The §4.3 downgrade hides spam-like mail from default views; an
 	// agent looking into a specific prefix may need it.
@@ -39,7 +40,10 @@ type Hit struct {
 	Class       agentview.Class `json:"class"`
 	Downgraded  bool            `json:"downgraded,omitempty"`
 	Quarantined bool            `json:"quarantined,omitempty"`
-	Content     HitContent      `json:"content"`
+	// Labels and Archived are annotations (annotate), not mail content.
+	Labels   []string   `json:"labels,omitempty"`
+	Archived bool       `json:"archived,omitempty"`
+	Content  HitContent `json:"content"`
 }
 
 // HitContent is the untrusted part of a Hit.
@@ -55,7 +59,7 @@ const (
 )
 
 func (s *Server) searchMessages(ctx context.Context, v *auth.Viewer, in SearchInput) (result, error) {
-	q := store.SearchQuery{Text: in.Q, IncludeDowngraded: in.IncludeDowngraded, Limit: defaultHits}
+	q := store.SearchQuery{Text: in.Q, IncludeDowngraded: in.IncludeDowngraded, Limit: defaultHits, Label: in.Label}
 	if in.Limit > 0 {
 		q.Limit = min(in.Limit, maxHits)
 	}
@@ -85,7 +89,7 @@ func (s *Server) searchMessages(ctx context.Context, v *auth.Viewer, in SearchIn
 	for i, h := range res.Hits {
 		out.Hits[i] = Hit{
 			URI: agentview.MessageURI(h.ID), ReceivedAt: h.ReceivedAt.UTC(), Class: agentview.Class(h.Class.String()),
-			Downgraded: h.Downgraded, Quarantined: h.Quarantined,
+			Downgraded: h.Downgraded, Quarantined: h.Quarantined, Labels: h.Labels, Archived: h.Archived,
 			Content: HitContent{From: agentview.Address{Name: h.FromName, Addr: h.FromAddr}, Subject: h.Subject, Snippet: h.Snippet},
 		}
 	}
@@ -128,6 +132,12 @@ func searchText(out SearchOutput, downgraded bool) string {
 		}
 		if h.Quarantined {
 			b.WriteString(" · quarantined")
+		}
+		if h.Archived {
+			b.WriteString(" · archived")
+		}
+		for _, l := range h.Labels {
+			fmt.Fprintf(&b, " · label %q", l)
 		}
 		b.WriteString("\n")
 		c := h.Content

@@ -331,6 +331,22 @@ M2 的写工具（[`internal/mcp/drafts.go`](../../internal/mcp/drafts.go)），
 - 工具描述是写死的字符串，不拼任何邮件内容；返回文本里的收发地址和主题包进不可信边界：
   它们可能是从信里抄来的，默认的 `from` 前缀还可能是发件人随便起的（未认领前缀）
 
+M3 的标注工具（[`internal/mcp/annotate.go`](../../internal/mcp/annotate.go)），上面签名里的 `propose` 落成四件：
+
+- `annotate(uri, actions, scope?)`：加 / 去标签、分类 / 取消分类、归档 / 取消归档，`scope=thread` 时是线程里调用方看得见的每一封，
+  整体一个 action。返回每项的 outcome 和撤销用的 `action_id`（什么都没变就没有）。要 `message:annotate`
+- `undo(action_id)`：撤销自己的一次 `annotate`；之后又被改过的项报 superseded，原样留着。要 `message:annotate`
+- `propose(kind, target, payload, rationale, cites)`：`kind=annotate` 时 `target` 是那封信，`payload` 是 `scope` + `actions`；
+  `kind=rule` 时 `payload` 是 `match` + `actions`，`target` 是示例信（可省）。动作只有 label / classify / archive /
+  （规则才有的）notify，输入 schema 里就没有别的值。要 `message:annotate`
+- `list_proposals(state?)`：只列自己的提案和人的决定，接受时建了规则的带 `rule_id`。理由和引用是 agent 自己写的，
+  但会引用信的原文，所以返回文本里包进不可信边界。要 `message:read`
+
+三件写工具的审计由 store 自己记（那一行 `actions` 就是撤销的把手），工具层不再重复记；没改动任何值的 `annotate`
+和被拒的调用照常由工具层记一行。`propose` 的审计只记形状和引用个数，不记理由和引文。
+`search_messages` 多了 `label` 过滤，命中带 `labels` 和 `archived`：它们是标注，不是信的内容。
+工具描述里写明：只能标注、永不外发；提案由人决定；`overruled` 和被拒绝都是正常结果。
+
 ### 8.8 审计与回放
 
 `actions`（表定义见 [`0003_identity.sql`](../../internal/store/migrations/0003_identity.sql)，主体模型见 §13.2）
