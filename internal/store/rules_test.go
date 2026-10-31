@@ -293,7 +293,7 @@ func TestUndoAndRevert(t *testing.T) {
 	if _, recorded, err := e.db.Annotate(ctx, arisu, msg, []store.Annotation{store.SetLabel("todo", true), store.SetArchived(true)}, a); err != nil || !recorded {
 		t.Fatal(err)
 	}
-	if _, err := e.db.Undo(ctx, other, a.ID, e.action("annotation.undo")); !errors.Is(err, store.ErrNotPermitted) {
+	if _, err := e.db.Undo(ctx, other, a.ID, e.action("annotation.undo")); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("undo of someone else's action: %v", err)
 	}
 	// The person changed archived since; only the label goes back.
@@ -552,8 +552,13 @@ func TestProposals(t *testing.T) {
 		t.Fatal(err)
 	}
 	other := e.principal("agent", "other")
-	if err := e.db.WithdrawProposal(ctx, other, p.ID, e.action("proposal.withdraw")); !errors.Is(err, store.ErrNotPermitted) {
-		t.Errorf("withdraw by another: %v", err)
+	// Another agent cannot see it (§13.8); a person sees it but only
+	// its proposer withdraws.
+	if err := e.db.WithdrawProposal(ctx, other, p.ID, e.action("proposal.withdraw")); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("withdraw by another agent: %v", err)
+	}
+	if err := e.db.WithdrawProposal(ctx, person, p.ID, e.action("proposal.withdraw")); !errors.Is(err, store.ErrNotPermitted) {
+		t.Errorf("withdraw by a person: %v", err)
 	}
 	acc, err = e.db.AcceptProposal(ctx, person, p.ID, nil, e.action("proposal.accept"))
 	if err != nil || len(acc.Annotations) != 2 || acc.Rule != nil {

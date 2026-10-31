@@ -1,6 +1,37 @@
 {
   "components": {
     "schemas": {
+      "AcceptBody": {
+        "type": "object",
+        "properties": {
+          "rule": {
+            "$ref": "#/components/schemas/RuleBody"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AcceptResult": {
+        "type": "object",
+        "properties": {
+          "proposal": {
+            "$ref": "#/components/schemas/Proposal"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageOutcomes"
+            }
+          },
+          "rule": {
+            "$ref": "#/components/schemas/SavedRule"
+          }
+        },
+        "required": [
+          "proposal",
+          "messages"
+        ],
+        "additionalProperties": false
+      },
       "Actor": {
         "type": "object",
         "properties": {
@@ -31,6 +62,176 @@
             "type": "string"
           }
         },
+        "additionalProperties": false
+      },
+      "AnnotateBody": {
+        "type": "object",
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Annotation"
+            }
+          },
+          "scope": {
+            "$ref": "#/components/schemas/AnnotateScope",
+            "description": "message (default) or thread"
+          }
+        },
+        "required": [
+          "actions"
+        ],
+        "additionalProperties": false
+      },
+      "AnnotateKind": {
+        "type": "string",
+        "enum": [
+          "label",
+          "unlabel",
+          "archive",
+          "unarchive",
+          "classify",
+          "unclassify"
+        ]
+      },
+      "AnnotateOutcome": {
+        "type": "string",
+        "enum": [
+          "applied",
+          "unchanged",
+          "overruled",
+          "labels_full"
+        ]
+      },
+      "AnnotateResult": {
+        "type": "object",
+        "properties": {
+          "action_id": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageOutcomes"
+            }
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "additionalProperties": false
+      },
+      "AnnotateScope": {
+        "type": "string",
+        "enum": [
+          "message",
+          "thread"
+        ]
+      },
+      "Annotation": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/AnnotateKind"
+          },
+          "label": {
+            "type": "string",
+            "description": "label and unlabel: the label; exact and case-sensitive, at most 64 characters"
+          },
+          "class": {
+            "$ref": "#/components/schemas/Class",
+            "description": "classify: the class to set"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "AnnotationEntry": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer"
+          },
+          "action_id": {
+            "type": "string"
+          },
+          "change": {
+            "$ref": "#/components/schemas/Annotation"
+          },
+          "rank": {
+            "$ref": "#/components/schemas/WriterRank"
+          },
+          "by": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "undoes": {
+            "type": "integer"
+          },
+          "undone_by": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "seq",
+          "action_id",
+          "change",
+          "rank",
+          "by",
+          "tool",
+          "at"
+        ],
+        "additionalProperties": false
+      },
+      "AnnotationHistory": {
+        "type": "object",
+        "properties": {
+          "message_id": {
+            "type": "string"
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnnotationEntry"
+            }
+          }
+        },
+        "required": [
+          "message_id",
+          "history"
+        ],
+        "additionalProperties": false
+      },
+      "AnnotationOutcome": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/AnnotateKind"
+          },
+          "label": {
+            "type": "string",
+            "description": "label and unlabel: the label; exact and case-sensitive, at most 64 characters"
+          },
+          "class": {
+            "$ref": "#/components/schemas/Class",
+            "description": "classify: the class to set"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/AnnotateOutcome"
+          }
+        },
+        "required": [
+          "kind",
+          "outcome"
+        ],
         "additionalProperties": false
       },
       "Attachment": {
@@ -172,6 +373,7 @@
           "unavailable",
           "no_identity",
           "submission_rejected",
+          "invalid_rule",
           "internal"
         ]
       },
@@ -654,6 +856,37 @@
           "quote"
         ]
       },
+      "LabelCount": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "label",
+          "messages"
+        ],
+        "additionalProperties": false
+      },
+      "LabelList": {
+        "type": "object",
+        "properties": {
+          "labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LabelCount"
+            }
+          }
+        },
+        "required": [
+          "labels"
+        ],
+        "additionalProperties": false
+      },
       "LeakCheck": {
         "type": "object",
         "properties": {
@@ -773,6 +1006,15 @@
           "sender_verified": {
             "type": "boolean"
           },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "archived": {
+            "type": "boolean"
+          },
           "message_id": {
             "type": "string"
           },
@@ -839,6 +1081,8 @@
           "quarantined",
           "has_attach",
           "recipients",
+          "labels",
+          "archived",
           "message_id",
           "in_reply_to",
           "references",
@@ -847,6 +1091,25 @@
           "to",
           "cc",
           "reply_to"
+        ],
+        "additionalProperties": false
+      },
+      "MessageOutcomes": {
+        "type": "object",
+        "properties": {
+          "message_id": {
+            "type": "string"
+          },
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AnnotationOutcome"
+            }
+          }
+        },
+        "required": [
+          "message_id",
+          "outcomes"
         ],
         "additionalProperties": false
       },
@@ -919,6 +1182,15 @@
           },
           "sender_verified": {
             "type": "boolean"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "archived": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -933,9 +1205,19 @@
           "downgraded",
           "quarantined",
           "has_attach",
-          "recipients"
+          "recipients",
+          "labels",
+          "archived"
         ],
         "additionalProperties": false
+      },
+      "NotifyLevel": {
+        "type": "string",
+        "enum": [
+          "off",
+          "silent",
+          "normal"
+        ]
       },
       "ObservedDomain": {
         "type": "object",
@@ -1325,6 +1607,37 @@
         ],
         "additionalProperties": false
       },
+      "PreviewBody": {
+        "type": "object",
+        "properties": {
+          "match": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleAction"
+            }
+          },
+          "since": {
+            "type": "string",
+            "description": "only mail received at or after this time; absent is all mail",
+            "format": "date-time"
+          },
+          "samples": {
+            "type": "integer",
+            "description": "how many matching messages to return, default 10",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "required": [
+          "match",
+          "actions"
+        ],
+        "additionalProperties": false
+      },
       "Problem": {
         "type": "object",
         "properties": {
@@ -1339,6 +1652,9 @@
           },
           "detail": {
             "type": "string"
+          },
+          "path": {
+            "type": "string"
           }
         },
         "required": [
@@ -1347,6 +1663,241 @@
           "code"
         ],
         "additionalProperties": false
+      },
+      "Proposal": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProposalKind"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProposalState"
+          },
+          "proposer": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/AnnotateScope"
+          },
+          "match": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleAction"
+            }
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "cites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Cite"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decided_by": {
+            "type": "string"
+          },
+          "decided_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "action_id": {
+            "type": "string"
+          },
+          "rule_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "proposer",
+          "actions",
+          "rationale",
+          "cites",
+          "created_at",
+          "expires_at"
+        ],
+        "additionalProperties": false
+      },
+      "ProposalBody": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ProposalKind"
+          },
+          "message_id": {
+            "type": "string",
+            "description": "annotate: the message; rule: an example it matches"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/AnnotateScope",
+            "description": "annotate: message (default) or thread"
+          },
+          "match": {
+            "type": "object",
+            "description": "rule: the match tree",
+            "additionalProperties": true
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleAction"
+            }
+          },
+          "rationale": {
+            "type": "string",
+            "description": "why, for the person who decides; at most 4000 characters"
+          },
+          "cites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Cite"
+            },
+            "description": "the passages it relies on"
+          }
+        },
+        "required": [
+          "kind",
+          "actions"
+        ],
+        "additionalProperties": false
+      },
+      "ProposalCreated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProposalKind"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ProposalState"
+          },
+          "proposer": {
+            "$ref": "#/components/schemas/Actor"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/AnnotateScope"
+          },
+          "match": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleAction"
+            }
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "cites": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Cite"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decided_by": {
+            "type": "string"
+          },
+          "decided_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "action_id": {
+            "type": "string"
+          },
+          "rule_id": {
+            "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleWarning"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "state",
+          "proposer",
+          "actions",
+          "rationale",
+          "cites",
+          "created_at",
+          "expires_at",
+          "warnings"
+        ],
+        "additionalProperties": false
+      },
+      "ProposalKind": {
+        "type": "string",
+        "enum": [
+          "annotate",
+          "rule"
+        ]
+      },
+      "ProposalPage": {
+        "type": "object",
+        "properties": {
+          "proposals": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Proposal"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposals"
+        ],
+        "additionalProperties": false
+      },
+      "ProposalState": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "accepted",
+          "rejected",
+          "withdrawn",
+          "expired"
+        ]
       },
       "RecipientKind": {
         "type": "string",
@@ -1475,6 +2026,441 @@
         },
         "required": [
           "resolution"
+        ],
+        "additionalProperties": false
+      },
+      "RetroBody": {
+        "type": "object",
+        "properties": {
+          "since": {
+            "type": "string",
+            "description": "only mail received at or after this time; absent is all mail",
+            "format": "date-time"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "apply only: count, write nothing"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RetroStats": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "integer"
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "changed": {
+            "type": "integer"
+          },
+          "overruled": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "messages",
+          "matched",
+          "changed",
+          "overruled",
+          "failed"
+        ],
+        "additionalProperties": false
+      },
+      "RevertStats": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "integer"
+          },
+          "reverted": {
+            "type": "integer"
+          },
+          "superseded": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "messages",
+          "reverted",
+          "superseded"
+        ],
+        "additionalProperties": false
+      },
+      "Rule": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "match": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleAction"
+            }
+          },
+          "proposal_id": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "unsupported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "priority",
+          "enabled",
+          "revision",
+          "match",
+          "actions",
+          "created_by",
+          "created_at",
+          "updated_at"
+        ],
+        "additionalProperties": false
+      },
+      "RuleAction": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/RuleActionKind"
+          },
+          "label": {
+            "type": "string",
+            "description": "label: the label to add; exact and case-sensitive, at most 64 characters"
+          },
+          "class": {
+            "$ref": "#/components/schemas/RuleClass",
+            "description": "classify: the class to set"
+          },
+          "level": {
+            "$ref": "#/components/schemas/NotifyLevel",
+            "description": "notify (rules only): off, silent or normal"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "RuleActionKind": {
+        "type": "string",
+        "enum": [
+          "label",
+          "classify",
+          "archive",
+          "notify"
+        ]
+      },
+      "RuleBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "for people; at most 200 characters"
+          },
+          "priority": {
+            "type": "integer",
+            "description": "evaluation order, ascending, ties by id; the first match sets class, archived and notify, labels add up"
+          },
+          "disabled": {
+            "type": "boolean",
+            "description": "saved but not run"
+          },
+          "match": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleAction"
+            }
+          }
+        },
+        "required": [
+          "match",
+          "actions"
+        ],
+        "additionalProperties": false
+      },
+      "RuleCandidate": {
+        "type": "object",
+        "properties": {
+          "condition": {
+            "$ref": "#/components/schemas/RuleCondition"
+          },
+          "selected": {
+            "type": "boolean"
+          },
+          "matches": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "condition",
+          "selected",
+          "matches"
+        ],
+        "additionalProperties": false
+      },
+      "RuleClass": {
+        "type": "string",
+        "enum": [
+          "machine",
+          "human"
+        ]
+      },
+      "RuleCondition": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "such as from.addr, from.verified, list.id, to.addr"
+          },
+          "op": {
+            "type": "string",
+            "description": "eq, in, contains, regex or has"
+          },
+          "value": {
+            "description": "a string, a boolean, or for in a list of strings"
+          }
+        },
+        "required": [
+          "field",
+          "op",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "RuleDraft": {
+        "type": "object",
+        "properties": {
+          "message_id": {
+            "type": "string"
+          },
+          "candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleCandidate"
+            }
+          },
+          "match": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "matches": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "message_id",
+          "candidates",
+          "matches"
+        ],
+        "additionalProperties": false
+      },
+      "RuleDraftBody": {
+        "type": "object",
+        "properties": {
+          "message_id": {
+            "type": "string"
+          },
+          "since": {
+            "type": "string",
+            "description": "count matches among mail received at or after this time; absent is all mail",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "message_id"
+        ],
+        "additionalProperties": false
+      },
+      "RuleList": {
+        "type": "object",
+        "properties": {
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            }
+          }
+        },
+        "required": [
+          "rules"
+        ],
+        "additionalProperties": false
+      },
+      "RulePreview": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "integer"
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "changed": {
+            "type": "integer"
+          },
+          "overruled": {
+            "type": "integer"
+          },
+          "failed": {
+            "type": "integer"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleWarning"
+            }
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageSummary"
+            }
+          }
+        },
+        "required": [
+          "messages",
+          "matched",
+          "changed",
+          "overruled",
+          "failed",
+          "warnings",
+          "samples"
+        ],
+        "additionalProperties": false
+      },
+      "RuleWarning": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "additionalProperties": false
+      },
+      "SavedRule": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "priority": {
+            "type": "integer"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "match": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleAction"
+            }
+          },
+          "proposal_id": {
+            "type": "string"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "deleted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "unsupported": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RuleWarning"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "priority",
+          "enabled",
+          "revision",
+          "match",
+          "actions",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "warnings"
         ],
         "additionalProperties": false
       },
@@ -1764,6 +2750,26 @@
           "auto"
         ]
       },
+      "UndoResult": {
+        "type": "object",
+        "properties": {
+          "reverted": {
+            "type": "integer"
+          },
+          "superseded": {
+            "type": "integer"
+          },
+          "hidden": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "reverted",
+          "superseded",
+          "hidden"
+        ],
+        "additionalProperties": false
+      },
       "View": {
         "type": "object",
         "properties": {
@@ -1791,6 +2797,14 @@
           "content"
         ],
         "additionalProperties": false
+      },
+      "WriterRank": {
+        "type": "string",
+        "enum": [
+          "rule",
+          "agent",
+          "person"
+        ]
       }
     },
     "securitySchemes": {
@@ -1813,6 +2827,55 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/actions/{id}/undo": {
+      "post": {
+        "summary": "Undo the annotations an action wrote; agents undo only their own",
+        "security": [
+          {
+            "bearer": [
+              "message:annotate"
+            ]
+          },
+          {
+            "session": [
+              "message:annotate"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UndoResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/drafts": {
       "get": {
         "summary": "List drafts, most recently changed first",
@@ -2166,6 +3229,45 @@
         }
       }
     },
+    "/api/v1/labels": {
+      "get": {
+        "summary": "List the labels in use, with how many messages carry each",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LabelList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/messages": {
       "get": {
         "summary": "List messages, newest first",
@@ -2214,6 +3316,22 @@
                 "include",
                 "only"
               ]
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "description": "only mail carrying this label (exact, case-sensitive)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "description": "only archived (true) or unarchived (false) mail; absent is both",
+            "schema": {
+              "type": "boolean"
             }
           },
           {
@@ -2291,6 +3409,112 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/messages/{id}/annotations": {
+      "get": {
+        "summary": "Get where a message's labels, class and archived state came from",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotationHistory"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Label, classify or archive a message or its thread; a higher-ranked writer's value is overruled, not an error",
+        "security": [
+          {
+            "bearer": [
+              "message:annotate"
+            ]
+          },
+          {
+            "session": [
+              "message:annotate"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnotateBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnnotateResult"
                 }
               }
             }
@@ -2810,6 +4034,796 @@
         }
       }
     },
+    "/api/v1/proposals": {
+      "get": {
+        "summary": "List proposals, newest first; agents see only their own",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "description": "only proposals in this state",
+            "schema": {
+              "$ref": "#/components/schemas/ProposalState"
+            }
+          },
+          {
+            "name": "message_id",
+            "in": "query",
+            "description": "only proposals about this message",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "next_cursor of the previous page",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalPage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Propose annotations or a rule for a person to decide",
+        "security": [
+          {
+            "bearer": [
+              "message:annotate"
+            ]
+          },
+          {
+            "session": [
+              "message:annotate"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposalBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalCreated"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/proposals/{id}": {
+      "get": {
+        "summary": "Get a proposal",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Proposal"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/proposals/{id}/accept": {
+      "post": {
+        "summary": "Accept a proposal, optionally creating a rule from it (rule:manage); people only",
+        "security": [
+          {
+            "bearer": [
+              "message:annotate"
+            ]
+          },
+          {
+            "session": [
+              "message:annotate"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/proposals/{id}/reject": {
+      "post": {
+        "summary": "Reject a proposal; people only",
+        "security": [
+          {
+            "bearer": [
+              "message:annotate"
+            ]
+          },
+          {
+            "session": [
+              "message:annotate"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Proposal"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/proposals/{id}/withdraw": {
+      "post": {
+        "summary": "Withdraw one's own proposal",
+        "security": [
+          {
+            "bearer": [
+              "message:annotate"
+            ]
+          },
+          {
+            "session": [
+              "message:annotate"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Proposal"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rules": {
+      "get": {
+        "summary": "List rules in evaluation order; people only",
+        "security": [
+          {
+            "bearer": [
+              "rule:manage"
+            ]
+          },
+          {
+            "session": [
+              "rule:manage"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "deleted",
+            "in": "query",
+            "description": "also list deleted rules",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a rule; it runs on mail arriving from now on; people only",
+        "security": [
+          {
+            "bearer": [
+              "rule:manage"
+            ]
+          },
+          {
+            "session": [
+              "rule:manage"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedRule"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rules/draft": {
+      "post": {
+        "summary": "Draft the conditions of a rule for mail like an example message, with match counts; people only",
+        "security": [
+          {
+            "bearer": [
+              "rule:manage",
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "rule:manage",
+              "message:read"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleDraftBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleDraft"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rules/preview": {
+      "post": {
+        "summary": "Try a rule on the mail the caller can see without saving it; people only",
+        "security": [
+          {
+            "bearer": [
+              "rule:manage",
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "rule:manage",
+              "message:read"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PreviewBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RulePreview"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rules/{id}": {
+      "delete": {
+        "summary": "Delete a rule; what it did stays until reverted; people only",
+        "security": [
+          {
+            "bearer": [
+              "rule:manage"
+            ]
+          },
+          {
+            "session": [
+              "rule:manage"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "summary": "Get a rule, deleted or not; people only",
+        "security": [
+          {
+            "bearer": [
+              "rule:manage"
+            ]
+          },
+          {
+            "session": [
+              "rule:manage"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Rule"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "summary": "Replace a rule; people only",
+        "security": [
+          {
+            "bearer": [
+              "rule:manage"
+            ]
+          },
+          {
+            "session": [
+              "rule:manage"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SavedRule"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rules/{id}/apply": {
+      "post": {
+        "summary": "Run a rule over past mail; it never notifies; people only",
+        "security": [
+          {
+            "bearer": [
+              "rule:manage"
+            ]
+          },
+          {
+            "session": [
+              "rule:manage"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetroBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RetroStats"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/rules/{id}/revert": {
+      "post": {
+        "summary": "Take back what a rule did to mail; people only",
+        "security": [
+          {
+            "bearer": [
+              "rule:manage"
+            ]
+          },
+          {
+            "session": [
+              "rule:manage"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetroBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RevertStats"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/search": {
       "get": {
         "summary": "Search messages, newest first",
@@ -2844,6 +4858,22 @@
                 "hide",
                 "include"
               ]
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "description": "only mail carrying this label (exact, case-sensitive)",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "description": "only archived (true) or unarchived (false) mail; absent is both",
+            "schema": {
+              "type": "boolean"
             }
           },
           {

@@ -99,6 +99,8 @@ type Proposal struct {
 	DecidedBy  string
 	DecidedAt  *time.Time
 	ActionID   string
+	// RuleID is the rule accepting it created, if any.
+	RuleID string
 }
 
 // parsePayload validates a proposal's payload for its kind and returns
@@ -121,10 +123,10 @@ func parsePayload(kind string, b []byte) ([]byte, []rules.Warning, error) {
 		dec := json.NewDecoder(bytes.NewReader(b))
 		dec.DisallowUnknownFields()
 		if err := dec.Decode(&raw); err != nil {
-			return nil, nil, fmt.Errorf("%w: annotate payload: %w", rules.ErrInvalid, err)
+			return nil, nil, &rules.InvalidError{Path: "payload", Reason: err.Error()}
 		}
 		if raw.V != 1 || (raw.Scope != ScopeMessage && raw.Scope != ScopeThread) {
-			return nil, nil, fmt.Errorf("%w: annotate payload: want v 1 and scope message or thread", rules.ErrInvalid)
+			return nil, nil, &rules.InvalidError{Path: "scope", Reason: "want v 1 and scope message or thread"}
 		}
 		as, err := rules.ParseActions(raw.Actions)
 		if err != nil {
@@ -137,13 +139,13 @@ func parsePayload(kind string, b []byte) ([]byte, []rules.Warning, error) {
 			if a.Kind == rules.KindNotify {
 				// Notification is decided when mail arrives; there is
 				// nothing to notify about mail already here.
-				return nil, nil, fmt.Errorf("%w: an annotate proposal cannot notify", rules.ErrInvalid)
+				return nil, nil, &rules.InvalidError{Path: "actions", Reason: "an annotate proposal cannot notify"}
 			}
 		}
 		out, err := json.Marshal(AnnotatePayload{V: 1, Scope: raw.Scope, Actions: as})
 		return out, nil, err
 	}
-	return nil, nil, fmt.Errorf("%w: proposal kind %q", rules.ErrInvalid, kind)
+	return nil, nil, &rules.InvalidError{Path: "kind", Reason: fmt.Sprintf("proposal kind %q", kind)}
 }
 
 // CreateProposal stores p as proposed by v and records a. The message,
@@ -156,7 +158,7 @@ func (db *DB) CreateProposal(ctx context.Context, v *auth.Viewer, p NewProposal,
 		return Proposal{}, nil, err
 	}
 	if p.Kind == ProposalAnnotate && p.MessageID == "" {
-		return Proposal{}, nil, fmt.Errorf("%w: an annotate proposal names its message", rules.ErrInvalid)
+		return Proposal{}, nil, &rules.InvalidError{Path: "message_id", Reason: "an annotate proposal names its message"}
 	}
 	payload, warns, err := parsePayload(p.Kind, p.Payload)
 	if err != nil {
@@ -226,24 +228,36 @@ func (db *DB) CreateProposal(ctx context.Context, v *auth.Viewer, p NewProposal,
 	return out, warns, nil
 }
 
-// proposalVisible is the condition on proposals pr that v may see: one
-// about a message only if v may see the message (§13.8); a rule
-// proposal without an example to all.
+// proposalVisible is the condition on proposals pr that v may see
+// (§13.8). A person sees every proposal, an agent or service only its
+// own: a rationale and its cites quote mail, maybe mail the reader may
+// not see. Either way one about a message only if v may see the
+// message; a rule proposal without an example message is not about
+// any.
 func (db *DB) proposalVisible(v *auth.Viewer) string {
-	return `(pr.message_id IS NULL OR EXISTS (SELECT 1 FROM messages m WHERE m.id = pr.message_id AND ` +
-		db.visibleMessage(v, "m") + `))`
+	own := "true"
+	if !isPerson(v) {
+		// Inlined like readableAccount: only a well-formed id is.
+		own = "false"
+		if ulid.Valid(v.PrincipalID) {
+			own = `pr.proposed_by = '` + v.PrincipalID + `'`
+		}
+	}
+	return `(` + own + ` AND (pr.message_id IS NULL OR EXISTS (SELECT 1 FROM messages m WHERE m.id = pr.message_id AND ` +
+		db.visibleMessage(v, "m") + `)))`
 }
 
 const proposalCols = `pr.id, pr.proposed_by, p.kind || ':' || p.name, pr.kind, coalesce(pr.message_id, ''), pr.payload,
 	pr.rationale, pr.cites, CASE WHEN pr.state = 'pending' AND pr.expires_at <= $1 THEN 'expired' ELSE pr.state END,
-	pr.created_at, pr.expires_at, coalesce(pr.decided_by, ''), pr.decided_at, coalesce(pr.action_id, '')`
+	pr.created_at, pr.expires_at, coalesce(pr.decided_by, ''), pr.decided_at, coalesce(pr.action_id, ''),
+	coalesce((SELECT r.id FROM rules r WHERE r.proposal_id = pr.id ORDER BY r.id LIMIT 1), '') AS rule_id`
 
 const proposalFrom = ` FROM proposals pr JOIN principals p ON p.id = pr.proposed_by`
 
 func scanProposal(r pgx.Row) (Proposal, error) {
 	var p Proposal
 	err := r.Scan(&p.ID, &p.ProposedBy, &p.Proposer, &p.Kind, &p.MessageID, &p.Payload, &p.Rationale, &p.Cites,
-		&p.State, &p.CreatedAt, &p.ExpiresAt, &p.DecidedBy, &p.DecidedAt, &p.ActionID)
+		&p.State, &p.CreatedAt, &p.ExpiresAt, &p.DecidedBy, &p.DecidedAt, &p.ActionID, &p.RuleID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, ErrNotFound
 	}
@@ -276,7 +290,9 @@ type ProposalQuery struct {
 	MessageID string
 	// ProposedBy keeps one proposer's.
 	ProposedBy string
-	Limit      int // default 100, at most 500
+	// Before continues a list after the proposal with this id.
+	Before string
+	Limit  int // default 100, at most 500
 }
 
 // Proposals lists the proposals v may see, newest first.
@@ -291,8 +307,8 @@ func (db *DB) Proposals(ctx context.Context, v *auth.Viewer, q ProposalQuery) ([
 	limit = min(limit, 500)
 	rows, err := db.pool.Query(ctx, `SELECT * FROM (SELECT `+proposalCols+proposalFrom+`
 			WHERE `+db.proposalVisible(v)+` AND ($2 = '' OR pr.message_id = $2) AND ($3 = '' OR pr.proposed_by = $3)) x
-		WHERE ($4 = '' OR x.state = $4)
-		ORDER BY x.id DESC LIMIT $5`, time.Now(), q.MessageID, q.ProposedBy, q.State, limit)
+		WHERE ($4 = '' OR x.state = $4) AND ($6 = '' OR x.id < $6)
+		ORDER BY x.id DESC LIMIT $5`, time.Now(), q.MessageID, q.ProposedBy, q.State, limit, q.Before)
 	if err != nil {
 		return nil, fmt.Errorf("proposals: %w", err)
 	}
@@ -396,13 +412,7 @@ func (db *DB) AcceptProposal(ctx context.Context, v *auth.Viewer, id string, rul
 			ins, _ = annotationsOf(pl.Actions)
 			targets = []string{p.MessageID}
 			if pl.Scope == ScopeThread {
-				rows, err := tx.Query(ctx, `SELECT m.id FROM messages m
-					WHERE m.thread_id = (SELECT thread_id FROM messages WHERE id = $1) AND `+db.visibleMessage(v, "m")+`
-					ORDER BY m.id`, p.MessageID)
-				if err != nil {
-					return err
-				}
-				if targets, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
+				if targets, err = db.visibleThreadOf(ctx, tx, v, p.MessageID); err != nil {
 					return err
 				}
 			}

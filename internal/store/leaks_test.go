@@ -220,8 +220,12 @@ func TestSenderVerifiedIsFromVerified(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if d.SenderVerified == nil || *d.SenderVerified != c.want {
-			t.Errorf("%s: sender verified %v, want %v", c.name, d.SenderVerified, c.want)
+		fs, err := db.FactsFor(ctx, v, id)
+		if err != nil || len(fs) != 1 {
+			t.Fatalf("%s: facts %+v %v", c.name, fs, err)
+		}
+		if d.SenderVerified == nil || *d.SenderVerified != c.want || fs[0].FromVerified != c.want {
+			t.Errorf("%s: sender verified %v, from.verified %v, want %v", c.name, d.SenderVerified, fs[0].FromVerified, c.want)
 		}
 		res, err := db.Search(ctx, v, store.SearchQuery{Text: d.Subject, IncludeDowngraded: true, Since: at})
 		if err != nil || len(res.Hits) != 1 || res.Hits[0].SenderVerified == nil || *res.Hits[0].SenderVerified != c.want {

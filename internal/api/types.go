@@ -30,6 +30,8 @@ type MessagesParams struct {
 	Prefix     *Mailbox          `query:"prefix" jsonschema:"only mail delivered to this prefix@zone, whatever its class"`
 	Class      []agentview.Class `query:"class" jsonschema:"only mail of these classes"`
 	Downgraded Downgraded        `query:"downgraded" default:"hide"`
+	Label      string            `query:"label" jsonschema:"only mail carrying this label (exact, case-sensitive)"`
+	Archived   *bool             `query:"archived" jsonschema:"only archived (true) or unarchived (false) mail; absent is both"`
 	Cursor     *Cursor           `query:"cursor" jsonschema:"next_cursor of the previous page"`
 	Limit      int               `query:"limit" minimum:"1" maximum:"500" default:"100"`
 }
@@ -112,6 +114,8 @@ func (PrefixState) Enum() []string { return []string{"claimed", "discovered"} }
 type SearchParams struct {
 	Q          string           `query:"q" jsonschema:"words that must all occur in subject, sender or body; empty matches everything"`
 	Downgraded SearchDowngraded `query:"downgraded" default:"hide"`
+	Label      string           `query:"label" jsonschema:"only mail carrying this label (exact, case-sensitive)"`
+	Archived   *bool            `query:"archived" jsonschema:"only archived (true) or unarchived (false) mail; absent is both"`
 	Cursor     *Cursor          `query:"cursor" jsonschema:"next_cursor of the previous page"`
 	Limit      int              `query:"limit" minimum:"1" maximum:"500" default:"50"`
 }
@@ -143,12 +147,18 @@ type MessageSummary struct {
 	// they last. Absent when nothing was found; in search hits, given
 	// for machine mail only.
 	Extracted *Extracted `json:"extracted,omitempty"`
-	// SenderVerified: the trusted receiver reported dmarc=pass on a
-	// delivery, so the From domain is genuine (§10.1.1). Absent for mail
-	// nobody received (only sent from here), in search hits that are not
-	// machine mail, and without delivery:read: it is an authentication
-	// fact.
+	// SenderVerified: on a delivery, the trusted receiver's DMARC passed
+	// for the organization of the From shown here, so that From is
+	// genuine (§10.1.1). It is exactly what a rule's from.verified
+	// tests. Absent for mail nobody received (only sent from here), in
+	// search hits that are not machine mail, and without delivery:read:
+	// it is an authentication fact.
 	SenderVerified *bool `json:"sender_verified,omitempty"`
+	// Labels and Archived are the message's annotations (§8.5); GET
+	// /api/v1/messages/{id}/annotations says who set them. Archived mail
+	// is out of the two zones but still listed and found.
+	Labels   []string `json:"labels"`
+	Archived bool     `json:"archived"`
 }
 
 // Extracted is the best of what yuuka's extractor found in a message.

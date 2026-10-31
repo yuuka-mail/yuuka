@@ -210,6 +210,38 @@ agent 只能撤销自己的 action。标签是 `message_state.labels` 上区分�
 不长时间挡住 ingest；写入幂等，中断后再跑一次即可；尊重优先级。预览只读，只看调用者可见的信（§13.8）。
 每条改了东西的规则在每次 ingest 写一行 `actions`（actor `rule:<id>`），个人量级约每年 10^5 行，可以接受。
 
+**接口：谁能做什么。** REST 的端点在 [`internal/api/rules.go`](../../internal/api/rules.go)（路由表在 `api.go`，契约见 §5.1），
+MCP 的工具在 [`internal/mcp/annotate.go`](../../internal/mcp/annotate.go)（§8.7）；两边共用的动作、标注、提案的形状在
+[`agentview/annotate.go`](../../internal/agentview/annotate.go) 声明一次。没有新 scope，「只有人」按主体类型判断，
+和 `outbox.resolve` 一样：scope 是一把凭据能力的上限，主体类型是另一道闸，agent 的 token 即使误发了 `rule:manage` 也只得到 403。
+
+| 动作 | scope | 谁 |
+|---|---|---|
+| 标注一封信或整个线程；撤销 | `message:annotate` | 任何主体；agent 只能撤销自己的 action，别人的和不存在一样（404） |
+| 提案；撤回 | `message:annotate` | 任何主体；只有提议者能撤回 |
+| 接受 / 拒绝提案 | `message:annotate`；接受时要建规则（`rule` 类提案，或带 `rule` 的「以后同类自动处理」）再加 `rule:manage` | 只有人 |
+| 规则的增删改查、`apply` / `revert`；预览和草拟（另要 `message:read`） | `rule:manage` | 只有人 |
+
+agent 保留直接标注而不是只能提案：标注可撤销，人永远赢，被人改过的值 agent 再写只得到 `overruled`。
+这条结果在 REST 的 outcome、MCP 的工具描述和返回文本里都写明是正常结果，免得 agent 当成错误换条路重试。
+agent 没有任何管理规则的工具，`propose` 是它影响规则的唯一途径。
+
+**「以后同类自动处理」分两步，都在 WebUI 里可见。** `POST /api/v1/rules/draft` 从示例信的一条可见投递（`store.FactsFor`，
+与规则求值同一个事实加载）调 `rules.Generalize`，返回候选条件、每项单独的命中数和默认勾选项合起来的命中数；
+这些数一次扫描算完（`store.CountMatches`，同一个求值器），不是每个候选扫一遍。人勾选后，
+`POST /api/v1/proposals/{id}/accept` 带上 `rule`，规则与接受在同一个事务里建好，`proposal_id` 指回提案。
+「改判」走同一个草拟端点，然后直接 `POST /api/v1/rules`，不经提案。通知卡片上不做这件事，只跳转。
+
+**校验错误说在哪。** REST 和 MCP 都把请求里的 `match` / `actions` 原样拼成 `{"v":1,…}` 交给 store 校验，不另写一份；
+`rules.InvalidError` 带着存储格式里的路径（`match.all[1].value`、`actions[0].label`），恰好也是请求体里的路径，
+于是 REST 回 `400 invalid_rule` 加 `path`，MCP 回 `payload.<path>`。警告（`unverified_from`）不是错误，放在成功的响应里。
+`apply` 是同步请求：个人量级一次几千到几万封、每页 200 封的短事务，可以接受；真到超时再改成后台任务。
+
+**「已验证发件人」只有一个定义。** 列表和搜索的 `sender_verified` 与规则的 `from.verified` 都是 `leak.SenderOf`：
+可信接收方的 `dmarc=pass`，而且它判的 `header.from` 与读者看到的 From 属于同一个组织域。原来列表只看
+`trusted && dmarc=pass`，接收方替另一个 From 报的 pass 会让列表显示「已验证」，而 `from.verified = true` 的规则却不匹配它，
+人照着列表写的规则会悄悄漏信。代价是组织域要用 publicsuffix 算，SQL 算不了：读路径把可见投递的认证事实聚合出来，在 Go 里判。
+
 ### 8.6 事件流和游标
 
 长期在跑的 agent 不能靠轮询全表。给一条 SSE 流 + `since_state` 游标，

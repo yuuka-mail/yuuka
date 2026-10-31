@@ -315,10 +315,19 @@ func matchAny(ctx context.Context, prog *rules.Program, fs []rules.Facts) (match
 // transaction, with whether the rule matched.
 type retroVisit func(tx pgx.Tx, w *writer, id string, matched bool) error
 
-// scan pages through s, evaluating prog, and calls visit. Each page is
-// one transaction: under contentLock when it writes, read only
-// otherwise. check runs first in each writing page.
-func (s scope) scan(ctx context.Context, prog *rules.Program, write bool, check func(tx pgx.Tx) error, st *RetroStats, visit retroVisit) error {
+// matcher decides a message from the facts of its deliveries, as
+// matchAny does for one program.
+type matcher func(fs []rules.Facts) (matched, failed bool)
+
+// one is the matcher of a single program.
+func one(ctx context.Context, prog *rules.Program) matcher {
+	return func(fs []rules.Facts) (bool, bool) { return matchAny(ctx, prog, fs) }
+}
+
+// scan pages through s, deciding each message with match, and calls
+// visit. Each page is one transaction: under contentLock when it
+// writes, read only otherwise. check runs first in each writing page.
+func (s scope) scan(ctx context.Context, match matcher, write bool, check func(tx pgx.Tx) error, st *RetroStats, visit retroVisit) error {
 	after := ""
 	for {
 		var ids []string
@@ -342,7 +351,7 @@ func (s scope) scan(ctx context.Context, prog *rules.Program, write bool, check 
 			w := writer{tx: tx}
 			for _, id := range ids {
 				st.Messages++
-				matched, failed := matchAny(ctx, prog, facts[id])
+				matched, failed := match(facts[id])
 				if failed {
 					st.Failed++
 				}
@@ -390,9 +399,9 @@ func (db *DB) storedProgram(ctx context.Context, id string) (prog *rules.Program
 	return prog, principal, revision, nil
 }
 
-// errRuleChanged: the rule was edited or deleted while a run went over
+// ErrRuleChanged: the rule was edited or deleted while a run went over
 // past mail; what was done so far stands and running again finishes it.
-var errRuleChanged = errors.New("the rule changed during the run; run it again")
+var ErrRuleChanged = errors.New("the rule changed during the run; run it again")
 
 // ApplyRule runs rule id over the mail received at or after since, as
 // requested by a, which it records with the counts as its result. What
@@ -419,11 +428,11 @@ func (db *DB) ApplyRule(ctx context.Context, id string, since time.Time, dry boo
 		var rev int
 		err := tx.QueryRow(ctx, `SELECT revision FROM rules WHERE id = $1 AND deleted_at IS NULL`, id).Scan(&rev)
 		if errors.Is(err, pgx.ErrNoRows) || err == nil && rev != revision {
-			return errRuleChanged
+			return ErrRuleChanged
 		}
 		return err
 	}
-	err = scope{db: db, since: since}.scan(ctx, prog, !dry, check, &st, func(tx pgx.Tx, w *writer, mid string, matched bool) error {
+	err = scope{db: db, since: since}.scan(ctx, one(ctx, prog), !dry, check, &st, func(tx pgx.Tx, w *writer, mid string, matched bool) error {
 		if !matched || len(ins) == 0 {
 			return nil
 		}
@@ -615,7 +624,7 @@ func (db *DB) PreviewRule(ctx context.Context, v *auth.Viewer, spec []byte, q Pr
 	prog := rules.Compile(s)
 	ins, _ := annotationsOf(s.Actions)
 	var samples []string
-	err = scope{db: db, since: q.Since, v: v}.scan(ctx, prog, false, nil, &out.RetroStats,
+	err = scope{db: db, since: q.Since, v: v}.scan(ctx, one(ctx, prog), false, nil, &out.RetroStats,
 		func(tx pgx.Tx, _ *writer, mid string, matched bool) error {
 			if !matched {
 				return nil
@@ -653,4 +662,60 @@ func (db *DB) PreviewRule(ctx context.Context, v *auth.Viewer, spec []byte, q Pr
 		}
 	}
 	return out, nil
+}
+
+// FactsFor returns what the rules see of message id through each of its
+// deliveries v can see, earliest first: the example a draft rule is
+// generalized from (rules.Generalize). ErrNotFound if v cannot see the
+// message; none for mail v sees only as our own sent copy, which rules
+// never match.
+func (db *DB) FactsFor(ctx context.Context, v *auth.Viewer, id string) ([]rules.Facts, error) {
+	if err := needViewer(v, "rule facts"); err != nil {
+		return nil, err
+	}
+	var out []rules.Facts
+	err := pgx.BeginTxFunc(ctx, db.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		mid, err := db.visibleMessageID(ctx, tx, v, id)
+		if err != nil {
+			return err
+		}
+		facts, err := loadFacts(ctx, tx, []string{mid}, db.visibleDelivery(v, "d"))
+		out = facts[mid]
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("rule facts of %s: %w", id, err)
+	}
+	return out, nil
+}
+
+// CountMatches counts, for each of ms, the messages v can see received
+// at or after since that it matches, in one pass over the mail with the
+// evaluator rules run with. ms need not be valid rules (a candidate
+// condition alone is not one); each is compiled as is, and one this
+// version cannot evaluate counts nothing.
+func (db *DB) CountMatches(ctx context.Context, v *auth.Viewer, ms []rules.Match, since time.Time) ([]int, error) {
+	if err := needViewer(v, "count matches"); err != nil {
+		return nil, err
+	}
+	progs := make([]*rules.Program, len(ms))
+	for i, m := range ms {
+		progs[i] = rules.Compile(rules.Spec{Match: m, Actions: []rules.Action{{Kind: rules.KindArchive}}})
+	}
+	counts := make([]int, len(ms))
+	match := func(fs []rules.Facts) (bool, bool) {
+		for i, p := range progs {
+			if ok, _ := matchAny(ctx, p, fs); ok {
+				counts[i]++
+			}
+		}
+		return false, false
+	}
+	var st RetroStats
+	err := scope{db: db, since: since, v: v}.scan(ctx, match, false, nil, &st,
+		func(pgx.Tx, *writer, string, bool) error { return nil })
+	if err != nil {
+		return nil, fmt.Errorf("count matches: %w", err)
+	}
+	return counts, nil
 }

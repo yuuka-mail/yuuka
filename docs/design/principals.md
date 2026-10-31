@@ -115,6 +115,8 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 所以 agent 持有 `submission:send` 不等于能发信：没有 `identity_grants` 的身份它用不了，
 以人的身份它最多到草稿。两层都是 API 层的事实，不是提示词的约定（§8.2）。
 注意 `message:annotate` 的动作必须可撤销（§8.8 的 `undo_token`）。
+`rule:manage` 是人的能力：规则是建好之后不再经人复核的常设能力，所以管理规则、以及接受提案时顺手建规则，
+端点在 scope 之外还按主体类型只放人（§8.5）。agent 的 token 不该带它，带了也用不上。
 
 ### 13.5 identity ↔ principal 授权
 
@@ -436,13 +438,20 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 | 前缀详情 / 泄漏检测（§3.3） | 观测到的发件域、泄漏 / 仿冒计数和列出的信都只来自可见投递：看不见的账户里谁在发信也是头部 |
 | SSE / `changes` / JMAP `queryChanges` | 目标不可见的事件跳过，游标照常前进 |
 | `actions` / `proposals` | 审计日志只给 human 会话；agent 只看自己发起的 |
+| 提案（`Proposals`、`ProposalByID`，REST `/proposals`、`list_proposals`） | 人看全部，agent / service 只看自己提的；关于某封信的只在那封信可见时可见。理由和引用会引原文，可能是读者看不到的信 |
+| 标注来源（`MessageAnnotations`，`GET /messages/{id}/annotations`） | 消息可见才可取；它是审计日志的一部分，agent / service 只看自己的 action 写的那几行 |
+| 撤销（`Undo`） | agent / service 只能撤销自己的 action，别人的和不存在一样；看不见的信上的行不动、只计数 |
+| 标签列表（`Labels`）、`label=` / `archived=` 过滤 | 只在可见消息上计数和过滤 |
+| 规则预览、草拟（`PreviewRule`、`FactsFor`、`CountMatches`） | 只在可见投递上求值和计数；只经 Sent 副本可见的信没有投递，不能拿来草拟 |
 | 推送通知 | 只发给 human，不经过受限主体 |
 
 测试上用一个「含受限账户」的固定夹具，表驱动地把上表每条读路径跑一遍，断言没有泄漏。
 新增读路径就是往这张表加一行。store 层的这张表是
 [`TestVisibility`](../../internal/store/sent_test.go)：过滤在 M2 默认关着，测试里打开，
 用可读、不可读两个账户下的收信和 Sent 副本跑列表、搜索、详情、线程和前缀视图。
-REST 层的 [`TestACL`](../../internal/api/api_test.go) 管的是另一半：它遍历路由表（§5.1），每个端点要认证、要 scope、把认证出的主体交给 store。
+REST 层的 [`TestACL`](../../internal/api/api_test.go) 管的是另一半：它遍历路由表（§5.1），每个端点要认证、要 scope、把认证出的主体交给 store；
+只有人能调的端点（决定提案、管理规则、`outbox.resolve`）另断言持有全部 scope 的 agent 得到 403，且请求到不了 store。
+规则本身是运维者的配置，读它不带 Viewer；能读的只有人，这由端点保证。
 
 发信授权读的事实也走同一个条件：回复的默认身份（`ReplyIdentities`）和线程参与者（`ReplyFacts`）
 只来自可见的投递、可见的消息和可见的 outbox 行，同在 `TestVisibility` 里。

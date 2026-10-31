@@ -285,7 +285,7 @@ func (db *DB) UpdateRule(ctx context.Context, id string, u RuleUpdate, a Action)
 		}
 		if next.Enabled && (spec != nil || !cur.Enabled) {
 			if len(cur.Unsupported) > 0 && spec == nil {
-				return fmt.Errorf("%w: the stored rule cannot be enabled by this version: %v", rules.ErrInvalid, cur.Unsupported)
+				return &rules.InvalidError{Path: "rule", Reason: fmt.Sprintf("the stored rule cannot be enabled by this version: %v", cur.Unsupported)}
 			}
 			if err := checkRegexBudget(ctx, tx, id, next.Spec.Match); err != nil {
 				return err
