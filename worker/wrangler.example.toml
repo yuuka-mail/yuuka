@@ -1,0 +1,29 @@
+# Example deploy config for the Email Worker. Copy to wrangler.toml
+# (gitignored) and fill in real values there; this file only ever uses
+# example.com. The test suite runs against this file, so the binding names
+# here are the ones the code expects.
+
+name = "yuuka-ingest"
+main = "src/index.ts"
+compatibility_date = "2026-10-12"
+
+# Routes every address of the zone to this Worker. It is declared here
+# because `wrangler email routing rules update ... catch-all` only accepts
+# forward/drop and cannot point the catch-all at a Worker (§2.1.1). Must be
+# the zone apex; top-level only. Uncomment in wrangler.toml with the real zone.
+# addresses = ["*@example.com"]
+
+[vars]
+# yuuka's webhook endpoint; must be reachable from Cloudflare.
+INGEST_URL = "https://yuuka.example.com/ingest/cloudflare"
+# WEBHOOK_SECRET is a secret, not a var: set it with
+#   npx wrangler secret put WEBHOOK_SECRET
+# using a random string of at least 32 bytes, shared with yuuka.
+
+[[r2_buckets]]
+binding = "RAW"
+bucket_name = "yuuka-raw"
+
+[[r2_buckets]]
+binding = "PENDING"
+bucket_name = "yuuka-pending"
