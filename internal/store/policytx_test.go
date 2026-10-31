@@ -26,6 +26,18 @@ import (
 // outbox_recipients).
 var insertOutbox = regexp.MustCompile(`(?i)insert\s+into\s+(\w+\.)?"?outbox"?[\s(]`)
 
+// The review tier's statements (§8.9): updateOutbox is an UPDATE of
+// outbox rows; toQueued sets state queued, toParam sets state from a
+// parameter; guarded says which state the statement moves rows from;
+// window touches the recall window or the verdict.
+var (
+	updateOutbox = regexp.MustCompile(`(?is)update\s+(\w+\.)?"?outbox"?\s.*\bset\b`)
+	toQueued     = regexp.MustCompile(`(?is)\bset\b.*\bstate\s*=\s*'queued'`)
+	toParam      = regexp.MustCompile(`(?is)\bset\b.*\bstate\s*=\s*\$`)
+	guarded      = regexp.MustCompile(`(?is)\bwhere\b.*\band\s+state\s*=\s*'(\w+)'`)
+	window       = regexp.MustCompile(`(?is)\bset\b.*\b(hold_until|review)\s*=`)
+)
+
 // TestOneWayToTheOutbox is the source-level half of the one-way door of
 // AGENTS.md (外发按身份授权): in every non-test Go file of the module,
 //
@@ -34,11 +46,23 @@ var insertOutbox = regexp.MustCompile(`(?i)insert\s+into\s+(\w+\.)?"?outbox"?[\s
 //   - a PolicyTx is built only by (*DB).WithDecision, with its decision
 //     from sendpolicy.Decide, and the decision is never assigned
 //     elsewhere,
-//   - PolicyTx has no exported field to change it through.
+//   - PolicyTx has no exported field to change it through,
+//
+// and for the review tier's held rows:
+//
+//   - the only SQL that moves an outbox row from held to queued is in
+//     PromoteHeld; every other statement that sets queued says in its
+//     WHERE which other state it moves rows from, and the one that sets
+//     the state from a parameter is advance, which never writes queued,
+//   - no SQL updates an outbox row's hold_until or review, so a window
+//     cannot be shortened nor a verdict rewritten,
+//   - outside internal/sendpolicy no code builds a sendpolicy.Decision,
+//     so Held (and the window, and the verdict) come from Decide alone;
+//     a copy changed afterwards is not what Enqueue reads.
 //
 // So a new way to queue mail without a decision fails here, whether it is
-// a new INSERT, a new caller, or a PolicyTx built by hand. The behavioural
-// half is TestPolicyTx.
+// a new INSERT, a new caller, a PolicyTx built by hand, or a shortcut out
+// of held. The behavioural half is TestPolicyTx and TestHeld.
 func TestOneWayToTheOutbox(t *testing.T) {
 	root, err := filepath.Abs("../..")
 	if err != nil {
@@ -48,6 +72,7 @@ func TestOneWayToTheOutbox(t *testing.T) {
 		t.Fatalf("module root %s: %v", root, err)
 	}
 	var inserts, callers, builders, assigns, exported []string
+	var promotions, paramStates, windows, decisions []string
 	fset := token.NewFileSet()
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -81,14 +106,37 @@ func TestOneWayToTheOutbox(t *testing.T) {
 			ast.Inspect(decl, func(n ast.Node) bool {
 				switch x := n.(type) {
 				case *ast.BasicLit:
-					if x.Kind == token.STRING && insertOutbox.MatchString(x.Value) {
+					if x.Kind != token.STRING {
+						break
+					}
+					if insertOutbox.MatchString(x.Value) {
 						inserts = append(inserts, where)
+					}
+					if !updateOutbox.MatchString(x.Value) {
+						break
+					}
+					if toQueued.MatchString(x.Value) {
+						switch g := guarded.FindStringSubmatch(x.Value); {
+						case g == nil:
+							t.Errorf("%s sets outbox rows queued without saying from which state", where)
+						case g[1] == "held":
+							promotions = append(promotions, where)
+						}
+					}
+					if toParam.MatchString(x.Value) {
+						paramStates = append(paramStates, where)
+					}
+					if window.MatchString(x.Value) {
+						windows = append(windows, where)
 					}
 				case *ast.CallExpr:
 					if name(x.Fun) == "enqueueOutbox" {
 						callers = append(callers, where)
 					}
 				case *ast.CompositeLit:
+					if sel, ok := x.Type.(*ast.SelectorExpr); ok && name(sel.X) == "sendpolicy" && sel.Sel.Name == "Decision" {
+						decisions = append(decisions, where)
+					}
 					if name(x.Type) == "PolicyTx" {
 						builders = append(builders, where)
 						if !decidedBySendpolicy(x) {
@@ -132,6 +180,10 @@ func TestOneWayToTheOutbox(t *testing.T) {
 		{"PolicyTx literals", builders, []string{"internal/store/policytx.go: (*DB).WithDecision"}},
 		{"assignments to .decision", assigns, nil},
 		{"exported PolicyTx fields", exported, nil},
+		{"held to queued", promotions, []string{"internal/store/held.go: (*DB).PromoteHeld"}},
+		{"outbox state from a parameter", paramStates, []string{"internal/store/outbox.go: advance"}},
+		{"updates of hold_until or review", windows, nil},
+		{"sendpolicy.Decision literals", decisions, nil},
 	} {
 		if !slices.Equal(c.got, c.want) {
 			t.Errorf("%s: %q, want %q", c.what, c.got, c.want)

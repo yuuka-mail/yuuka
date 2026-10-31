@@ -48,7 +48,8 @@ func (g Grant) ForPolicy() sendpolicy.Grant {
 		Limits: sendpolicy.Limits{
 			MaxPerHour: g.MaxPerHour, MaxPerDay: g.MaxPerDay, MaxNewRecipientsPerDay: g.MaxNewRecipientsPerDay,
 		},
-		Suspended: g.SuspendedAt != nil,
+		HoldSeconds: g.HoldSeconds,
+		Suspended:   g.SuspendedAt != nil,
 	}
 }
 

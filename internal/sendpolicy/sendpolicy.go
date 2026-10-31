@@ -4,7 +4,8 @@
 // facts (grant, counters, thread correspondents) and calls Decide itself,
 // inside the transaction that holds the grant's lock
 // (store.WithDecision); an outbox row can only be created through the
-// store.PolicyTx that carries that decision, and only when it is Queue.
+// store.PolicyTx that carries that decision, and only when it is Queue
+// (in queued, or in held when Held: the review tier, review.go).
 // internal/submit is the one caller, for every submission path.
 //
 // Exceeding a grant is a downgrade, never a refusal: every outcome other
@@ -73,7 +74,8 @@ func ParseRecipientScope(s string) (RecipientScope, error) {
 }
 
 // HoldReason is drafts.hold_reason. The list is closed by the column's
-// CHECK; Decide writes the first seven, M3's review and recall the rest.
+// CHECK; Decide writes all but withdrawn, which a recall from held
+// writes (store.WithdrawOutbox, store.PromoteHeld).
 type HoldReason string
 
 const (
@@ -147,6 +149,17 @@ func DefaultLimits(kind string) Limits {
 // lives here, so changing it needs no migration.
 const DefaultHoldSeconds = 600
 
+// EffectiveHoldSeconds is the recall window a grant's hold_seconds
+// stands for: nil (NULL, no number of its own) is DefaultHoldSeconds,
+// anything else itself, 0 meaning no window. Effective applies it; it is
+// exported for whoever compares a stored grant with what applies.
+func EffectiveHoldSeconds(stored *int) int {
+	if stored == nil {
+		return DefaultHoldSeconds
+	}
+	return *stored
+}
+
 // MaxAutoPerThreadRecipient bounds automatic mail (approved by system)
 // to one recipient within one thread over the last 24 hours, whoever
 // sent it (§8.9 邮件循环). Two auto-responders that slipped past the
@@ -175,10 +188,14 @@ type Grant struct {
 	RecipientScope RecipientScope
 	// Allowlist holds addresses (with @) and domains (without), matched
 	// case-insensitively: an address exactly, a domain exactly (no
-	// subdomains).
+	// subdomains). Its domains are also the link domains the review tier
+	// accepts (review.go).
 	Allowlist []string
 	Limits    Limits
-	Suspended bool
+	// HoldSeconds is the recall window of the review tier; nil means
+	// DefaultHoldSeconds, 0 no window.
+	HoldSeconds *int
+	Suspended   bool
 }
 
 // Counters are what the grant has done recently. Windows are rolling:
@@ -194,13 +211,17 @@ type Counters struct {
 	// no outbox row has ever gone to.
 	FirstContact []string
 	// AutoInThread counts, per folded recipient, the automatic outbox
-	// rows (approved by system) in the replied-to thread over the last
-	// day. Nil when not a reply.
+	// rows (approved by system, or held for review from a submitter who
+	// is not a human) in the replied-to thread over the last day. Nil
+	// when not a reply.
 	AutoInThread map[string]int
 }
 
 // Reply describes the message replied to.
 type Reply struct {
+	// ThreadID is its thread; the review tier compares the threads of
+	// what the mail cites with it.
+	ThreadID string
 	// Correspondents are the folded addresses recipient_scope thread
 	// admits: who wrote into the thread, whom its mail was addressed to,
 	// as far as its headers can be trusted, and whom we sent to in it
@@ -236,15 +257,30 @@ type Input struct {
 	// Reply is nil for a new thread.
 	Reply    *Reply
 	Counters Counters
+	// Review is what the review tier's checks read (review.go). The
+	// store gathers it only where they run: tier review, no human
+	// confirming. Nil there means it could not be gathered, and the
+	// submission stays a draft.
+	Review *ReviewFacts
 }
 
 // Decision is where the submission goes.
 type Decision struct {
-	// Queue: create the outbox row in queued. Otherwise it is a draft
-	// with HoldReason and Detail.
+	// Queue: create the outbox row, in queued, or in held when Held.
+	// Otherwise it is a draft with HoldReason and Detail.
 	Queue bool
-	// ApprovedBy is outbox.approved_by when Queue: the human who pressed
-	// send, or SystemPrincipalID when a policy let it go.
+	// Held: the review passed, and the row waits HoldSeconds in held
+	// for a recall before it is released to queued (store.PromoteHeld).
+	// Only Decide sets it (TestOneWayToTheOutbox).
+	Held        bool
+	HoldSeconds int
+	// Review is the verdict of the review tier's checks: set when they
+	// ran, whether they passed (Held) or escalated (HoldReview). It is
+	// stored with the outcome, outbox.review or drafts.review.
+	Review *Verdict
+	// ApprovedBy is outbox.approved_by when Queue and not Held: the
+	// human who pressed send, or SystemPrincipalID when a policy let it
+	// go. A held row has none until it is released (ReleasedBy).
 	ApprovedBy string
 	HoldReason HoldReason
 	// Detail says the rest for people (drafts.hold_detail).
@@ -270,7 +306,7 @@ func Fold(addr string) string { return strings.ToLower(addr) }
 //   - the identity's owner, human: auto, any recipient. A person pressing
 //     send on their own address is the confirmation.
 //   - the owner, agent or service: review, thread (§13.5's default for an
-//     agent's own identity). M2 treats review as a draft.
+//     agent's own identity).
 //   - an agent on a human-owned identity: draft. Writing drafts in the
 //     operator's name is what agents are for (§8.2); sending is not.
 //   - anyone else: none.
@@ -287,9 +323,10 @@ func Effective(in Input) Grant {
 		if g.Limits.MaxNewRecipientsPerDay == nil {
 			g.Limits.MaxNewRecipientsPerDay = lim.MaxNewRecipientsPerDay
 		}
+		g.HoldSeconds = ptr(EffectiveHoldSeconds(g.HoldSeconds))
 		return g
 	}
-	g := Grant{Policy: None, RecipientScope: ScopeThread, Limits: lim}
+	g := Grant{Policy: None, RecipientScope: ScopeThread, Limits: lim, HoldSeconds: ptr(DefaultHoldSeconds)}
 	switch {
 	case in.Submitter.ID == in.Identity.OwnerID && in.Submitter.Kind == KindHuman:
 		g.Policy, g.RecipientScope = Auto, ScopeAny
@@ -323,12 +360,15 @@ func OwnerCapped(submitterID string, id Identity) bool {
 //  7. no recipients, or one outside the scope  → draft (recipients)
 //  8. automatic reply to automatic mail, or the per-thread cap → draft (loop)
 //  9. max_per_hour, max_per_day, max_new_recipients_per_day → draft (limit)
-//  10. tier review: M2 has no automatic review → draft (review)
+//  10. tier review: every check of review.go, none skipped; any that
+//     escalates → draft (review) with the verdict, all pass → held for
+//     the grant's hold_seconds. No facts to check → draft (review).
 //  11. tier auto                               → queue
 //
 // Automatic means the submitter is not a human: the loop rules apply to
 // it, and when it is queued it is approved by system and carries
-// Auto-Submitted.
+// Auto-Submitted. Held mail carries it too, and is approved when it is
+// released (ReleasedBy).
 func Decide(in Input) Decision {
 	g := Effective(in)
 	tier := g.Policy
@@ -414,13 +454,36 @@ func Decide(in Input) Decision {
 	}
 
 	if tier == Review {
-		return draft(HoldReview, "the grant's tier is review, and the automatic review is not available yet; a human confirms instead")
+		if in.Review == nil {
+			return draft(HoldReview, "the review could not read this submission, so it stays a draft for a human")
+		}
+		v := review(g, in, rcpts)
+		if why := v.escalated(); why != "" {
+			d := draft(HoldReview, "the review escalated it: %s", why)
+			d.Review = &v
+			return d
+		}
+		d := Decision{Queue: true, Held: true, HoldSeconds: *g.HoldSeconds, Review: &v, Tier: tier}
+		if automatic {
+			d.AutoSubmitted = AutoSubmittedValue
+		}
+		return d
 	}
 	d := Decision{Queue: true, ApprovedBy: in.Submitter.ID, Tier: tier}
 	if automatic {
 		d.ApprovedBy, d.AutoSubmitted = SystemPrincipalID, AutoSubmittedValue
 	}
 	return d
+}
+
+// ReleasedBy is outbox.approved_by of a held row when its window ends:
+// the submitter if a human (a person under a review grant pressed send),
+// otherwise system, the policy that let automatic mail go.
+func ReleasedBy(submitter Principal) string {
+	if submitter.Kind == KindHuman {
+		return submitter.ID
+	}
+	return SystemPrincipalID
 }
 
 // fold folds and deduplicates recipients, keeping their order.

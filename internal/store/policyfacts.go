@@ -19,8 +19,8 @@ import (
 
 // contactedStates are the outbox states in which a message went, or is
 // going, to its recipients: an address in one of them has been
-// contacted. held (M3) is still under review; withdrawn and dead never
-// reached anyone.
+// contacted. held is still in its recall window; withdrawn and dead
+// never reached anyone.
 const contactedStates = `('queued', 'sending', 'sent', 'partial', 'unknown', 'failed')`
 
 // ReplyFacts describe a message being replied to.
@@ -196,13 +196,17 @@ func sendCounters(ctx context.Context, q dbtx, identityID, principalID string, r
 	if threadID == "" {
 		return c, nil
 	}
-	// Automatic mail (approved by system) of the last day in this thread,
-	// per recipient, whoever sent it. Starting from the few recent outbox
+	// Automatic mail of the last day in this thread, per recipient,
+	// whoever sent it: approved by system, or held for review from a
+	// submitter who is not a human, which system approves when its
+	// window ends. Without the held rows, submissions inside one window
+	// would each see the cap unspent. Starting from the few recent outbox
 	// rows keeps this on primary keys and the unique content_hash index.
 	rows, err = q.Query(ctx, `
 		SELECT r.addr_fold, count(DISTINCT o.id)::int
 		FROM outbox o JOIN outbox_recipients r ON r.outbox_id = o.id
-		WHERE o.approved_by = $1 AND o.created_at > $2 AND r.addr_fold = ANY($3)
+		WHERE (o.approved_by = $1 OR o.state = 'held' AND (SELECT kind FROM principals WHERE id = o.submitted_by) <> 'human')
+		  AND o.created_at > $2 AND r.addr_fold = ANY($3)
 		  AND (EXISTS (SELECT 1 FROM raw_objects ro JOIN messages m ON m.content_hash = ro.content_hash
 		               WHERE ro.id = o.raw_id AND m.thread_id = $4)
 		    OR EXISTS (SELECT 1 FROM drafts dr JOIN messages m ON m.id = dr.in_reply_to_id
@@ -241,7 +245,12 @@ type Submission struct {
 	// draft's author is then the submitter (its grant is the one counted)
 	// and the viewer the confirmer.
 	DraftAuthorID string
-	Now           time.Time
+	// Content is the message as it will go out, for the review tier's
+	// checks. WithDecision gathers their facts from it only where they
+	// run (tier review, no confirmation); nil there leaves the review
+	// without facts, and the submission stays a draft.
+	Content *ReviewInput
+	Now     time.Time
 }
 
 // PolicyFacts are sendpolicy's input for a submission, with what was
@@ -266,10 +275,13 @@ func (db *DB) PolicyInput(ctx context.Context, v *auth.Viewer, s Submission) (Po
 	if err := needViewer(v, "policy input"); err != nil {
 		return PolicyFacts{}, err
 	}
-	return db.policyInput(ctx, db.pool, v, s)
+	return db.policyInput(ctx, db.pool, v, s, false)
 }
 
-func (db *DB) policyInput(ctx context.Context, q dbtx, v *auth.Viewer, s Submission) (PolicyFacts, error) {
+// policyInput gathers the input; with review, also the review tier's
+// facts where its checks run, which costs lookups worth doing once,
+// under the lock.
+func (db *DB) policyInput(ctx context.Context, q dbtx, v *auth.Viewer, s Submission, review bool) (PolicyFacts, error) {
 	var f PolicyFacts
 	ident, from, err := resolveIdentity(ctx, q, s.FromAddr)
 	disabled := false
@@ -320,13 +332,26 @@ func (db *DB) policyInput(ctx context.Context, q dbtx, v *auth.Viewer, s Submiss
 			return f, err
 		}
 		f.Reply, threadID = &r, r.ThreadID
-		in.Reply = &sendpolicy.Reply{Correspondents: r.Correspondents, Machine: r.Machine}
+		in.Reply = &sendpolicy.Reply{ThreadID: r.ThreadID, Correspondents: r.Correspondents, Machine: r.Machine}
 	}
 	in.Counters, err = sendCounters(ctx, q, ident.ID, in.Submitter.ID, s.Recipients, threadID, s.Now)
 	if err != nil {
 		return f, err
 	}
+	if review && s.Content != nil && in.ConfirmedBy == nil && reviewed(*in) {
+		if in.Review, err = db.reviewFacts(ctx, q, v, s); err != nil {
+			return f, err
+		}
+	}
 	return f, nil
+}
+
+// reviewed reports whether Decide runs the review tier's checks on in:
+// its effective tier is review. The owner cap lowers it to draft first,
+// as in Decide.
+func reviewed(in sendpolicy.Input) bool {
+	g := sendpolicy.Effective(in)
+	return g.Policy == sendpolicy.Review && !sendpolicy.OwnerCapped(in.Submitter.ID, in.Identity)
 }
 
 // MessageByHeaderID returns the newest message v can see whose
@@ -366,9 +391,13 @@ type Standing struct {
 	Capped bool
 	// Hold is the reason every submission as this identity stops at a
 	// draft, "" when one can go out within the grant's recipient scope
-	// and limits. HoldDetail says the rest for people.
+	// and limits. HoldDetail says the rest for people. Under review it is
+	// HoldReview: nothing goes out straight away, and HoldDetail says
+	// that mail the review passes waits HoldSeconds for a recall.
 	Hold       sendpolicy.HoldReason
 	HoldDetail string
+	// HoldSeconds is the recall window of the review tier, under it.
+	HoldSeconds int
 }
 
 // Standings returns every enabled identity, by address, with where v's
@@ -405,17 +434,32 @@ func (db *DB) Standings(ctx context.Context, v *auth.Viewer) ([]Standing, error)
 		// Without recipients Decide runs its rules about who submits as
 		// what (1–6) and stops at the recipients rule (7) if none of them
 		// held it. Of the rules after that, only the review tier holds
-		// every submission alike.
+		// every submission alike: in its recall window, or as a draft
+		// when a check escalates.
 		d := sendpolicy.Decide(in)
 		s.Tier, s.Capped = d.Tier, sendpolicy.OwnerCapped(v.PrincipalID, in.Identity)
 		switch {
 		case d.HoldReason != sendpolicy.HoldRecipients:
 			s.Hold, s.HoldDetail = d.HoldReason, d.Detail
 		case s.Tier == sendpolicy.Review:
-			s.Hold, s.HoldDetail = sendpolicy.HoldReview,
-				"the grant's tier is review, and the automatic review is not available yet; a human confirms instead"
+			s.HoldSeconds = *s.Grant.HoldSeconds
+			s.Hold, s.HoldDetail = sendpolicy.HoldReview, fmt.Sprintf("reviewed first: mail the checks pass is held %s "+
+				"for a recall, then sent; mail they escalate (first contact, a code or link from incoming mail, "+
+				"another thread, an unknown link domain, an unreadable attachment) stays a draft for a human",
+				holdWindow(s.HoldSeconds))
 		}
 		out = append(out, s)
 	}
 	return out, nil
+}
+
+// holdWindow says a recall window for people.
+func holdWindow(seconds int) string {
+	switch {
+	case seconds == 0:
+		return "only until the next release pass"
+	case seconds%60 == 0:
+		return fmt.Sprintf("%d minute(s)", seconds/60)
+	}
+	return fmt.Sprintf("%d second(s)", seconds)
 }

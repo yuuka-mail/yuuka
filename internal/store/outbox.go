@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -126,6 +127,10 @@ type NewOutbox struct {
 	// address keep the first (§4.6). Their folded set must be the one
 	// decided on.
 	Recipients []OutboxRecipient
+	// HeldDraft, for a held SMTP submission (no DraftID), is the draft
+	// to create backed by Raw: where the row goes back to if withdrawn.
+	// Enqueue sets its ID to the draft created.
+	HeldDraft *Draft
 }
 
 // outboxRow is one outbox row with its sent copy and recipients.
@@ -137,6 +142,11 @@ type outboxRow struct {
 	approvedBy  string
 	// newRaw: Raw has no raw_objects row yet.
 	newRaw bool
+	// held: the review passed; the row waits holdSeconds in held with
+	// its verdict.
+	held        bool
+	holdSeconds int
+	review      []byte
 }
 
 // IdentityTransport returns the transport name of identity id, which must
@@ -159,9 +169,10 @@ func (db *DB) IdentityTransport(ctx context.Context, id string) (string, error) 
 }
 
 // enqueueOutbox records a sent copy and the outbox row that will send it,
-// in state queued and due now, in tx (§4.6). The bytes must already be
-// stored: if the transaction fails they are an orphan under sent/, which
-// is not lost mail, since nothing was sent.
+// in state queued and due now, or held until the end of its window by
+// the database's clock, in tx (§4.6). The bytes must already be stored:
+// if the transaction fails they are an orphan under sent/, which is not
+// lost mail, since nothing was sent.
 //
 // It is the only statement that creates an outbox row, and
 // (*PolicyTx).Enqueue is its only caller (TestOneWayToTheOutbox): an
@@ -189,9 +200,14 @@ func enqueueOutbox(ctx context.Context, tx pgx.Tx, o outboxRow) error {
 		}
 	}
 	_, err := tx.Exec(ctx, `
-		INSERT INTO outbox (id, state, next_retry_at, identity_id, from_addr, submitted_by, approved_by, draft_id, raw_id)
-		VALUES ($1, 'queued', now(), $2, $3, $4, $5, $6, $7)`,
-		o.ID, o.identityID, o.fromAddr, o.submittedBy, o.approvedBy, nullable(o.DraftID), o.Raw.ID)
+		INSERT INTO outbox (id, state, next_retry_at, hold_until, review,
+		                    identity_id, from_addr, submitted_by, approved_by, draft_id, raw_id)
+		VALUES ($1, CASE WHEN $8 THEN 'held' ELSE 'queued' END,
+		        CASE WHEN $8 THEN NULL ELSE now() END,
+		        CASE WHEN $8 THEN now() + $9 * interval '1 second' END, $10,
+		        $2, $3, $4, $5, $6, $7)`,
+		o.ID, o.identityID, o.fromAddr, o.submittedBy, nullable(o.approvedBy), nullable(o.DraftID), o.Raw.ID,
+		o.held, o.holdSeconds, o.review)
 	if err != nil {
 		return fmt.Errorf("enqueue %s: insert outbox: %w", o.ID, err)
 	}
@@ -778,7 +794,7 @@ func (db *DB) ResolveOutbox(ctx context.Context, id, resolution string, a Action
 				return err
 			}
 			state = OutboxQueued
-			if _, err := tx.Exec(ctx, `UPDATE outbox SET state = 'queued', next_retry_at = now() WHERE id = $1`, id); err != nil {
+			if _, err := tx.Exec(ctx, `UPDATE outbox SET state = 'queued', next_retry_at = now() WHERE id = $1 AND state = 'unknown'`, id); err != nil {
 				return err
 			}
 		case ResolveAbandon:
@@ -848,6 +864,13 @@ type OutboxEntry struct {
 	// LastOutcome is the newest attempt's outcome; "" while it runs or
 	// when there is none.
 	LastOutcome string
+	// HoldUntil ends the recall window of a row the review tier passed
+	// (set from held on); Review is that review's verdict
+	// (sendpolicy.Verdict as JSON), nil for mail that was not reviewed.
+	HoldUntil *time.Time
+	Review    json.RawMessage
+	// WithdrawnBy recalled it from held (Principal.ID "" unless withdrawn).
+	WithdrawnBy Principal
 }
 
 // OutboxRecipientState is a recipient and its state.
@@ -864,7 +887,8 @@ const outboxEntryCols = `o.id, coalesce(i.prefix, '*') || '@' || i.zone, i.id, o
 	(SELECT count(*) FROM send_attempts a WHERE a.outbox_id = o.id),
 	coalesce((SELECT a.outcome FROM send_attempts a WHERE a.outbox_id = o.id
 		ORDER BY a.started_at DESC, a.id DESC LIMIT 1), ''),
-	r.addrs, r.kinds, r.states`
+	r.addrs, r.kinds, r.states, o.hold_until, o.review,
+	coalesce(wp.id, ''), coalesce(wp.kind, ''), coalesce(wp.name, '')`
 
 // outboxEntryFrom selects the outbox rows v may see: those whose
 // identity's account v may read (§13.8, the rule of visibleOutbox).
@@ -874,6 +898,7 @@ func (db *DB) outboxEntryFrom(v *auth.Viewer) string {
 		JOIN identities i ON i.id = o.identity_id
 		JOIN principals sp ON sp.id = o.submitted_by
 		LEFT JOIN principals ap ON ap.id = o.approved_by
+		LEFT JOIN principals wp ON wp.id = o.withdrawn_by
 		LEFT JOIN LATERAL (
 			SELECT m.id, m.subject FROM raw_objects sr JOIN messages m ON m.content_hash = sr.content_hash
 			WHERE sr.id = o.raw_id ORDER BY m.id LIMIT 1
@@ -891,17 +916,19 @@ func scanOutboxEntries(rows pgx.Rows) ([]OutboxEntry, error) {
 	out := []OutboxEntry{}
 	var e OutboxEntry
 	var addrs, kinds, states []string
-	s, a := &e.SubmittedBy, &e.ApprovedBy
+	s, a, w := &e.SubmittedBy, &e.ApprovedBy, &e.WithdrawnBy
 	_, err := pgx.ForEachRow(rows, []any{
 		&e.ID, &e.Identity, &e.IdentityID, &e.State, &e.FromAddr, &e.CreatedAt, &e.NextRetryAt, &e.Error,
 		&e.DraftID, &e.MessageID, &e.Subject, &s.ID, &s.Kind, &s.Name, &a.ID, &a.Kind, &a.Name,
-		&e.Attempts, &e.LastOutcome, &addrs, &kinds, &states,
+		&e.Attempts, &e.LastOutcome, &addrs, &kinds, &states, &e.HoldUntil, &e.Review, &w.ID, &w.Kind, &w.Name,
 	}, func() error {
 		e.Recipients = make([]OutboxRecipientState, len(addrs))
 		for i := range addrs {
 			e.Recipients[i] = OutboxRecipientState{Addr: addrs[i], Kind: kinds[i], State: states[i]}
 		}
 		out = append(out, e)
+		// The next row's JSON must not land in this one's array.
+		e.Review = nil
 		return nil
 	})
 	return out, err

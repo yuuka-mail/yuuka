@@ -148,6 +148,10 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 窗口是滚动的（最近 60 分钟、最近 24 小时），不依赖时区；按 outbox 行计数，不论状态，提交过就占一个名额。
 「新收件人」是此前没有任何处于已发出或在途状态（`queued`…`failed`）的 outbox 行发往过的地址，按 `addr_fold` 比较。
 
+`review` 档的撤回窗口 `hold_seconds` 同理：空值是 [`sendpolicy.DefaultHoldSeconds`](../../internal/sendpolicy/sendpolicy.go)（600 秒，
+对所有主体一样），0 是明确不设窗口，其余是秒数；一个存着的值代表多长由 `sendpolicy.EffectiveHoldSeconds` 回答，
+比较授权和实际生效值的地方都用它。10 分钟够在手机上读完卡片按撤回，又不至于让一封回信读起来像隔天的。
+
 **硬上限在两处成立**：`Decide` 里身份属于某个 human、提交者不是他时一律压回 `draft`，不看授权表；
 `yuuka grant set`（[`store.SetGrant`](../../internal/store/grants.go)）拒绝写入这种组合下高于 `draft` 的档位，
 而不是存下来再在执行时压低——表里写着一个永远不会生效的 `auto`，只会误导下一个读它的人。
@@ -162,7 +166,7 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 | 主体 → 身份 | 没有授权行时的档位 |
 |---|---|
 | `human:<operator>` → 自己的身份 | `auto` + `any`（人按发送就是确认） |
-| `agent:arisu` → `arisu@example.com`（owner 是它自己） | `review` + `thread`；M2 没有自动审核，等于草稿 |
+| `agent:arisu` → `arisu@example.com`（owner 是它自己） | `review` + `thread`：审核通过后扣留 10 分钟可撤回，升级的停在草稿（§8.9） |
 | service → 自己拥有的身份 | 同上，`review` + `thread` |
 | `agent:arisu` → 人的身份 | `draft`，**且不能调高**（§8.9 的硬上限）：替人起草正是 agent 的用处（§8.2） |
 | 其他组合（service → 人的身份、human → 别人的身份……） | `none` |
@@ -319,7 +323,7 @@ yuuka 不假设自己部署在什么网络里（§2）。所以**每个端点都
 | ingest（Worker → yuuka）| HMAC + 时间戳（§2） | Cloudflare |
 | SMTP submission | SASL → `smtp_password` 凭据 | 发信的服务；默认只在私有网络可达，发信方在私有网络外时经独立中转机（见下） |
 | REST / MCP | Bearer → `token` 凭据 | 调用它的 agent 和服务 |
-| TG 回调按钮（§8.4） | 校验 `callback_query.from.id` → 运维者的 `session` 凭据 | Telegram；改用长轮询则无需入站 |
+| TG 回调按钮（§8.4） | 长轮询，没有入站端点。校验 `callback_query.from.id`、`chat.id` 和回调数据 `w:<ULID>` → 记为 `YUUKA_TELEGRAM_OPERATOR` 指定的人，`credential_id` 为空、`via: telegram` | 只能撤回扣留中的信；见下 |
 | `GET /healthz` | **不认证**（唯一的例外） | 反向代理的健康检查 |
 
 这几个端点各自认证，不要混。
@@ -341,8 +345,9 @@ Web 和 webhook 靠 Cloudflare 得到的那层保护随之失效；连接上限�
 该改成带凭据的独立端点。路由清单与各自的认证方式在
 [`cmd/yuuka/main.go`](../../cmd/yuuka/main.go) 的 `routes`，清单测试保证新端点不会无意中漏掉认证。
 WebUI 的页面壳（静态资源）同样不需要会话，但它不含数据，数据全走 `/api/`。
-`/api/v1/openapi.json` 也不需要：它是接口描述，和公开仓库里的那份一样（§5.1）。TG 容易被当成纯输出而漏掉，但它上面有「确认发送」按钮，
-就是 `submission:send` 的入口之一。把 REST / MCP 放在只认浏览器 cookie 的身份代理后面是个常见错误——
+`/api/v1/openapi.json` 也不需要：它是接口描述，和公开仓库里的那份一样（§5.1）。TG 容易被当成纯输出而漏掉，但它上面有按钮。
+M3 的按钮只有撤回（§8.4）：最坏的后果是信发不出去，所以记作配置里的人、不发凭据就够了，
+和 CLI 一样不冒充登录；将来出现「确认发送」按钮时它就是 `submission:send` 的入口之一，那时再给它一种可吊销的 `session` 类凭据。把 REST / MCP 放在只认浏览器 cookie 的身份代理后面是个常见错误——
 agent 不是浏览器，拿不到那个 cookie。
 
 **WebUI 的内置登录**：

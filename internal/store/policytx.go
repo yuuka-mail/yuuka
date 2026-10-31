@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/mail"
@@ -26,11 +27,13 @@ import (
 // grant's lock; the caller never hands in a decision, so there is none
 // to forge or to reuse, and the counters it was made on are the ones
 // locked until the row commits. Enqueue refuses unless that decision is
-// Queue, takes the identity, From, submitter and approver from it, and
+// Queue, takes the identity, From, submitter and approver from it (and,
+// for the review tier, the state held, the window and the verdict), and
 // checks that the bytes and recipients are the ones decided on. One
 // PolicyTx records one outcome. TestOneWayToTheOutbox keeps it that way
-// at the source level: no other statement inserts an outbox row, and
-// nothing else builds a PolicyTx.
+// at the source level: no other statement inserts an outbox row,
+// nothing else builds a PolicyTx, only PromoteHeld turns held into
+// queued, nothing shortens a window, and only sendpolicy sets Held.
 
 // ErrNotApproved: Enqueue on a PolicyTx whose decision is not Queue, or
 // with something other than what was decided.
@@ -68,14 +71,14 @@ func (db *DB) WithDecision(ctx context.Context, v *auth.Viewer, s Submission, f 
 	}
 	var p *PolicyTx
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
-		facts, err := db.policyInput(ctx, tx, v, s)
+		facts, err := db.policyInput(ctx, tx, v, s, false)
 		if err != nil {
 			return err
 		}
 		if err := lockGrant(ctx, tx, facts.Identity.ID, facts.Input.Submitter.ID); err != nil {
 			return err
 		}
-		if facts, err = db.policyInput(ctx, tx, v, s); err != nil {
+		if facts, err = db.policyInput(ctx, tx, v, s, true); err != nil {
 			return err
 		}
 		p = &PolicyTx{db: db, tx: tx, v: v, sub: s, facts: facts, decision: sendpolicy.Decide(facts.Input)}
@@ -114,14 +117,19 @@ func (p *PolicyTx) outcome(op string) error {
 	return nil
 }
 
-// Enqueue records o as a queued outbox row (§4.5, §4.6), approved by the
-// decision. It refuses (ErrNotApproved) unless the decision is Queue,
-// and unless o is what was decided on: the same folded set of
-// recipients, a header From that is the decided From address, bytes that
-// are the sent copy described. Identity, From, submitted_by and
-// approved_by come from the decision. With o.DraftID the draft is locked
+// Enqueue records o as an outbox row (§4.5, §4.6) as the decision says:
+// queued and approved, or, when the review passed (Held), held for the
+// decision's window with its verdict and no approver. It refuses
+// (ErrNotApproved) unless the decision is Queue, and unless o is what was
+// decided on: the same folded set of recipients, a header From that is
+// the decided From address, bytes that are the sent copy described.
+// Identity, From, submitted_by, approved_by, the state, the window and
+// the verdict come from the decision. With o.DraftID the draft is locked
 // and must not be in the outbox already (ErrInFlight), so a draft is
 // queued once however often send is pressed.
+//
+// A held row needs a draft to go back to when it is withdrawn: o.DraftID,
+// or for an SMTP submission o.HeldDraft, created here backed by o.Raw.
 func (p *PolicyTx) Enqueue(ctx context.Context, o NewOutbox) error {
 	if err := p.outcome("enqueue"); err != nil {
 		return err
@@ -139,8 +147,32 @@ func (p *PolicyTx) Enqueue(ctx context.Context, o NewOutbox) error {
 	row := outboxRow{
 		NewOutbox: o, identityID: f.Identity.ID, fromAddr: f.FromAddr,
 		submittedBy: f.Input.Submitter.ID, approvedBy: d.ApprovedBy, newRaw: true,
+		held: d.Held, holdSeconds: d.HoldSeconds,
 	}
-	if o.DraftID != "" {
+	if d.Review != nil {
+		b, err := json.Marshal(d.Review)
+		if err != nil {
+			return fmt.Errorf("enqueue: review: %w", err)
+		}
+		row.review = b
+	}
+	switch {
+	case o.HeldDraft != nil && (!d.Held || o.DraftID != ""):
+		return errors.New("enqueue: a draft to create is for a held submission without one")
+	case d.Held && o.DraftID == "" && o.HeldDraft == nil:
+		return fmt.Errorf("enqueue: %w: held mail needs a draft to go back to", ErrNotApproved)
+	case o.HeldDraft != nil:
+		// The SMTP submission's draft, backed by the sent copy: what a
+		// withdrawal returns to, and what a person may confirm later.
+		if err := o.Raw.describes(o.Message); err != nil {
+			return fmt.Errorf("enqueue: %w", err)
+		}
+		dr, err := p.rawDraft(ctx, *o.HeldDraft, o.Raw)
+		if err != nil {
+			return fmt.Errorf("enqueue: %w", err)
+		}
+		row.DraftID, row.newRaw, o.HeldDraft.ID = dr.ID, false, dr.ID
+	case o.DraftID != "":
 		dr, err := draftByID(ctx, p.tx, p.v, o.DraftID, true)
 		if err != nil {
 			return fmt.Errorf("enqueue: %w", err)
@@ -185,18 +217,23 @@ func (p *PolicyTx) CreateDraft(ctx context.Context, d Draft, raw *SentRaw, messa
 	if err := sameRecipients(p.sub.Recipients, DraftRecipients(d)); err != nil {
 		return Draft{}, fmt.Errorf("create draft: %w", err)
 	}
-	d.HoldReason, d.HoldDetail = dec.HoldReason, dec.Detail
+	d.HoldReason, d.HoldDetail, d.Review = dec.HoldReason, dec.Detail, nil
+	if dec.Review != nil {
+		b, err := json.Marshal(dec.Review)
+		if err != nil {
+			return Draft{}, fmt.Errorf("create draft: review: %w", err)
+		}
+		d.Review = b
+	}
 	if raw != nil {
 		if err := raw.describes(message); err != nil {
 			return Draft{}, fmt.Errorf("create draft: %w", err)
 		}
-		if _, err := p.tx.Exec(ctx, `
-			INSERT INTO raw_objects (id, r2_key, local_path, size, sha256, received_at, completeness, content_hash)
-			VALUES ($1, $2, $2, $3, $4, $5, 1, $6)`,
-			raw.ID, raw.Key, raw.Size, raw.SHA256[:], raw.At, raw.ContentHash[:]); err != nil {
-			return Draft{}, fmt.Errorf("create draft: insert raw_objects: %w", err)
+		out, err := p.rawDraft(ctx, d, *raw)
+		if err != nil {
+			return Draft{}, fmt.Errorf("create draft: %w", err)
 		}
-		d.RawID, d.BodyMD = raw.ID, ""
+		return out, nil
 	}
 	out, err := p.db.createDraft(ctx, p.tx, p.v, d, at)
 	if err != nil {
@@ -204,6 +241,38 @@ func (p *PolicyTx) CreateDraft(ctx context.Context, d Draft, raw *SentRaw, messa
 	}
 	if out.IdentityID != f.Identity.ID {
 		return Draft{}, fmt.Errorf("create draft: %s now resolves to another identity", d.FromAddr)
+	}
+	return out, nil
+}
+
+// rawDraft records d, an SMTP submission held as a draft or held for
+// review, with raw as its body: the raw_objects row of the sent copy,
+// then the draft by the submitter, checked against the decision like
+// CreateDraft.
+func (p *PolicyTx) rawDraft(ctx context.Context, d Draft, raw SentRaw) (Draft, error) {
+	f := p.facts
+	switch {
+	case p.sub.DraftAuthorID != "":
+		return Draft{}, errors.New("a confirmation holds its draft")
+	case FoldAddr(d.FromAddr) != f.FromAddr || d.InReplyToID != p.sub.InReplyToID:
+		return Draft{}, fmt.Errorf("draft from %s in reply to %q is not what was decided", d.FromAddr, d.InReplyToID)
+	}
+	if err := sameRecipients(p.sub.Recipients, DraftRecipients(d)); err != nil {
+		return Draft{}, err
+	}
+	if _, err := p.tx.Exec(ctx, `
+		INSERT INTO raw_objects (id, r2_key, local_path, size, sha256, received_at, completeness, content_hash)
+		VALUES ($1, $2, $2, $3, $4, $5, 1, $6)`,
+		raw.ID, raw.Key, raw.Size, raw.SHA256[:], raw.At, raw.ContentHash[:]); err != nil {
+		return Draft{}, fmt.Errorf("insert raw_objects: %w", err)
+	}
+	d.RawID, d.BodyMD = raw.ID, ""
+	out, err := p.db.createDraft(ctx, p.tx, p.v, d, raw.At)
+	if err != nil {
+		return Draft{}, err
+	}
+	if out.IdentityID != f.Identity.ID {
+		return Draft{}, fmt.Errorf("%s now resolves to another identity", d.FromAddr)
 	}
 	return out, nil
 }
@@ -217,7 +286,14 @@ func (p *PolicyTx) HoldDraft(ctx context.Context, id string, at time.Time) error
 	if p.decision.Queue {
 		return errors.New("hold draft: the decision is to queue")
 	}
-	if err := holdDraft(ctx, p.tx, p.v, id, p.decision.HoldReason, p.decision.Detail, at); err != nil {
+	var review []byte
+	if r := p.decision.Review; r != nil {
+		var err error
+		if review, err = json.Marshal(r); err != nil {
+			return fmt.Errorf("hold draft %s: review: %w", id, err)
+		}
+	}
+	if err := holdDraft(ctx, p.tx, p.v, id, p.decision.HoldReason, p.decision.Detail, review, at); err != nil {
 		return fmt.Errorf("hold draft %s: %w", id, err)
 	}
 	return nil
@@ -249,13 +325,27 @@ func (p *PolicyTx) Audit(ctx context.Context, tool string, args, result map[stri
 	})
 }
 
-// DecisionRecord is how a decision appears in the audit log.
+// DecisionRecord is how a decision appears in the audit log. A review
+// verdict appears as the checks that did not pass; what they found is on
+// the draft or the outbox row.
 func DecisionRecord(d sendpolicy.Decision) map[string]any {
 	r := map[string]any{"queue": d.Queue, "tier": d.Tier}
-	if d.Queue {
+	switch {
+	case d.Held:
+		r["held"], r["hold_seconds"] = true, d.HoldSeconds
+	case d.Queue:
 		r["approved_by"] = d.ApprovedBy
-	} else {
+	default:
 		r["hold_reason"], r["detail"] = d.HoldReason, d.Detail
+	}
+	if d.Review != nil {
+		escalated := []string{}
+		for _, c := range d.Review.Checks {
+			if !c.Pass {
+				escalated = append(escalated, c.Name)
+			}
+		}
+		r["review_escalated"] = escalated
 	}
 	if d.AutoSubmitted != "" {
 		r["auto_submitted"] = d.AutoSubmitted

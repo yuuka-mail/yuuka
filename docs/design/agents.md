@@ -143,6 +143,24 @@ agent 做摘要和提取，人在手机上一点就完成审批/标注，确认�
 - 自动审核放行、处在撤回窗口里的信（§8.9 的 `held`）同样推一张系统署名的卡片，
   默认动作是什么都不做（到期发出），[撤回] 是一等按钮
 
+**落地（M3）：卡片上只有撤回**（[`internal/notify`](../../internal/notify/cards.go)）。扣留卡片列出发信身份、收件人（To/Cc/Bcc）、
+提交者、所回复的主题和本信主题、附件（名称、类型、大小）、正文前 3 行 / 300 字、通过了哪些检查、几点发出；
+按钮只有回调按钮 [Recall] 和一个打开 WebUI 的链接。被审核升级的信和被熔断的授权各推一张不带回调按钮的卡片。
+全部纯文本、不用 `parse_mode`，每个字段都经清洗。正文前几行会经过 Telegram 的服务器——这时外泄检查已经通过。
+
+取舍：
+
+- **不做「确认发送」按钮**。有了它，Telegram 账号失陷就等于 `submission:send`；只有撤回时，最坏的后果是信被扣下（拒绝服务），
+  永远发不出信。所以撤回的审计主体可以简单：记为配置里指定的人（`YUUKA_TELEGRAM_OPERATOR`），`credential_id` 为空，
+  `args.via = telegram` 加 Telegram 用户 ID，和 CLI 一样不冒充一次没发生过的登录。等出现第一个能发信的按钮，
+  再给 Telegram 一种可吊销的凭据类型
+- **长轮询，不是 webhook**（[`notify.Poller`](../../internal/notify/poll.go)）：没有入站端点、没有 webhook 密钥，什么都不暴露。
+  更新只来自用我们的 bot token 经 TLS 访问的 Telegram；`callback_query.from.id` 必须是配置的运维者、`chat.id` 必须是配置的 chat、
+  数据严格是 `w:<ULID>`，否则不理。撤回本身检查状态且幂等，重放或过时的点击得到「已撤回」「已发出」并移除按钮。
+  代价：同一个 bot 不能再设 webhook 或被别的进程轮询（Telegram 回 409，日志里会说）
+- **卡片发送失败只记日志，不延长窗口**。窗口是授权的承诺，不随通知通道的状况变；没配 Telegram 时 WebUI 的扣留队列照样能撤回
+- 没配运维者时卡片照发，只是没有撤回按钮：按了也没有人接
+
 ### 8.5 协作的单位是任务，不是邮件
 
 人机协作的单位不是"一封信"，而是"一件待办"：这个验证码给我、这张发票归档、
@@ -408,7 +426,7 @@ M3 的标注工具（[`internal/mcp/annotate.go`](../../internal/mcp/annotate.go
 |---|---|---|
 | `none` | 不能用这个身份 | 不在允许列表里 |
 | `draft` | 只生成草稿，人确认才进 outbox | 每次都问 |
-| `review` | 进 outbox 的 `held` 态，过自动审核 + 撤回窗口，通过即发；拦下的退回草稿等人 | auto 模式：审核器把关，拦下的转人 |
+| `review` | 先过确定性审核：拦下的停在草稿等人；通过的进 outbox 的 `held` 态，撤回窗口到期即发 | auto 模式：审核器把关，拦下的转人 |
 | `auto` | 直接进 `queued`，只受限额约束 | 白名单命令免确认 |
 
 **硬上限**：身份的 owner 是 human、而发信主体不是这个 human 本人时，档位上限是 `draft`。
@@ -430,8 +448,13 @@ agent 的工作不会丢，人也不会被一堆报错淹没。凭据缺 `submis
   决定存在不导出的字段里。调用方拿不到可以伪造或复用的「批准」，读到的 `Decision()` 只是副本
 - `Enqueue` 只在决定为 `Queue` 时写；身份、From、`submitted_by`、`approved_by` 取自决定，不由调用方传；
   还核对收件人集合、信头 From、字节与原件描述都是被决定的那一份；一个决定只能落一个结果
-- `TestOneWayToTheOutbox` 解析整个模块的源码，断言上面三条（以及 `PolicyTx` 没有导出字段、
-  决定字段只来自 `sendpolicy.Decide`）；`TestPolicyTx` 是行为上的另一半
+- `held` 行同样只由决定写：状态、窗口长度（`hold_until` 按数据库时钟算）和审核结论都取自 `Decision`（`Held`、`HoldSeconds`、`Review`），
+  `Decision` 只在 `sendpolicy` 里构造。离开 `held` 只有两条路：到期放行（`store.PromoteHeld`）和撤回（`store.WithdrawOutbox`）
+- `TestOneWayToTheOutbox` 解析整个模块的源码，断言上面几条（以及 `PolicyTx` 没有导出字段、
+  决定字段只来自 `sendpolicy.Decide`），并且：把 `held` 改成 `queued` 的 SQL 只在 `PromoteHeld` 里，
+  其他把行改成 `queued` 的语句都在 WHERE 里写明从哪个别的状态来；没有任何 SQL 更新 outbox 的 `hold_until` 或 `review`
+  （窗口不能被缩短，结论不能被改写）；模块里没有别处构造 `sendpolicy.Decision`。
+  `TestPolicyTx`、`TestHeld` 是行为上的另一半
 
 取舍：`Decide` 本身是导出的纯函数，谁都能拿手写的输入调用它，但结果只是一个值，进不了 outbox；
 真正的门是 `PolicyTx`。测试也只能经 `WithDecision` 入队，测试辅助不另开路（少数 store 测试为了造历史数据直接写 SQL，
@@ -449,11 +472,15 @@ agent 的工作不会丢，人也不会被一堆报错淹没。凭据缺 `submis
 7. 没有收件人，或有人不在 `recipient_scope` 内 → `recipients`
 8. 邮件循环（只对自动提交，见下）→ `loop`
 9. 每小时、每天、每天新收件人限额 → `limit`
-10. `review` 档：**M2 没有自动审核**，一律停在草稿（`review`，`hold_detail` 说明审核尚未实现），绝不当成 `auto`
+10. `review` 档：跑下面「自动审核」的每一项检查，**全部跑完、不短路**，人一次看到全部原因。
+    任一项不过 → 草稿（`review`，结论记进 `drafts.review`）；全部通过 → `held`，窗口是授权的 `hold_seconds`。
+    没有审核事实（提交路径没给出外发内容）→ 草稿，失败即关闭，绝不当成 `auto`
 11. `auto` 档 → `queued`；人提交时 `approved_by` 是本人，agent / service 提交时是 `system`，
     并且 `Decision.AutoSubmitted` 要求信带 `Auto-Submitted: auto-generated`
 
 「自动」指提交者不是 human。确认路径里 agent 写的信由人放行，是人的信，不加 `Auto-Submitted`。
+`held` 的信在提交时就带上 `Auto-Submitted`（非人提交时），`approved_by` 为空，到期放行时才写：
+非人提交者是 `system`，人在 `review` 授权下提交的是他本人（`sendpolicy.ReleasedBy`）。
 `recipient_scope = allowlist` 的条目是地址（精确）或域（精确，不含子域），大小写不敏感。
 `thread` 放行的是线程的**通信方**（`ReplyFacts.Correspondents`；不叫「参与者」，免得和线程视图里
 只列发件人的 `participants` 混淆）。线程里每封查询者看得见的信按它的头部有多可信贡献地址，
@@ -496,11 +523,11 @@ flowchart TD
   policy -- "review / auto" --> limits{"限额 · recipient_scope<br/>熔断 · 邮件循环"}
   limits -- 超出 --> draft
   limits -- "通过，auto 档" --> queued(["queued"])
-  limits -- "通过，review 档" --> review{"首次联系 · 外泄检查<br/>· 模型审核（可选）"}
+  limits -- "通过，review 档" --> review{"首次联系 · 外泄 · 跨线程<br/>· 链接域 · 可读性"}
   review -- 任一项升级 --> draft
-  review -- 通过 --> held["held<br/>撤回窗口 + TG 卡片"]
+  review -- 全部通过 --> held["held<br/>撤回窗口 + TG 卡片"]
   held -- 窗口到期 --> queued
-  held -- 人撤回 --> draft
+  held -- "撤回（人、提交者自己、熔断、授权暂停）" --> draft
 ```
 
 #### 限额与熔断
@@ -514,38 +541,85 @@ flowchart TD
 
 agent 专属身份的默认值是 `review` + `thread`。各类主体的默认档位和默认限额见 §13.5。
 
-熔断目前只有手动的一半：`yuuka grant set --suspend / --resume`。按退信率、投诉率自动熔断要等 DSN 回收（§10.4.2）有了数据再接。
-
 熔断是全局的：某条授权的退信率或投诉率超阈值、或短时间内被人撤回 / 驳回过多次，
 该授权自动 `suspended`，期间所有提交降级为草稿，等人看过再恢复。
 
+落地（M3）的是「被人撤回」这一半（[`store.WithdrawOutbox`](../../internal/store/held.go)）：
+人撤回一封 `held` 的信时，在同一个事务里数这条授权最近 24 小时内提交、被**人**撤回的行，
+到 `sendpolicy.MaxRecallsPerDay`（2）就暂停授权——没有授权行时写一行当时生效的默认值再暂停，`--resume` 恢复的就是原样——
+同时撤回它其余所有 `held` 的信（`withdrawn_by = system`，草稿原因 `suspended`），记一条 system 的 `grant.suspend`，推一张卡片。
+手动的一半是 `yuuka grant set --suspend / --resume`；`--suspend` 同时是命令行的紧急开关：
+放行时发现授权已暂停（或身份、提交者已停用）的 `held` 行会被撤回，而不是发出。
+
+取舍：
+
+- **只数人的撤回**。agent 撤回自己扣着的信是在纠错，不该把自己熔断；审核升级是系统在正常工作，
+  首次联系天然会触发，算进来就会误熔断。2 次：一次可能是事后才发现的笔误，一天两次说明这条授权发出去的东西不是主人想要的
+- 窗口按提交时间（`created_at`）而不是撤回时间算，和这条授权的其他计数（§13.5）一样；
+  所以不另设 `withdrawn_at` 列，撤回的时刻在审计日志里。代价：窗口长于一天的 `review` 授权，撤回一条前天提交的信不再计数
+- 恢复后的 24 小时内再被人撤回一次就会再次熔断：人刚放过它，下一次撤回仍然是有效信号
+- 推迟：按退信率、投诉率、RCPT 拒收率熔断（要 DSN 回收，§10.4.2）；把人删除被升级的草稿算作「驳回」；WebUI 的恢复按钮
+
 #### 自动审核（`review` 档）
 
-按代价从低到高跑，**任何一项不过就升级到人**，不静默丢弃：
+**在哪里跑**：提交时，同步，在 `store.WithDecision` 持有授权锁的事务里；结论由 `Decide` 给出
+（规则 10，[`sendpolicy/review.go`](../../internal/sendpolicy/review.go)）。审核要读的事实
+（[`store/review.go`](../../internal/store/review.go)）只在有效档位是 `review`、且不是人在确认时，在加锁后的那次读取里收集，
+**只按提交者的可见范围读**：审核若能读到提交者看不见的信，它就成了「这是不是那封我看不见的信里的码」的预言机。
+外发内容由 [`internal/submit`](../../internal/submit/review.go) 从真正会发出去的字节构造：草稿是预演一次组装再像收信一样解析
+（正文不依赖判定结果；草稿在锁内复核 `updated_at`，审的就是发的），SMTP 提交是规范化前的原文
+（规范化只改审核不读的头部：From、Sender、Bcc、Date、Message-ID、Auto-Submitted）。
+每个文本部分都读：两个 alternative、HTML 的标记本身和它的可见文本（注释里藏的值照样发出去）、文本附件、附带的 `message/rfc822`。
 
-1. **限额与收件人**：是否在 `recipient_scope` 内；**首次联系的地址一律升级**
-2. **确定性的外泄检查**——catch-all 收件箱里最值钱的就是验证码和 magic link，
-   注入攻击最想做的就是把它们发出去：
-   - 正文或附件里出现 `extractions` 表中的值（验证码、链接）→ 升级
-   - 引用、转发或附带的内容来自另一个线程，而收件人不是那个线程的参与者 → 升级
-   - 正文里出现收件箱里没见过、也不在授权白名单里的链接域 → 升级
-   判断依据是草稿的 `in_reply_to`、`cites`（§8.1 的锚点）和正文本身，不依赖 agent 的自述。
-   第一条的输入已经在库里（[0008](../../internal/store/migrations/0008_extractions.sql)，提取器见
-   [`internal/extract`](../../internal/extract/extract.go)），检查本身随 `review` 档落地。定下的形状：
-   按提取器的切法把待发正文（和可读的附件文本）切成候选——数字串去掉分组的空格和连字符、URL 原样——
-   用 `extractions.value` 上的哈希索引做等值查找，不做子串扫描；只认有投递的信（从外面进来的）
-   的值，自己 Sent 副本里提取到的不算，否则 agent 回信里引用自己写过的数字也会被拦。
-   时间窗口按 message id（ULID 即到达时间）限定，码过期很久的仍然算：外泄的代价不随有效期结束。
-   按提取器的阈值，被它漏掉的码这一条也看不见；短数字（4 位）撞上正文里的普通数字时会多升级几次，
-   方向是对的
-3. **模型审核**（可选）：一个独立的 reviewer 主体，**没有任何工具**，只看待发的信、
-   收件人与本线程的往来元数据、agent 的 `rationale`，输出 `pass | escalate` 和理由。
-   它**只能升级，不能放行**前两步拦下的东西。用和起草者不同的上下文，最好是不同的模型，
-   且不读入站正文——同一段注入不该同时骗过起草者和审核者
-4. **撤回窗口**：通过后在 `held` 停留 `hold_seconds`，同时推送 §8.4 的卡片；
-   到期进 `queued`，窗口内人可一键撤回
+检查项，**任何一项不过就升级到人**，不静默丢弃：
 
-`auto` 档跳过 2–4，只做第 1 步的限额与收件人范围检查。
+1. **首次联系**（`first_contact`）：任何收件人从未被任何身份发过信 → 升级。
+   包括第一次回复一个主动来信的新人——这正是注入攻击的形状。人放行过一次之后，这个地址就算已知。
+   取舍：「DMARC 通过的来信人算已知」更省事，但攻击者很容易满足它
+2. **提取值外泄**（`extracted_values`）——catch-all 收件箱里最值钱的就是验证码和 magic link，注入攻击最想做的就是把它们发出去。
+   [`extract.Tokens`](../../internal/extract/tokens.go) 把外发文本切成候选：4–10 位字母数字串（原样和大写）、词里的 4–8 位数字串、
+   被单个空格 / `-` / `.` / 不换行空格隔开的数字组去掉分隔符后每段 4–8 位的连续子链（`7-4-0-2-1-9` 也能抓到）、全角数字、
+   每个 URL（原样和去掉结尾标点）。它是提取器写 `Value` 的逆，`TestTokensCoverExtractions` 在语料上把两者绑在一起，
+   提取器改了切法而它没跟上就会失败。候选和 `extractions.value` 按值相等连接（0008 的哈希索引），
+   只认 otp / link、30 天内（`store.ExtractionLookback`，按 message id 的 ULID 时间）、有一条提交者可见的**收到的**投递的信
+   （自己的 Sent 副本没有投递，不算）。码过期了仍然算：外泄的代价不随有效期结束。
+   结论只记类型、来源消息、来源位置和外发里的位置，**不记值本身**。候选超过 2 万个 → 升级（「太多，审不了」）
+3. **跨线程引用**（`cross_thread`）：草稿的 `cites`、正文里写的 `yuuka://message/<id>` 锚点、附带信的 Message-ID
+   都要解析到一封提交者看得见的信，解析不了 → 升级；那封信不在本线程时，每个收件人都必须是那个线程的通信方（`ReplyFacts`），否则升级
+4. **链接域**（`link_domains`）：每个链接的主机名小写、IDNA 转 ASCII、去掉末尾的点；IP 字面量或不是域名 → 视为没见过。
+   取组织域后满足任一即「见过」：我们自己身份的域；授权 `recipient_allowlist` 里的域（只取域条目，不取地址条目；先复用这一列，混用出问题再单独加列）；
+   某封提交者可见、没被降级、DMARC 通过的来信的发件组织域（0011 在反转后的发件域上建了索引，按后缀查）；我们发过信的地址的域。
+   「收件箱里见过」被刻意解释为「经过认证的发件方或通信方的组织」：链接本身没有入库，正文里随便出现过的域不算数
+5. **可读性**（`readable`）：解析出问题的信、非文本附件（PDF、图片、压缩包……）、超长的文本部分、超过 200 个链接或 100 个链接主机、
+   嵌套超过两层的附带信 → 升级。读不了的东西没法放行；发 PDF 的服务应该用 `auto` + 白名单
+
+**被升级时**：落成草稿，`hold_reason = review`，`hold_detail` 一行摘要，`drafts.review` 记每项结论；
+**不建 outbox 行**——那会占用限额，Sent 副本还会被解析成消息挂进线程。配了 Telegram 会推一张「已升级」卡片（§8.4）。
+
+**全部通过时**：同一条 `enqueueOutbox` 写成 `held`，`hold_until = now() + hold_seconds`（数据库时钟），带上结论，`approved_by` 为空。
+SMTP 提交在同一事务里建一个以原件为载体的草稿，每个 `held` 行撤回时都有草稿可回。推一张带 [Recall] 的卡片（§8.4）。
+`hold_seconds` 为空时是 `sendpolicy.DefaultHoldSeconds`（600 秒），0 表示不设窗口（下一轮放行就发）。
+
+**放行与撤回**（[`store/held.go`](../../internal/store/held.go)）：
+
+- 放行 `PromoteHeld` 由执行器在每次领取前调用，并按最早的 `hold_until` 定时醒来：内容锁、`FOR UPDATE SKIP LOCKED` 选出到期行，
+  逐行改成 `queued`（`WHERE state = 'held'`），记 `outbox.release`；授权已暂停、身份或提交者已停用的改为撤回。
+  服务停着时信就一直扣着，重启后再发。放行不再检查限额：提交时已经占了名额
+- 撤回 `WithdrawOutbox`：人可以撤回任何看得见的行，agent / service 只能撤回自己提交的；状态必须还是 `held`，
+  否则报「已放行」——`queued` 的信随时可能在线上，不再撤。改为 `withdrawn`、记 `withdrawn_by`，草稿原因改为 `withdrawn`，
+  可以再编辑、再提交；记 `outbox.withdraw`，然后检查熔断（见上）
+- 两者都先拿内容锁再拿行，必然串行：放行在先，撤回看到 `queued` 干净地失败；撤回在先，放行的 `WHERE state = 'held'` 匹配不到。
+  `TestHeldRecallRace` 并行跑 100 次，断言既不会出现「已撤回却有发送尝试」，也不会出现「已排队但草稿标记为撤回」
+- **不做「立即发送」**：那会是第二条 `held → queued` 的路，最多只省 `hold_seconds`
+
+**模型审核：推迟**。确定性检查看不见换了说法的东西：把码写成「七四零二一九」、夹进字母、编码；重排链接的查询参数；
+把机密转述出来。这些要一个读者。接口草图：`Reviewer.Review(ctx, Outgoing) (Verdict, error)`，输入是渲染后的外发文本、收件人、
+线程元数据（地址、数量、日期，不含收到的主题和正文）和 agent 的理由，**不给任何工具**；输出 `pass | escalate` 加理由，出错即升级；
+它**只能升级，不能放行**确定性检查拦下的东西，在 `held` 期间运行，升级则 `held → withdrawn`。用和起草者不同的上下文，
+最好是不同的模型，且不读入站正文——同一段注入不该同时骗过起草者和审核者。推迟的理由：要配置提供方、引入网络依赖、
+要一条异步路径，草稿还没有 `rationale` 字段；而首次联系升级、外泄检查和撤回窗口已经挡住了注入的主要形状。
+
+`auto` 档不审核，只做限额与收件人范围检查。
 
 #### 邮件循环
 

@@ -62,7 +62,7 @@ func TestDecide(t *testing.T) {
 			want{reason: HoldPolicy, tier: None},
 		},
 		{
-			"agent, own identity, no grant: review is a draft in M2",
+			"agent, own identity, no grant: review without facts is a draft",
 			Input{
 				Submitter: agentP, CanSubmit: true, Identity: arisuID,
 				Recipients: bob, Reply: reply("bob@example.net"),
@@ -498,13 +498,17 @@ func TestOwnerCapHolds(t *testing.T) {
 				}
 				return gs
 			}()...) {
-				in := Input{
-					Submitter: s, CanSubmit: true, ConfirmedBy: conf, Identity: operatorID, Grant: g,
-					Recipients: []string{"bob@example.net"}, Reply: reply("bob@example.net"),
-				}
-				d := Decide(in)
-				if d.Queue || d.Tier.rank() > Draft.rank() {
-					t.Fatalf("%+v confirmed by %+v with grant %+v: %+v", s, conf, g, d)
+				// The review dimension: no facts, a review that passes,
+				// one that escalates. None of them lifts the cap.
+				for _, rf := range []*ReviewFacts{nil, {}, {Unreadable: []string{"x"}}} {
+					in := Input{
+						Submitter: s, CanSubmit: true, ConfirmedBy: conf, Identity: operatorID, Grant: g,
+						Recipients: []string{"bob@example.net"}, Reply: reply("bob@example.net"), Review: rf,
+					}
+					d := Decide(in)
+					if d.Queue || d.Held || d.Tier.rank() > Draft.rank() {
+						t.Fatalf("%+v confirmed by %+v with grant %+v, review %+v: %+v", s, conf, g, rf, d)
+					}
 				}
 			}
 		}

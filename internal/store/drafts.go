@@ -56,8 +56,12 @@ type Draft struct {
 	Cites      json.RawMessage
 	HoldReason sendpolicy.HoldReason // "" for a draft never submitted
 	HoldDetail string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	// Review is the verdict (sendpolicy.Verdict as JSON) of the review
+	// that escalated it, nil unless HoldReason is review; read only, the
+	// decision writes it.
+	Review    json.RawMessage
+	CreatedAt time.Time
+	UpdatedAt time.Time
 
 	// Read only: the newest outbox row made from it that was not
 	// withdrawn, "" when none, i.e. while it is still a draft.
@@ -84,7 +88,7 @@ func seesEveryDraft(v *auth.Viewer) bool { return v.PrincipalKind == sendpolicy.
 
 const draftCols = `dr.id, dr.principal_id, ap.kind, ap.name, dr.identity_id, dr.from_addr, coalesce(dr.in_reply_to_id, ''),
 	dr.to_addrs, dr.cc_addrs, dr.bcc_addrs, dr.subject, coalesce(dr.body_md, ''), coalesce(dr.raw_id, ''),
-	dr.cites, coalesce(dr.hold_reason, ''), coalesce(dr.hold_detail, ''), dr.created_at, dr.updated_at,
+	dr.cites, coalesce(dr.hold_reason, ''), coalesce(dr.hold_detail, ''), dr.review, dr.created_at, dr.updated_at,
 	coalesce(o.id, ''), coalesce(o.state, ''), op.id, op.kind, op.name`
 
 // draftFrom joins the identity's owner and the newest outbox row that
@@ -102,7 +106,7 @@ func scanDraft(row pgx.Row) (Draft, error) {
 	var reason string
 	err := row.Scan(&d.ID, &d.PrincipalID, &d.AuthorKind, &d.AuthorName, &d.IdentityID, &d.FromAddr, &d.InReplyToID,
 		&d.To, &d.Cc, &d.Bcc, &d.Subject, &d.BodyMD, &d.RawID,
-		&d.Cites, &reason, &d.HoldDetail, &d.CreatedAt, &d.UpdatedAt, &d.OutboxID, &d.OutboxState,
+		&d.Cites, &reason, &d.HoldDetail, &d.Review, &d.CreatedAt, &d.UpdatedAt, &d.OutboxID, &d.OutboxState,
 		&d.IdentityOwner.ID, &d.IdentityOwner.Kind, &d.IdentityOwner.Name)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound
@@ -282,7 +286,7 @@ func (db *DB) CreateDraft(ctx context.Context, v *auth.Viewer, d Draft, at time.
 	if err := needViewer(v, "create draft"); err != nil {
 		return Draft{}, err
 	}
-	if d.RawID != "" || d.HoldReason != "" || d.HoldDetail != "" {
+	if d.RawID != "" || d.HoldReason != "" || d.HoldDetail != "" || d.Review != nil {
 		return Draft{}, fmt.Errorf("create draft: %w: a raw body and a hold reason come from a submission's decision", ErrInvalidDraft)
 	}
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
@@ -311,10 +315,10 @@ func (db *DB) createDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, d Draf
 	}
 	_, err := tx.Exec(ctx, `
 		INSERT INTO drafts (id, principal_id, identity_id, from_addr, in_reply_to_id, to_addrs, cc_addrs, bcc_addrs,
-		                    subject, body_md, raw_id, cites, hold_reason, hold_detail, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15)`,
+		                    subject, body_md, raw_id, cites, hold_reason, hold_detail, review, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $16)`,
 		d.ID, d.PrincipalID, d.IdentityID, d.FromAddr, nullable(d.InReplyToID), d.To, d.Cc, d.Bcc,
-		d.Subject, body, nullable(d.RawID), d.Cites, nullable(string(d.HoldReason)), nullable(d.HoldDetail), at)
+		d.Subject, body, nullable(d.RawID), d.Cites, nullable(string(d.HoldReason)), nullable(d.HoldDetail), d.Review, at)
 	if err != nil {
 		return Draft{}, fmt.Errorf("insert draft: %w", err)
 	}
@@ -327,8 +331,8 @@ func (db *DB) createDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, d Draf
 // UpdateDraft replaces the content of draft d.ID (From, reply target,
 // recipients, subject, body, cites) as v at time at. Only Markdown drafts
 // are edited; an SMTP submission's raw is what its service sent. Editing
-// clears the hold reason: it described a submission of other content,
-// and submitting again decides afresh. ErrInFlight once the draft has
+// clears the hold reason and the review verdict: they described a
+// submission of other content, and submitting again decides afresh. ErrInFlight once the draft has
 // gone to the outbox; ErrNotFound if v cannot see it. Recorded as
 // draft.update.
 func (db *DB) UpdateDraft(ctx context.Context, v *auth.Viewer, d Draft, at time.Time) (Draft, error) {
@@ -354,7 +358,7 @@ func (db *DB) UpdateDraft(ctx context.Context, v *auth.Viewer, d Draft, at time.
 		_, err = tx.Exec(ctx, `
 			UPDATE drafts SET identity_id = $2, from_addr = $3, in_reply_to_id = $4, to_addrs = $5, cc_addrs = $6,
 				bcc_addrs = $7, subject = $8, body_md = $9, cites = $10, hold_reason = NULL, hold_detail = NULL,
-				updated_at = $11
+				review = NULL, updated_at = $11
 			WHERE id = $1`,
 			d.ID, d.IdentityID, d.FromAddr, nullable(d.InReplyToID), d.To, d.Cc, d.Bcc, d.Subject, d.BodyMD, d.Cites, at)
 		if err != nil {
@@ -376,9 +380,10 @@ func (db *DB) UpdateDraft(ctx context.Context, v *auth.Viewer, d Draft, at time.
 }
 
 // holdDraft records why a submission of draft id stopped at the draft,
-// as v at time at; (*PolicyTx).HoldDraft passes its decision. Recorded
-// as draft.hold.
-func holdDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, id string, reason sendpolicy.HoldReason, detail string, at time.Time) error {
+// and the review verdict when one escalated it (nil clears it), as v at
+// time at; (*PolicyTx).HoldDraft passes its decision. Recorded as
+// draft.hold.
+func holdDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, id string, reason sendpolicy.HoldReason, detail string, review []byte, at time.Time) error {
 	if reason == "" {
 		return errors.New("hold draft: no reason")
 	}
@@ -389,8 +394,8 @@ func holdDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, id string, reason
 	if err := notInFlight(ctx, tx, id); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE drafts SET hold_reason = $2, hold_detail = $3, updated_at = $4 WHERE id = $1`,
-		id, string(reason), nullable(detail), at); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE drafts SET hold_reason = $2, hold_detail = $3, review = $4, updated_at = $5 WHERE id = $1`,
+		id, string(reason), nullable(detail), review, at); err != nil {
 		return err
 	}
 	if err := logDraftChange(ctx, tx, id); err != nil {

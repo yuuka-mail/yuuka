@@ -39,8 +39,9 @@
 - 有几列已建、暂不写：`messages.spam_score`（§4.3 的降级现算）、`messages.body_html_key`、
   `deliveries.spf_recheck`（二次 SPF 判定还没接）、`prefixes.observed_domains` 和 `prefixes.leak_suspect`
   （泄漏检测按可见性现算，§3.3；存一份会绕过 §13.8。两列不删：删列要迁移，留着不读没有代价）
-- M2 的 `outbox.state` 已经容纳 `held` 和 `withdrawn`、`outbox.review` / `hold_until` 已建，
-  但 M2 只做 `draft` 和 `auto` 两档，不写它们；`review` 档（M3）不必改约束
+- M2 的 `outbox.state` 已经容纳 `held` 和 `withdrawn`、`outbox.review` / `hold_until` 已建；
+  `review` 档（M3）只追加了 `drafts.review`、`outbox.withdrawn_by` 和描述 `held` / `withdrawn` 形状的约束
+  （[0011](../../internal/store/migrations/0011_review.sql)）
 - **出口（transport）不是表**。出口按名字定义在进程配置里（主机、端口、caps、凭据文件路径），
   `identities.transport` 只存名字。出口带着一份密钥和一个进程必须连得上的主机，这两样都是部署事实，
   和 R2、数据库的配置同类；放进表里只是配置的镜像，还可能和配置不一致。代价是改出口要改配置、重启，
@@ -289,10 +290,10 @@ UI 上就是线程里并列的两条，其中一条标「正文未同步」。
 
 ```mermaid
 stateDiagram-v2
-  [*] --> held: review 档
+  [*] --> held: review 档，审核全部通过
   [*] --> queued: auto 档 / 人确认发送
   held --> queued: 审核通过，撤回窗口到期
-  held --> withdrawn: 撤回 · 升级（回草稿）
+  held --> withdrawn: 撤回（人、提交者自己、熔断、授权暂停 / 停用）· 回草稿
   queued --> sending: 领取，写 send_attempts
   sending --> sent: 全部收件人收下
   sending --> partial: 部分收件人被拒
@@ -316,7 +317,14 @@ stateDiagram-v2
 `review` 的结论、谁提交的、Sent 副本都还挂在这一行上，删了就回答不了「这封为什么没发出去」。
 
 outbox 行只有一个来处：[`store.WithDecision`](../../internal/store/policytx.go) 交出的 `PolicyTx`，
-它带着在授权锁下做出的 `sendpolicy.Decide` 决定，只有 `Queue` 才能落成 `queued` 行（§8.9）。
+它带着在授权锁下做出的 `sendpolicy.Decide` 决定，只有 `Queue` 才能落成行：`queued`，或审核通过时的 `held`（§8.9）。
+**审核升级不经过 outbox**：被升级的信直接停在草稿（`hold_reason = review`，结论在 `drafts.review`），
+不建行、不占限额，也不会有一份没人收到的 Sent 副本挂进线程。所以 `withdrawn` 只来自 `held`。
+
+`held → queued` 只有一条语句（[`store.PromoteHeld`](../../internal/store/held.go)），由执行器在领取前调用；
+`held → withdrawn` 是撤回（`store.WithdrawOutbox`）或放行时发现授权已暂停。两边都先拿内容锁再拿行，必然串行。
+0011 的约束要求 `held` 行带审核结论和草稿、没有 `approved_by`，`withdrawn` 行带 `withdrawn_by` 和草稿；
+`hold_until` 和 `review` 写一次，没有语句会改它们（`TestOneWayToTheOutbox`）。
 
 表上能写成约束的不变量都写成了约束（[0005](../../internal/store/migrations/0005_sending.sql)），
 不靠执行器的代码自觉：`next_retry_at` 只在等待发送的状态（`queued`、`failed`、还有收件人要重试的 `partial`）
