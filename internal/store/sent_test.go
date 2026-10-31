@@ -764,6 +764,31 @@ func TestVisibility(t *testing.T) {
 				t.Errorf("PreviewRule matched %d, samples %q, want %q", pv.Matched, got, wantMatched)
 			}
 
+			// Pushes (§8.4): the summary of new mail goes to a binding
+			// whose person sees the delivery, which names the prefix:
+			// both, seen only as a sent copy, is not pushed to the
+			// restricted viewer. Cards about a grant follow the
+			// identity's account.
+			for n, id := range msgs {
+				var delivery string
+				err := pool.QueryRow(ctx, `SELECT id FROM deliveries WHERE message_id = $1`, id).Scan(&delivery)
+				if errors.Is(err, pgx.ErrNoRows) {
+					continue // sent only
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				ok, err := db.DeliveryVisible(ctx, v, delivery)
+				if err != nil || ok != slices.Contains(wantMatched, n) {
+					t.Errorf("DeliveryVisible %s: %v %v", n, ok, err)
+				}
+			}
+			for identity, wantID := range map[string]bool{mine: v != nobody, theirs: v == everyone} {
+				if ok, err := db.IdentityMailVisible(ctx, v, identity); err != nil || ok != wantID {
+					t.Errorf("IdentityMailVisible %s: %v %v", identity, ok, err)
+				}
+			}
+
 			res, err := db.Search(ctx, v, store.SearchQuery{Filter: storetest.Query(t, "body"), IncludeDowngraded: true})
 			if err != nil {
 				t.Fatal(err)

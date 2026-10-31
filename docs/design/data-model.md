@@ -119,53 +119,8 @@ notifications(id, message_id, channel, state, sent_at)
   -- 这不是「每次推送的投递记录」，那个不做（§17.10）
 ```
 
-通知渠道（§17，已定，未实现；迁移是 0018）。它们引用的 `secrets` 已经由
-[0017](../../internal/store/migrations/0017_transports.sql) 建好（`telegram_bot_token` 类型也已在 CHECK 里）；
-为什么一张通用 `secrets` 表见 §17.4：
-
-```sql
-CREATE TABLE notification_channels (  -- 一个渠道就是一个 bot（§8.4）
-    id          text COLLATE "C" PRIMARY KEY,
-    name        text NOT NULL UNIQUE CHECK (name ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'),
-    kind        text NOT NULL CHECK (kind IN ('telegram')),   -- 其他类型随各自的迁移加入
-    external_id text NOT NULL,                                -- Telegram：bot 的数字 id，经 getMe 确认
-    settings    jsonb NOT NULL DEFAULT '{}',                  -- 非机密，按类型在 Go 里校验
-    secret_id   text COLLATE "C" UNIQUE REFERENCES secrets (id),
-    disabled_at timestamptz,
-    revision    bigint NOT NULL DEFAULT 1,
-    created_at  timestamptz NOT NULL DEFAULT now()
-);
--- getUpdates 每个 bot 只允许一个轮询者
-CREATE UNIQUE INDEX ON notification_channels (kind, external_id) WHERE disabled_at IS NULL;
-
-CREATE TABLE channel_bindings (       -- 渠道上属于某个 human 的一个目的地（只限 human，Go 里查）
-    id                text COLLATE "C" PRIMARY KEY,
-    channel_id        text COLLATE "C" NOT NULL REFERENCES notification_channels (id),
-    principal_id      text COLLATE "C" NOT NULL REFERENCES principals (id),
-    address           text NOT NULL,   -- Telegram chat id（私聊或群）
-    actor_external_id text,            -- 谁按的按钮算数；空 = 这个绑定上没有按钮
-    label             text NOT NULL DEFAULT '',
-    created_at        timestamptz NOT NULL DEFAULT now(),
-    last_used_at      timestamptz,
-    revoked_at        timestamptz
-);
-CREATE UNIQUE INDEX ON channel_bindings (channel_id, address) WHERE revoked_at IS NULL;
-
-channel_bind_codes(                   -- 绑定码（§13.7），只存哈希，10 分钟有效
-  id, channel_id, principal_id,
-  code_hash bytea(32) unique,
-  created_with → credentials,         -- 发起它的再验证过的会话；空 = 主机上的 CLI
-  created_at, expires_at,
-  redeemed_at, seen_address, seen_actor_id, seen_label,   -- /start <码> 时 Telegram 报来的身份，确认时展示
-  binding_id → channel_bindings)
-
-CREATE TABLE notification_subscriptions (
-    binding_id text COLLATE "C" NOT NULL REFERENCES channel_bindings (id),
-    event      text NOT NULL CHECK (event IN ('mail.new', 'send.held', 'send.escalated', 'grant.suspended')),
-    PRIMARY KEY (binding_id, event)
-);
--- 只列今天已有发出方的事件；security 不可订阅，强制发给管理员和当事人的全部有效绑定（§8.4、§13.10）
-```
+通知渠道、绑定、绑定码和订阅（§17）在 [0018](../../internal/store/migrations/0018_channels.sql)，
+读写在 [`internal/store/channels.go`](../../internal/store/channels.go)；为什么这样分表见 §17.4。
 
 全文检索：Postgres 原生 FTS 对中文很弱。先用 `pg_trgm` 够个人用量，
 中文体验不行再换 Postgres 里的做法（Go 侧切词写 `tsvector`、pg_bigm、PGroonga），这是可替换的一层，不影响模型。
