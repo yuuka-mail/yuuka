@@ -9,7 +9,7 @@
 | **M0** | Worker（pending 标记 + R2 + HMAC webhook + 写入截止时间，§2.1）；**Worker ↔ Go 契约与共享测试向量**（§2.2）；**最小 Postgres**：只建 `raw_objects` + `deliveries`；`content_hash` + 以唯一约束实现的重投去重（§4.1）；Go ingest + raw 归档 + 幂等 + reconcile；TG 推送一行摘要 | 一周内可日用：所有信已自持 + 有通知。无 UI |
 | **M1** | go-message 解析入库；**主体/凭据建表**（§13.9）；**`changes` 变更日志建表**（§4）；前缀 claimed/discovered 两态 + 最低垃圾降级（§4.3）；WebUI 内置 passkey 登录（§13.7）+ 列表/阅读/按前缀聚合；trgm 搜索；**agent 读路径**（文本化视图 + MCP 只读 tools） | 替代现有查看方式；agent 已能检索邮箱 |
 | **M2** | **REST 契约迁到 OpenAPI**（§5.1，先于写端点）；outbox 状态机（含 `unknown` / 逐收件人结果）+ 任意前缀发信 + 回复/线程；**CF 出口的字节比对实测**（2026-10-31 已测：Message-ID 从最终回复回填，§10.4.1）；草稿可由 agent 起、人确认发出；**SMTP submission 口**（§13.6，隐式 TLS + PROXY protocol），其他服务可直接发信；`accounts` / `identities` 建表（§9.5） | 不再用 curl 发信 |
-| **M3** | **界面 i18n**（§12.11，先于本阶段的界面文案）；规则引擎 + machine/human 分区 + 验证码提取 + 前缀注册表/泄漏检测；决策模型分诊（§15，可选，默认影子模式）；agent 提案→规则的闭环；**`changes` 游标的拉取**（§8.6，SSE 推送仍在 M4）；**agent 专属身份的 `review` / `auto` 外发**（§8.9，外泄检查依赖本阶段的验证码提取） | 本项目的差异化能力 |
+| **M3** | **界面 i18n**（§12.11，先于本阶段的界面文案）；规则引擎 + machine/human 分区 + 验证码提取 + 前缀注册表/泄漏检测；决策模型分诊（§15，可选，默认影子模式）；agent 提案→规则的闭环；**`changes` 游标的拉取**（§8.6，SSE 推送仍在 M4）；**agent 专属身份的 `review` / `auto` 外发**（§8.9，外泄检查依赖本阶段的验证码提取）；管理动作进 WebUI（§13.10，放宽权限仍只在 CLI） | 本项目的差异化能力 |
 | **M3.5** | 多账户：IMAP 拉取 driver（Gmail / 企业邮箱，只读）+ 跨账户去重/线程归并 + 身份→传输路由，回复不串身份；`account_access`（§13.8）；`offload_policy` / `remote_state` 建表（§9.6） | 一个收件箱看全部 |
 | **M3.6** | 归档卸载（§9.6）：拉取稳定一个周期后，按账户开 `offload_policy`，释放外部邮箱容量 | 容量受限的邮箱不再需要清理 |
 | **M4** | JMAP 子集 + 自己的客户端/PWA；SSE 事件流（人和 agent 共用增量游标） | 多端 |

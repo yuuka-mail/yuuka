@@ -70,7 +70,7 @@ passkey 不是 `credentials` 的一行：它是产生 `session` 凭据的登录�
 （公钥、签名计数、AAGUID、BE/BS 标志），不把任何库的序列化格式冻结进库里。
 
 **`token` 的签发（M1）**：只有主机上的 CLI 能签发（`yuuka token issue` / `ls` / `revoke`，
-参数见 [`cmd/yuuka/token.go`](../../cmd/yuuka/token.go)），WebUI 入口还没有（§13.7 的 CLI 规则）。
+参数见 [`cmd/yuuka/token.go`](../../cmd/yuuka/token.go)），WebUI 入口还没有；以后也只列出和吊销，签发留在 CLI（§13.10）。
 
 - 只发给 `agent` 和 `service`。`human` 的凭据只有 passkey 登录产生的 `session`，
   `issue` 遇到 human 直接拒绝并指向 `admin enroll`：给人发一把长期 token，等于在 passkey 旁边开一扇不防钓鱼的后门。
@@ -484,6 +484,7 @@ human 看全部，其他主体只看自己写的。草稿是没发出去的字�
 |---|---|
 | M1 | **`principals` / `credentials` / `identity_grants` / `account_access` / `actions` 建表**，WebUI 内置 passkey 登录、走 session 凭据（M1 只有 JSON 端点，页面在第二阶段）；只读 MCP 与 REST 的 bearer token，由 `yuuka token` 签发 |
 | M2 | SMTP submission 口（跟发信能力一起做）；`accounts` / `identities` 建表（§9.5），`identity_grants`、`account_access` 补外键（已落地：[0005](../../internal/store/migrations/0005_sending.sql)） |
+| M3 | 管理动作进 WebUI（§13.10）：跟着信走的决定、权限类配置的查看与收紧；放宽权限仍只在 CLI |
 | M3.5 | `account_access` 生效：读路径按 §13.8 过滤（跟多账户一起做） |
 
 `identity_grants` 和 `account_access` 在 M1 只建表、不读：外键指向的 `identities`、`accounts`
@@ -493,3 +494,43 @@ human 看全部，其他主体只看自己写的。草稿是没发出去的字�
 
 主体与凭据的表从 M1 就建，因为主体模型是改起来最贵的部分。
 M0 不需要这一层——那时只有一个人和一个脚本。
+
+### 13.10 管理面：收紧在界面，放宽在主机
+
+M2 结束时，几乎所有管理动作都只能在主机上敲 CLI。这不全对，但也不该反过来做一个和读信分开的「管理后台」。
+管理动作按性质分三类，各有各的位置：
+
+| 类 | 例子 | 在哪做 | 谁能做 |
+|---|---|---|---|
+| 信任根与主机运维 | `admin enroll`、恢复码轮换、`migrate`、`reconcile`、`reparse` | 只在主机 CLI | 能登上主机的人 |
+| 跟着信走的决定 | 认领前缀、写期望域、规则、改判、`unknown` 外发的裁决 | WebUI，放在引出它的信或前缀旁边（§12.12）；CLI 保留 | 按 scope（`prefix:manage`、`rule:manage`……），和其他写端点一样 |
+| 改变谁能做什么 | 凭据、身份、授权 | WebUI 能看、能收紧；放宽只在 CLI | 只认 human 的 `session`，且带 `admin` |
+
+**信任根留在主机。** §13.7 的恢复链建立在「能跑 CLI 就是最高权限」上：WebUI 起不来、passkey 全丢、
+登录入口被刷爆时，恢复不能依赖 Web。迁移和重建是主机上的运维动作，不做成 HTTP 端点：
+一个能触发全量 `reparse` 的端点，被会话劫持后就是一个现成的放大器。
+
+**跟着信走的决定放在信旁边。** 做这类决定，起因都是读信时看到了什么：一个出事的前缀，一类反复来的通知。
+让人切到 shell 敲命令，等于先把上下文丢掉，再凭记忆找回来。这类动作不改变任何主体的权限，
+所以和其他写端点一样只看 scope。CLI 保留：规则的 `--spec` 文件可以进版本库，脚本也要用。
+界面和 CLI 调同一个 store 函数，校验只写一份，和发信只有一个提交核心（§8.9）是同一个道理。
+
+**改变权限的配置不对称。** 吊销凭据、调低 `send_policy` 或限额、删授权、停用身份，只会让系统更保守，
+误操作的代价是某个 agent 报一次缺权限，所以在界面上一步完成。签发 token、调高档位或限额、加身份，
+会扩大某个主体能做的事：会话一旦被劫持，攻击者靠它就能留一个比会话活得长的后门，
+比如一把 `submission:send` 的 token 加一条 `auto` 授权。所以这类操作暂时只在 CLI。
+以后要在 WebUI 放开，条件是当场再做一次 passkey 断言（要求用户验证），只对这一次操作有效，
+和吊销一样记 `actions` 并推送告警。做到这一步之前，放宽权限的操作不出现在 REST 上。
+
+**权限类端点只认人的会话。** scope 挂在凭据上，`admin` 也能被 `yuuka token issue` 写进一把 token。
+如果这类端点只查 `admin`，拿到这把 token 的 agent 就能给自己调档，§8.9 的授权就成了 agent 自己能改的约定。
+所以这类端点除了查 scope，还要求凭据是 `session`、主体是 `human`。这和 WebUI 添加 passkey 用的是同一个条件
+（[`internal/authn/handler.go`](../../internal/authn/handler.go) 的注册入口）。这条进 [`TestACL`](../../internal/api/api_test.go)：
+对这类路由，持有全部 scope 的 token 也必须拿到 403。收紧也走这条：允许 agent 吊销别人的凭据没有用处，
+多一种例外只会多一条要测的路径。
+
+这一节不新增任何绕过授权的路径。界面只是 `identity_grants` 的又一个写入方：
+硬上限照样在 [`store.SetGrant`](../../internal/store/grants.go) 和 `Decide` 两处成立（§13.5），提交时的判定一处不变。
+
+**审计也因此更准。** 从 WebUI 来的管理动作记成 `human:<operator>`，带具体的 `credential_id`；
+CLI 只能记 `system` 加 `host_user`（§13.7）。信任根之外的动作值得进界面，这是另一个理由。
