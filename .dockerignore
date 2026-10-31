@@ -1,0 +1,18 @@
+# Allow-list: the build context holds only what the Dockerfile copies, so
+# local/, .env files, credentials and node_modules can never leak into it.
+*
+!go.mod
+!go.sum
+!mise.toml
+!cmd/
+!internal/
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!.node-version
+!worker/package.json
+!web/
+web/node_modules/
+web/dist/
+**/*_test.go
+**/testdata/
