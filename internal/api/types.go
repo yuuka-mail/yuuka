@@ -1,30 +1,129 @@
 package api
 
-import "time"
+import (
+	"encoding/base64"
+	"errors"
+	"strings"
+	"time"
 
-// The JSON shapes of the REST API. web/src/api/types.gen.ts is generated
-// from this file by tygo (go generate ./internal/api); keep everything the
-// WebUI reads here and nothing else.
-
-// Class is the effective machine/human split of §3 principle 4.
-type Class string
-
-const (
-	ClassUnknown Class = "unknown"
-	ClassMachine Class = "machine"
-	ClassHuman   Class = "human"
+	"github.com/yuuka-mail/yuuka/internal/agentview"
+	"github.com/yuuka-mail/yuuka/internal/store"
 )
+
+// The request and response shapes of the REST API. openapi.json is
+// derived from them and the route table (§5.1); the WebUI's TypeScript
+// types are generated from that.
+//
+// Parameters are structs whose fields carry path:"name" or query:"name",
+// the constraints of internal/openapi (minimum, maximum, pattern,
+// default) and a jsonschema:"description". Enum types list their values
+// in an Enum method. Each endpoint gets its own parameter type, so it
+// accepts exactly the values its type admits.
+
+// IDParams name one message or thread.
+type IDParams struct {
+	ID string `path:"id"`
+}
+
+// MessagesParams are the parameters of GET /api/v1/messages.
+type MessagesParams struct {
+	Prefix     *Mailbox          `query:"prefix" jsonschema:"only mail delivered to this prefix@zone, whatever its class"`
+	Class      []agentview.Class `query:"class" jsonschema:"only mail of these classes"`
+	Downgraded Downgraded        `query:"downgraded" default:"hide"`
+	Cursor     *Cursor           `query:"cursor" jsonschema:"next_cursor of the previous page"`
+	Limit      int               `query:"limit" minimum:"1" maximum:"500" default:"100"`
+}
+
+// Downgraded selects by the §4.3 minimal downgrade: hide downgraded mail
+// (the default views), include it, or show only it (the review list).
+type Downgraded string
+
+func (Downgraded) Enum() []string { return []string{"hide", "include", "only"} }
+
+// SearchDowngraded is Downgraded without only: search has no review list.
+type SearchDowngraded string
+
+func (SearchDowngraded) Enum() []string { return []string{"hide", "include"} }
+
+// Mailbox is a prefix@zone parameter.
+type Mailbox struct{ Prefix, Zone string }
+
+func (m *Mailbox) UnmarshalText(b []byte) error {
+	s := string(b)
+	i := strings.LastIndexByte(s, '@')
+	if i <= 0 || i == len(s)-1 {
+		return errors.New("want prefix@zone")
+	}
+	m.Prefix, m.Zone = strings.ToLower(s[:i]), strings.ToLower(s[i+1:])
+	return nil
+}
+
+// Cursor is a position in a list that new mail joins at the top. It is
+// opaque to clients: base64url of "<RFC 3339 nano> <id>".
+type Cursor store.MessageCursor
+
+func (c *Cursor) UnmarshalText(b []byte) error {
+	raw, err := base64.RawURLEncoding.DecodeString(string(b))
+	if err == nil {
+		at, id, ok := strings.Cut(string(raw), " ")
+		if t, terr := time.Parse(time.RFC3339Nano, at); ok && terr == nil && id != "" {
+			*c = Cursor{ReceivedAt: t, ID: id}
+			return nil
+		}
+	}
+	return errors.New("malformed; pass next_cursor back as it came")
+}
+
+func (c Cursor) String() string {
+	return base64.RawURLEncoding.EncodeToString([]byte(c.ReceivedAt.UTC().Format(time.RFC3339Nano) + " " + c.ID))
+}
+
+// ViewParams are the parameters of GET /api/v1/messages/{id}/view.
+type ViewParams struct {
+	ID     string           `path:"id"`
+	Level  agentview.Level  `query:"level" default:"part"`
+	Anchor agentview.Anchor `query:"anchor" jsonschema:"start at this anchor, such as part/1/para/3"`
+}
+
+// AttachmentParams are the parameters of an attachment download.
+type AttachmentParams struct {
+	ID string `path:"id"`
+	// The section bounds keep the number short; mail never nests deeper.
+	Part string `path:"part" pattern:"^[1-9][0-9]{0,3}(\\.[1-9][0-9]{0,3}){0,15}$" jsonschema:"the IMAP section of the attachment, as the view lists it"`
+}
+
+// PrefixesParams are the parameters of GET /api/v1/prefixes. Prefixes
+// change slowly and only people page through them, so they page by
+// offset; without a limit every matching prefix comes back.
+type PrefixesParams struct {
+	State  PrefixState `query:"state" jsonschema:"only claimed or only discovered prefixes"`
+	Limit  int         `query:"limit" minimum:"1" maximum:"500"`
+	Offset int         `query:"offset" minimum:"0"`
+}
+
+// PrefixState is how a prefix came to be known (§3.3).
+type PrefixState string
+
+func (PrefixState) Enum() []string { return []string{"claimed", "discovered"} }
+
+// SearchParams are the parameters of GET /api/v1/search.
+type SearchParams struct {
+	Q          string           `query:"q" jsonschema:"words that must all occur in subject, sender or body; empty matches everything"`
+	Downgraded SearchDowngraded `query:"downgraded" default:"hide"`
+	Cursor     *Cursor          `query:"cursor" jsonschema:"next_cursor of the previous page"`
+	Limit      int              `query:"limit" minimum:"1" maximum:"500" default:"50"`
+}
 
 // MessageSummary is a message as lists show it.
 type MessageSummary struct {
-	ID         string    `json:"id"`
-	ThreadID   string    `json:"thread_id"`
-	ReceivedAt time.Time `json:"received_at"`
-	Subject    string    `json:"subject"`
-	FromAddr   string    `json:"from_addr"`
-	FromName   string    `json:"from_name"`
-	Snippet    string    `json:"snippet"`
-	Class      Class     `json:"class"`
+	ID         string          `json:"id"`
+	ThreadID   string          `json:"thread_id"`
+	ReceivedAt time.Time       `json:"received_at"`
+	Subject    string          `json:"subject"`
+	FromAddr   string          `json:"from_addr"`
+	FromName   string          `json:"from_name"`
+	Snippet    string          `json:"snippet"`
+	Class      agentview.Class `json:"class"`
 	// Downgraded: hidden from default views by the §4.3 minimal downgrade
 	// (only discovered prefixes, or DMARC failed).
 	Downgraded bool `json:"downgraded"`
@@ -35,30 +134,32 @@ type MessageSummary struct {
 	Recipients []string `json:"recipients"`
 }
 
-// MessagePage is one page of GET /api/v1/messages.
+// MessagePage is one page of GET /api/v1/messages, newest first.
 type MessagePage struct {
 	Messages []MessageSummary `json:"messages"`
 	// NextCursor continues the list; absent on the last page.
 	NextCursor string `json:"next_cursor,omitempty"`
 }
 
-// AuthResult is one method result of a trusted Authentication-Results.
-type AuthResult struct {
+// DeliveryAuthResult is one method result of a trusted
+// Authentication-Results.
+type DeliveryAuthResult struct {
 	Method string            `json:"method"`
 	Result string            `json:"result"`
 	Props  map[string]string `json:"props,omitempty"`
 }
 
-// Auth is what the trusted receiver reported for a delivery (§10.1.1).
-type Auth struct {
+// DeliveryAuth is what the trusted receiver reported for a delivery
+// (§10.1.1).
+type DeliveryAuth struct {
 	// Trusted is false when no trusted Authentication-Results was found;
 	// everything else is then empty except Reason.
-	Trusted    bool         `json:"trusted"`
-	Reason     string       `json:"reason,omitempty"`
-	AuthservID string       `json:"authserv_id,omitempty"`
-	DMARC      string       `json:"dmarc,omitempty"`
-	Results    []AuthResult `json:"results,omitempty"`
-	RemoteIP   string       `json:"remote_ip,omitempty"`
+	Trusted    bool                 `json:"trusted"`
+	Reason     string               `json:"reason,omitempty"`
+	AuthservID string               `json:"authserv_id,omitempty"`
+	DMARC      string               `json:"dmarc,omitempty"`
+	Results    []DeliveryAuthResult `json:"results,omitempty"`
+	RemoteIP   string               `json:"remote_ip,omitempty"`
 }
 
 // Delivery is one arrival of a message at prefix@zone.
@@ -71,20 +172,20 @@ type Delivery struct {
 	EnvelopeTo    string    `json:"envelope_to"`
 	ReceivedAt    time.Time `json:"received_at"`
 	// Auth is absent for deliveries ingested before auth was extracted.
-	Auth *Auth `json:"auth,omitempty"`
+	Auth *DeliveryAuth `json:"auth,omitempty"`
 }
 
 // Message is GET /api/v1/messages/{id}: parsed fields and the plain text
 // body. Its id may differ from the requested one when that was merged
 // into another message (§4.2).
 type Message struct {
-	MessageSummary `tstype:",extends"`
-	MessageID      string     `json:"message_id"`
-	InReplyTo      string     `json:"in_reply_to"`
-	References     []string   `json:"references"`
-	Date           *time.Time `json:"date,omitempty"` // absent if missing or unparseable
-	BodyText       string     `json:"body_text"`
-	ParseError     string     `json:"parse_error,omitempty"`
+	MessageSummary
+	MessageID  string     `json:"message_id"`
+	InReplyTo  string     `json:"in_reply_to"`
+	References []string   `json:"references"`
+	Date       *time.Time `json:"date,omitempty"` // absent if missing or unparseable
+	BodyText   string     `json:"body_text"`
+	ParseError string     `json:"parse_error,omitempty"`
 	// Deliveries are envelope and authentication facts. They need
 	// delivery:read and are absent without it.
 	Deliveries []Delivery `json:"deliveries,omitempty"`
@@ -129,13 +230,11 @@ type PrefixList struct {
 	Prefixes   []Prefix `json:"prefixes"`
 }
 
-// SearchResult is GET /api/v1/search.
+// SearchResult is GET /api/v1/search: a page of hits, newest first, and
+// how many match in all.
 type SearchResult struct {
 	Total int              `json:"total"`
 	Hits  []MessageSummary `json:"hits"`
-}
-
-// ErrorBody is the body of every non-2xx response.
-type ErrorBody struct {
-	Error string `json:"error"`
+	// NextCursor continues the hits; absent on the last page.
+	NextCursor string `json:"next_cursor,omitempty"`
 }

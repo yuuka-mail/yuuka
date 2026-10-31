@@ -15,11 +15,11 @@ import (
 
 // SearchInput is the input of search_messages.
 type SearchInput struct {
-	Q      string `json:"q,omitempty" jsonschema:"words that must all occur in subject, sender or body (case-insensitive substrings); empty matches everything"`
-	Prefix string `json:"prefix,omitempty" jsonschema:"only mail delivered to this local part, or to local@domain"`
-	Class  string `json:"class,omitempty" jsonschema:"only mail of this class: machine, human or unknown"`
-	Since  string `json:"since,omitempty" jsonschema:"only mail received at or after this time, RFC 3339 or YYYY-MM-DD"`
-	Limit  int    `json:"limit,omitempty" jsonschema:"at most this many hits, default 20, at most 100"`
+	Q      string          `json:"q,omitempty" jsonschema:"words that must all occur in subject, sender or body (case-insensitive substrings); empty matches everything"`
+	Prefix string          `json:"prefix,omitempty" jsonschema:"only mail delivered to this local part, or to local@domain"`
+	Class  agentview.Class `json:"class,omitempty" jsonschema:"only mail of this class"`
+	Since  string          `json:"since,omitempty" jsonschema:"only mail received at or after this time, RFC 3339 or YYYY-MM-DD"`
+	Limit  int             `json:"limit,omitempty" jsonschema:"at most this many hits, default 20, at most 100"`
 	// The §4.3 downgrade hides spam-like mail from default views; an
 	// agent looking into a specific prefix may need it.
 	IncludeDowngraded bool `json:"include_downgraded,omitempty" jsonschema:"also return downgraded mail (unclaimed prefix or dmarc=fail), which is excluded by default"`
@@ -34,12 +34,12 @@ type SearchOutput struct {
 
 // Hit is one message found. Content is what the sender wrote.
 type Hit struct {
-	URI         string     `json:"uri"`
-	ReceivedAt  time.Time  `json:"received_at"`
-	Class       string     `json:"class"`
-	Downgraded  bool       `json:"downgraded,omitempty"`
-	Quarantined bool       `json:"quarantined,omitempty"`
-	Content     HitContent `json:"content"`
+	URI         string          `json:"uri"`
+	ReceivedAt  time.Time       `json:"received_at"`
+	Class       agentview.Class `json:"class"`
+	Downgraded  bool            `json:"downgraded,omitempty"`
+	Quarantined bool            `json:"quarantined,omitempty"`
+	Content     HitContent      `json:"content"`
 }
 
 // HitContent is the untrusted part of a Hit.
@@ -64,12 +64,10 @@ func (s *Server) searchMessages(ctx context.Context, v *auth.Viewer, in SearchIn
 		q.Prefix, q.Zone = local, zone
 	}
 	if in.Class != "" {
-		c, ok := map[string]classify.Class{
-			"machine": classify.Machine, "human": classify.Human, "unknown": classify.Unknown,
+		// The input schema lists the classes; the SDK refuses others.
+		c := map[agentview.Class]classify.Class{
+			agentview.ClassMachine: classify.Machine, agentview.ClassHuman: classify.Human, agentview.ClassUnknown: classify.Unknown,
 		}[in.Class]
-		if !ok {
-			return result{}, refuse("class must be machine, human or unknown")
-		}
 		q.Class = &c
 	}
 	if in.Since != "" {
@@ -86,7 +84,7 @@ func (s *Server) searchMessages(ctx context.Context, v *auth.Viewer, in SearchIn
 	out := SearchOutput{Total: res.Total, Notice: agentview.Notice, Hits: make([]Hit, len(res.Hits))}
 	for i, h := range res.Hits {
 		out.Hits[i] = Hit{
-			URI: agentview.MessageURI(h.ID), ReceivedAt: h.ReceivedAt.UTC(), Class: h.Class.String(),
+			URI: agentview.MessageURI(h.ID), ReceivedAt: h.ReceivedAt.UTC(), Class: agentview.Class(h.Class.String()),
 			Downgraded: h.Downgraded, Quarantined: h.Quarantined,
 			Content: HitContent{From: agentview.Address{Name: h.FromName, Addr: h.FromAddr}, Subject: h.Subject, Snippet: h.Snippet},
 		}
@@ -150,8 +148,8 @@ func address(a agentview.Address) string {
 
 // GetInput is the input of get_message.
 type GetInput struct {
-	URI   string `json:"uri" jsonschema:"yuuka://message/<id>, optionally with #part/<section> or #part/<section>/para/<n>"`
-	Level string `json:"level,omitempty" jsonschema:"snippet (default), sections or part"`
+	URI   string          `json:"uri" jsonschema:"yuuka://message/<id>, optionally with #part/<section> or #part/<section>/para/<n>"`
+	Level agentview.Level `json:"level,omitempty" jsonschema:"snippet (default), sections or part"`
 }
 
 func (s *Server) getMessage(ctx context.Context, v *auth.Viewer, in GetInput) (result, error) {
@@ -159,7 +157,7 @@ func (s *Server) getMessage(ctx context.Context, v *auth.Viewer, in GetInput) (r
 	if err != nil {
 		return result{}, refuse("%v", err)
 	}
-	level, err := agentview.ParseLevel(in.Level)
+	level, err := agentview.ParseLevel(string(in.Level))
 	if err != nil {
 		return result{}, refuse("%v", err)
 	}

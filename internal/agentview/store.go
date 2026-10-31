@@ -16,7 +16,7 @@ import (
 func InputOf(v *auth.Viewer, m store.MessageDetail, raw []byte) Input {
 	in := Input{
 		ID: m.ID, Raw: raw, ReceivedAt: m.ReceivedAt,
-		Class: m.Class.String(), Downgraded: m.Downgraded,
+		Class: Class(m.Class.String()), Downgraded: m.Downgraded,
 		WithholdDelivery: !v.Has(auth.DeliveryRead),
 	}
 	for _, d := range m.Deliveries {

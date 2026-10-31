@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,9 +19,13 @@ type SearchQuery struct {
 	// Text is split on whitespace; every term must occur (case-insensitive
 	// substring, which also works for Chinese without segmentation).
 	// Empty matches everything.
-	Text   string
-	Limit  int // default 50, at most 500
-	Offset int
+	Text  string
+	Limit int // default 50, at most 500
+	// Before returns hits strictly after this position in the order
+	// (received_at, id), both descending; nil starts at the newest. As in
+	// the message list, keyset paging keeps pages stable while mail
+	// arrives, which an offset would not. Total ignores it.
+	Before *MessageCursor
 	// IncludeDowngraded also returns mail the §4.3 minimal downgrade
 	// hides from aggregate views (discovered prefixes, dmarc=fail).
 	IncludeDowngraded bool
@@ -78,7 +83,6 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		limit = 50
 	}
 	limit = min(limit, 500)
-	offset := max(q.Offset, 0)
 
 	var where []string
 	args := []any{}
@@ -119,13 +123,18 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		if err := tx.QueryRow(ctx, `SELECT count(*) `+from, args...).Scan(&res.Total); err != nil {
 			return err
 		}
-		pageArgs := append(args, limit, offset)
+		page, pageArgs := from, slices.Clone(args)
+		if q.Before != nil {
+			pageArgs = append(pageArgs, q.Before.ReceivedAt, q.Before.ID)
+			page += fmt.Sprintf(` AND (m.received_at, m.id) < ($%d, $%d)`, len(pageArgs)-1, len(pageArgs))
+		}
+		pageArgs = append(pageArgs, limit)
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 			SELECT m.id, m.thread_id, m.received_at, m.subject, m.from_addr, m.from_name, m.snippet,
 				coalesce(s.class_override, m.class), downgraded, m.parse_error IS NOT NULL, ob.id, ob.state
 			%s
 			ORDER BY m.received_at DESC, m.id DESC
-			LIMIT $%d OFFSET $%d`, from, len(args)+1, len(args)+2), pageArgs...)
+			LIMIT $%d`, page, len(pageArgs)), pageArgs...)
 		if err != nil {
 			return err
 		}

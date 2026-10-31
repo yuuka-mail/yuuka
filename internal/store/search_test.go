@@ -104,14 +104,16 @@ func TestSearchPaging(t *testing.T) {
 	if all.Total != len(files) || len(all.Hits) != len(files) {
 		t.Fatalf("total %d hits %d, want %d", all.Total, len(all.Hits), len(files))
 	}
-	page, err := db.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{IncludeDowngraded: true, Limit: 3, Offset: 3})
+	after := &store.MessageCursor{ReceivedAt: all.Hits[2].ReceivedAt, ID: all.Hits[2].ID}
+	page, err := db.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{IncludeDowngraded: true, Limit: 3, Before: after})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if page.Total != all.Total || len(page.Hits) != 3 || page.Hits[0].ID != all.Hits[3].ID {
 		t.Fatalf("page %+v", page)
 	}
-	past, err := db.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{IncludeDowngraded: true, Offset: 1000})
+	last := all.Hits[len(all.Hits)-1]
+	past, err := db.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{IncludeDowngraded: true, Before: &store.MessageCursor{ReceivedAt: last.ReceivedAt, ID: last.ID}})
 	if err != nil || past.Total != all.Total || len(past.Hits) != 0 {
 		t.Fatalf("past the end: %+v %v", past, err)
 	}

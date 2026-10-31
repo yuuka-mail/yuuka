@@ -2,9 +2,21 @@ package agentview
 
 import "time"
 
-// The JSON shape of the view. web/src/api/agentview.gen.ts is generated
-// from this file by tygo (go generate ./internal/api); keep the view's
-// types here and nothing else.
+// The JSON shape of the view, shared by the MCP tools and the REST API
+// (§5.1). Types with an Enum method list their values once, here; both
+// contracts' schemas are derived from them by internal/openapi.
+
+// Class is the effective machine/human split of §3 principle 4, as
+// classify.Class names it.
+type Class string
+
+const (
+	ClassUnknown Class = "unknown"
+	ClassMachine Class = "machine"
+	ClassHuman   Class = "human"
+)
+
+func (Class) Enum() []string { return []string{"unknown", "machine", "human"} }
 
 // Level is how much of a message a view carries (§8.1).
 type Level string
@@ -18,6 +30,8 @@ const (
 	// to MaxChars.
 	LevelPart Level = "part"
 )
+
+func (Level) Enum() []string { return []string{"snippet", "sections", "part"} }
 
 // View is the structured view of one message.
 type View struct {
@@ -35,7 +49,7 @@ type View struct {
 type Facts struct {
 	ReceivedAt  time.Time `json:"received_at"`
 	DeliveredTo []string  `json:"delivered_to"`
-	Class       string    `json:"class"`
+	Class       Class     `json:"class"`
 	Auth        Auth      `json:"auth"`
 	// Downgraded is true when the message fails the §4.3 minimal
 	// downgrade (unclaimed prefix, or dmarc=fail from the trusted
@@ -143,6 +157,8 @@ const (
 	// collapsed. The quoted text itself is the earlier message.
 	KindQuote Kind = "quote"
 )
+
+func (Kind) Enum() []string { return []string{"heading", "para", "item", "pre", "quote"} }
 
 // Block is one addressable unit of text. Its anchor's para number counts
 // every block of the part, whatever its kind.

@@ -1,17 +1,33 @@
 package authn
 
-import "time"
+import (
+	"time"
 
-// Response bodies of the /auth/ endpoints that the WebUI reads. tygo
-// generates web/src/api/auth.gen.ts from this file (see
-// internal/api/tygo.yaml).
+	"github.com/yuuka-mail/yuuka/internal/auth"
+)
+
+// The bodies of the /auth/ endpoints, described in openapi.json
+// (internal/api) next to the REST API.
+
+// RegisterBegin is the body of POST /auth/passkey/register/begin. Without
+// an enrollment token, the request's session must be a human's with
+// admin.
+type RegisterBegin struct {
+	EnrollmentToken string `json:"enrollment_token,omitempty"`
+	Label           string `json:"label,omitempty"`
+}
+
+// RecoveryRequest is the body of POST /auth/recovery.
+type RecoveryRequest struct {
+	Code string `json:"code"`
+}
 
 // SessionInfo is GET /auth/session: who the request acts as.
 type SessionInfo struct {
-	Principal      string   `json:"principal"` // kind:name
-	CredentialID   string   `json:"credential_id"`
-	CredentialKind string   `json:"credential_kind"` // session | token
-	Scopes         []string `json:"scopes"`
+	Principal      string       `json:"principal"` // kind:name
+	CredentialID   string       `json:"credential_id"`
+	CredentialKind string       `json:"credential_kind"` // session | token
+	Scopes         []auth.Scope `json:"scopes"`
 }
 
 // LoginResult is POST /auth/passkey/login/finish; the session itself is

@@ -149,7 +149,7 @@ passkey 绑定浏览器看到的源，所以开发时一律从 `http://localhost
   其他需要固定端口的东西（开发服务、本地依赖）也在这个段里挑，不占别的项目常用的端口
 
 - 不要绕过 mise 直接用系统里别的版本；需要新工具时加进 `mise.toml` 并固定版本。
-  只被 `go generate` 调用的 Go 工具（sqlc、tygo 等）用 `go.mod` 的 `tool` 指令固定
+  只被 `go generate` 调用的 Go 工具（sqlc 等）用 `go.mod` 的 `tool` 指令固定
 - lint 规则在 [`.golangci.yml`](.golangci.yml)。`//nolint` 必须指明 linter 并写理由
 - 本机配置和凭据（如 Cloudflare token）放 gitignore 的 `mise.local.toml`，
   或仓库外的文件由它加载，不进被跟踪的文件

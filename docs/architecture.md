@@ -395,10 +395,10 @@ ltt.rs 等，Thunderbird / aerc / iOS Mail 都不支持）。所以"JMAP 就行"
 
 ### 5.1 API 契约：OpenAPI 3.1，从 Go 类型生成
 
-> 状态：已定，未实现。M1 的 REST 是手写的：请求参数各自在 handler 里解析，TS 类型由 `tygo` 生成（§12.7）。
-> 迁移在 M2 加写端点之前做；落地后这一节只留理由和不变量，形状以代码为准。
+REST 的契约是 [`internal/api/openapi.json`](../internal/api/openapi.json)，由 Go 类型和路由表生成、提交进仓库，
+二进制在 `/api/v1/openapi.json` 免认证提供。WebUI 的类型和客户端从它生成。
 
-M1 手写的 REST 有四处会悄悄漂移，换任何方案都应该消掉：
+M1 手写的 REST 有四处会悄悄漂移，这次迁移就是为了消掉它们：
 
 - **请求契约只存在于两边的代码里**。参数名、枚举值、上下限一份写在 Go 的 `parse*` 里，
   一份写在 TS 拼 `URLSearchParams` 的字符串里，改了一边，另一边要到运行时才收到 400
@@ -408,7 +408,7 @@ M1 手写的 REST 有四处会悄悄漂移，换任何方案都应该消掉：
 - **用 bearer token 的调用方没有机器可读的接口描述**，只能读源码
 
 store → 线上类型的映射（`summary()` 之类）和领域解析（游标、`prefix@zone`、锚点）不在其中：
-这两样换成什么方案都得手写，只是换个地方写。
+这两样换成什么方案都得手写，只是换个地方写——它们现在是参数类型上的 `UnmarshalText`。
 
 #### 选型看的是消费方
 
@@ -439,53 +439,74 @@ OpenAPI 3.1 的 schema 就是 JSON Schema 2020-12，和 MCP 是同一种语言�
   想删掉的代价很高，维护也基本靠一个人。它还有自己的 schema 推导，和 MCP 用的不是同一个
 - **只保留 tygo，自己补一层请求类型和配对**。这能消掉前两处漂移，但两个推导器的问题还在，
   对外仍然没有接口描述
+- **Go 注释进不了契约**。tygo 会把字段注释带进 TS；`jsonschema-go` 只读 `jsonschema:"…"` 标签当描述。
+  响应类型的注释仍留在 Go 里，参数的说明写在标签里
 
 #### 形状
 
 ```
-Go 类型 + 路由表（internal/api）
-   │  jsonschema-go：和 MCP 工具 schema 同一个库、同一组 ForOptions
+Go 类型 + 路由表（internal/api，authn 的 /auth/ 表）
+   │  internal/openapi：jsonschema-go，和 MCP 工具 schema 同一个库、同一组 ForOptions
    ▼
-openapi.json：提交进仓库，check 校验它没有过期
-   │  openapi-typescript（devDependency）
+internal/api/openapi.json（go generate ./internal/api）
+   │  openapi-typescript（devDependency，pnpm --dir web run gen）
    ▼
-web/src/api 的生成类型 → openapi-fetch + openapi-react-query
+web/src/api/schema.gen.ts → openapi-fetch + openapi-react-query（web/src/api/client.ts）
 ```
 
-- **路由表仍然是唯一来源**。每一条记方法、路径、scope、请求类型和响应类型；ACL 测试遍历它（§13.8），
-  生成器也遍历它。handler 的形状是 `func(ctx, *auth.Viewer, P) (R, error)`：query 和 path 按 struct tag
-  绑定到 `P`，错误统一映射，`writeError` 和 `fail` 这些样板收进一处。附件、SSE 这类 HTTP 原生的端点
-  仍然写成 `http.Handler`，但同样登记在表里，在文档里照样有描述
-- **约束只声明一次**。枚举的取值、数字的范围跟着 Go 类型声明，同时进 schema 和运行时校验，
-  不再在 handler 里另写一遍。MCP 和 REST 共用的类型（`Class`、`Level`、`Address`……）在 `ForOptions.TypeSchemas` 里登记一次
-- **生成物就是契约，靠评审它来守住契约**。改了接口，diff 里就能看到 `openapi.json` 怎么变；
-  发布之后在 `check` 里加 oasdiff 拦破坏性变更，作用相当于 `buf breaking`
-- **这份文档本身也随二进制提供**，路径是 `/api/v1/openapi.json`，不需要认证：仓库是公开的，
-  契约本来就不是秘密；拿到 token 的 agent 可以直接读它
-- `/auth/*` 的 JSON 端点也写进这份文档（WebAuthn 那部分的形状由库决定，只描述外层）。
-  `/mcp` 和 JMAP 不进：这两个协议各自描述自己
-- 依赖：Go 侧不新增模块，`jsonschema-go` 从间接依赖变成直接依赖，`tygo` 移除；
-  Node 侧加 `openapi-typescript`、`openapi-fetch`、`openapi-react-query`。自己写的部分（绑定、校验、
-  路由表转 paths）预计 300～400 行
+- **路由表是唯一来源**。[`internal/api/api.go`](../internal/api/api.go) 的 `routes` 每条记方法、路径、scope、
+  参数类型和响应类型；服务请求、ACL 测试（§13.8）和生成器都遍历它。`/auth/*` 是
+  [`internal/authn/handler.go`](../internal/authn/handler.go) 的 `endpoints`，`Handler` 和 `Ops` 都从它来，
+  WebAuthn 的选项和凭据只描述成对象（形状归库管）。`/mcp` 和 JMAP 不进：它们各自描述自己
+- **加一个端点是一条表项加一个有类型的 handler**，形状是 `func(*API, ctx, *auth.Viewer, P) (R, error)`，
+  见 [`internal/api/route.go`](../internal/api/route.go)。`P` 的字段按 `path:` / `query:` 标签绑定，
+  带 `body:"json"` 的字段是请求体；`R` 是 `struct{}` 时回 204，`withStatus` 改成功状态码。
+  附件这类 HTTP 原生端点用 `rawRoute`，参数照样绑定，响应自己写，在文档里照样有描述
+- **约束只声明一次**。枚举是类型上的 `Enum()` 方法，范围、正则、默认值是字段上的
+  `minimum` / `maximum` / `pattern` / `default` 标签；读这些标签的只有
+  [`internal/openapi/schema.go`](../internal/openapi/schema.go) 的 `Constrain`（写进 schema）和 `Check`（运行时校验），
+  文档和服务端不会各说各话。请求体解码时拒绝未知字段，再把每个值过一遍 `Check`；
+  `omitempty` 字段的零值算缺省、不校验。必填只到 JSON 解码这一步——缺了必填字段得到零值，由 handler 判断
+- **MCP 和 REST 共用类型，也共用推导**。`Class`、`Level`、`Kind` 等在 agentview 里各声明一次取值，
+  MCP 工具的输入 schema 也走 `openapi.Schema`，于是 `class=robot` 在两边都被 schema 拒掉
+- **生成物就是契约，靠评审它来守住契约**。改了接口，diff 里就能看到 `openapi.json` 和 `schema.gen.ts` 怎么变；
+  `check` 在任一个过期时失败（`TestOpenAPI`、`gen --check`）。发布之后在 `check` 里加 oasdiff 拦破坏性变更，
+  作用相当于 `buf breaking`
+- **这份文档本身也随二进制提供**，不需要认证：仓库是公开的，契约本来就不是秘密；拿到 token 的 agent 可以直接读它
+- 依赖：Go 侧没有新模块，`jsonschema-go` 从间接依赖变成直接依赖，`tygo` 已移除；
+  Node 侧是 `openapi-typescript`、`openapi-fetch`、`openapi-react-query`
+
+几处是用了才知道的：
+
+- **`jsonschema-go` 一律内联，不出 `$ref`**。生成器把每个具名 struct 和枚举登记成组件，
+  推导时用 `TypeSchemas` 换成引用；被嵌入的 struct（`Message` 嵌 `MessageSummary`）只能展开，不能引用。
+  两个类型同名（agentview 的 `Auth` 和投递的认证结果）是生成错误，于是后者改名 `DeliveryAuth`
+- **它把切片和指针都推成可空**。线上从不发 `null`（下一节），生成器就把 `null` 从所有 schema 里去掉；
+  这句承诺由 ACL 测试兑现：每个端点的成功响应里出现任何 `null` 都算失败
+- **openapi-typescript 要 TypeScript 5 的编译器 API**，仓库用的 TypeScript 7 不再导出它。
+  [`.pnpmfile.cjs`](../.pnpmfile.cjs) 给它单独装一份 TypeScript 5，别处看不到；它支持 7 之后删掉
 
 #### 趁还没发布一并定下的约定
 
-以下几点发布之后再改就是破坏性变更，所以现在定：
+以下几点发布之后再改就是破坏性变更，所以已经定下：
 
-- **错误用 RFC 9457 的 `application/problem+json`**，扩展成员 `code` 是稳定的机器可读码（`not_found`、
-  `invalid_param`、`scope_required`……），`detail` 给人读。§8.9 的"超出授权降级为草稿"不算错误：
-  照常返回成功，结果里说明原因
-- **分页**：新行会从列表头部插入的（消息、线程、搜索、事件），一律用不透明游标，因为 offset 在新信到达时会重复或跳行；
-  搜索现在按时间倒序配 offset，迁移时一并改成游标，`total` 照常单独返回。变化很慢、只给人翻的表
-  （未认领前缀，§12.9）可以用 `limit` / `offset`
-- **多值参数**一律逗号分隔（OpenAPI 里的 `style: form, explode: false`），和现在的 `class` 一致
-- **哪个端点接受哪些值，就用哪个类型**。比如搜索不接受 `downgraded=only`，那它的参数类型里就不该有这个值，
-  不在 handler 里另拒一次
-- JSON 字段名用 snake_case，时间用 RFC 3339 UTC，列表永远是数组、不返回 `null`（现在由 `nonNil` 保证）
+- **错误用 RFC 9457 的 `application/problem+json`**（[`internal/openapi/problem.go`](../internal/openapi/problem.go)），
+  `/api/` 和 `/auth/` 都是。扩展成员 `code` 是稳定的机器可读码，取值在 schema 里列全；`detail` 给人读，
+  客户端只按 `code` 分支。`type` 一律缺省（`about:blank`），所以 `title` 就是状态码的文字。
+  §8.9 的"超出授权降级为草稿"不算错误：照常返回成功，结果里说明原因
+- **分页**：新行会从列表头部插入的（消息、搜索，以后的事件），一律用不透明游标，因为 offset 在新信到达时会重复或跳行；
+  搜索的 `total` 照常单独返回，且不受游标影响。变化很慢、只给人翻的表（未认领前缀，§12.9）用 `limit` / `offset`
+- **多值参数**一律逗号分隔（OpenAPI 里的 `style: form, explode: false`），如 `class=human,unknown`
+- **哪个端点接受哪些值，就用哪个类型**。搜索不接受 `downgraded=only`，所以它的参数类型是
+  `SearchDowngraded`，不在 handler 里另拒一次
+- JSON 字段名用 snake_case，时间用 RFC 3339 UTC，列表永远是数组，响应里没有 `null`
 
 #### 什么时候该回头
 
-- 自己写的这层涨过 500 行左右，或者开始实现 OpenAPI 的边角功能：说明在重造 huma，该直接用现成的
+- 自己写的这层（绑定、校验、表转文档：`internal/openapi` 的 schema 与 document，加 `internal/api/route.go`）
+  落地时约 580 行代码（不计注释与空行），比预估的 300～400 多。多出来的主要是请求体的绑定和校验（M2 的写端点要用）
+  和为凑出 `$ref`、去掉 `null` 而补的推导胶水，已经越过当初定的 500 行警戒线。它再往上涨，或者开始实现
+  OpenAPI 的边角功能（多种媒体类型协商、`oneOf` 判别、回调……），说明在重造 huma，该直接用现成的
 - 出现需要双向流或高吞吐二进制的接口：只给那一部分单独考虑 Connect 或 WebSocket，不必把整套契约都迁过去
 
 ---

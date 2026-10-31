@@ -520,7 +520,7 @@ func TestBearerScopes(t *testing.T) {
 	h.want(h.do(http.MethodGet, "/test/read", nil), http.StatusUnauthorized)
 	// Nor may it add a passkey, or log out.
 	h.want(h.do(http.MethodPost, "/auth/passkey/register/begin", map[string]string{}, bearer), http.StatusForbidden)
-	h.want(h.do(http.MethodPost, "/auth/logout", nil, bearer), http.StatusBadRequest)
+	h.want(h.do(http.MethodPost, "/auth/logout", nil, bearer), http.StatusForbidden)
 
 	// Revoked: rejected from then on.
 	id, _, _ := auth.ParseSecret(auth.PrefixToken, tok)

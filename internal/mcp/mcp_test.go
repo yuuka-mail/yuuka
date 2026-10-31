@@ -358,7 +358,8 @@ func TestBadInput(t *testing.T) {
 		`{"uri": "https://example.com/x"}`:                              "not a yuuka://message",
 		`{"uri": "` + agentview.MessageURI(ulid.New(time.Now())) + `"}`: "no message",
 		`{"uri": "` + uri + `#part/7"}`:                                 "has no part/7",
-		`{"uri": "` + uri + `", "level": "everything"}`:                 "level must be",
+		// The input schema lists the levels (§5.1).
+		`{"uri": "` + uri + `", "level": "everything"}`: "[snippet sections part]",
 	} {
 		var a map[string]any
 		if err := json.Unmarshal([]byte(args), &a); err != nil {
@@ -370,7 +371,7 @@ func TestBadInput(t *testing.T) {
 		}
 	}
 	r := callTool(t, cs, "search_messages", map[string]any{"class": "robot"})
-	if !r.isError || !strings.Contains(r.text, "class must be") {
+	if !r.isError || !strings.Contains(r.text, "[unknown machine human]") {
 		t.Errorf("bad class: %+v", r)
 	}
 }

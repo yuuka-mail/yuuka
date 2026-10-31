@@ -12,6 +12,7 @@ import (
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
+	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
@@ -35,32 +36,24 @@ var servedTypes = map[string]bool{
 // attachment serves one attachment of a message as a download: the part
 // the structured view lists under content.attachments, by its section.
 // Mail is untrusted input (§8.3), so the bytes are never rendered here.
-func (a *API) attachment(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
-	part := r.PathValue("part")
-	if !validSection(part) {
-		writeError(w, http.StatusBadRequest, "part: want an IMAP section number such as 2 or 1.3")
-		return
-	}
-	d, err := a.db.MessageByID(r.Context(), v, r.PathValue("id"))
+func (a *API) attachment(w http.ResponseWriter, r *http.Request, v *auth.Viewer, p AttachmentParams) error {
+	part := p.Part
+	d, err := a.db.MessageByID(r.Context(), v, p.ID)
 	if err != nil {
-		a.fail(w, r, err)
-		return
+		return err
 	}
 	// d.Raw is a visible delivery's raw, or a visible sent copy's (§13.8).
 	raw, err := a.raw.ReadRaw(r.Context(), d.Raw)
 	if err != nil {
-		a.fail(w, r, err)
-		return
+		return err
 	}
 	ent, body, err := mimeparse.Attachment(raw, part)
 	if errors.Is(err, mimeparse.ErrNoAttachment) {
-		writeError(w, http.StatusNotFound, "no attachment "+part+" in this message")
-		return
+		return openapi.Errorf(http.StatusNotFound, openapi.CodeNotFound, "no attachment %s in this message", part)
 	}
 	if err != nil {
 		a.log.Warn("api: attachment", "message", d.ID, "part", part, "err", err)
-		writeError(w, http.StatusUnprocessableEntity, "the attachment cannot be decoded")
-		return
+		return openapi.Errorf(http.StatusUnprocessableEntity, openapi.CodeUndecodable, "the attachment cannot be decoded")
 	}
 	// Downloads are recorded like the agent's reads (§8.8): who, which
 	// message and part, never the content or the sender's file name. No
@@ -72,8 +65,7 @@ func (a *API) attachment(w http.ResponseWriter, r *http.Request, v *auth.Viewer)
 		Result: map[string]any{"bytes": len(body)},
 	})
 	if err != nil {
-		a.fail(w, r, err)
-		return
+		return err
 	}
 	typ := "application/octet-stream"
 	if servedTypes[ent.MediaType] {
@@ -89,20 +81,7 @@ func (a *API) attachment(w http.ResponseWriter, r *http.Request, v *auth.Viewer)
 	h.Set("Cache-Control", "no-store")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(body)
-}
-
-// validSection accepts "2", "1.3": dot-separated numbers without leading
-// zeros.
-func validSection(s string) bool {
-	if s == "" || len(s) > 64 {
-		return false
-	}
-	for n := range strings.SplitSeq(s, ".") {
-		if n == "" || n[0] == '0' || strings.Trim(n, "0123456789") != "" {
-			return false
-		}
-	}
-	return true
+	return nil
 }
 
 // maxFilename bounds the file name in bytes; file systems commonly allow

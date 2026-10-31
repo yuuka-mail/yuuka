@@ -2,17 +2,20 @@ package authn
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/go-webauthn/webauthn/protocol"
 	"github.com/go-webauthn/webauthn/webauthn"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
+	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
@@ -20,15 +23,8 @@ import (
 // maxBody bounds every JSON request; an attestation is a few KiB.
 const maxBody = 64 << 10
 
-// Handler serves the JSON endpoints of the WebUI login under /auth/:
-//
-//	POST /auth/passkey/register/begin   {"enrollment_token"?, "label"?}  — token, or a session with admin
-//	POST /auth/passkey/register/finish  PublicKeyCredential (attestation)
-//	POST /auth/passkey/login/begin      {}
-//	POST /auth/passkey/login/finish     PublicKeyCredential (assertion) → session cookie
-//	POST /auth/recovery                 {"code"} → {"enrollment_token", "expires_at"}
-//	POST /auth/logout                   session
-//	GET  /auth/session                  session or bearer token → the viewer
+// Handler serves the JSON endpoints of the WebUI login under /auth/,
+// as listed in endpoints.
 //
 // Only login/finish ever creates a session. Registration, enrollment and
 // recovery never do: a recovery code buys one enrollment token, the token
@@ -44,14 +40,70 @@ const maxBody = 64 << 10
 // not ambient, so they need none of this.
 func (s *Service) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("POST /auth/passkey/register/begin", s.Optional(http.HandlerFunc(s.registerBegin)))
-	mux.Handle("POST /auth/passkey/register/finish", s.Optional(http.HandlerFunc(s.registerFinish)))
-	mux.HandleFunc("POST /auth/passkey/login/begin", s.loginBegin)
-	mux.HandleFunc("POST /auth/passkey/login/finish", s.loginFinish)
-	mux.HandleFunc("POST /auth/recovery", s.recover)
-	mux.Handle("POST /auth/logout", s.Require(http.HandlerFunc(s.logout)))
-	mux.Handle("GET /auth/session", s.Require(http.HandlerFunc(s.session)))
+	for _, e := range endpoints {
+		var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { e.h(s, w, r) })
+		switch e.op.Access {
+		case openapi.Authenticated:
+			h = s.Require(h, e.op.Scopes...)
+		case openapi.Optional:
+			h = s.Optional(h)
+		}
+		mux.Handle(e.op.Method+" "+e.op.Path, h)
+	}
 	return s.csrf.Handler(mux)
+}
+
+// webauthnJSON stands for the options and credentials of a ceremony,
+// whose shape the go-webauthn library defines (base64url binary fields).
+var webauthnJSON = reflect.TypeFor[map[string]any]()
+
+// endpoints is every operation under /auth/: Handler serves it, and Ops
+// describes it in openapi.json, so neither can miss one.
+var endpoints = []struct {
+	op openapi.Op
+	h  func(*Service, http.ResponseWriter, *http.Request)
+}{
+	{openapi.Op{
+		Method: http.MethodPost, Path: "/auth/passkey/register/begin", Access: openapi.Optional,
+		Summary: "Begin registering a passkey, by enrollment token or by an admin session; returns WebAuthn creation options",
+		Body:    reflect.TypeFor[RegisterBegin](), Response: webauthnJSON,
+	}, (*Service).registerBegin},
+	{openapi.Op{
+		Method: http.MethodPost, Path: "/auth/passkey/register/finish", Access: openapi.Optional,
+		Summary: "Finish registering with the WebAuthn attestation; never logs in",
+		Body:    webauthnJSON, Response: reflect.TypeFor[RegisterResult](), Status: http.StatusCreated,
+	}, (*Service).registerFinish},
+	{openapi.Op{
+		Method: http.MethodPost, Path: "/auth/passkey/login/begin", Access: openapi.Public,
+		Summary: "Begin a passkey login; returns WebAuthn request options",
+		Body:    reflect.TypeFor[struct{}](), Response: webauthnJSON,
+	}, (*Service).loginBegin},
+	{openapi.Op{
+		Method: http.MethodPost, Path: "/auth/passkey/login/finish", Access: openapi.Public,
+		Summary: "Finish a passkey login with the WebAuthn assertion; the session is the cookie set",
+		Body:    webauthnJSON, Response: reflect.TypeFor[LoginResult](),
+	}, (*Service).loginFinish},
+	{openapi.Op{
+		Method: http.MethodPost, Path: "/auth/recovery", Access: openapi.Public,
+		Summary: "Exchange a recovery code for an enrollment token, never a session",
+		Body:    reflect.TypeFor[RecoveryRequest](), Response: reflect.TypeFor[RecoveryGrant](),
+	}, (*Service).recover},
+	{openapi.Op{
+		Method: http.MethodPost, Path: "/auth/logout", Summary: "End this browser session",
+	}, (*Service).logout},
+	{openapi.Op{
+		Method: http.MethodGet, Path: "/auth/session", Summary: "Who the request acts as",
+		Response: reflect.TypeFor[SessionInfo](),
+	}, (*Service).session},
+}
+
+// Ops describes the endpoints of Handler.
+func Ops() []openapi.Op {
+	ops := make([]openapi.Op, len(endpoints))
+	for i, e := range endpoints {
+		ops[i] = e.op
+	}
+	return ops
 }
 
 func writeJSON(w http.ResponseWriter, code int, v any) {
@@ -61,8 +113,23 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]string{"error": msg})
+// writeError sends a problem with the usual code for status; problem
+// sends one with another code.
+func writeError(w http.ResponseWriter, status int, msg string) {
+	problem(w, status, map[int]openapi.Code{
+		http.StatusBadRequest:            openapi.CodeInvalidBody,
+		http.StatusUnauthorized:          openapi.CodeUnauthenticated,
+		http.StatusForbidden:             openapi.CodeForbidden,
+		http.StatusConflict:              openapi.CodeConflict,
+		http.StatusRequestEntityTooLarge: openapi.CodeBodyTooLarge,
+		http.StatusUnsupportedMediaType:  openapi.CodeUnsupportedType,
+		http.StatusTooManyRequests:       openapi.CodeRateLimited,
+		http.StatusServiceUnavailable:    openapi.CodeUnavailable,
+	}[status], msg)
+}
+
+func problem(w http.ResponseWriter, status int, code openapi.Code, msg string) {
+	openapi.Write(w, openapi.Errorf(status, cmp.Or(code, openapi.CodeInternal), "%s", msg))
 }
 
 // readJSON reads a bounded application/json body. An empty body is
@@ -164,22 +231,19 @@ func (s *Service) takeCeremony(w http.ResponseWriter, r *http.Request, register 
 	clearCookie(w, ceremonyCookie)
 	c, err := r.Cookie(ceremonyCookie)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "no ceremony in progress")
+		problem(w, http.StatusBadRequest, openapi.CodeCeremonyExpired, "no ceremony in progress")
 		return ceremony{}, false
 	}
 	cer, ok := s.ceremonies.take(c.Value, s.now())
 	if !ok || cer.register != register {
-		writeError(w, http.StatusBadRequest, "ceremony expired or unknown; start again")
+		problem(w, http.StatusBadRequest, openapi.CodeCeremonyExpired, "ceremony expired or unknown; start again")
 		return ceremony{}, false
 	}
 	return cer, true
 }
 
 func (s *Service) registerBegin(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		EnrollmentToken string `json:"enrollment_token"`
-		Label           string `json:"label"`
-	}
+	var req RegisterBegin
 	if !decodeJSON(w, r, &req) {
 		return
 	}
@@ -295,7 +359,7 @@ func (s *Service) registerFinish(w http.ResponseWriter, r *http.Request) {
 			Actor: cer.principalID, CredentialID: cer.credentialID, Tool: "auth.passkey.reject",
 			Args: map[string]any{"reason": protocolReason(err), "remote": s.remote(r)},
 		})
-		writeError(w, http.StatusBadRequest, "registration not verified")
+		problem(w, http.StatusBadRequest, openapi.CodeNotVerified, "registration not verified")
 		return
 	}
 	now := s.now()
@@ -399,7 +463,7 @@ func (s *Service) loginFinish(w http.ResponseWriter, r *http.Request) {
 		s.record(r.Context(), store.Action{Tool: "auth.login.reject", Args: map[string]any{
 			"reason": protocolReason(err), "passkey_id": pk.ID, "remote": s.remote(r),
 		}})
-		writeError(w, http.StatusUnauthorized, "login not verified")
+		problem(w, http.StatusUnauthorized, openapi.CodeNotVerified, "login not verified")
 		return
 	}
 
@@ -441,9 +505,7 @@ func (s *Service) recover(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, "too many recovery attempts; wait, or use `yuuka admin enroll` on the host")
 		return
 	}
-	var req struct {
-		Code string `json:"code"`
-	}
+	var req RecoveryRequest
 	if !decodeJSON(w, r, &req) {
 		return
 	}
@@ -487,7 +549,7 @@ func (s *Service) recover(w http.ResponseWriter, r *http.Request) {
 func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	v, _ := auth.ViewerFrom(r.Context())
 	if v.CredentialKind != auth.KindSession {
-		writeError(w, http.StatusBadRequest, "logout ends a browser session; revoke tokens instead")
+		writeError(w, http.StatusForbidden, "logout ends a browser session; revoke tokens instead")
 		return
 	}
 	now := s.now()
@@ -507,6 +569,6 @@ func (s *Service) session(w http.ResponseWriter, r *http.Request) {
 	v, _ := auth.ViewerFrom(r.Context())
 	writeJSON(w, http.StatusOK, SessionInfo{
 		Principal: v.String(), CredentialID: v.CredentialID, CredentialKind: v.CredentialKind,
-		Scopes: auth.Strings(v.Scopes),
+		Scopes: v.Scopes,
 	})
 }

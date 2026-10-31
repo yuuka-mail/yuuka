@@ -3,27 +3,27 @@
 // the scopes it needs, and every store read takes the request's viewer, so
 // visibility (§13.8) is decided by the store and nowhere here.
 //
-// The JSON shapes are in types.go; the WebUI's TypeScript types are
-// generated from them.
+// The route table is the single source of the contract (§5.1): it serves
+// the requests, the ACL test walks it, and openapi.json is generated from
+// it and the types in types.go (go generate ./internal/api).
 package api
 
-//go:generate go tool tygo generate --config tygo.yaml
+//go:generate go run ./openapigen -o openapi.json
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
-	"strconv"
-	"strings"
-	"time"
+	"sync"
 
 	"github.com/yuuka-mail/yuuka/internal/agentview"
 	"github.com/yuuka-mail/yuuka/internal/auth"
+	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/classify"
+	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/store"
 )
 
@@ -66,44 +66,78 @@ func New(db Store, raw RawReader, log *slog.Logger) *API {
 	return &API{db: db, raw: raw, log: log}
 }
 
-// route is one endpoint and the scopes it requires. The ACL test walks
-// this table, so a new read path cannot skip it.
-type route struct {
-	pattern string
-	scopes  []auth.Scope
-	handle  func(*API, http.ResponseWriter, *http.Request, *auth.Viewer)
-}
+var (
+	read   = []auth.Scope{auth.MessageRead}
+	prefix = []auth.Scope{auth.PrefixRead}
+)
 
+// routes is every operation under /api/. A new one is one entry here and
+// a handler; the ACL test and openapi.json pick it up from this table.
 var routes = []route{
-	{"GET /api/v1/messages", []auth.Scope{auth.MessageRead}, (*API).listMessages},
-	{"GET /api/v1/messages/{id}", []auth.Scope{auth.MessageRead}, (*API).message},
-	{"GET /api/v1/messages/{id}/view", []auth.Scope{auth.MessageRead}, (*API).messageView},
-	{"GET /api/v1/messages/{id}/attachments/{part}", []auth.Scope{auth.MessageRead}, (*API).attachment},
-	{"GET /api/v1/threads/{id}", []auth.Scope{auth.MessageRead}, (*API).thread},
-	{"GET /api/v1/prefixes", []auth.Scope{auth.PrefixRead}, (*API).prefixes},
-	{"GET /api/v1/search", []auth.Scope{auth.MessageRead}, (*API).search},
+	jsonRoute(http.MethodGet, "/api/v1/messages", "List messages, newest first", read, (*API).listMessages),
+	jsonRoute(http.MethodGet, "/api/v1/messages/{id}", "Get a message's parsed fields and plain text body", read, (*API).message),
+	jsonRoute(http.MethodGet, "/api/v1/messages/{id}/view", "Get the structured view of a message (§8.1)", read, (*API).messageView),
+	rawRoute(http.MethodGet, "/api/v1/messages/{id}/attachments/{part}", "Download an attachment",
+		"application/octet-stream", read, (*API).attachment),
+	jsonRoute(http.MethodGet, "/api/v1/threads/{id}", "Get a thread", read, (*API).thread),
+	jsonRoute(http.MethodGet, "/api/v1/prefixes", "List prefixes with message counts", prefix, (*API).prefixes),
+	jsonRoute(http.MethodGet, "/api/v1/search", "Search messages, newest first", read, (*API).search),
+	{Op: openapi.Op{
+		Method: http.MethodGet, Path: "/api/v1/openapi.json", Summary: "This document",
+		Access: openapi.Public, Media: "application/json",
+	}},
 }
 
-// Handler serves /api/. Unknown paths under it are JSON 404s, never the
-// WebUI shell.
+// OpenAPI is the document of routes and of the /auth/ endpoints.
+var OpenAPI = sync.OnceValues(func() ([]byte, error) {
+	ops := authn.Ops()
+	for _, rt := range routes {
+		ops = append(ops, rt.Op)
+	}
+	return openapi.Document("yuuka", "v1", ops)
+})
+
+// Handler serves /api/. Unknown paths under it are problem+json 404s,
+// never the WebUI shell.
 func (a *API) Handler(g Guard) http.Handler {
+	doc, err := OpenAPI()
+	if err != nil {
+		panic(err) // the types cannot describe themselves: TestOpenAPI fails first
+	}
 	mux := http.NewServeMux()
 	for _, rt := range routes {
+		pattern := rt.Method + " " + rt.Path
+		if rt.serve == nil {
+			// The contract is public: the repository is, and an agent
+			// with a token can read what it may call.
+			mux.HandleFunc(pattern, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write(doc)
+			})
+			continue
+		}
 		h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			v, ok := auth.ViewerFrom(r.Context())
 			if !ok {
 				// Guard let a request through without a viewer: a wiring
 				// bug, never "anonymous".
-				a.log.Error("api: no viewer after guard", "path", r.URL.Path)
-				writeError(w, http.StatusInternalServerError, "internal error")
+				a.fail(w, r, errors.New("api: no viewer after guard"))
 				return
 			}
-			rt.handle(a, w, r, v)
+			res, err := rt.serve(a, w, r, v)
+			switch {
+			case err != nil:
+				a.fail(w, r, err)
+			case rt.Response != nil:
+				writeJSON(w, openapi.StatusOf(rt.Op), res)
+			case rt.Media == "":
+				w.WriteHeader(openapi.StatusOf(rt.Op)) // 204
+			}
 		})
-		mux.Handle(rt.pattern, g.Require(h, rt.scopes...))
+		mux.Handle(pattern, g.Require(h, rt.Scopes...))
 	}
-	mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) {
-		writeError(w, http.StatusNotFound, "no such endpoint")
+	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
+		openapi.Write(w, openapi.Errorf(http.StatusNotFound, openapi.CodeNotFound, "no endpoint %s %s", r.Method, r.URL.Path))
 	})
 	return mux
 }
@@ -116,153 +150,60 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-func writeError(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, ErrorBody{Error: msg})
-}
-
-// fail maps a store error to a response.
+// fail maps an error to a problem: one a handler or bind returned as is,
+// store.ErrNotFound to not_found, anything else to internal.
 func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
+	if p, ok := errors.AsType[*openapi.Problem](err); ok {
+		openapi.Write(w, p)
+		return
+	}
 	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "not found")
+		openapi.Write(w, openapi.Errorf(http.StatusNotFound, openapi.CodeNotFound, "not found"))
 		return
 	}
 	if r.Context().Err() != nil {
 		return // the client went away
 	}
 	a.log.Error("api", "path", r.URL.Path, "err", err)
-	writeError(w, http.StatusInternalServerError, "internal error")
+	openapi.Write(w, openapi.Errorf(http.StatusInternalServerError, openapi.CodeInternal, "internal error"))
 }
 
-// badRequest is a query parameter error.
-type badRequest string
-
-func (b badRequest) Error() string { return string(b) }
-
-func parseLimit(s string, upper int) (int, error) {
-	if s == "" {
-		return 0, nil
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 1 || n > upper {
-		return 0, badRequest("limit: want 1.." + strconv.Itoa(upper))
-	}
-	return n, nil
+var downgrades = map[Downgraded]store.Downgrade{
+	"hide": store.HideDowngraded, "include": store.IncludeDowngraded, "only": store.OnlyDowngraded,
 }
 
-func parseDowngrade(s string) (store.Downgrade, error) {
-	switch s {
-	case "", "hide":
-		return store.HideDowngraded, nil
-	case "include":
-		return store.IncludeDowngraded, nil
-	case "only":
-		return store.OnlyDowngraded, nil
-	}
-	return 0, badRequest("downgraded: want hide, include or only")
+var classes = map[agentview.Class]classify.Class{
+	agentview.ClassUnknown: classify.Unknown, agentview.ClassMachine: classify.Machine, agentview.ClassHuman: classify.Human,
 }
 
-// parseClasses reads class=human,unknown: one class or several, comma
-// separated.
-func parseClasses(s string) ([]classify.Class, error) {
-	if s == "" {
-		return nil, nil
+func (a *API) listMessages(ctx context.Context, v *auth.Viewer, p MessagesParams) (MessagePage, error) {
+	q := store.MessageQuery{Limit: p.Limit, Before: (*store.MessageCursor)(p.Cursor)}
+	q.Downgraded = downgrades[p.Downgraded]
+	if p.Prefix != nil {
+		q.Prefix, q.Zone = p.Prefix.Prefix, p.Prefix.Zone
 	}
-	var out []classify.Class
-	for _, name := range strings.Split(s, ",") {
-		switch Class(name) {
-		case ClassUnknown:
-			out = append(out, classify.Unknown)
-		case ClassMachine:
-			out = append(out, classify.Machine)
-		case ClassHuman:
-			out = append(out, classify.Human)
-		default:
-			return nil, badRequest("class: want unknown, machine or human, comma separated")
-		}
+	for _, c := range p.Class {
+		q.Classes = append(q.Classes, classes[c])
 	}
-	return out, nil
-}
-
-// Cursors are opaque to clients: base64url of "<RFC 3339 nano> <id>".
-func encodeCursor(c store.MessageCursor) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(c.ReceivedAt.UTC().Format(time.RFC3339Nano) + " " + c.ID))
-}
-
-func decodeCursor(s string) (*store.MessageCursor, error) {
-	if s == "" {
-		return nil, nil
-	}
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err == nil {
-		at, id, ok := strings.Cut(string(raw), " ")
-		if t, terr := time.Parse(time.RFC3339Nano, at); ok && terr == nil && id != "" {
-			return &store.MessageCursor{ReceivedAt: t, ID: id}, nil
-		}
-	}
-	return nil, badRequest("cursor: malformed")
-}
-
-func (a *API) listMessages(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
-	q, err := messageQuery(r)
+	ms, err := a.db.ListMessages(ctx, v, q)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	ms, err := a.db.ListMessages(r.Context(), v, q)
-	if err != nil {
-		a.fail(w, r, err)
-		return
+		return MessagePage{}, err
 	}
 	page := MessagePage{Messages: make([]MessageSummary, len(ms))}
 	for i, m := range ms {
 		page.Messages[i] = summary(m)
 	}
-	limit := q.Limit
-	if limit == 0 {
-		limit = defaultPage
-	}
-	if len(ms) == limit {
+	if len(ms) == p.Limit {
 		last := ms[len(ms)-1]
-		page.NextCursor = encodeCursor(store.MessageCursor{ReceivedAt: last.ReceivedAt, ID: last.ID})
+		page.NextCursor = Cursor{ReceivedAt: last.ReceivedAt, ID: last.ID}.String()
 	}
-	writeJSON(w, http.StatusOK, page)
+	return page, nil
 }
 
-const defaultPage = 100
-
-func messageQuery(r *http.Request) (store.MessageQuery, error) {
-	p := r.URL.Query()
-	q := store.MessageQuery{Limit: defaultPage}
-	var err error
-	if addr := p.Get("prefix"); addr != "" {
-		i := strings.LastIndexByte(addr, '@')
-		if i <= 0 || i == len(addr)-1 {
-			return q, badRequest("prefix: want prefix@zone")
-		}
-		q.Prefix, q.Zone = strings.ToLower(addr[:i]), strings.ToLower(addr[i+1:])
-	}
-	if q.Classes, err = parseClasses(p.Get("class")); err != nil {
-		return q, err
-	}
-	if q.Downgraded, err = parseDowngrade(p.Get("downgraded")); err != nil {
-		return q, err
-	}
-	if q.Before, err = decodeCursor(p.Get("cursor")); err != nil {
-		return q, err
-	}
-	if n, err := parseLimit(p.Get("limit"), 500); err != nil {
-		return q, err
-	} else if n > 0 {
-		q.Limit = n
-	}
-	return q, nil
-}
-
-func (a *API) message(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
-	d, err := a.db.MessageByID(r.Context(), v, r.PathValue("id"))
+func (a *API) message(ctx context.Context, v *auth.Viewer, p IDParams) (Message, error) {
+	d, err := a.db.MessageByID(ctx, v, p.ID)
 	if err != nil {
-		a.fail(w, r, err)
-		return
+		return Message{}, err
 	}
 	out := Message{
 		MessageSummary: summary(d.MessageSummary),
@@ -280,69 +221,43 @@ func (a *API) message(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
 // messageView is the structured view of §8.1 that the reading pane
-// renders (§12.1), the same tree get_message gives agents. level is
-// snippet, sections or part (the default); anchor is a fragment such as
-// part/1/para/3. Delivery facts in it need delivery:read, as above.
-func (a *API) messageView(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
-	p := r.URL.Query()
-	level := agentview.LevelPart
-	if s := p.Get("level"); s != "" {
-		var err error
-		if level, err = agentview.ParseLevel(s); err != nil {
-			writeError(w, http.StatusBadRequest, "level: want snippet, sections or part")
-			return
-		}
-	}
-	var anchor agentview.Anchor
-	if s := p.Get("anchor"); s != "" {
-		var err error
-		if anchor, err = agentview.ParseAnchor(s); err != nil {
-			writeError(w, http.StatusBadRequest, "anchor: want part/<section>[/para/<n>]")
-			return
-		}
-	}
-	d, err := a.db.MessageByID(r.Context(), v, r.PathValue("id"))
+// renders (§12.1), the same tree get_message gives agents. Delivery facts
+// in it need delivery:read, as above.
+func (a *API) messageView(ctx context.Context, v *auth.Viewer, p ViewParams) (agentview.View, error) {
+	d, err := a.db.MessageByID(ctx, v, p.ID)
 	if err != nil {
-		a.fail(w, r, err)
-		return
+		return agentview.View{}, err
 	}
-	raw, err := a.raw.ReadRaw(r.Context(), d.Raw)
+	raw, err := a.raw.ReadRaw(ctx, d.Raw)
 	if err != nil {
-		a.fail(w, r, err)
-		return
+		return agentview.View{}, err
 	}
-	view, err := agentview.Select(agentview.Build(agentview.InputOf(v, d, raw)), level, anchor)
+	view, err := agentview.Select(agentview.Build(agentview.InputOf(v, d, raw)), p.Level, p.Anchor)
 	if errors.Is(err, agentview.ErrNoAnchor) {
-		writeError(w, http.StatusNotFound, "anchor: not in this message")
-		return
+		return view, openapi.Errorf(http.StatusNotFound, openapi.CodeNotFound, "anchor %s is not in this message", p.Anchor)
 	}
-	if err != nil {
-		a.fail(w, r, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, view)
+	return view, err
 }
 
-func authOf(a *authres.Auth) *Auth {
+func authOf(a *authres.Auth) *DeliveryAuth {
 	if a == nil {
 		return nil
 	}
-	out := &Auth{Trusted: a.Trusted, Reason: a.Reason, AuthservID: a.AuthservID, DMARC: a.DMARC, RemoteIP: a.RemoteIP}
+	out := &DeliveryAuth{Trusted: a.Trusted, Reason: a.Reason, AuthservID: a.AuthservID, DMARC: a.DMARC, RemoteIP: a.RemoteIP}
 	for _, res := range a.Results {
-		out.Results = append(out.Results, AuthResult{Method: res.Method, Result: res.Result, Props: res.Props})
+		out.Results = append(out.Results, DeliveryAuthResult{Method: res.Method, Result: res.Result, Props: res.Props})
 	}
 	return out
 }
 
-func (a *API) thread(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
-	t, err := a.db.ThreadByID(r.Context(), v, r.PathValue("id"))
+func (a *API) thread(ctx context.Context, v *auth.Viewer, p IDParams) (Thread, error) {
+	t, err := a.db.ThreadByID(ctx, v, p.ID)
 	if err != nil {
-		a.fail(w, r, err)
-		return
+		return Thread{}, err
 	}
 	out := Thread{
 		ID: t.ID, Subject: t.Subject, Participants: nonNil(t.Participants),
@@ -351,19 +266,15 @@ func (a *API) thread(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
 	for i, m := range t.Messages {
 		out.Messages[i] = summary(m)
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
-func (a *API) prefixes(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
-	q, err := prefixQuery(r)
+func (a *API) prefixes(ctx context.Context, v *auth.Viewer, p PrefixesParams) (PrefixList, error) {
+	q := store.PrefixQuery{Limit: p.Limit, Offset: p.Offset}
+	q.State = map[PrefixState]int{"claimed": store.PrefixClaimed, "discovered": store.PrefixDiscovered}[p.State]
+	sum, err := a.db.PrefixStats(ctx, v, q)
 	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	sum, err := a.db.PrefixStats(r.Context(), v, q)
-	if err != nil {
-		a.fail(w, r, err)
-		return
+		return PrefixList{}, err
 	}
 	out := PrefixList{Messages: sum.Messages, Downgraded: sum.Downgraded, Total: sum.Total, Prefixes: make([]Prefix, len(sum.Prefixes))}
 	for i, p := range sum.Prefixes {
@@ -373,67 +284,15 @@ func (a *API) prefixes(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
 			FirstSeen: p.FirstSeen, LastSeen: p.LastSeen, Messages: p.Messages, Downgraded: p.Downgraded,
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	return out, nil
 }
 
-// prefixQuery reads state=claimed|discovered and limit/offset paging.
-// Without a limit every matching prefix comes back.
-func prefixQuery(r *http.Request) (store.PrefixQuery, error) {
-	p := r.URL.Query()
-	var q store.PrefixQuery
-	switch p.Get("state") {
-	case "":
-	case "claimed":
-		q.State = store.PrefixClaimed
-	case "discovered":
-		q.State = store.PrefixDiscovered
-	default:
-		return q, badRequest("state: want claimed or discovered")
-	}
-	var err error
-	if q.Limit, err = parseLimit(p.Get("limit"), 500); err != nil {
-		return q, err
-	}
-	if q.Offset, err = parseOffset(p.Get("offset")); err != nil {
-		return q, err
-	}
-	return q, nil
-}
-
-func parseOffset(s string) (int, error) {
-	if s == "" {
-		return 0, nil
-	}
-	n, err := strconv.Atoi(s)
-	if err != nil || n < 0 {
-		return 0, badRequest("offset: want a non-negative integer")
-	}
-	return n, nil
-}
-
-func (a *API) search(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
-	p := r.URL.Query()
-	limit, err := parseLimit(p.Get("limit"), 500)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	offset, err := parseOffset(p.Get("offset"))
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	dg, err := parseDowngrade(p.Get("downgraded"))
-	if err != nil || dg == store.OnlyDowngraded {
-		writeError(w, http.StatusBadRequest, "downgraded: want hide or include")
-		return
-	}
-	res, err := a.db.Search(r.Context(), v, store.SearchQuery{
-		Text: p.Get("q"), Limit: limit, Offset: offset, IncludeDowngraded: dg == store.IncludeDowngraded,
+func (a *API) search(ctx context.Context, v *auth.Viewer, p SearchParams) (SearchResult, error) {
+	res, err := a.db.Search(ctx, v, store.SearchQuery{
+		Text: p.Q, Limit: p.Limit, Before: (*store.MessageCursor)(p.Cursor), IncludeDowngraded: p.Downgraded == "include",
 	})
 	if err != nil {
-		a.fail(w, r, err)
-		return
+		return SearchResult{}, err
 	}
 	out := SearchResult{Total: res.Total, Hits: make([]MessageSummary, len(res.Hits))}
 	for i, h := range res.Hits {
@@ -443,7 +302,11 @@ func (a *API) search(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
 			Downgraded: h.Downgraded, Quarantined: h.Quarantined, Recipients: []string{},
 		}
 	}
-	writeJSON(w, http.StatusOK, out)
+	if len(res.Hits) == p.Limit {
+		last := res.Hits[len(res.Hits)-1]
+		out.NextCursor = Cursor{ReceivedAt: last.ReceivedAt, ID: last.ID}.String()
+	}
+	return out, nil
 }
 
 func summary(m store.MessageSummary) MessageSummary {
@@ -455,10 +318,9 @@ func summary(m store.MessageSummary) MessageSummary {
 	}
 }
 
-func classOf(c classify.Class) Class { return Class(c.String()) }
+func classOf(c classify.Class) agentview.Class { return agentview.Class(c.String()) }
 
-// nonNil keeps JSON arrays arrays: the TypeScript types say string[],
-// not string[] | null.
+// nonNil keeps JSON arrays arrays: the schema promises no null.
 func nonNil(s []string) []string {
 	if s == nil {
 		return []string{}

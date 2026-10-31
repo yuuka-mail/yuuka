@@ -1,0 +1,1658 @@
+{
+  "components": {
+    "schemas": {
+      "Address": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "addr": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Attachment": {
+        "type": "object",
+        "properties": {
+          "section": {
+            "type": "string"
+          },
+          "filename": {
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "section",
+          "media_type"
+        ],
+        "additionalProperties": false
+      },
+      "Auth": {
+        "type": "object",
+        "properties": {
+          "verified": {
+            "type": "boolean"
+          },
+          "withheld": {
+            "type": "boolean"
+          },
+          "spf": {
+            "type": "string"
+          },
+          "dkim": {
+            "type": "string"
+          },
+          "dmarc": {
+            "type": "string"
+          },
+          "from_domain": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "line": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "verified",
+          "line"
+        ],
+        "additionalProperties": false
+      },
+      "Block": {
+        "type": "object",
+        "properties": {
+          "anchor": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/Kind"
+          },
+          "level": {
+            "type": "integer"
+          },
+          "spans": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Span"
+            }
+          },
+          "lines": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "anchor",
+          "kind"
+        ],
+        "additionalProperties": false
+      },
+      "Class": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "machine",
+          "human"
+        ]
+      },
+      "Code": {
+        "type": "string",
+        "enum": [
+          "invalid_param",
+          "invalid_body",
+          "unsupported_type",
+          "body_too_large",
+          "not_found",
+          "unauthenticated",
+          "scope_required",
+          "forbidden",
+          "conflict",
+          "not_verified",
+          "ceremony_expired",
+          "rate_limited",
+          "undecodable",
+          "unavailable",
+          "internal"
+        ]
+      },
+      "Content": {
+        "type": "object",
+        "properties": {
+          "notice": {
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Attachment"
+            }
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Section"
+            }
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Part"
+            }
+          },
+          "more": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "notice",
+          "from",
+          "subject",
+          "snippet"
+        ],
+        "additionalProperties": false
+      },
+      "Delivery": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "zone": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "prefix_claimed": {
+            "type": "boolean"
+          },
+          "envelope_from": {
+            "type": "string"
+          },
+          "envelope_to": {
+            "type": "string"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/DeliveryAuth"
+          }
+        },
+        "required": [
+          "id",
+          "zone",
+          "prefix",
+          "prefix_claimed",
+          "envelope_from",
+          "envelope_to",
+          "received_at"
+        ],
+        "additionalProperties": false
+      },
+      "DeliveryAuth": {
+        "type": "object",
+        "properties": {
+          "trusted": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "authserv_id": {
+            "type": "string"
+          },
+          "dmarc": {
+            "type": "string"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeliveryAuthResult"
+            }
+          },
+          "remote_ip": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "trusted"
+        ],
+        "additionalProperties": false
+      },
+      "DeliveryAuthResult": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string"
+          },
+          "result": {
+            "type": "string"
+          },
+          "props": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "method",
+          "result"
+        ],
+        "additionalProperties": false
+      },
+      "Facts": {
+        "type": "object",
+        "properties": {
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "delivered_to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "class": {
+            "$ref": "#/components/schemas/Class"
+          },
+          "auth": {
+            "$ref": "#/components/schemas/Auth"
+          },
+          "downgraded": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "stripped": {
+            "$ref": "#/components/schemas/Stripped"
+          }
+        },
+        "required": [
+          "received_at",
+          "delivered_to",
+          "class",
+          "auth",
+          "downgraded",
+          "stripped"
+        ],
+        "additionalProperties": false
+      },
+      "Kind": {
+        "type": "string",
+        "enum": [
+          "heading",
+          "para",
+          "item",
+          "pre",
+          "quote"
+        ]
+      },
+      "Level": {
+        "type": "string",
+        "enum": [
+          "snippet",
+          "sections",
+          "part"
+        ]
+      },
+      "LoginResult": {
+        "type": "object",
+        "properties": {
+          "principal": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "principal",
+          "expires_at"
+        ],
+        "additionalProperties": false
+      },
+      "Message": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "from_addr": {
+            "type": "string"
+          },
+          "from_name": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "class": {
+            "$ref": "#/components/schemas/Class"
+          },
+          "downgraded": {
+            "type": "boolean"
+          },
+          "quarantined": {
+            "type": "boolean"
+          },
+          "has_attach": {
+            "type": "boolean"
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "in_reply_to": {
+            "type": "string"
+          },
+          "references": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "body_text": {
+            "type": "string"
+          },
+          "parse_error": {
+            "type": "string"
+          },
+          "deliveries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Delivery"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "thread_id",
+          "received_at",
+          "subject",
+          "from_addr",
+          "from_name",
+          "snippet",
+          "class",
+          "downgraded",
+          "quarantined",
+          "has_attach",
+          "recipients",
+          "message_id",
+          "in_reply_to",
+          "references",
+          "body_text"
+        ],
+        "additionalProperties": false
+      },
+      "MessagePage": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageSummary"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "messages"
+        ],
+        "additionalProperties": false
+      },
+      "MessageSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "from_addr": {
+            "type": "string"
+          },
+          "from_name": {
+            "type": "string"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "class": {
+            "$ref": "#/components/schemas/Class"
+          },
+          "downgraded": {
+            "type": "boolean"
+          },
+          "quarantined": {
+            "type": "boolean"
+          },
+          "has_attach": {
+            "type": "boolean"
+          },
+          "recipients": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "thread_id",
+          "received_at",
+          "subject",
+          "from_addr",
+          "from_name",
+          "snippet",
+          "class",
+          "downgraded",
+          "quarantined",
+          "has_attach",
+          "recipients"
+        ],
+        "additionalProperties": false
+      },
+      "Part": {
+        "type": "object",
+        "properties": {
+          "anchor": {
+            "type": "string"
+          },
+          "media_type": {
+            "type": "string"
+          },
+          "blocks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Block"
+            }
+          }
+        },
+        "required": [
+          "anchor",
+          "media_type",
+          "blocks"
+        ],
+        "additionalProperties": false
+      },
+      "Prefix": {
+        "type": "object",
+        "properties": {
+          "zone": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "claimed": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messages": {
+            "type": "integer"
+          },
+          "downgraded": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "zone",
+          "prefix",
+          "address",
+          "claimed",
+          "label",
+          "messages",
+          "downgraded"
+        ],
+        "additionalProperties": false
+      },
+      "PrefixList": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "integer"
+          },
+          "downgraded": {
+            "type": "integer"
+          },
+          "total": {
+            "type": "integer"
+          },
+          "prefixes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Prefix"
+            }
+          }
+        },
+        "required": [
+          "messages",
+          "downgraded",
+          "total",
+          "prefixes"
+        ],
+        "additionalProperties": false
+      },
+      "Problem": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "code": {
+            "$ref": "#/components/schemas/Code"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "status",
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "RecoveryGrant": {
+        "type": "object",
+        "properties": {
+          "enrollment_token": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "enrollment_token",
+          "expires_at"
+        ],
+        "additionalProperties": false
+      },
+      "RecoveryRequest": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "RegisterBegin": {
+        "type": "object",
+        "properties": {
+          "enrollment_token": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RegisterResult": {
+        "type": "object",
+        "properties": {
+          "passkey_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "passkey_id"
+        ],
+        "additionalProperties": false
+      },
+      "Scope": {
+        "type": "string",
+        "enum": [
+          "message:read",
+          "delivery:read",
+          "prefix:read",
+          "message:annotate",
+          "draft:create",
+          "submission:send",
+          "prefix:manage",
+          "account:manage",
+          "rule:manage",
+          "admin"
+        ]
+      },
+      "SearchResult": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "integer"
+          },
+          "hits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageSummary"
+            }
+          },
+          "next_cursor": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "total",
+          "hits"
+        ],
+        "additionalProperties": false
+      },
+      "Section": {
+        "type": "object",
+        "properties": {
+          "anchor": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "level": {
+            "type": "integer"
+          },
+          "blocks": {
+            "type": "integer"
+          },
+          "chars": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "anchor",
+          "title",
+          "blocks",
+          "chars"
+        ],
+        "additionalProperties": false
+      },
+      "SessionInfo": {
+        "type": "object",
+        "properties": {
+          "principal": {
+            "type": "string"
+          },
+          "credential_id": {
+            "type": "string"
+          },
+          "credential_kind": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            }
+          }
+        },
+        "required": [
+          "principal",
+          "credential_id",
+          "credential_kind",
+          "scopes"
+        ],
+        "additionalProperties": false
+      },
+      "Span": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "href": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "Stripped": {
+        "type": "object",
+        "properties": {
+          "tracking_pixels": {
+            "type": "integer"
+          },
+          "images": {
+            "type": "integer"
+          },
+          "hidden": {
+            "type": "integer"
+          },
+          "unsafe_links": {
+            "type": "integer"
+          },
+          "quoted_lines": {
+            "type": "integer"
+          }
+        },
+        "additionalProperties": false
+      },
+      "Thread": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "participants": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "first_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MessageSummary"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "subject",
+          "participants",
+          "first_at",
+          "last_at",
+          "messages"
+        ],
+        "additionalProperties": false
+      },
+      "View": {
+        "type": "object",
+        "properties": {
+          "uri": {
+            "type": "string"
+          },
+          "view_version": {
+            "type": "integer"
+          },
+          "level": {
+            "$ref": "#/components/schemas/Level"
+          },
+          "facts": {
+            "$ref": "#/components/schemas/Facts"
+          },
+          "content": {
+            "$ref": "#/components/schemas/Content"
+          }
+        },
+        "required": [
+          "uri",
+          "view_version",
+          "level",
+          "facts",
+          "content"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "bearer": {
+        "description": "A yuuka token (ykt_…)",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "session": {
+        "description": "The WebUI's passkey session",
+        "in": "cookie",
+        "name": "__Host-yuuka-session",
+        "type": "apiKey"
+      }
+    }
+  },
+  "info": {
+    "title": "yuuka",
+    "version": "v1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/messages": {
+      "get": {
+        "summary": "List messages, newest first",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "prefix",
+            "in": "query",
+            "description": "only mail delivered to this prefix@zone, whatever its class",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "class",
+            "in": "query",
+            "description": "only mail of these classes",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Class"
+              }
+            }
+          },
+          {
+            "name": "downgraded",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "hide",
+              "enum": [
+                "hide",
+                "include",
+                "only"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "next_cursor of the previous page",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePage"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/messages/{id}": {
+      "get": {
+        "summary": "Get a message's parsed fields and plain text body",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/messages/{id}/attachments/{part}": {
+      "get": {
+        "summary": "Download an attachment",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "part",
+            "in": "path",
+            "description": "the IMAP section of the attachment, as the view lists it",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]{0,3}(\\.[1-9][0-9]{0,3}){0,15}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/octet-stream": {}
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/messages/{id}/view": {
+      "get": {
+        "summary": "Get the structured view of a message (§8.1)",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "level",
+            "in": "query",
+            "schema": {
+              "$ref": "#/components/schemas/Level",
+              "default": "part"
+            }
+          },
+          {
+            "name": "anchor",
+            "in": "query",
+            "description": "start at this anchor, such as part/1/para/3",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/View"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/openapi.json": {
+      "get": {
+        "summary": "This document",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {}
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prefixes": {
+      "get": {
+        "summary": "List prefixes with message counts",
+        "security": [
+          {
+            "bearer": [
+              "prefix:read"
+            ]
+          },
+          {
+            "session": [
+              "prefix:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "description": "only claimed or only discovered prefixes",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "claimed",
+                "discovered"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrefixList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/search": {
+      "get": {
+        "summary": "Search messages, newest first",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "words that must all occur in subject, sender or body; empty matches everything",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "downgraded",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "default": "hide",
+              "enum": [
+                "hide",
+                "include"
+              ]
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "next_cursor of the previous page",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/threads/{id}": {
+      "get": {
+        "summary": "Get a thread",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Thread"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "summary": "End this browser session",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/passkey/login/begin": {
+      "post": {
+        "summary": "Begin a passkey login; returns WebAuthn request options",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/passkey/login/finish": {
+      "post": {
+        "summary": "Finish a passkey login with the WebAuthn assertion; the session is the cookie set",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/passkey/register/begin": {
+      "post": {
+        "summary": "Begin registering a passkey, by enrollment token or by an admin session; returns WebAuthn creation options",
+        "security": [
+          {},
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterBegin"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/passkey/register/finish": {
+      "post": {
+        "summary": "Finish registering with the WebAuthn attestation; never logs in",
+        "security": [
+          {},
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RegisterResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/recovery": {
+      "post": {
+        "summary": "Exchange a recovery code for an enrollment token, never a session",
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecoveryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryGrant"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/session": {
+      "get": {
+        "summary": "Who the request acts as",
+        "security": [
+          {
+            "bearer": []
+          },
+          {
+            "session": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionInfo"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

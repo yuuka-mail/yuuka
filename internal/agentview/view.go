@@ -71,7 +71,7 @@ type Input struct {
 	// deliveries of this message.
 	DeliveredTo []string
 	// Class is the effective class (a human override wins).
-	Class string
+	Class Class
 	// Downgraded is the §4.3 minimal downgrade as the store computed it.
 	Downgraded bool
 	// Auth is the authentication facts of the delivery the view is for.

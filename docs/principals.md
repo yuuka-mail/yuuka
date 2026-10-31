@@ -279,7 +279,8 @@ yuuka 不假设自己部署在什么网络里（§2）。所以**每个端点都
 后者对攻击没有增量。这几条约束一旦放松（比如想加版本号或依赖细节），它就不再是一个可以不认证的端点，
 该改成带凭据的独立端点。路由清单与各自的认证方式在
 [`cmd/yuuka/main.go`](../cmd/yuuka/main.go) 的 `routes`，清单测试保证新端点不会无意中漏掉认证。
-WebUI 的页面壳（静态资源）同样不需要会话，但它不含数据，数据全走 `/api/`。TG 容易被当成纯输出而漏掉，但它上面有「确认发送」按钮，
+WebUI 的页面壳（静态资源）同样不需要会话，但它不含数据，数据全走 `/api/`。
+`/api/v1/openapi.json` 也不需要：它是接口描述，和公开仓库里的那份一样（§5.1）。TG 容易被当成纯输出而漏掉，但它上面有「确认发送」按钮，
 就是 `submission:send` 的入口之一。把 REST / MCP 放在只认浏览器 cookie 的身份代理后面是个常见错误——
 agent 不是浏览器，拿不到那个 cookie。
 
@@ -381,7 +382,7 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 新增读路径就是往这张表加一行。store 层的这张表是
 [`TestVisibility`](../internal/store/sent_test.go)：过滤在 M2 默认关着，测试里打开，
 用可读、不可读两个账户下的收信和 Sent 副本跑列表、搜索、详情、线程和前缀视图。
-REST 层的 [`TestACL`](../internal/api/api_test.go) 管的是另一半：每个端点要认证、要 scope、把认证出的主体交给 store。
+REST 层的 [`TestACL`](../internal/api/api_test.go) 管的是另一半：它遍历路由表（§5.1），每个端点要认证、要 scope、把认证出的主体交给 store。
 
 发信授权读的事实也走同一个条件：回复的默认身份（`ReplyIdentities`）和线程参与者（`ReplyFacts`）
 只来自可见的投递、可见的消息和可见的 outbox 行，同在 `TestVisibility` 里。

@@ -2,10 +2,12 @@ package authn
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
+	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/store"
 )
 
@@ -41,7 +43,7 @@ func (s *Service) Require(h http.Handler, scopes ...auth.Scope) http.Handler {
 				Actor: v.PrincipalID, CredentialID: v.CredentialID, Tool: "auth.deny",
 				Args: map[string]any{"method": r.Method, "path": r.URL.Path, "missing": missing},
 			})
-			writeError(w, http.StatusForbidden, "missing scope")
+			problem(w, http.StatusForbidden, openapi.CodeScopeRequired, fmt.Sprintf("this credential lacks %s", strings.Join(auth.Strings(missing), ", ")))
 			return
 		}
 		h.ServeHTTP(w, r.WithContext(auth.WithViewer(r.Context(), v)))

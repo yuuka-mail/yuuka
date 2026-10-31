@@ -50,6 +50,9 @@ func ParseScopes(ss []string) ([]Scope, error) {
 	return out, nil
 }
 
+// Enum lists every scope: the API schema says which exist.
+func (Scope) Enum() []string { return Strings(AllScopes) }
+
 // Strings converts scopes for storage.
 func Strings(scopes []Scope) []string {
 	out := make([]string, len(scopes))

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/devseed"
 	"github.com/yuuka-mail/yuuka/internal/localraw"
+	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
@@ -155,12 +157,12 @@ func decode[T any](t *testing.T, w *httptest.ResponseRecorder) T {
 	return v
 }
 
-// TestACL is the table of every read endpoint (AGENTS.md: visibility is
-// computed in one place, and new read paths join this table). In M1 it
-// checks that an unauthenticated request never reaches the store, that the
-// scope is enforced, and that the authenticated viewer is the one the
-// store reads for. When account_access arrives (M3.5), each row also gets
-// a restricted viewer and asserts nothing leaks.
+// TestACL walks the route table (AGENTS.md: visibility is computed in
+// one place, and new read paths join this table). In M1 it checks that an
+// unauthenticated request never reaches the store, that the scope is
+// enforced, and that the authenticated viewer is the one the store reads
+// for. When account_access arrives (M3.5), each row also gets a
+// restricted viewer and asserts nothing leaks.
 func TestACL(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
@@ -169,34 +171,35 @@ func TestACL(t *testing.T) {
 	att := h.find("Invoice and logo")
 	h.spy.take()
 
-	table := []struct {
-		pattern string // as registered in routes
-		path    string
-		scopes  []auth.Scope
-		reads   string // the store method it must call
-	}{
-		{"GET /api/v1/messages", "/api/v1/messages?prefix=github@example.com", []auth.Scope{auth.MessageRead}, "ListMessages"},
-		{"GET /api/v1/messages/{id}", "/api/v1/messages/" + msg.ID, []auth.Scope{auth.MessageRead}, "MessageByID"},
-		{"GET /api/v1/messages/{id}/view", "/api/v1/messages/" + msg.ID + "/view?level=sections", []auth.Scope{auth.MessageRead}, "MessageByID"},
-		{"GET /api/v1/messages/{id}/attachments/{part}", "/api/v1/messages/" + att + "/attachments/2", []auth.Scope{auth.MessageRead}, "MessageByID"},
-		{"GET /api/v1/threads/{id}", "/api/v1/threads/" + msg.ThreadID, []auth.Scope{auth.MessageRead}, "ThreadByID"},
-		{"GET /api/v1/prefixes", "/api/v1/prefixes", []auth.Scope{auth.PrefixRead}, "PrefixStats"},
-		{"GET /api/v1/search", "/api/v1/search?q=verification", []auth.Scope{auth.MessageRead}, "Search"},
+	// How to call each route, and the store method it must read through.
+	calls := map[string]struct{ path, reads string }{
+		"GET /api/v1/messages":                         {"/api/v1/messages?prefix=github@example.com", "ListMessages"},
+		"GET /api/v1/messages/{id}":                    {"/api/v1/messages/" + msg.ID, "MessageByID"},
+		"GET /api/v1/messages/{id}/view":               {"/api/v1/messages/" + msg.ID + "/view?level=sections", "MessageByID"},
+		"GET /api/v1/messages/{id}/attachments/{part}": {"/api/v1/messages/" + att + "/attachments/2", "MessageByID"},
+		"GET /api/v1/threads/{id}":                     {"/api/v1/threads/" + msg.ThreadID, "ThreadByID"},
+		"GET /api/v1/prefixes":                         {"/api/v1/prefixes", "PrefixStats"},
+		"GET /api/v1/search":                           {"/api/v1/search?q=verification", "Search"},
 	}
-	var covered []string
-	for _, row := range table {
-		covered = append(covered, row.pattern)
-		i := slices.IndexFunc(routes, func(r route) bool { return r.pattern == row.pattern })
-		if i < 0 {
-			t.Errorf("%s: not a route", row.pattern)
+	for _, rt := range routes {
+		pattern := rt.Method + " " + rt.Path
+		if rt.Access == openapi.Public {
+			if pattern != "GET /api/v1/openapi.json" {
+				t.Errorf("%s is public", pattern)
+			}
 			continue
 		}
-		if !slices.Equal(routes[i].scopes, row.scopes) {
-			t.Errorf("%s: route requires %v, table says %v", row.pattern, routes[i].scopes, row.scopes)
+		row, ok := calls[pattern]
+		if !ok {
+			t.Errorf("route %s is missing from the ACL table", pattern)
+			continue
+		}
+		if rt.Access != openapi.Authenticated || len(rt.Scopes) == 0 {
+			t.Errorf("%s: access %v, scopes %v", pattern, rt.Access, rt.Scopes)
 		}
 
-		if w := h.get(row.path, ""); w.Code != http.StatusUnauthorized {
-			t.Errorf("%s anonymous: %d", row.path, w.Code)
+		if w := h.get(row.path, ""); w.Code != http.StatusUnauthorized || problemOf(t, w).Code != openapi.CodeUnauthenticated {
+			t.Errorf("%s anonymous: %d %s", row.path, w.Code, w.Body.String())
 		}
 		if w := h.get(row.path, "ykt_bogus"); w.Code != http.StatusUnauthorized {
 			t.Errorf("%s bad token: %d", row.path, w.Code)
@@ -204,23 +207,26 @@ func TestACL(t *testing.T) {
 		// Every scope except the required ones is not enough.
 		var others []auth.Scope
 		for _, s := range auth.AllScopes {
-			if !slices.Contains(row.scopes, s) {
+			if !slices.Contains(rt.Scopes, s) {
 				others = append(others, s)
 			}
 		}
-		if w := h.get(row.path, h.token(others...)); w.Code != http.StatusForbidden {
-			t.Errorf("%s without %v: %d", row.path, row.scopes, w.Code)
+		if w := h.get(row.path, h.token(others...)); w.Code != http.StatusForbidden || problemOf(t, w).Code != openapi.CodeScopeRequired {
+			t.Errorf("%s without %v: %d %s", row.path, rt.Scopes, w.Code, w.Body.String())
 		}
 		if calls := h.spy.take(); len(calls) != 0 {
 			t.Errorf("%s: refused requests reached the store: %v", row.path, calls)
 		}
 
-		w := h.get(row.path, h.token(row.scopes...))
+		w := h.get(row.path, h.token(rt.Scopes...))
 		if w.Code != http.StatusOK {
 			t.Errorf("%s: %d %s", row.path, w.Code, w.Body.String())
 		}
 		if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
 			t.Errorf("%s: Cache-Control %q", row.path, cc)
+		}
+		if rt.Response != nil {
+			noNull(t, row.path, decode[any](t, w))
 		}
 		calls := h.spy.take()
 		vs := calls[row.reads]
@@ -228,11 +234,36 @@ func TestACL(t *testing.T) {
 			t.Errorf("%s: store calls %v, want one %s for %s", row.path, calls, row.reads, h.agent.ID)
 		}
 	}
-	for _, r := range routes {
-		if !slices.Contains(covered, r.pattern) {
-			t.Errorf("route %s is missing from the ACL table", r.pattern)
+}
+
+// noNull fails on any null in a response: the schema promises arrays are
+// arrays and absent values are left out.
+func noNull(t *testing.T, at string, v any) {
+	t.Helper()
+	switch v := v.(type) {
+	case nil:
+		t.Errorf("%s: null", at)
+	case map[string]any:
+		for k, e := range v {
+			noNull(t, at+"."+k, e)
+		}
+	case []any:
+		for i, e := range v {
+			noNull(t, fmt.Sprintf("%s[%d]", at, i), e)
 		}
 	}
+}
+
+func problemOf(t *testing.T, w *httptest.ResponseRecorder) openapi.Problem {
+	t.Helper()
+	if ct := w.Header().Get("Content-Type"); ct != "application/problem+json" {
+		t.Errorf("Content-Type %q: %s", ct, w.Body.String())
+	}
+	p := decode[openapi.Problem](t, w)
+	if p.Status != w.Code || p.Title != http.StatusText(w.Code) || p.Detail == "" {
+		t.Errorf("problem %+v for %d", p, w.Code)
+	}
+	return p
 }
 
 func TestDeliveriesNeedDeliveryRead(t *testing.T) {
@@ -321,19 +352,19 @@ func TestMessageListPaging(t *testing.T) {
 	}
 
 	conv := decode[MessagePage](t, h.get("/api/v1/messages?downgraded=include&limit=500&class=human,unknown", tok))
-	if len(conv.Messages) == 0 || slices.ContainsFunc(conv.Messages, func(m MessageSummary) bool { return m.Class == ClassMachine }) {
+	if len(conv.Messages) == 0 || slices.ContainsFunc(conv.Messages, func(m MessageSummary) bool { return m.Class == agentview.ClassMachine }) {
 		t.Errorf("class=human,unknown: %d messages, machine among them or none", len(conv.Messages))
 	}
 
-	for _, bad := range []string{"prefix=nozone", "class=spam", "class=human,", "downgraded=maybe", "cursor=%21%21", "limit=0", "limit=501"} {
-		if w := h.get("/api/v1/messages?"+bad, tok); w.Code != http.StatusBadRequest {
-			t.Errorf("%s: %d", bad, w.Code)
+	for _, bad := range []string{"prefix=nozone", "class=spam", "class=human,", "downgraded=maybe", "cursor=%21%21", "limit=0", "limit=501", "limit=x"} {
+		if w := h.get("/api/v1/messages?"+bad, tok); w.Code != http.StatusBadRequest || problemOf(t, w).Code != openapi.CodeInvalidParam {
+			t.Errorf("%s: %d %s", bad, w.Code, w.Body.String())
 		}
 	}
-	if w := h.get("/api/v1/messages/"+ulid.New(time.Now()), tok); w.Code != http.StatusNotFound {
+	if w := h.get("/api/v1/messages/"+ulid.New(time.Now()), tok); w.Code != http.StatusNotFound || problemOf(t, w).Code != openapi.CodeNotFound {
 		t.Errorf("missing message: %d", w.Code)
 	}
-	if w := h.get("/api/v1/nope", tok); w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "error") {
+	if w := h.get("/api/v1/nope", tok); w.Code != http.StatusNotFound || problemOf(t, w).Code != openapi.CodeNotFound {
 		t.Errorf("unknown endpoint: %d %s", w.Code, w.Body.String())
 	}
 }
@@ -358,16 +389,40 @@ func TestPrefixesAndSearch(t *testing.T) {
 	if page.Total != len(discovered) || len(page.Prefixes) != 2 || page.Prefixes[0].Address != discovered[1].Address || page.Messages != ps.Messages {
 		t.Errorf("discovered page: %+v", page)
 	}
-	for _, bad := range []string{"state=spam", "offset=-1", "limit=0"} {
+	for _, bad := range []string{"state=spam", "offset=-1", "limit=0", "limit=501"} {
 		if w := h.get("/api/v1/prefixes?"+bad, h.token(auth.PrefixRead)); w.Code != http.StatusBadRequest {
 			t.Errorf("prefixes %s: %d", bad, w.Code)
 		}
 	}
 	read := h.token(auth.MessageRead)
+	// Search pages by cursor; the total is that of all matches.
+	all := decode[SearchResult](t, h.get("/api/v1/search?downgraded=include&limit=500", read))
+	var ids []string
+	next := "/api/v1/search?downgraded=include&limit=9"
+	for next != "" {
+		p := decode[SearchResult](t, h.get(next, read))
+		if p.Total != all.Total {
+			t.Fatalf("total %d, want %d", p.Total, all.Total)
+		}
+		for _, m := range p.Hits {
+			ids = append(ids, m.ID)
+		}
+		next = ""
+		if p.NextCursor != "" {
+			next = "/api/v1/search?downgraded=include&limit=9&cursor=" + p.NextCursor
+		}
+	}
+	if all.NextCursor != "" || len(ids) != all.Total || ids[len(ids)-1] != all.Hits[len(all.Hits)-1].ID {
+		t.Errorf("paged %d search hits, want %d", len(ids), all.Total)
+	}
+	// Search has no review list: only is not one of its values.
+	if w := h.get("/api/v1/search?downgraded=only", read); w.Code != http.StatusBadRequest {
+		t.Errorf("search downgraded=only: %d", w.Code)
+	}
 	// Generated variants may reuse the body under another subject.
 	res := decode[SearchResult](t, h.get("/api/v1/search?q=usual+place", read))
 	i := slices.IndexFunc(res.Hits, func(m MessageSummary) bool { return m.Subject == "Re: Lunch on Friday?" })
-	if i < 0 || res.Hits[i].Class != ClassHuman {
+	if i < 0 || res.Hits[i].Class != agentview.ClassHuman {
 		t.Fatalf("search: %+v", res)
 	}
 	// devseed adds the question and an answer around the corpus reply.

@@ -36,7 +36,7 @@ func input(t *testing.T, name string) Input {
 		Raw:         raw,
 		ReceivedAt:  time.Date(2026, 10, 31, 1, 41, 38, 0, time.UTC),
 		DeliveredTo: []string{"inbox@example.com"},
-		Class:       classify.Of(mimeparse.Parse(raw), []string{"inbox"}).String(),
+		Class:       Class(classify.Of(mimeparse.Parse(raw), []string{"inbox"}).String()),
 		Auth:        authres.Extract(raw, "mx.cloudflare.net"),
 	}
 }

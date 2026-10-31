@@ -502,7 +502,7 @@ const (
 	authHMAC     = "hmac"           // the Email Worker's webhook signature (§2.2)
 	authBearer   = "bearer"         // agent and service tokens only
 	authPasskey  = "passkey"        // the login endpoints, which issue the session
-	authSession  = "session|bearer" // the REST API
+	authSession  = "session|bearer" // the REST API, but for its public contract GET /api/v1/openapi.json
 	authNoShell  = "none: static"   // the WebUI page shell; its data comes from /api/
 	authNoHealth = "none: health"   // GET /healthz; health.go says why
 )

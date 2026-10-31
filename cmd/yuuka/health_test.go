@@ -130,8 +130,9 @@ func TestHealthzIsBounded(t *testing.T) {
 }
 
 // TestRouteInventory lists every endpoint serve exposes and how it
-// authenticates (§13.7). Two are open: the WebUI page shell, which holds
-// no data, and /healthz, which answers one bit. Anything else that turns
+// authenticates (§13.7). Three are open: the WebUI page shell, which
+// holds no data, /healthz, which answers one bit, and the API's contract
+// (§5.1), which is public like the repository. Anything else that turns
 // up without authentication fails here.
 func TestRouteInventory(t *testing.T) {
 	t.Parallel()
@@ -161,7 +162,7 @@ func TestRouteInventory(t *testing.T) {
 		}
 	}
 
-	// Anonymous requests: only the two open routes answer.
+	// Anonymous requests: only the open routes answer.
 	mux := testMux(t, testApp(t, pool, "https://mail.example.com"))
 	for _, c := range []struct {
 		method, path string
@@ -171,6 +172,7 @@ func TestRouteInventory(t *testing.T) {
 		{http.MethodPost, "/ingest/cloudflare", http.StatusUnauthorized},
 		{http.MethodPost, "/mcp", http.StatusUnauthorized},
 		{http.MethodGet, "/api/v1/messages", http.StatusUnauthorized},
+		{http.MethodGet, "/api/v1/openapi.json", http.StatusOK},
 		{http.MethodGet, "/auth/session", http.StatusUnauthorized},
 	} {
 		if w := get(t, mux, c.method, c.path); w.Code != c.code {

@@ -69,6 +69,16 @@ func ParseURI(s string) (id string, a Anchor, err error) {
 	return id, a, err
 }
 
+// UnmarshalText is ParseAnchor, for a fragment that arrives as a
+// parameter.
+func (a *Anchor) UnmarshalText(b []byte) error {
+	var err error
+	if *a, err = ParseAnchor(string(b)); err != nil {
+		return errors.New("want part/<section>[/para/<n>]")
+	}
+	return nil
+}
+
 // ParseAnchor reads a fragment such as "part/2/para/7".
 func ParseAnchor(frag string) (Anchor, error) {
 	seg := strings.Split(frag, "/")

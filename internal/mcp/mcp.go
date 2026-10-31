@@ -22,11 +22,13 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/authn"
+	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
@@ -82,25 +84,38 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 		&sdk.ServerOptions{Instructions: instructions, Logger: s.log})
 	readOnly := &sdk.ToolAnnotations{ReadOnlyHint: true, IdempotentHint: true, OpenWorldHint: new(false)}
 	sdk.AddTool(srv, &sdk.Tool{
-		Name: "search_messages",
+		Name:        "search_messages",
+		InputSchema: input[SearchInput](),
 		Description: "Search mail by words in subject, sender or body. Returns yuuka:// URIs with a snippet, " +
 			"newest first. Needs message:read.",
 		Annotations: readOnly,
 	}, tool(s, viewerOf, "search_messages", auth.MessageRead, s.searchMessages))
 	sdk.AddTool(srv, &sdk.Tool{
-		Name: "get_message",
+		Name:        "get_message",
+		InputSchema: input[GetInput](),
 		Description: "Read one message as structured text with stable anchors. level=snippet (default) gives " +
 			"facts and a snippet, sections a table of contents, part the text of the anchored part from the " +
 			"anchored paragraph on. Needs message:read; delivery facts (recipients, SPF/DKIM/DMARC) also need delivery:read.",
 		Annotations: readOnly,
 	}, tool(s, viewerOf, "get_message", auth.MessageRead, s.getMessage))
 	sdk.AddTool(srv, &sdk.Tool{
-		Name: "list_prefixes",
+		Name:        "list_prefixes",
+		InputSchema: input[PrefixesInput](),
 		Description: "List the local parts (prefixes) mail arrives at, most recently seen first, with message " +
 			"counts and the operator's labels. Needs prefix:read.",
 		Annotations: readOnly,
 	}, tool(s, viewerOf, "list_prefixes", auth.PrefixRead, s.listPrefixes))
 	return srv
+}
+
+// input is the schema of a tool's input, derived as the REST API's are
+// (§5.1): the enums of agentview's shared types list their values.
+func input[T any]() *jsonschema.Schema {
+	s, err := openapi.Schema[T]()
+	if err != nil {
+		panic(err) // a type that cannot describe itself; every test fails first
+	}
+	return s
 }
 
 // userError is a refusal the caller can act on; its text is returned as
