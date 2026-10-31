@@ -26,6 +26,7 @@ WebUI，agent 结构化视图与 MCP；发信：outbox 状态机与崩溃恢复�
 | 多账户、IMAP、归档卸载 | §9 |
 | 前端 | §12 |
 | logo、吉祥物、美术资源 | §14、§12.8 |
+| 改了环境变量、CLI、端口、回复码、MCP 工具 | 上面的章节，加 `docs/operate/` 或 `docs/integrate/` 的对应页 |
 
 `local/` 被 gitignore，放维护者的真实部署信息。存在就读，用来理解实际场景；
 **其中的任何内容都不要写进被跟踪的文件**（见下文「公开仓库」）。
@@ -100,8 +101,8 @@ WebUI，agent 结构化视图与 MCP；发信：outbox 状态机与崩溃恢复�
 | 目录 | 读者 | 回答 |
 |---|---|---|
 | [`docs/design/`](docs/design/README.md) | 开发者 | 为什么：不变量、取舍、放弃了什么 |
-| `docs/operate/`、[`deploy/`](deploy/README.md) | 服务器管理员 | 怎么部署、配置、管理、排障 |
-| `docs/integrate/` | 接 MCP、REST、SMTP 的 agent 作者和服务 | 怎么接、会得到什么结果 |
+| [`docs/operate/`](docs/operate/README.md)、[`deploy/`](deploy/README.md) | 服务器管理员 | 怎么部署、配置、管理、排障 |
+| [`docs/integrate/`](docs/integrate/README.md) | 接 MCP、REST、SMTP 的 agent 作者和服务 | 怎么接、会得到什么结果 |
 
 - 全部用中文。写取舍而不是宣传；不写营销腔，不堆形容词
 - **设计文档**：新章节沿用全局 § 编号，在 [`docs/design/README.md`](docs/design/README.md) 的索引表登记。

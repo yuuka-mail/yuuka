@@ -55,7 +55,8 @@ The documentation is in Chinese and split by what you are doing;
 
 | You want to | Start at |
 |---|---|
-| Deploy and run it | [`deploy/README.md`](deploy/README.md) — Docker Compose with Caddy, Postgres and scheduled backups |
+| Deploy and run it | [`docs/operate/`](docs/operate/README.md); for Docker Compose with Caddy, Postgres and scheduled backups, [`deploy/README.md`](deploy/README.md) |
+| Connect an agent or a service | [`docs/integrate/`](docs/integrate/README.md) — MCP, SMTP submission, REST |
 | Work on the code | [`CONTRIBUTING.md`](CONTRIBUTING.md), then the design in [`docs/design/`](docs/design/README.md) |
 
 The design documents explain why the system is shaped the way it is. Their

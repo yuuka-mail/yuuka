@@ -1,0 +1,104 @@
+# 排障
+
+按现象查。命令的完整用法见[管理命令](cli.md)；用 Docker Compose 时加 `docker compose run --rm yuuka` 前缀，
+日志用 `docker compose logs yuuka` 看。
+
+## 信没到
+
+先分清是没进 Cloudflare，还是进了没到 yuuka。
+
+- **发件方收到退信 `550 5.1.1`**：Cloudflare 的路由规则不认这个地址。新建的规则 30–60 秒后才生效；
+  否则检查这个域的 catch-all 是否指向 Email Worker（[Cloudflare 侧](cloudflare.md#email-worker收信)）
+- **发件方收到 `421 4.3.0`**：Worker 写 R2 失败或超时了。这是临时失败，发件方会重投，不会丢；持续出现就看 Worker 的日志
+- **Cloudflare 收下了，WebUI 里没有**：Worker 已经把原件和投递标记写进 R2，只是 webhook 没调通。
+  yuuka 每 `YUUKA_RECONCILE_INTERVAL`（默认 5 分钟）扫一遍标记，会自己补进来。想立刻补：
+
+  ```bash
+  yuuka reconcile
+  ```
+
+  信总是隔几分钟才到：webhook 一直没调通，全靠定期补。查 Worker 和 `YUUKA_WEBHOOK_SECRETS` 的密钥是否一致、
+  `INGEST_URL` 能否从外面访问。一直补不进来：看 yuuka 的日志，多半是 R2 令牌失效
+- **信在，但不在收件箱里**：发往未认领前缀的信只静默入库，不推送、不进聚合视图。`yuuka prefix ls --state discovered` 里找到它，
+  是你的地址就 `yuuka prefix claim`
+- **从备份恢复之后少了信**：备份时刻之后到达的信还在 R2 里，`yuuka reconcile --full` 把每个原件和库对一遍，补回来
+
+## 信解析得不对
+
+解析失败的信不会丢：原件保留，信被隔离。修了解析器（升级到新版本）之后重新解析：
+
+```bash
+yuuka reparse --since 2026-01-01
+```
+
+`reparse` 只重建从原件派生的内容（正文、线程、头部字段），不碰你的标记、改判和认领，可以放心重跑。
+升级时如果新版本需要补字段，`serve` 启动后会自己在后台补，不用手动 reparse；信多时第一轮会跑一阵。
+
+## 信发不出去
+
+```bash
+yuuka outbox ls
+```
+
+看状态和最后的错误：
+
+- **一直 `queued`，日志里有 `transport paused`**：出口连不上或认证被拒（密码失效、换了没重启）。
+  yuuka 暂停这个出口而不是把信判死，暂停从 1 分钟起翻倍、最长 30 分钟。修好凭据、重启 `serve` 之后接着发
+- **一直 `queued`，错误说出口不在配置里**：发信地址指向的出口名不在 `YUUKA_TRANSPORTS` 里。改配置并重启，或者用 `yuuka identity add` 换出口
+- **`failed`**：出口回了临时错误，按 5 分钟、15 分钟、45 分钟……退避重试，最长间隔 6 小时，大约一天半后放弃
+- **`dead`**：重试用完或被永久拒收，不会再发
+- **`partial`**：部分收件人收下了，其余的被拒或还在重试
+- **`unknown`**：可能已经发出，yuuka 不会自己重发。确认之后用 `yuuka outbox resolve <id> --sent | --resend | --abandon`
+  （[各选项](cli.md#发件队列)）
+
+## 信停在草稿里
+
+这是授权在起作用，不是故障：超出档位、收件人范围或限额的信都停在草稿等人确认。
+提交的结果里写着原因。要调整就改授权：
+
+```bash
+yuuka grant ls --identity alerts@example.com
+yuuka grant set --identity alerts@example.com --principal service:monitoring --max-per-day 500
+```
+
+以人的地址发信时，不是本人提交的一律停在草稿，这条改不了；让服务用它自己拥有的地址
+（[授权](cli.md#发信地址与授权)）。
+
+## 启动时报数据库版本不对
+
+```
+yuuka: database is at version 4, this binary needs 5: run `yuuka migrate` as the schema owner (YUUKA_DATABASE_OWNER_URL), then start again
+```
+
+升级了二进制但没迁移。以拥有表结构的角色跑一次 `yuuka migrate` 再启动。
+
+反过来是 `database is at version 5, this binary only knows 4`：库被更新的版本迁移过，而你回退了版本。
+旧版本不认识新表结构，回退要连同升级前的备份一起恢复。
+
+## 启动时报提交口配置不全
+
+`YUUKA_SUBMISSION_LISTEN` 设了，却既没有证书文件也没有 `YUUKA_SUBMISSION_PROXIES`：yuuka 不肯在没有 TLS 的情况下接受明文。
+给证书，或者写上终结 TLS 的代理的地址（[SMTP 提交口](submission.md#tls-由谁终结)）。
+
+## SMTP 客户端报错
+
+- **连上就被断开**：经代理进来却没带 PROXY 头，或者带了 PROXY 头却不在 `YUUKA_SUBMISSION_PROXIES` 里。
+  看日志里 yuuka 记下的来源地址，和名单对一下
+- **`535 5.7.8`**：用户名或密码不对。用户名是凭据 id，不是主体名
+- **`550 5.7.1`**：这个服务无权以信头 `From` 里的地址发信，回复里写着原因
+
+各个回复码的含义见[接入 SMTP](../integrate/smtp.md#回复码)。
+
+## passkey 丢了
+
+还能登上服务器：`yuuka admin enroll`，用打印的链接注册新的 passkey。
+登不上服务器：在 `<YUUKA_WEB_ORIGIN>/recover` 用一个离线恢复码换一次注册（[第一次登录](cli.md#第一次登录)）。
+
+## 登录被限速、审计里全是同一个地址
+
+yuuka 在反向代理后面，却没有把代理写进 `YUUKA_TRUSTED_PROXIES`，所有人看起来都是代理
+（[配置](config.md#httpwebuirestmcp)）。
+
+## 健康检查
+
+`GET /healthz` 不需要认证：能在短超时内连上 Postgres 就是 200，否则 503。反向代理用它做健康检查。

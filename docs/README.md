@@ -4,10 +4,11 @@
 
 | 你是 | 要做的事 | 从这里开始 |
 |---|---|---|
-| 服务器管理员 | 部署、配置、日常管理、备份升级、出了问题怎么查 | [deploy/README.md](../deploy/README.md) |
+| 服务器管理员 | 部署、配置、日常管理、出了问题怎么查 | [operate/](operate/README.md)；用 Docker Compose 部署看 [deploy/README.md](../deploy/README.md) |
+| agent 作者、要发信的服务 | 接 MCP、SMTP、REST | [integrate/](integrate/README.md) |
 | 开发者 | 改代码、理解设计为什么是这样 | [CONTRIBUTING.md](../CONTRIBUTING.md)、[design/](design/README.md) |
 
-三类文档各管一件事：
+几类文档各管一件事：
 
 - **运维、接入文档**回答「怎么做」。写的是步骤和参考，不讲设计理由，需要时链到设计文档
 - **设计文档**（[design/](design/README.md)）回答「为什么」：不变量、取舍、放弃了什么。
