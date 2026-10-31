@@ -88,7 +88,7 @@ JMAP Filter JSON（M4）──解码──┘
 | `from` | `from:` | 支持 | 发件人的名字或地址 |
 | `to` | `to:` | 支持 | To 里的名字或地址 |
 | `cc` | `cc:` | 支持 | Cc 里的名字或地址 |
-| `bcc` | `bcc:` | 支持 | 自己发出的信的密送地址，取自 outbox（见下） |
+| `bcc` | `bcc:` | 支持 | 自己发出的信的密送地址，取自 outbox；撰写的信还有密送人的名字，取自草稿（见下） |
 | `subject` | `subject:` | 支持 | 主题 |
 | `body` | `body:` | 支持 | `body_text`（有长度上限，§4） |
 | `after` | `after:` | 支持 | `received_at >= 值` |
@@ -143,10 +143,11 @@ JMAP 的 `subject: "foo bar"`（值里不带引号）意思是两个词都要出
   outbox 是决定表，不是派生内容，所以 Bcc 不能放进 `messages` 的派生列，也就进不了 trigram 索引。
   `text` 因此多一条分支：`m.id = ANY(ARRAY(子查询))`，子查询找出密送地址命中、而且调用者看得见的 outbox 行对应的信。
   Postgres 把它当作只算一次的 initplan，再和 trigram 索引做 BitmapOr，所以不会让每次搜索都退化成顺序扫描。
-  Bcc 只按地址匹配，因为 yuuka 里本来就没有密送人的名字：撰写（WebUI、REST、MCP）的收件人只收裸地址，
-  SMTP 提交的 Bcc 只在信封里（`RCPT TO` 不带名字），客户端写的 `Bcc` 头在规范化时就删掉了（§13.6）。
-  同理，自己撰写的信 To / Cc 也没有显示名，`to_names` / `cc_names` 对它们为空。撰写要不要支持显示名是撰写那边的事，
-  支持了以后这里自然跟上
+  Bcc 的名字只有撰写的信有：撰写（WebUI、REST、MCP）的收件人可以带显示名，Bcc 的名字不写进 Sent 副本，
+  留在 outbox 行所来自的草稿上（`drafts.bcc_names`，0014，与 `bcc_addrs` 一一对应）。所以 Bcc 分支的子查询经
+  `outbox.draft_id` 连上草稿，按地址或名字匹配；SMTP 提交直接发出的信没有草稿，Bcc 只在信封里（`RCPT TO` 不带名字，
+  客户端写的 `Bcc` 头在规范化时就删掉了，§13.6），只能按地址匹配。草稿是决定表，这一支和 outbox 一样不进派生列。
+  自己撰写的信 To / Cc 的显示名就在 Sent 副本的头里，`to_names` / `cc_names` 从原件读出时自然收录，不用另做什么
 
 #### 时间
 
