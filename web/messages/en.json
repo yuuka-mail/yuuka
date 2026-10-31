@@ -810,7 +810,6 @@
   "triage_o_spam": "spam",
   "triage_o_yes": "yes",
   "triage_provenance": "Scored {when}, question set v{version}.",
-  "triage_q_injection": "instructions to an AI",
   "triage_q_kind": "kind",
   "triage_q_needs_reply": "needs a reply",
   "triage_q_phishing": "phishing",

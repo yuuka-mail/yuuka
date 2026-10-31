@@ -717,7 +717,6 @@
   "triage_o_spam": "垃圾",
   "triage_o_yes": "是",
   "triage_provenance": "评分于 {when}，问题集 v{version}。",
-  "triage_q_injection": "写给 AI 的指令",
   "triage_q_kind": "类型",
   "triage_q_needs_reply": "需要回复",
   "triage_q_phishing": "钓鱼",

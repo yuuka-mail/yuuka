@@ -14,7 +14,6 @@ const questions: Record<string, () => string> = {
   kind: m.triage_q_kind,
   phishing: m.triage_q_phishing,
   needs_reply: m.triage_q_needs_reply,
-  injection: m.triage_q_injection,
 };
 const options: Record<string, () => string> = {
   yes: m.triage_o_yes,
@@ -29,7 +28,7 @@ export const questionLabel = (q: string) => questions[q]?.() ?? q;
 export const optionLabel = (o: string) => options[o]?.() ?? o;
 
 /** The set's order (§15.3), then any other question by name. */
-const order = ["kind", "phishing", "needs_reply", "injection"];
+const order = ["kind", "phishing", "needs_reply"];
 const rank = (q: string) => (order.includes(q) ? order.indexOf(q) : order.length);
 export function byQuestion<T extends { question: string }>(xs: readonly T[]): T[] {
   return xs.toSorted(
