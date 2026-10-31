@@ -8,9 +8,10 @@
 > [0017](../../internal/store/migrations/0017_transports.sql) 建了机密、出口、身份的出口链，
 > 读写在 [`internal/store/transports.go`](../../internal/store/transports.go)。0018（通知渠道）的形状在 §4 的设计块里；
 > WebUI 上的放宽动作依赖 §13.10 的当场再验证（0015）。分期见 §17.9。
-> 发信（P3）之前，出口的主机和密码、Telegram 仍按 §10.2、§8.4 写的现状从环境变量读。
 > P4 已合入：主机上的 `transport`、`identity set`、`secret` 命令和环境变量里出口的导入在 [`cmd/yuuka`](../../cmd/yuuka/transportcmd.go)，
 > 用法在[运维文档](../operate/cli.md#出口与第三方机密)。
+> P3 已合入：发信从库里解析出口（[`internal/outbox/route.go`](../../internal/outbox/route.go)），
+> 环境变量里的出口只在弃用期内顶替同名的占位（§17.7）；Telegram 仍按 §8.4 写的现状从环境变量读。
 
 M2 把出口当作部署事实：按名字定义在环境变量里，`identities.transport` 只存名字（§4 的原注）；
 Telegram 也是一组环境变量，一个 bot、一个 chat、一个人。当时写下的回头条件是「出现需要在运行时增删出口的场景」。
@@ -115,8 +116,13 @@ yuuka 下一次发信就会在 `AUTH PLAIN` 里把 token 交过去。只把密�
 | KEK 文件格式不对 | 拒绝启动：一个读不懂的 KEK 文件是配置错误，不是可以降级运行的状态 |
 | 某一行的包装器或钥匙引用对不上任何已配置的钥匙 | 只锁这一条，日志写出包装器和钥匙引用 |
 | 钥匙对得上，解包或解封失败 | 视为篡改或损坏：锁住，并经仍能用的渠道推一条 `security` 告警（§8.4） |
+| 从行重算的 audience 和机密封进去的不一致 | 同上：锁住并告警。存储层换去向时一定换新机密（§17.4），这种状态只能是有人绕过它直接改了库 |
 
 包装器不可用时渠道本身也上了锁（bot token 是机密），所以这种情况只能靠日志和 WebUI 横幅被发现。
+
+出口这一侧的落地在 [`internal/outbox/route.go`](../../internal/outbox/route.go)：上锁的出口在 `outbox.error` 里只写原因
+（「没有 KEK」「钥匙没加载」「解不开，重新设置」），不写机密 id、包装器和钥匙引用——`outbox.error` 有比运维者更宽的读者；
+这些细节只进日志。告警经 `outbox.SecurityAlerter` 交出去，由渠道一侧（P5）接上，每个（出口 revision，机密 revision）只报一次。
 
 **轮换只重新包装 DEK，在主机上做。** 本地包装器：新 KEK 放进 `YUUKA_KEK_FILE`，旧的列进 `YUUKA_KEK_PREVIOUS_FILES`（只用来解包），重启；
 `yuuka secret rewrap` 逐行把 DEK 解开、用新 KEK 包上，载荷不动；`yuuka secret ls` 看每一行的钥匙引用，没有行再用旧钥匙时删掉旧文件。
@@ -161,6 +167,15 @@ KEK 丢了（或 Vault 里的钥匙被删）要重新输入所有第三方机密
 构建好的 SMTP 客户端按（出口 id，出口 revision，机密 revision）缓存，这是唯一的缓存。
 暂停按出口 id 记，出口或机密换了 revision 就清掉暂停：修好密码，下一次领取就重试，不用重启，也不等暂停期满。
 主机上用 CLI 改了，下一次领取就生效。LISTEN/NOTIFY 以后可以作为降延迟的优化加上，不是正确性的一部分。
+
+落地（[`internal/outbox/route.go`](../../internal/outbox/route.go)、[`store.ClaimOutbox`](../../internal/store/outbox.go)）时定下的两点：
+
+- **每次领取前读全部出口，而不是只读这封信的链**。出口是个位数的几行，一条查询；解析出能用的出口及其两个 revision，
+  领取的那条 SQL 再按这组 revision 比对，所以解析之后、领取之前有人改了出口，这次领取就不会经它发，下一次领取按新的来。
+  同一份解析也给停车（§10.2.2）用，说得出链上每个成员为什么不能用
+- **缓存里也放「解不开」的结论，但只放不会自己好的那几种**：篡改、audience 不符、格式版本不认识，按 revision 缓存，
+  所以同一个 revision 只告警一次。没有 KEK、钥匙没加载、包装器的临时错误不缓存，下一次领取重试——
+  本地包装器的这几种失败不花什么，远端包装器恢复后也就自动解锁（§17.3）
 
 **渠道**：一个管理协程每 15 秒读一次渠道表，每个启用的 Telegram 渠道跑一个轮询者，revision 变了就重启它。
 分发器对每个事件现查绑定和订阅，不缓存，所以撤销绑定立即生效。15 秒是加渠道、换 token 的最长生效时间，

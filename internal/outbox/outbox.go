@@ -5,10 +5,11 @@
 // copy), and then records the sent copy, the outbox row and its recipients
 // through a store.PolicyTx, in the transaction of the decision that let
 // the message go. The executor claims due rows, hands the bytes to the
-// identity's transport with a commit callback that records committed_at
-// before the point of no return, and records what came back. Whether a
-// failure may be retried is decided only by what was recorded, never by
-// whether a process is still alive: see store.RecoverAttempts.
+// first usable transport of the identity's chain (route.go) with a commit
+// callback that records committed_at before the point of no return, and
+// records what came back. Whether a failure may be retried is decided only
+// by what was recorded, never by whether a process is still alive: see
+// store.RecoverAttempts.
 //
 // Whether a principal may send at all is not decided here: a row can only
 // be queued through a store.PolicyTx whose decision (sendpolicy.Decide,
@@ -32,6 +33,7 @@ import (
 
 	"github.com/yuuka-mail/yuuka/internal/localraw"
 	"github.com/yuuka-mail/yuuka/internal/r2"
+	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/transport"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
@@ -57,9 +59,20 @@ type Config struct {
 	DB    *store.DB
 	Raw   RawStore
 	Local localraw.Dir
-	// Transports by the name identities.transport uses. A row whose
-	// identity names another one is parked, not attempted.
+	// Sealer opens the passwords of the transports configured in the
+	// database (§17.2). Nil is the locked state of §17.3: those that have
+	// a password cannot send, and mail that only they can send waits.
+	Sealer *secret.Sealer
+	// Transports configured in the environment, by name: during the
+	// deprecation period of §17.7 a placeholder row of the same name
+	// sends through one of these. A configured row always wins.
 	Transports map[string]Transport
+	// NewTransport builds the client of a transport configured in the
+	// database; nil means transport.NewSMTP. Tests replace it.
+	NewTransport func(transport.Config) (Transport, error)
+	// Alerter is told when a transport's secret is not what was sealed
+	// for it (§17.3); nil only logs.
+	Alerter SecurityAlerter
 	// IndexSent parses a sent copy into messages (§4.6), so it shows up in
 	// threads and search. Enqueue calls it after the commit; a failure is
 	// logged and does not undo the enqueue, so the indexer must also pick
@@ -77,7 +90,7 @@ type Config struct {
 	// SendTimeout bounds one attempt (default transport.DefaultTimeout).
 	SendTimeout time.Duration
 	// RecoverInterval is how often expired leases are recovered and rows
-	// of unconfigured transports parked (default 1m).
+	// that no transport can send are parked (default 1m).
 	RecoverInterval time.Duration
 	// Retry decides retries of deferred recipients (default DefaultRetry).
 	Retry store.RetryPolicy
@@ -122,28 +135,37 @@ const (
 	// storageRetry: after the sent copy could not be read or did not
 	// match its recorded hash.
 	storageRetry = 10 * time.Minute
-	// unconfiguredRetry: how long a row whose transport is missing waits
-	// before it is checked again.
-	unconfiguredRetry = 10 * time.Minute
+	// misfitRetry: after no usable transport of the chain allowed the
+	// header fields of the sent copy.
+	misfitRetry = 10 * time.Minute
 )
 
 // Service enqueues and sends. Enqueue may be called concurrently, also
 // while Run is running and without it.
 type Service struct {
-	cfg   Config
-	log   *slog.Logger
-	names []string
-	wake  chan struct{}
+	cfg  Config
+	log  *slog.Logger
+	wake chan struct{}
 
-	mu     sync.Mutex
-	paused map[string]pause
+	mu sync.Mutex
+	// clients are the transports built from configured rows, by id, for
+	// as long as their version holds (route.go).
+	clients map[string]resolved
+	// pauses are the transports paused after an exit failure, by id.
+	pauses map[string]pause
+	// lockedAt is when locked transports were last reported; parkedAt,
+	// the same for waiting rows. Zero while there are none.
+	lockedAt, parkedAt time.Time
 	// nextHold is when the earliest recall window ends; zero for none.
 	nextHold time.Time
 }
 
 type pause struct {
-	until time.Time
-	next  time.Duration
+	// version is the transport's when it was paused; another one ends the
+	// pause.
+	version version
+	until   time.Time
+	next    time.Duration
 }
 
 // New returns a Service.
@@ -182,16 +204,15 @@ func New(cfg Config) *Service {
 		host, _ := os.Hostname()
 		cfg.Owner = fmt.Sprintf("%s:%d:%s", host, os.Getpid(), ulid.New(time.Now())[10:])
 	}
-	names := make([]string, 0, len(cfg.Transports))
-	for n := range cfg.Transports {
-		names = append(names, n)
+	if cfg.NewTransport == nil {
+		cfg.NewTransport = func(c transport.Config) (Transport, error) { return transport.NewSMTP(c) }
 	}
 	return &Service{
-		cfg:    cfg,
-		log:    cfg.Log.With("component", "outbox"),
-		names:  names,
-		wake:   make(chan struct{}, 1),
-		paused: map[string]pause{},
+		cfg:     cfg,
+		log:     cfg.Log.With("component", "outbox"),
+		wake:    make(chan struct{}, 1),
+		clients: map[string]resolved{},
+		pauses:  map[string]pause{},
 	}
 }
 
@@ -205,9 +226,10 @@ type Submission struct {
 	// submission DraftID, queued as it was stored; Raw must be its bytes.
 	// Otherwise Raw is stored as a new sent copy.
 	RawID string
-	// Raw is the composed message. Header fields the transport does not
-	// let the caller set are removed before it is stored
-	// (transport.StripHeaders), so the sent copy is what the exit gets.
+	// Raw is the composed message. Header fields that any transport of
+	// the identity's chain does not let the caller set are removed before
+	// it is stored (Caps, transport.StripHeaders), so the sent copy is
+	// what the exit gets, whichever member it is.
 	Raw []byte
 	// Recipients are the envelope recipients, verbatim. Spellings that
 	// differ only in case are one recipient, the first spelling wins
@@ -227,19 +249,9 @@ type Enqueued struct {
 	DraftID string
 }
 
-// ErrUnconfigured is returned when an identity names a transport this
-// process does not have.
+// ErrUnconfigured is returned when no transport of an identity's chain is
+// configured and enabled (Caps).
 var ErrUnconfigured = errors.New("transport not configured")
-
-// Caps returns the caps of the transport called name, ErrUnconfigured if
-// this process has none by that name.
-func (s *Service) Caps(name string) (transport.Caps, error) {
-	tr, ok := s.cfg.Transports[name]
-	if !ok {
-		return transport.Caps{}, fmt.Errorf("%w: %q", ErrUnconfigured, name)
-	}
-	return tr.Caps(), nil
-}
 
 // Enqueue stores sub's bytes as a sent copy and queues it for sending
 // (§4.6) through p, the submission's decision, which must be Queue
@@ -258,12 +270,12 @@ func (s *Service) Enqueue(ctx context.Context, p *store.PolicyTx, sub Submission
 	if d := p.Decision(); !d.Queue {
 		return Enqueued{}, fmt.Errorf("enqueue: %w: %s", store.ErrNotApproved, d.HoldReason)
 	}
-	name := p.Facts().Identity.Transport
-	caps, err := s.Caps(name)
+	ident := p.Facts().Identity
+	caps, err := s.Caps(ctx, ident.ID)
 	if err != nil {
-		// Its caps decide which header fields to strip, so the bytes
-		// cannot be prepared without it.
-		return Enqueued{}, fmt.Errorf("enqueue: identity %s: %w", p.Facts().Identity.ID, err)
+		// The caps decide which header fields to strip, so the bytes
+		// cannot be prepared without them.
+		return Enqueued{}, fmt.Errorf("enqueue: %w", err)
 	}
 	raw := transport.StripHeaders(sub.Raw, caps)
 
@@ -285,7 +297,7 @@ func (s *Service) Enqueue(ctx context.Context, p *store.PolicyTx, sub Submission
 	}
 	p.AfterCommit(func(ctx context.Context) {
 		s.Wake()
-		s.log.Info("queued", "outbox", e.OutboxID, "raw", e.RawID, "transport", name)
+		s.log.Info("queued", "outbox", e.OutboxID, "raw", e.RawID, "transports", strings.Join(ident.Transports, ","))
 		if s.cfg.IndexSent != nil {
 			if err := s.cfg.IndexSent(ctx, e.RawID); err != nil {
 				s.log.Warn("index sent copy; the backlog pass will retry", "raw", e.RawID, "err", err)

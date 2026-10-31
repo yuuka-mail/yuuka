@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 )
 
 // The lock order of held.go under load: recalls, releases, claims and
@@ -56,6 +57,7 @@ func TestHeldLockOrder(t *testing.T) {
 		mu.Unlock()
 	}
 
+	usable := storetest.Usable(t, e.db, "cf")
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	for _, r := range rows {
@@ -68,7 +70,7 @@ func TestHeldLockOrder(t *testing.T) {
 			<-start
 			_, _, err := e.db.PromoteHeld(ctx)
 			check("promote", err)
-			_, err = e.db.ClaimOutbox(ctx, "lock", []string{"cf"}, time.Minute)
+			_, err = e.db.ClaimOutbox(ctx, "lock", usable, time.Minute)
 			check("claim", err)
 		})
 		wg.Go(func() {

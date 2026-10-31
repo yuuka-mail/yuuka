@@ -13,11 +13,12 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/transport"
 )
 
-// Transports are configured in the environment for now (§10.2): a name,
+// Transports configured in the environment, deprecated (§17.7): a name,
 // as the transports table and identities' chains name it, and the exit it
 // stands for. The table holds placeholders for these names (serve and
-// `identity add` make them, EnsureTransports); sending still resolves the
-// name against this configuration (§17.9 P3 moves it to the table). The
+// `identity add` make them, EnsureTransports), and the outbox sends a
+// placeholder's mail through the exit configured here under its name; a
+// row configured in the table always wins (outbox/route.go). The
 // environment lists the names and gives each its own variables:
 //
 //	YUUKA_TRANSPORTS=cloudflare,work

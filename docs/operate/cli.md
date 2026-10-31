@@ -132,6 +132,10 @@ yuuka identity rm alerts@example.com
   `identity ls` 的 TRANSPORT 列是出口链，主出口在前
 - `set --transports 主,备…` 整个替换出口链，最多 8 个，主出口在前；`add --transport NAME` 等于只有一个成员的链。
   换出口链改变了信的去向，记一条审计（`identity.route`，带新旧两条链）
+- 发信时按链的顺序用第一个能用的出口：主出口连不上或认证被拒而暂停时、被 `transport rm` 时、密码上锁时、还只是占位时，走下一个。
+  信已经交给出口、只是没拿到结论（`unknown`）时不换出口重发。入队时按链上所有已配置出口里最严的 caps 去掉信头，
+  所以链上有 `cloudflare` 这类出口时，经主出口发的信也不带自己的 `Message-ID`
+  （[为什么](../design/drivers.md#1022-出口链与执行器)）
 - `--owner` 是这个地址属于谁：`human:<name>`（必须已存在）、`agent:<name>` 或 `service:<name>`
 - `*@example.com` 让这个人能以该域的任意前缀发信
 - `--display-name` 是信头 `From` 里的显示名，会覆盖 SMTP 客户端自己写的

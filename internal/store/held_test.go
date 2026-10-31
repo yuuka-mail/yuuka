@@ -11,6 +11,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/sendpolicy"
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
@@ -121,7 +122,7 @@ func TestHeld(t *testing.T) {
 	}
 
 	// Never claimed, not released before its window ends.
-	if c, err := e.db.ClaimOutbox(ctx, "test", []string{"cf"}, time.Minute); err != nil || c != nil {
+	if c, err := e.db.ClaimOutbox(ctx, "test", storetest.Usable(t, e.db, "cf"), time.Minute); err != nil || c != nil {
 		t.Errorf("claimed a held row: %+v %v", c, err)
 	}
 	rel, wait, err := e.db.PromoteHeld(ctx)
@@ -279,6 +280,7 @@ func TestHeldRecallRace(t *testing.T) {
 		rows[i].id, rows[i].draft, _ = e.hold(fmt.Sprintf("race%d@example.com", i))
 	}
 	withdrew := make([]error, n)
+	usable := storetest.Usable(t, e.db, "cf")
 	start := make(chan struct{})
 	var wg sync.WaitGroup
 	for i := range rows {
@@ -291,7 +293,7 @@ func TestHeldRecallRace(t *testing.T) {
 			if _, _, err := e.db.PromoteHeld(ctx); err != nil {
 				t.Error(err)
 			}
-			if _, err := e.db.ClaimOutbox(ctx, "race", []string{"cf"}, time.Minute); err != nil {
+			if _, err := e.db.ClaimOutbox(ctx, "race", usable, time.Minute); err != nil {
 				t.Error(err)
 			}
 		})

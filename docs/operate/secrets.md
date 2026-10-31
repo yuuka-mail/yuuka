@@ -45,6 +45,8 @@ chown 65532:65532 secrets/yuuka-kek && chmod 400 secrets/yuuka-kek   # 镜像以
 不用 Compose 时同理：一个只有运行 yuuka 的用户能读的文件，不在数据库备份所在的目录里。
 
 `serve` 启动时读 KEK：没设 `YUUKA_KEK_FILE` 时照常启动，需要密码的出口上锁；设了但文件读不了或格式不对，拒绝启动。
+有出口上锁时，`serve` 启动时和之后每 10 分钟报一次 ERROR `transports locked`，只能走它们的信在 `yuuka outbox ls` 里
+是 `queued`，错误写着原因（[排障](troubleshooting.md#信发不出去)）；出口链上有不需要密码、或密码解得开的备用时，信走备用。
 
 ## 从环境变量升级
 

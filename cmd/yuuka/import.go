@@ -37,24 +37,21 @@ import (
 // sees that.
 const importAttempts = 3
 
-// importEnvTransports loads the KEK named in the environment (a malformed
-// one stops serve, as everywhere) and imports ts. Failures to import one
-// transport are logged, not returned: the environment still works for it.
+// importEnvTransports imports ts, sealing with s, serve's Sealer (nil
+// without YUUKA_KEK_FILE: then nothing is imported). Failures to import
+// one transport are logged, not returned: the environment still works
+// for it.
 func importEnvTransports(ctx context.Context, log *slog.Logger, db *store.DB, ts []transportConfig,
-	getenv func(string) string, readFile func(string) ([]byte, error),
-) error {
+	s *secret.Sealer, readFile func(string) ([]byte, error),
+) {
 	if len(ts) == 0 {
-		return nil
-	}
-	s, err := loadSealer(getenv)
-	if err != nil {
-		return err
+		return
 	}
 	if s == nil {
 		log.Warn("YUUKA_TRANSPORTS is deprecated and not imported without YUUKA_KEK_FILE; "+
 			"the transports keep working from the environment for now (docs/operate/secrets.md)",
 			"transports", len(ts))
-		return nil
+		return
 	}
 	for _, t := range ts {
 		if err := importTransport(ctx, log, db, s, t, readFile); err != nil {
@@ -62,7 +59,6 @@ func importEnvTransports(ctx context.Context, log *slog.Logger, db *store.DB, ts
 				"transport", t.Name, "err", err)
 		}
 	}
-	return nil
 }
 
 func importTransport(ctx context.Context, log *slog.Logger, db *store.DB, s *secret.Sealer, t transportConfig,

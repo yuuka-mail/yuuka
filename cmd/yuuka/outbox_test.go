@@ -44,7 +44,7 @@ func (e *hostEnv) unknownOutbox() string {
 	if err != nil {
 		e.t.Fatal(err)
 	}
-	c, err := e.db.ClaimOutbox(ctx, "gone", []string{"cf"}, time.Minute)
+	c, err := e.db.ClaimOutbox(ctx, "gone", storetest.Usable(e.t, e.db, "cf"), time.Minute)
 	if err != nil || c == nil {
 		e.t.Fatalf("claim: %v %v", c, err)
 	}

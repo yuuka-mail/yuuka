@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -70,16 +69,21 @@ func (s *Service) worker(ctx context.Context) {
 }
 
 // step releases the held mail whose recall window has ended, then
-// claims one due row and sends it. It reports whether it found one.
+// resolves the transports, claims one due row through them and sends it.
+// It reports whether it found one.
 func (s *Service) step(ctx context.Context) (bool, error) {
 	s.promote(ctx)
-	c, err := s.cfg.DB.ClaimOutbox(ctx, s.cfg.Owner, s.available(), s.cfg.Lease)
+	rs, err := s.resolve(ctx)
+	if err != nil {
+		return false, fmt.Errorf("resolve transports: %w", err)
+	}
+	c, err := s.cfg.DB.ClaimOutbox(ctx, s.cfg.Owner, rs.usable, s.cfg.Lease)
 	if err != nil || c == nil {
 		return false, err
 	}
 	// More may be due; let another worker look while this one sends.
 	s.Wake()
-	s.attempt(ctx, c)
+	s.attempt(ctx, c, rs)
 	return true, nil
 }
 
@@ -123,8 +127,8 @@ func (s *Service) idle() time.Duration {
 	return wait
 }
 
-// housekeep recovers attempts whose executor is gone and parks rows whose
-// transport is not configured.
+// housekeep recovers attempts whose executor is gone and parks the rows
+// that no transport of their chain can send.
 func (s *Service) housekeep(ctx context.Context) {
 	rec, err := s.cfg.DB.RecoverAttempts(ctx, recoverRetry)
 	for _, r := range rec {
@@ -138,18 +142,39 @@ func (s *Service) housekeep(ctx context.Context) {
 	if err != nil && ctx.Err() == nil {
 		s.log.Error("recover attempts", "err", err)
 	}
-	parked, err := s.cfg.DB.ParkUnconfigured(ctx, s.names, unconfiguredRetry)
-	for _, p := range parked {
-		s.log.Error("not sending: the identity's transport is not configured (YUUKA_TRANSPORTS); the message waits",
-			"outbox", p.OutboxID, "transport", p.Transport)
+	rs, err := s.resolve(ctx)
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Error("resolve transports", "err", err)
+		}
+		return
 	}
+	parked, err := s.cfg.DB.ParkUnusable(ctx, rs.live, rs.why)
 	if err != nil && ctx.Err() == nil {
-		s.log.Error("park unconfigured", "err", err)
+		s.log.Error("park unusable", "err", err)
+	}
+	s.mu.Lock()
+	now := s.cfg.Now()
+	all := len(parked) > 0 && (s.parkedAt.IsZero() || now.Sub(s.parkedAt) >= lockedReport)
+	switch {
+	case len(parked) == 0:
+		s.parkedAt = time.Time{}
+	case all:
+		s.parkedAt = now
+	}
+	s.mu.Unlock()
+	for _, p := range parked {
+		if p.Changed || all {
+			s.log.Error("not sending: no transport of the identity's chain can be used; the message waits",
+				"outbox", p.OutboxID, "why", p.Error)
+		}
 	}
 }
 
-// attempt runs one claimed attempt to its end and records it.
-func (s *Service) attempt(ctx context.Context, c *store.Claimed) {
+// attempt runs one claimed attempt to its end and records it, through the
+// first member of c.Chain that rs resolved and whose caps allow the sent
+// copy (§10.2.2).
+func (s *Service) attempt(ctx context.Context, c *store.Claimed, rs *routes) {
 	log := s.log.With("outbox", c.OutboxID, "attempt", c.AttemptID, "transport", c.Transport)
 	// What happened is recorded even while shutting down.
 	bg := context.WithoutCancel(ctx)
@@ -161,6 +186,25 @@ func (s *Service) attempt(ctx context.Context, c *store.Claimed) {
 		log.Error("cannot read the sent copy; not sending", "raw", c.RawID, "err", err)
 		s.abandon(bg, log, c, "read sent copy: "+err.Error(), storageRetry)
 		return
+	}
+	via, ok := rs.pick(c, raw)
+	if !ok {
+		// The chain's caps narrowed after the bytes were prepared. They
+		// are right as they are; it is the configuration that changed, so
+		// the message waits rather than being rejected.
+		why := fmt.Sprintf("no usable transport of the chain allows the header fields of the sent copy (%s); "+
+			"its caps were narrowed after it was queued", chainNames(c.Chain))
+		log.Error("not sending: "+why, "raw", c.RawID)
+		s.abandon(bg, log, c, why, misfitRetry)
+		return
+	}
+	if via.id != c.TransportID {
+		if err := s.cfg.DB.RouteAttempt(bg, c.AttemptID, s.cfg.Owner, via.name); err != nil {
+			log.Warn("record the transport; not sent", "via", via.name, "err", err)
+			s.abandon(bg, log, c, err.Error(), commitRetry)
+			return
+		}
+		log = log.With("transport", via.name)
 	}
 
 	sendCtx, cancelSend := context.WithTimeout(bg, s.cfg.SendTimeout)
@@ -189,16 +233,19 @@ func (s *Service) attempt(ctx context.Context, c *store.Claimed) {
 		return s.cfg.DB.CommitAttempt(cctx, c.AttemptID, s.cfg.Owner)
 	}
 
-	tr := s.cfg.Transports[c.Transport]
-	res, sendErr := tr.Send(sendCtx, transport.Envelope{From: c.FromAddr, To: c.Recipients}, raw, commit)
+	res, sendErr := via.tr.Send(sendCtx, transport.Envelope{From: c.FromAddr, To: c.Recipients}, raw, commit)
 	stopWatch()
 	mu.Lock()
 	stopped := stopping
 	mu.Unlock()
 
+	// Whatever happens below, this attempt went through via only. Past
+	// the commit point a missing answer is unknown and waits for a person
+	// (§4.5); another transport is tried only by a later claim, and only
+	// for a row that provably was not delivered.
 	switch {
 	case res.Committed:
-		s.markReachable(c.Transport)
+		s.markReachable(via.id)
 		s.finish(bg, log, c, res, sendErr)
 	case stopped:
 		s.abandon(bg, log, c, "shut down before the commit point", 0)
@@ -208,12 +255,26 @@ func (s *Service) attempt(ctx context.Context, c *store.Claimed) {
 		log.Warn("commit point not recorded; not sent", "err", sendErr)
 		s.abandon(bg, log, c, sendErr.Error(), commitRetry)
 	case transport.ExitFailure(sendErr):
-		d := s.pause(c.Transport, sendErr)
-		s.abandon(bg, log, c, fmt.Sprintf("transport paused for %s: %v", d, sendErr), d)
+		d := s.pause(via, sendErr)
+		retry := d
+		if len(c.Chain) > 1 {
+			// The next claim, which leaves the paused transport out, can
+			// send it through a fallback now.
+			retry = 0
+		}
+		s.abandon(bg, log, c, fmt.Sprintf("transport %s paused for %s: %v", via.name, d, sendErr), retry)
 	default:
-		s.markReachable(c.Transport)
+		s.markReachable(via.id)
 		s.finish(bg, log, c, res, sendErr)
 	}
+}
+
+func chainNames(ms []store.ChainMember) string {
+	names := make([]string, len(ms))
+	for k, m := range ms {
+		names[k] = m.Name
+	}
+	return strings.Join(names, ", ")
 }
 
 func stage(err error) transport.Stage {
@@ -342,44 +403,34 @@ func errorText(res *transport.SendResult, err error) string {
 	return strings.Join(refused, "; ")
 }
 
-// pause takes transport name out of claiming after an exit failure and
+// pause takes transport r out of claiming after an exit failure and
 // returns for how long. The pause doubles, up to PauseMax, while the exit
 // keeps failing; a concurrent failure during a pause does not extend it.
-func (s *Service) pause(name string, err error) time.Duration {
+// It is kept by transport id, and ends early when the transport or its
+// secret changes revision (route.go).
+func (s *Service) pause(r resolved, err error) time.Duration {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	now := s.cfg.Now()
-	p := s.paused[name]
+	p, ok := s.pauses[r.id]
+	if !ok || p.version != r.version {
+		p = pause{version: r.version}
+	}
 	if p.until.After(now) {
 		return p.until.Sub(now)
 	}
 	d := max(p.next, s.cfg.PauseMin)
 	p.until, p.next = now.Add(d), min(2*d, s.cfg.PauseMax)
-	s.paused[name] = p
+	s.pauses[r.id] = p
 	s.log.Error("transport paused: the exit cannot be used, so messages wait instead of failing; "+
-		"check its host, certificate and credentials", "transport", name, "for", d, "err", err)
+		"check its host, certificate and credentials", "transport", r.name, "for", d, "err", err)
 	return d
 }
 
-// markReachable ends the pause schedule of a transport that got as far as
-// MAIL: the next exit failure starts again at PauseMin.
-func (s *Service) markReachable(name string) {
+// markReachable ends the pause schedule of transport id, which got as far
+// as MAIL: the next exit failure starts again at PauseMin.
+func (s *Service) markReachable(id string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.paused, name)
-}
-
-// available lists the configured transports that are not paused.
-func (s *Service) available() []string {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	now := s.cfg.Now()
-	out := make([]string, 0, len(s.names))
-	for _, n := range s.names {
-		if !s.paused[n].until.After(now) {
-			out = append(out, n)
-		}
-	}
-	slices.Sort(out)
-	return out
+	delete(s.pauses, id)
 }

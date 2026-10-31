@@ -42,9 +42,22 @@ yuuka outbox ls
 
 看状态和最后的错误：
 
-- **一直 `queued`，日志里有 `transport paused`**：出口连不上或认证被拒（密码失效、换了没重启）。
-  yuuka 暂停这个出口而不是把信判死，暂停从 1 分钟起翻倍、最长 30 分钟。修好凭据、重启 `serve` 之后接着发
-- **一直 `queued`，错误说出口不在配置里**：发信地址指向的出口名不在 `YUUKA_TRANSPORTS` 里。改配置并重启，或者用 `yuuka identity add` 换出口
+- **一直 `queued`，日志里有 `transport paused`**：出口连不上或认证被拒（密码失效）。
+  yuuka 暂停这个出口而不是把信判死，暂停从 1 分钟起翻倍、最长 30 分钟；出口链上有备用时，暂停期间的信走备用。
+  `transport set <名字> --password-file -` 换了密码，下一封信就用新的、暂停立即解除，不用重启；
+  还写在环境变量里的出口换密码要重启 `serve`
+- **一直 `queued`，错误以 `no usable transport:` 开头**：发信地址的出口链上没有一个能用的出口，后面逐个写着原因，
+  `serve` 的日志里同样报 ERROR（原因变了就报，之后每 10 分钟一次）。信不会因此失败，配好之后下一次领取就发，不用重启：
+  - `not configured`：只有名字的占位。用 `transport set` 配好，或者 `identity set --transports` 换出口
+  - `disabled`：出口被 `transport rm` 了。用 `identity set --transports` 换掉
+  - `locked: no key to open its password (YUUKA_KEK_FILE)`：没设 KEK，见[第三方机密](secrets.md#挂载)。
+    这期间 `serve` 每 10 分钟报一次 ERROR `transports locked`
+  - `locked: the key its password was sealed under is not loaded`：密码是用另一把 KEK 加密的，
+    比如换 KEK 之后过早去掉了 `YUUKA_KEK_PREVIOUS_FILES`。日志里的 `transports locked` 写着它要哪把钥匙（`key`，和 `secret ls` 的 KEY 列对得上）
+  - `locked: its password failed authentication` 或 `was sealed for another destination`：库里的密文或出口的主机被绕过 yuuka 改过，
+    日志里是 `transport locked: its secret is not what was sealed for it`。先查清是谁改了库，再 `transport set` 重新输入密码
+- **一直 `queued`，错误说 `no usable transport of the chain allows the header fields`**：信入队之后，链上出口的 caps 收紧了，
+  或者换上了更严的出口，存下的这份信头没有出口肯收。每 10 分钟再看一次；把能收的出口放回链上，或者放宽 caps
 - **`failed`**：出口回了临时错误，按 5 分钟、15 分钟、45 分钟……退避重试，最长间隔 6 小时，大约一天半后放弃
 - **`dead`**：重试用完或被永久拒收，不会再发
 - **`partial`**：部分收件人收下了，其余的被拒或还在重试

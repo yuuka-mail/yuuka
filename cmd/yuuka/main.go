@@ -194,6 +194,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/outbox"
 	"github.com/yuuka-mail/yuuka/internal/r2"
+	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/submit"
 	"github.com/yuuka-mail/yuuka/internal/triage"
@@ -363,11 +364,14 @@ func (a *app) newMessage(id string) {
 	}
 }
 
-// openOutbox builds the outbox from the configured transports, reading
-// their password files, and the submission service in front of it. Only
-// serve sends, so only serve needs them. Each configured name gets a
-// placeholder row if it has none, so identities can name it (§17.7).
-func (a *app) openOutbox(ctx context.Context, log *slog.Logger) error {
+// openOutbox builds the outbox and the submission service in front of
+// it. Only serve sends, so only serve needs them. The outbox resolves the
+// transports from the database at every claim, opening their passwords
+// with sealer (nil: those with a password are locked, §17.3). The
+// environment's transports, read here with their password files, stand
+// in for placeholders of the same name (§17.7); each such name gets a
+// placeholder row if it has none, so identities can name it.
+func (a *app) openOutbox(ctx context.Context, log *slog.Logger, sealer *secret.Sealer) error {
 	trs, err := openTransports(a.cfg.Outbox.Transports, os.ReadFile)
 	if err != nil {
 		return err
@@ -379,13 +383,11 @@ func (a *app) openOutbox(ctx context.Context, log *slog.Logger) error {
 	if err := a.db.EnsureTransports(ctx, names); err != nil {
 		return err
 	}
-	if len(trs) == 0 {
-		log.Info("YUUKA_TRANSPORTS not set; queued mail waits until a transport is configured")
-	}
 	a.outbox = outbox.New(outbox.Config{
 		DB:           a.db,
 		Raw:          r2.NewRawBucket(a.cfg.Raw),
 		Local:        localraw.Dir{Root: a.cfg.DataDir},
+		Sealer:       sealer,
 		Transports:   trs,
 		IndexSent:    a.in.IndexSent,
 		Workers:      a.cfg.Outbox.Workers,
@@ -567,10 +569,14 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	if err := importEnvTransports(ctx, log, a.db, a.cfg.Outbox.Transports, os.Getenv, os.ReadFile); err != nil {
+	// One Sealer for the import and for sending. Without a KEK both wait
+	// and everything else runs; a malformed one stops serve (§17.3).
+	sealer, err := loadSealer(os.Getenv)
+	if err != nil {
 		return err
 	}
-	if err := a.openOutbox(ctx, log); err != nil {
+	importEnvTransports(ctx, log, a.db, a.cfg.Outbox.Transports, sealer, os.ReadFile)
+	if err := a.openOutbox(ctx, log, sealer); err != nil {
 		return err
 	}
 	defer a.submit.Wait()

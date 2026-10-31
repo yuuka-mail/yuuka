@@ -237,7 +237,15 @@ type Claimed struct {
 	OutboxID  string
 	AttemptID string
 	FromAddr  string
-	Transport string
+	// TransportID and Transport (its name, what send_attempts.transport
+	// records) are the transport the attempt was opened for: Chain[0].
+	TransportID string
+	Transport   string
+	// Chain is the members of the identity's chain the claim could use,
+	// primary first (§10.2.2). The executor sends through the first whose
+	// caps allow the stored bytes, and records it with RouteAttempt when
+	// that is not Chain[0].
+	Chain []ChainMember
 	// Recipients of this attempt, verbatim: those still pending or
 	// deferred, so a retry after partial goes to the deferred ones only.
 	Recipients []string
@@ -248,40 +256,52 @@ type Claimed struct {
 	SHA256     []byte
 }
 
-// ClaimOutbox takes the oldest due outbox row whose identity's primary
-// transport is one of transports (by name, as the process configures
-// them; the chain's fallbacks are not used yet), moves it to sending and
-// opens an attempt owned by owner with a lease of lease, all in one
-// transaction. It returns nil when nothing is due. Concurrent claimers
-// skip each other's rows (SKIP LOCKED), and the unique index on open
-// attempts would refuse a second one anyway.
-func (db *DB) ClaimOutbox(ctx context.Context, owner string, transports []string, lease time.Duration) (*Claimed, error) {
-	if len(transports) == 0 {
+// ClaimOutbox takes the oldest due outbox row whose identity's chain has
+// a member in usable at the revisions given (§17.5: a transport or secret
+// that changed since the caller resolved it does not count), moves it to
+// sending and opens an attempt through the first such member, owned by
+// owner with a lease of lease, all in one transaction. It returns nil when
+// nothing is due. Concurrent claimers skip each other's rows (SKIP
+// LOCKED), and the unique index on open attempts would refuse a second
+// one anyway.
+func (db *DB) ClaimOutbox(ctx context.Context, owner string, usable []UsableTransport, lease time.Duration) (*Claimed, error) {
+	if len(usable) == 0 {
 		return nil, nil
 	}
+	ids, revs, srevs := usableArrays(usable)
 	var c *Claimed
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
 		if err := lockContent(ctx, tx); err != nil {
 			return err
 		}
 		var cl Claimed
+		var chainIDs, chainNames []string
 		err := tx.QueryRow(ctx, `
-			SELECT o.id, o.from_addr, t.name, r.id, r.r2_key, r.local_path, r.size, r.sha256
+			WITH u AS (`+usableTransports+`)
+			SELECT o.id, o.from_addr, r.id, r.r2_key, r.local_path, r.size, r.sha256,
+				ARRAY(SELECT u.id FROM identity_transports it JOIN u ON u.id = it.transport_id
+				      WHERE it.identity_id = o.identity_id ORDER BY it.position),
+				ARRAY(SELECT u.name FROM identity_transports it JOIN u ON u.id = it.transport_id
+				      WHERE it.identity_id = o.identity_id ORDER BY it.position)
 			FROM outbox o
-			JOIN identity_transports it ON it.identity_id = o.identity_id AND it.position = 0
-			JOIN transports t ON t.id = it.transport_id
 			JOIN raw_objects r ON r.id = o.raw_id
-			WHERE o.next_retry_at <= now() AND t.name = ANY($1)
+			WHERE o.next_retry_at <= now() AND EXISTS (
+				SELECT 1 FROM identity_transports it JOIN u ON u.id = it.transport_id
+				WHERE it.identity_id = o.identity_id)
 			ORDER BY o.next_retry_at, o.id
 			LIMIT 1
-			FOR UPDATE OF o SKIP LOCKED`, transports).
-			Scan(&cl.OutboxID, &cl.FromAddr, &cl.Transport, &cl.RawID, &cl.R2Key, &cl.LocalPath, &cl.Size, &cl.SHA256)
+			FOR UPDATE OF o SKIP LOCKED`, ids, revs, srevs).
+			Scan(&cl.OutboxID, &cl.FromAddr, &cl.RawID, &cl.R2Key, &cl.LocalPath, &cl.Size, &cl.SHA256, &chainIDs, &chainNames)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil
 		}
 		if err != nil {
 			return fmt.Errorf("select due: %w", err)
 		}
+		for k := range chainIDs {
+			cl.Chain = append(cl.Chain, ChainMember{ID: chainIDs[k], Name: chainNames[k]})
+		}
+		cl.TransportID, cl.Transport = cl.Chain[0].ID, cl.Chain[0].Name
 		rows, err := tx.Query(ctx, `
 			SELECT addr FROM outbox_recipients
 			WHERE outbox_id = $1 AND state IN ('pending', 'deferred')
@@ -683,21 +703,34 @@ func (db *DB) RecoverAttempts(ctx context.Context, retry time.Duration) ([]Recov
 	}
 }
 
-// Parked is a due outbox row whose transport is not configured.
+// Parked is a due outbox row that no member of its identity's chain can
+// send through.
 type Parked struct {
-	OutboxID  string
-	Transport string
+	OutboxID string
+	// Error is what outbox.error now says: each member and why it cannot
+	// be used.
+	Error string
+	// Changed: Error is new, the row was not parked for this already.
+	Changed bool
 }
 
-// ParkUnconfigured pushes every due outbox row whose identity's primary
-// transport is outside configured (or which has none) back by retry, and
-// says so in outbox.error.
-// A missing transport is a configuration error, not a verdict on the
-// message: the row keeps its state and is not attempted, so it neither
-// opens an attempt nor counts toward the retry cap.
-func (db *DB) ParkUnconfigured(ctx context.Context, configured []string, retry time.Duration) ([]Parked, error) {
-	if configured == nil {
-		configured = []string{} // NULL would match nothing
+// ParkUnusable writes why into outbox.error of every due outbox row whose
+// identity's chain has no member among live (the transports the executor
+// can send through, paused ones included): each member with its entry in
+// why, keyed by transport id.
+//
+// A chain that cannot be used is a configuration state (a placeholder, a
+// disabled transport, a locked secret: §10.2.2, §17.3), not a verdict on
+// the message: the row keeps its state, opens no attempt, does not count
+// toward the retry cap, and stays due, so the first claim after the
+// configuration is fixed sends it (§17.5).
+func (db *DB) ParkUnusable(ctx context.Context, live []string, why map[string]string) ([]Parked, error) {
+	if live == nil {
+		live = []string{} // NULL would match nothing
+	}
+	whyIDs, whyTexts := make([]string, 0, len(why)), make([]string, 0, len(why))
+	for id, w := range why {
+		whyIDs, whyTexts = append(whyIDs, id), append(whyTexts, w)
 	}
 	var out []Parked
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
@@ -706,26 +739,29 @@ func (db *DB) ParkUnconfigured(ctx context.Context, configured []string, retry t
 		}
 		rows, err := tx.Query(ctx, `
 			WITH due AS (
-				SELECT o.id, coalesce(t.name, '') AS transport, o.error AS old
+				SELECT o.id, o.error AS old, coalesce((
+					SELECT string_agg(t.name || ': ' || coalesce(w.why, 'changed while being resolved'), '; '
+					                  ORDER BY it.position)
+					FROM identity_transports it JOIN transports t ON t.id = it.transport_id
+					LEFT JOIN unnest($2::text[], $3::text[]) AS w (id, why) ON w.id = t.id
+					WHERE it.identity_id = o.identity_id), 'the identity has no transport') AS why
 				FROM outbox o
-				LEFT JOIN identity_transports it ON it.identity_id = o.identity_id AND it.position = 0
-				LEFT JOIN transports t ON t.id = it.transport_id
-				WHERE o.next_retry_at <= now() AND (t.name IS NULL OR NOT (t.name = ANY($1)))
+				WHERE o.next_retry_at <= now() AND NOT EXISTS (
+					SELECT 1 FROM identity_transports it
+					WHERE it.identity_id = o.identity_id AND it.transport_id = ANY($1))
 				FOR UPDATE OF o SKIP LOCKED
 			)
-			UPDATE outbox o SET next_retry_at = now() + $2 * interval '1 millisecond',
-				error = format('transport %s is not configured', quote_literal(due.transport))
+			UPDATE outbox o SET error = 'no usable transport: ' || due.why
 			FROM due WHERE o.id = due.id
-			RETURNING o.id, due.transport, due.old IS DISTINCT FROM o.error`, configured, retry.Milliseconds())
+			RETURNING o.id, o.error, due.old IS DISTINCT FROM o.error`, live, whyIDs, whyTexts)
 		if err != nil {
 			return err
 		}
 		w := writer{tx: tx}
 		var p Parked
-		var changed bool
-		_, err = pgx.ForEachRow(rows, []any{&p.OutboxID, &p.Transport, &changed}, func() error {
+		_, err = pgx.ForEachRow(rows, []any{&p.OutboxID, &p.Error, &p.Changed}, func() error {
 			out = append(out, p)
-			if changed {
+			if p.Changed {
 				w.change("outbox", p.OutboxID)
 			}
 			return nil
@@ -736,7 +772,7 @@ func (db *DB) ParkUnconfigured(ctx context.Context, configured []string, retry t
 		return w.flush(ctx)
 	})
 	if err != nil {
-		return nil, fmt.Errorf("park unconfigured: %w", err)
+		return nil, fmt.Errorf("park unusable: %w", err)
 	}
 	return out, nil
 }

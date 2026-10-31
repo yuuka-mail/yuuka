@@ -623,7 +623,7 @@ func TestTransportPause(t *testing.T) {
 		t.Fatal("pause did not end")
 	}
 	// Still failing: the pause doubles.
-	if d := e.svc.paused["cf"].until.Sub(e.clock.now()); d != 20*time.Minute {
+	if d := e.svc.pauses[e.transportID("cf")].until.Sub(e.clock.now()); d != 20*time.Minute {
 		t.Errorf("second pause %v", d)
 	}
 	e.clock.add(21 * time.Minute)
@@ -637,7 +637,7 @@ func TestTransportPause(t *testing.T) {
 			t.Errorf("%s: %+v", id, r)
 		}
 	}
-	if _, ok := e.svc.paused["cf"]; ok {
+	if _, ok := e.svc.pauses[e.transportID("cf")]; ok {
 		t.Error("pause schedule not reset by a working exit")
 	}
 }
@@ -662,11 +662,14 @@ func TestTransportPauseConnectionRefused(t *testing.T) {
 	if r := e.row(q.OutboxID); r.state != store.OutboxQueued || !near(r.next, time.Minute) || !slices.Equal(r.outcome, []string{"abandoned"}) {
 		t.Errorf("after connection refused: %+v", r)
 	}
-	if got := e.svc.available(); len(got) != 0 {
-		t.Errorf("available %v", got)
+	if rs, err := e.svc.resolve(t.Context()); err != nil || len(rs.usable) != 0 || len(rs.live) != 1 {
+		t.Errorf("usable %v, live %v, %v", rs.usable, rs.live, err)
 	}
 }
 
+// A chain without a usable member parks the row: it waits with the reason
+// in outbox.error, opens no attempt, and stays due, so the claim after the
+// configuration is fixed sends it.
 func TestUnconfiguredTransportIsParked(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t, nil)
@@ -681,8 +684,16 @@ func TestUnconfiguredTransportIsParked(t *testing.T) {
 	}
 	e.svc.housekeep(t.Context())
 	r := e.row(q.OutboxID)
-	if r.state != store.OutboxQueued || !near(r.next, unconfiguredRetry) || len(r.outcome) != 0 || r.err != "transport 'gone' is not configured" {
+	if r.state != store.OutboxQueued || r.next == nil || *r.next > 0 || len(r.outcome) != 0 ||
+		r.err != "no usable transport: gone: not configured" {
 		t.Errorf("parked: %+v", r)
+	}
+	e.svc.cfg.Transports["gone"] = e.tr
+	if !e.step() {
+		t.Fatal("not claimed once its transport was configured")
+	}
+	if r := e.row(q.OutboxID); r.state != store.OutboxSent || r.err != "" {
+		t.Errorf("after configuring: %+v", r)
 	}
 }
 
@@ -700,7 +711,7 @@ func TestRecovery(t *testing.T) {
 	}
 	claim := func() *store.Claimed {
 		t.Helper()
-		c, err := e.db.ClaimOutbox(ctx, "crashed", []string{"cf"}, time.Minute)
+		c, err := e.db.ClaimOutbox(ctx, "crashed", storetest.Usable(t, e.db, "cf"), time.Minute)
 		if err != nil || c == nil {
 			t.Fatalf("claim: %v %v", c, err)
 		}
@@ -829,13 +840,14 @@ func TestClaimExclusive(t *testing.T) {
 	for i := range n {
 		e.enqueue(fmt.Sprintf("r%d@example.net", i))
 	}
+	usable := storetest.Usable(t, e.db, "cf")
 	var mu sync.Mutex
 	claimed := map[string]int{}
 	var wg sync.WaitGroup
 	for w := range 6 {
 		wg.Go(func() {
 			for {
-				c, err := e.db.ClaimOutbox(t.Context(), fmt.Sprintf("w%d", w), []string{"cf"}, time.Minute)
+				c, err := e.db.ClaimOutbox(t.Context(), fmt.Sprintf("w%d", w), usable, time.Minute)
 				if err != nil {
 					t.Error(err)
 					return

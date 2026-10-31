@@ -11,6 +11,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -156,6 +157,24 @@ func Transports(t *testing.T, db *store.DB, names ...string) {
 	if err := db.EnsureTransports(t.Context(), names); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// Usable is the transports called names at their current revisions, for
+// tests that claim outbox rows (store.ClaimOutbox) without an executor to
+// resolve them.
+func Usable(t *testing.T, db *store.DB, names ...string) []store.UsableTransport {
+	t.Helper()
+	all, err := db.SendingTransports(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []store.UsableTransport
+	for _, tr := range all {
+		if slices.Contains(names, tr.Name) {
+			out = append(out, store.UsableTransport{ID: tr.ID, Revision: tr.Revision, SecretRevision: tr.SecretRevision()})
+		}
+	}
+	return out
 }
 
 // Route gives identity id, inserted by hand, the transport chain [name],

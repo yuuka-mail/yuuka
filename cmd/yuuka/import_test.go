@@ -57,9 +57,11 @@ func TestImportEnvTransports(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(&logs, nil))
 	importOnce := func() {
 		t.Helper()
-		if err := importEnvTransports(ctx, log, e.db, oc.Transports, getenv, os.ReadFile); err != nil {
+		s, err := loadSealer(getenv)
+		if err != nil {
 			t.Fatal(err)
 		}
+		importEnvTransports(ctx, log, e.db, oc.Transports, s, os.ReadFile)
 	}
 
 	// cloudflare is a placeholder (0017 or an earlier serve); relay is

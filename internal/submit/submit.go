@@ -199,7 +199,7 @@ func (s *Service) SubmitRaw(ctx context.Context, v *auth.Viewer, mailFrom string
 			rejected = fmt.Errorf("%w: %s has no grant to send as %s", ErrRejected, v, f.FromAddr)
 			return p.Audit(ctx, toolRaw, args, map[string]any{"rejected": rejected.Error()}, now)
 		}
-		caps, err := s.cfg.Outbox.Caps(f.Identity.Transport)
+		caps, err := s.cfg.Outbox.Caps(ctx, f.Identity.ID)
 		if err != nil {
 			return err
 		}
@@ -419,7 +419,7 @@ func (s *Service) submitDraft(ctx context.Context, v *auth.Viewer, id string) (R
 // queueComposed composes Markdown draft d and queues it through p.
 func (s *Service) queueComposed(ctx context.Context, p *store.PolicyTx, d store.Draft, rs []store.OutboxRecipient, now time.Time) (outbox.Enqueued, error) {
 	f, dec := p.Facts(), p.Decision()
-	caps, err := s.cfg.Outbox.Caps(f.Identity.Transport)
+	caps, err := s.cfg.Outbox.Caps(ctx, f.Identity.ID)
 	if err != nil {
 		return outbox.Enqueued{}, err
 	}
@@ -468,7 +468,7 @@ func (s *Service) queueHeld(ctx context.Context, p *store.PolicyTx, d store.Draf
 	if err != nil {
 		return outbox.Enqueued{}, fmt.Errorf("held submission %s: %w", d.RawID, err)
 	}
-	caps, err := s.cfg.Outbox.Caps(f.Identity.Transport)
+	caps, err := s.cfg.Outbox.Caps(ctx, f.Identity.ID)
 	if err != nil {
 		return outbox.Enqueued{}, err
 	}
