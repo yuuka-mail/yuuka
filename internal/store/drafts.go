@@ -145,6 +145,9 @@ type DraftQuery struct {
 	Held bool
 	// InFlight: went to the outbox (OutboxID).
 	InFlight bool
+	// HoldReasons keeps only held drafts whose hold reason is one of
+	// these; empty keeps every draft the states select.
+	HoldReasons []sendpolicy.HoldReason
 	// Before returns drafts strictly after this position in the order
 	// (updated_at, id), both descending; nil starts at the most recent.
 	// An edit moves a draft to the top, past a cursor taken before it.
@@ -171,17 +174,22 @@ func (db *DB) Drafts(ctx context.Context, v *auth.Viewer, q DraftQuery) ([]Draft
 	if !q.Open && !q.Held && !q.InFlight {
 		q.Open, q.Held = true, true
 	}
-	args := []any{v.PrincipalID, q.Open, q.Held, q.InFlight, limit}
+	reasons := make([]string, len(q.HoldReasons))
+	for i, r := range q.HoldReasons {
+		reasons[i] = string(r)
+	}
+	args := []any{v.PrincipalID, q.Open, q.Held, q.InFlight, limit, reasons}
 	page := ""
 	if q.Before != nil {
 		args = append(args, q.Before.UpdatedAt, q.Before.ID)
-		page = ` AND (dr.updated_at, dr.id) < ($6, $7)`
+		page = ` AND (dr.updated_at, dr.id) < ($7, $8)`
 	}
 	rows, err := db.pool.Query(ctx, `SELECT `+draftCols+draftFrom+`
 		WHERE `+visibleDraft(v)+page+` AND CASE
 			WHEN o.id IS NOT NULL THEN $4::bool
 			WHEN dr.hold_reason IS NOT NULL THEN $3::bool
 			ELSE $2::bool END
+		AND (cardinality($6::text[]) = 0 OR o.id IS NULL AND dr.hold_reason = ANY($6))
 		ORDER BY dr.updated_at DESC, dr.id DESC LIMIT $5`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list drafts: %w", err)

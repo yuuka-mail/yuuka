@@ -429,6 +429,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/counts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Count what waits in the outbox, proposals and drafts, as their lists would show it */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Counts"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/drafts": {
         parameters: {
             query?: never;
@@ -442,6 +487,8 @@ export interface paths {
                 query?: {
                     /** @description only drafts in these states; absent means draft,held */
                     state?: components["schemas"]["DraftState"][];
+                    /** @description only held drafts whose hold_reason is one of these */
+                    hold_reason?: components["schemas"]["HoldReason"][];
                     /** @description next_cursor of the previous page */
                     cursor?: string;
                     limit?: number;
@@ -2976,6 +3023,11 @@ export interface components {
             domain: string;
             as: string;
         };
+        Counts: {
+            outbox?: components["schemas"]["OutboxCounts"];
+            proposals: number;
+            drafts: components["schemas"]["DraftCounts"];
+        };
         /** @enum {string} */
         CredentialKind: "token" | "smtp_password";
         CredentialList: {
@@ -3048,6 +3100,10 @@ export interface components {
             in_reply_to?: string;
             /** @description the passages the draft relies on, which the review checks; at most 32, each quote at most 1000 characters */
             cites?: components["schemas"]["Cite"][];
+        };
+        DraftCounts: {
+            open: number;
+            held: number;
         };
         DraftPage: {
             drafts: components["schemas"]["Draft"][];
@@ -3286,6 +3342,11 @@ export interface components {
             domain?: string;
             /** Format: date-time */
             delivered_at: string;
+        };
+        OutboxCounts: {
+            held: number;
+            unknown: number;
+            attention: number;
         };
         OutboxEntry: {
             id: string;
@@ -3545,6 +3606,7 @@ export interface components {
         ReviewExtracted: {
             kind: components["schemas"]["ExtractionKind"];
             message_id: string;
+            subject?: string;
             source: components["schemas"]["ExtractionSource"];
             where: string;
         };
@@ -3557,6 +3619,7 @@ export interface components {
             as: string;
             where: string;
             message_id?: string;
+            subject?: string;
         };
         Rule: {
             id: string;

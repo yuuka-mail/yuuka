@@ -457,6 +457,8 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 | 撤销（`Undo`） | agent / service 只能撤销自己的 action，别人的和不存在一样；看不见的信上的行不动、只计数 |
 | 标签列表（`Labels`）、`label=` / `archived=` 过滤 | 只在可见消息上计数和过滤 |
 | 规则预览、草拟（`PreviewRule`、`FactsFor`、`CountMatches`） | 只在可见投递上求值和计数；只经 Sent 副本可见的信没有投递，不能拿来草拟 |
+| 审核结论里指向的信的主题（`Subjects`，草稿和 outbox 行的 `review`） | 结论只存 message id；主题只在那封信对读者可见时给，看不见的只剩 id |
+| 侧栏计数（`Counts`，REST `/counts`） | 每个数和它对应的列表同一个条件：outbox 行按发信身份的账户、提案按 `proposalVisible`、草稿按 `visibleDraft`；outbox 的数另要 `delivery:read` |
 | 推送通知 | 只发给 human，不经过受限主体 |
 
 测试上用一个「含受限账户」的固定夹具，表驱动地把上表每条读路径跑一遍，断言没有泄漏。

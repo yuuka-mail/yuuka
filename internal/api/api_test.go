@@ -154,6 +154,16 @@ func (s *spy) OutboxByID(ctx context.Context, v *auth.Viewer, id string) (store.
 	return s.DB.OutboxByID(ctx, v, id)
 }
 
+func (s *spy) Subjects(ctx context.Context, v *auth.Viewer, ids []string) (map[string]string, error) {
+	s.saw("Subjects", v)
+	return s.DB.Subjects(ctx, v, ids)
+}
+
+func (s *spy) Counts(ctx context.Context, v *auth.Viewer, now time.Time) (store.Counts, error) {
+	s.saw("Counts", v)
+	return s.DB.Counts(ctx, v, now)
+}
+
 func (s *spy) WithdrawOutbox(ctx context.Context, v *auth.Viewer, id string, via map[string]any, at time.Time) (store.Withdrawal, error) {
 	s.saw("WithdrawOutbox", v)
 	return s.DB.WithdrawOutbox(ctx, v, id, via, at)
@@ -556,6 +566,14 @@ func (h *harness) queued() string {
 // him.
 func (h *harness) held() string {
 	h.t.Helper()
+	return h.heldCiting("")
+}
+
+// heldCiting is held, its draft citing message cited unless "": mail of
+// another thread its recipient never had, which the review reports
+// (cross_thread, advisory) and still holds for a recall.
+func (h *harness) heldCiting(cited string) string {
+	h.t.Helper()
 	if _, err := h.pool.Exec(h.t.Context(), `
 		INSERT INTO identity_grants (identity_id, principal_id, send_policy, recipient_scope)
 		SELECT id, $1, 'review', 'any' FROM identities WHERE prefix = 'arisu'
@@ -565,7 +583,11 @@ func (h *harness) held() string {
 	if n := h.count(`SELECT count(*) FROM outbox_recipients WHERE addr_fold = 'bob@example.net'`); n == 0 {
 		h.queued()
 	}
-	d := h.draft(h.agent, store.Draft{FromAddr: "arisu@example.com", Subject: "Held", BodyMD: "See you at noon."})
+	d := store.Draft{FromAddr: "arisu@example.com", Subject: "Held", BodyMD: "See you at noon."}
+	if cited != "" {
+		d.Cites = json.RawMessage(`[{"uri":"yuuka://message/` + cited + `"}]`)
+	}
+	d = h.draft(h.agent, d)
 	res, err := h.sub.SubmitDraft(h.t.Context(), viewer(h.agent), d.ID)
 	if err != nil || !res.Held {
 		h.t.Fatalf("submit: %+v, %v", res, err)
@@ -612,7 +634,9 @@ func TestACL(t *testing.T) {
 	att := h.find("Invoice and logo")
 	mine := func() string { return h.draft(h.agent, store.Draft{FromAddr: "arisu@example.com"}).ID }
 	get, upd, del, sub := mine(), mine(), mine(), mine()
-	sent, unknown, held := h.queued(), h.unknown(), h.held()
+	unknown, held := h.unknown(), h.held()
+	// Held mail whose review names a message: read with its subject.
+	cited := h.heldCiting(att)
 	other := principalNamed(t, h, "agent", "momoi")
 	// arisu's annotation and proposals, and the operator's rules (§8.5).
 	annotated := h.annotation(h.agent, msg.ID, store.SetLabel("acl", true))
@@ -675,7 +699,7 @@ func TestACL(t *testing.T) {
 			path: "/api/v1/messages/" + msg.ID + "/reply-identities", reads: []string{"ReplyIdentities", "Standings"},
 		},
 		"GET /api/v1/identities": {path: "/api/v1/identities", reads: []string{"Standings"}},
-		"GET /api/v1/drafts":     {path: "/api/v1/drafts?state=draft,held,outbox", reads: []string{"Drafts"}},
+		"GET /api/v1/drafts":     {path: "/api/v1/drafts?state=draft,held,outbox&hold_reason=review,policy", reads: []string{"Drafts"}},
 		"POST /api/v1/drafts": {
 			method: http.MethodPost, path: "/api/v1/drafts",
 			body:  `{"in_reply_to":"` + msg.ID + `","to":["bob@example.net"],"body_markdown":"Hi"}`,
@@ -690,7 +714,7 @@ func TestACL(t *testing.T) {
 		// The submission core reads the store itself, as the viewer.
 		"POST /api/v1/drafts/{id}/submit": {method: http.MethodPost, path: "/api/v1/drafts/" + sub + "/submit", private: true},
 		"GET /api/v1/outbox":              {path: "/api/v1/outbox?state=queued,unknown", reads: []string{"OutboxList"}},
-		"GET /api/v1/outbox/{id}":         {path: "/api/v1/outbox/" + sent, reads: []string{"OutboxByID"}},
+		"GET /api/v1/outbox/{id}":         {path: "/api/v1/outbox/" + cited, reads: []string{"OutboxByID", "Subjects"}},
 		"POST /api/v1/outbox/{id}/resolve": {
 			method: http.MethodPost, path: "/api/v1/outbox/" + unknown + "/resolve", body: `{"resolution":"abandon"}`,
 			as: h.human, reads: []string{"OutboxByID"}, people: true,
@@ -703,6 +727,7 @@ func TestACL(t *testing.T) {
 		},
 
 		"GET /api/v1/labels": {path: "/api/v1/labels", reads: []string{"Labels"}},
+		"GET /api/v1/counts": {path: "/api/v1/counts", reads: []string{"Counts"}},
 		"POST /api/v1/messages/{id}/annotations": {
 			method: http.MethodPost, path: "/api/v1/messages/" + msg.ID + "/annotations",
 			body: `{"actions":[{"kind":"label","label":"acl2"}]}`, reads: []string{"Annotate"},

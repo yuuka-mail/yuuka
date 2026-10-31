@@ -939,6 +939,41 @@ func TestVisibility(t *testing.T) {
 			if got := names(ids); !slices.Equal(got, wantSent) {
 				t.Errorf("OutboxList %q, want %q", got, wantSent)
 			}
+
+			// A review names the messages it refers to only where v
+			// sees them.
+			subjects, err := db.Subjects(ctx, v, slices.Collect(maps.Values(msgs)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := names(slices.Collect(maps.Keys(subjects))); !slices.Equal(got, want) {
+				t.Errorf("Subjects %q, want %q", got, want)
+			}
+			for id, s := range subjects {
+				if names([]string{id})[0] != s {
+					t.Errorf("Subjects %s: %q", id, s)
+				}
+			}
+
+			// The sidebar's counts are its lists' lengths. The outbox
+			// states it counts are checked below, once rows are in
+			// them.
+			c, err := db.Counts(ctx, v, time.Now())
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending, err := db.Proposals(ctx, v, store.ProposalQuery{State: store.ProposalPending})
+			if err != nil {
+				t.Fatal(err)
+			}
+			open, err := db.Drafts(ctx, v, store.DraftQuery{Open: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if c.Proposals != len(ownProposals[v]) || c.Proposals != len(pending) || c.DraftsOpen != len(open) ||
+				c.DraftsOpen != map[*auth.Viewer]int{everyone: 2, restricted: 1, nobody: 0}[v] || c.DraftsHeld != 0 {
+				t.Errorf("Counts %+v: %d proposals pending, %d drafts open", c, len(pending), len(open))
+			}
 			var all []string
 			if err := pool.QueryRow(ctx, `SELECT array_agg(id) FROM outbox`).Scan(&all); err != nil {
 				t.Fatal(err)
@@ -1031,6 +1066,17 @@ func TestVisibility(t *testing.T) {
 				}
 			}
 		})
+	}
+
+	// The outbox counts, after the reads above: every row's delivery
+	// unknown, counted only where v may list the row.
+	if _, err := pool.Exec(ctx, `UPDATE outbox SET state = 'unknown', next_retry_at = NULL`); err != nil {
+		t.Fatal(err)
+	}
+	for v, n := range map[*auth.Viewer]int{everyone: 3, restricted: 2, nobody: 0} {
+		if c, err := db.Counts(ctx, v, time.Now()); err != nil || c.OutboxUnknown != n || c.OutboxAttention != n || c.OutboxHeld != 0 {
+			t.Errorf("Counts as %s: %+v, %v; want %d unknown", v.PrincipalName, c, err, n)
+		}
 	}
 
 	// Deleting a note of someone else's (§8.10), after the reads above:

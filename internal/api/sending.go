@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/yuuka-mail/yuuka/internal/agentview"
@@ -38,7 +39,7 @@ func (a *API) createDraft(ctx context.Context, v *auth.Viewer, p CreateDraftPara
 	if err != nil {
 		return Draft{}, err
 	}
-	return draftOut(d), nil
+	return a.draftOut(ctx, v, d)
 }
 
 func (a *API) updateDraft(ctx context.Context, v *auth.Viewer, p UpdateDraftParams) (Draft, error) {
@@ -59,7 +60,7 @@ func (a *API) updateDraft(ctx context.Context, v *auth.Viewer, p UpdateDraftPara
 	if err != nil {
 		return Draft{}, err
 	}
-	return draftOut(d), nil
+	return a.draftOut(ctx, v, d)
 }
 
 // draftOf turns a body into the store's draft. Without a From, from is
@@ -111,7 +112,7 @@ func (a *API) draft(ctx context.Context, v *auth.Viewer, p IDParams) (Draft, err
 	if err != nil {
 		return Draft{}, err
 	}
-	return draftOut(d), nil
+	return a.draftOut(ctx, v, d)
 }
 
 var draftStates = map[DraftState]func(*store.DraftQuery){
@@ -125,6 +126,9 @@ func (a *API) drafts(ctx context.Context, v *auth.Viewer, p DraftsParams) (Draft
 	for _, s := range p.State {
 		draftStates[s](&q)
 	}
+	for _, r := range p.HoldReason {
+		q.HoldReasons = append(q.HoldReasons, sendpolicy.HoldReason(r))
+	}
 	if p.Cursor != nil {
 		q.Before = &store.DraftCursor{UpdatedAt: p.Cursor.ReceivedAt, ID: p.Cursor.ID}
 	}
@@ -133,8 +137,13 @@ func (a *API) drafts(ctx context.Context, v *auth.Viewer, p DraftsParams) (Draft
 		return DraftPage{}, err
 	}
 	page := DraftPage{Drafts: make([]Draft, len(ds))}
+	var reviews []*Review
 	for i, d := range ds {
 		page.Drafts[i] = draftOut(d)
+		reviews = append(reviews, page.Drafts[i].Review)
+	}
+	if err := a.nameReviewed(ctx, v, reviews...); err != nil {
+		return DraftPage{}, err
 	}
 	if len(ds) == p.Limit {
 		last := ds[len(ds)-1]
@@ -145,6 +154,13 @@ func (a *API) drafts(ctx context.Context, v *auth.Viewer, p DraftsParams) (Draft
 
 func (a *API) deleteDraft(ctx context.Context, v *auth.Viewer, p IDParams) (struct{}, error) {
 	return struct{}{}, a.db.DeleteDraft(ctx, v, p.ID, time.Now())
+}
+
+// draftOut is d as v reads it: draftOut with the messages its review
+// refers to named (nameReviewed).
+func (a *API) draftOut(ctx context.Context, v *auth.Viewer, d store.Draft) (Draft, error) {
+	out := draftOut(d)
+	return out, a.nameReviewed(ctx, v, out.Review)
 }
 
 func draftOut(d store.Draft) Draft {
@@ -199,6 +215,54 @@ func reviewOut(raw json.RawMessage) *Review {
 		out.Checks[i] = rc
 	}
 	return out
+}
+
+// nameReviewed adds to the findings of rs the subjects of the messages
+// they refer to, in one read, for the messages v may see: the verdict
+// keeps ids only, and a person deciding on held mail wants to know which
+// mail it took a code from or cited without opening each. Never the
+// extracted value: neither the verdict nor Review holds one. A subject
+// may still carry a code its sender put there; it goes only to a viewer
+// who reads it on the message anyway.
+func (a *API) nameReviewed(ctx context.Context, v *auth.Viewer, rs ...*Review) error {
+	var ids []string
+	for _, r := range rs {
+		if r == nil {
+			continue
+		}
+		for _, c := range r.Checks {
+			for _, x := range c.Extracted {
+				ids = append(ids, x.MessageID)
+			}
+			for _, x := range c.Refs {
+				if x.MessageID != "" {
+					ids = append(ids, x.MessageID)
+				}
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	slices.Sort(ids)
+	subjects, err := a.db.Subjects(ctx, v, slices.Compact(ids))
+	if err != nil {
+		return err
+	}
+	for _, r := range rs {
+		if r == nil {
+			continue
+		}
+		for _, c := range r.Checks {
+			for i := range c.Extracted {
+				c.Extracted[i].Subject = subjects[c.Extracted[i].MessageID]
+			}
+			for i := range c.Refs {
+				c.Refs[i].Subject = subjects[c.Refs[i].MessageID]
+			}
+		}
+	}
+	return nil
 }
 
 // submitDraft submits draft id through the core. Queued or held, it is a
@@ -301,8 +365,13 @@ func (a *API) outboxList(ctx context.Context, v *auth.Viewer, p OutboxParams) (O
 		return OutboxPage{}, err
 	}
 	page := OutboxPage{Entries: make([]OutboxEntry, len(rows))}
+	var reviews []*Review
 	for i, r := range rows {
 		page.Entries[i] = outboxOut(r)
+		reviews = append(reviews, page.Entries[i].Review)
+	}
+	if err := a.nameReviewed(ctx, v, reviews...); err != nil {
+		return OutboxPage{}, err
 	}
 	if len(rows) == p.Limit {
 		page.NextCursor = rows[len(rows)-1].ID
@@ -315,7 +384,8 @@ func (a *API) outboxEntry(ctx context.Context, v *auth.Viewer, p IDParams) (Outb
 	if err != nil {
 		return OutboxEntry{}, err
 	}
-	return outboxOut(e), nil
+	out := outboxOut(e)
+	return out, a.nameReviewed(ctx, v, out.Review)
 }
 
 // resolveOutbox is the human decision on mail whose delivery is unknown
@@ -346,7 +416,8 @@ func (a *API) resolveOutbox(ctx context.Context, v *auth.Viewer, p ResolveParams
 	if err != nil {
 		return OutboxEntry{}, err
 	}
-	return outboxOut(e), nil
+	out := outboxOut(e)
+	return out, a.nameReviewed(ctx, v, out.Review)
 }
 
 // withdrawOutbox recalls held mail during its recall window (§8.9): it
@@ -380,6 +451,20 @@ func (a *API) withdrawOutbox(ctx context.Context, v *auth.Viewer, p IDParams) (W
 		if a.suspended != nil {
 			a.suspended.Suspended(ctx, *s)
 		}
+	}
+	return out, nil
+}
+
+// counts is the sidebar's. The outbox is counted only for a credential
+// that may list it: its rows carry envelope recipients (outboxRead).
+func (a *API) counts(ctx context.Context, v *auth.Viewer, _ struct{}) (Counts, error) {
+	c, err := a.db.Counts(ctx, v, time.Now())
+	if err != nil {
+		return Counts{}, err
+	}
+	out := Counts{Proposals: c.Proposals, Drafts: DraftCounts{Open: c.DraftsOpen, Held: c.DraftsHeld}}
+	if v.Has(auth.DeliveryRead) {
+		out.Outbox = &OutboxCounts{Held: c.OutboxHeld, Unknown: c.OutboxUnknown, Attention: c.OutboxAttention}
 	}
 	return out, nil
 }

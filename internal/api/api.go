@@ -62,6 +62,11 @@ type Store interface {
 	Standings(ctx context.Context, v *auth.Viewer) ([]store.Standing, error)
 	OutboxList(ctx context.Context, v *auth.Viewer, q store.OutboxQuery) ([]store.OutboxEntry, error)
 	OutboxByID(ctx context.Context, v *auth.Viewer, id string) (store.OutboxEntry, error)
+	// Subjects names the messages a review verdict refers to, those v
+	// may see only; Counts is the sidebar's, each over what its list
+	// would show v.
+	Subjects(ctx context.Context, v *auth.Viewer, ids []string) (map[string]string, error)
+	Counts(ctx context.Context, v *auth.Viewer, now time.Time) (store.Counts, error)
 	// ResolveOutbox records a person's decision on an unknown row; the
 	// handler reads the row as the viewer first (OutboxByID).
 	ResolveOutbox(ctx context.Context, id, resolution string, a store.Action, p store.RetryPolicy) (string, error)
@@ -254,6 +259,8 @@ var routes = []route{
 		outboxWithdraw, (*API).withdrawOutbox),
 
 	jsonRoute(http.MethodGet, "/api/v1/labels", "List the labels in use, with how many messages carry each", read, (*API).labels),
+	jsonRoute(http.MethodGet, "/api/v1/counts", "Count what waits in the outbox, proposals and drafts, as their lists would show it",
+		read, (*API).counts),
 	jsonRoute(http.MethodPost, "/api/v1/messages/{id}/annotations",
 		"Label, classify or archive a message or its thread; a higher-ranked writer's value is overruled, not an error",
 		annotate, (*API).annotate),

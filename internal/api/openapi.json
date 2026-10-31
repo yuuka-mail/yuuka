@@ -558,6 +558,25 @@
         ],
         "additionalProperties": false
       },
+      "Counts": {
+        "type": "object",
+        "properties": {
+          "outbox": {
+            "$ref": "#/components/schemas/OutboxCounts"
+          },
+          "proposals": {
+            "type": "integer"
+          },
+          "drafts": {
+            "$ref": "#/components/schemas/DraftCounts"
+          }
+        },
+        "required": [
+          "proposals",
+          "drafts"
+        ],
+        "additionalProperties": false
+      },
       "CredentialKind": {
         "type": "string",
         "enum": [
@@ -819,6 +838,22 @@
             "description": "the passages the draft relies on, which the review checks; at most 32, each quote at most 1000 characters"
           }
         },
+        "additionalProperties": false
+      },
+      "DraftCounts": {
+        "type": "object",
+        "properties": {
+          "open": {
+            "type": "integer"
+          },
+          "held": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "open",
+          "held"
+        ],
         "additionalProperties": false
       },
       "DraftPage": {
@@ -1757,6 +1792,26 @@
         ],
         "additionalProperties": false
       },
+      "OutboxCounts": {
+        "type": "object",
+        "properties": {
+          "held": {
+            "type": "integer"
+          },
+          "unknown": {
+            "type": "integer"
+          },
+          "attention": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "held",
+          "unknown",
+          "attention"
+        ],
+        "additionalProperties": false
+      },
       "OutboxEntry": {
         "type": "object",
         "properties": {
@@ -2692,6 +2747,9 @@
           "message_id": {
             "type": "string"
           },
+          "subject": {
+            "type": "string"
+          },
           "source": {
             "$ref": "#/components/schemas/ExtractionSource"
           },
@@ -2736,6 +2794,9 @@
             "type": "string"
           },
           "message_id": {
+            "type": "string"
+          },
+          "subject": {
             "type": "string"
           }
         },
@@ -4305,6 +4366,45 @@
         }
       }
     },
+    "/api/v1/counts": {
+      "get": {
+        "summary": "Count what waits in the outbox, proposals and drafts, as their lists would show it",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Counts"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/drafts": {
       "get": {
         "summary": "List drafts, most recently changed first",
@@ -4331,6 +4431,19 @@
               "type": "array",
               "items": {
                 "$ref": "#/components/schemas/DraftState"
+              }
+            }
+          },
+          {
+            "name": "hold_reason",
+            "in": "query",
+            "description": "only held drafts whose hold_reason is one of these",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/HoldReason"
               }
             }
           },

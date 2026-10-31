@@ -19,7 +19,9 @@ WebUI 用的是浏览器会话，程序不要模仿它。
   `detail` 是给人读的
 - **超出授权不是错误**：提交草稿（`POST /api/v1/drafts/{id}/submit`）照常返回成功，`state` 说明信是进了队列（`queued`）、
   审核通过后扣在撤回窗口里（`held`，到 `hold_until` 发出）还是停在草稿（`draft`，`hold_reason` 说为什么）。
-  被审核拦下的草稿带 `review`：每项检查的结论和触发它的东西；验证码和登录链接只说在哪里找到，不带值
+  被审核拦下的草稿带 `review`：每项检查的结论和触发它的东西；验证码和登录链接只说在哪里找到，不带值。
+  发现里指向的信（`extracted`、`refs` 的 `message_id`）在你看得见那封信时带它的 `subject`。
+  `GET /api/v1/drafts?hold_reason=review,owner` 只列因这些原因停着的草稿
 - **用某个身份发会怎样**：`GET /api/v1/identities` 每项的 `outcome` 直接说：`sends`（不经人发出）、
   `held_after_review`（先审核，过了扣在 `hold_seconds` 的撤回窗口里再发，拦下的停在草稿）、`draft_only`、`none`。
   `review` 档的 `sends` 是假、`hold_reason` 是 `review`，和被审核拦下的草稿一样，所以按 `outcome` 分支，不要从 `hold_seconds` 推
@@ -57,6 +59,9 @@ WebUI 用的是浏览器会话，程序不要模仿它。
   如 `POST /api/v1/admin/grants/{identity}/{principal}/tighten`
 - 会有新行插到头部的列表（消息、搜索、草稿、发件队列、提案）和变更（见下）用不透明游标分页；变化很慢的列表用 `limit` / `offset`
 - 多值参数逗号分隔，如 `class=human,unknown`
+- **侧栏计数**：`GET /api/v1/counts` 一次给出待决的提案、在写和停着的草稿，有 `delivery:read` 时再给发件队列里
+  扣在撤回窗口的（`held`）、投递未知的（`unknown`）和要人看一眼的（`attention`：`unknown`、`failed`、`partial`）。
+  每个数都是对应列表会给你看的行数
 - 字段名 snake_case，时间是 RFC 3339 UTC，列表永远是数组，响应里没有 `null`
 
 受限的凭据能知道某封受限的信存在，但看不到它的任何头部和正文。

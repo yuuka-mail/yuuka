@@ -52,9 +52,10 @@ type UpdateDraftParams struct {
 
 // DraftsParams are the parameters of GET /api/v1/drafts.
 type DraftsParams struct {
-	State  []DraftState `query:"state" jsonschema:"only drafts in these states; absent means draft,held"`
-	Cursor *Cursor      `query:"cursor" jsonschema:"next_cursor of the previous page"`
-	Limit  int          `query:"limit" minimum:"1" maximum:"500" default:"100"`
+	State      []DraftState `query:"state" jsonschema:"only drafts in these states; absent means draft,held"`
+	HoldReason []HoldReason `query:"hold_reason" jsonschema:"only held drafts whose hold_reason is one of these"`
+	Cursor     *Cursor      `query:"cursor" jsonschema:"next_cursor of the previous page"`
+	Limit      int          `query:"limit" minimum:"1" maximum:"500" default:"100"`
 }
 
 // DraftState is where a draft stands: being written, held by its last
@@ -183,8 +184,10 @@ type ReviewCheck struct {
 type ReviewExtracted struct {
 	Kind agentview.ExtractionKind `json:"kind"`
 	// MessageID is the incoming message it was extracted from, Source
-	// where in that message.
+	// where in that message. Subject is that message's subject, present
+	// when the viewer may see the message and it has one.
 	MessageID string                     `json:"message_id"`
+	Subject   string                     `json:"subject,omitempty"`
 	Source    agentview.ExtractionSource `json:"source"`
 	// Where is where in the outgoing message: subject, body, an
 	// attachment ...
@@ -197,8 +200,11 @@ type ReviewRef struct {
 	As    string `json:"as"`
 	Where string `json:"where"`
 	// MessageID is the message it resolved to; absent when no message
-	// the submitter can see answers to it.
+	// the submitter can see answers to it. Subject is that message's
+	// subject, present when the viewer may see the message and it has
+	// one.
 	MessageID string `json:"message_id,omitempty"`
+	Subject   string `json:"subject,omitempty"`
 }
 
 // ReviewLink is a domain the outgoing mail links to.
@@ -431,4 +437,37 @@ type Suspension struct {
 	Recalls int `json:"recalls"`
 	// Withdrawn are the grant's other held messages, withdrawn with it.
 	Withdrawn []string `json:"withdrawn"`
+}
+
+// Counts is GET /api/v1/counts: what a sidebar shows beside its
+// sections, each counted over what the list it opens would show the
+// viewer (§13.8).
+type Counts struct {
+	// Outbox counts the rows GET /api/v1/outbox would list; absent for a
+	// credential without delivery:read, which may not list them.
+	Outbox *OutboxCounts `json:"outbox,omitempty"`
+	// Proposals are pending, not yet expired: a person's to decide, and
+	// for an agent its own waiting on one.
+	Proposals int         `json:"proposals"`
+	Drafts    DraftCounts `json:"drafts"`
+}
+
+// OutboxCounts are the outbox rows that wait or went wrong.
+type OutboxCounts struct {
+	// Held waits out its recall window (§8.9).
+	Held int `json:"held"`
+	// Unknown is mail whose delivery is unknown: only a person resolves
+	// it (POST /api/v1/outbox/{id}/resolve).
+	Unknown int `json:"unknown"`
+	// Attention is unknown, failed or partial: something went wrong that
+	// a person may want to look at. Failed and partial mail may still be
+	// retried on its own.
+	Attention int `json:"attention"`
+}
+
+// DraftCounts are drafts by GET /api/v1/drafts state: being written,
+// and held by their last submission for a person.
+type DraftCounts struct {
+	Open int `json:"open"`
+	Held int `json:"held"`
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/sendpolicy"
+	"github.com/yuuka-mail/yuuka/internal/store"
 )
 
 // The review tier over REST (§8.9): mail the checks pass is held with
@@ -130,6 +131,101 @@ func TestWithdrawSuspends(t *testing.T) {
 		if i.Address == "arisu@example.com" && (!i.Suspended || i.HoldReason != "suspended" || i.HoldSeconds != nil || i.Outcome != "draft_only") {
 			t.Errorf("suspended identity: %+v", i)
 		}
+	}
+}
+
+// Review findings name the mail they refer to by its subject, read as
+// the viewer (restricted viewers: the store's TestVisibility), and the
+// draft list keeps held drafts by why they are held.
+func TestReviewNamesMail(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.held()
+	agent := h.token(auth.MessageRead, auth.DraftCreate, auth.SubmissionSend, auth.DeliveryRead)
+	otp, invoice := h.find("Your verification code is 482913"), h.find("Invoice and logo")
+
+	// A code of incoming mail going out: escalated to a person.
+	d := decode[Draft](t, h.post("/api/v1/drafts", `{"from":"arisu@example.com","to":["bob@example.net"],"body_markdown":"It is 482913."}`, agent))
+	if res := decode[SubmitResult](t, h.post("/api/v1/drafts/"+d.ID+"/submit", "", agent)); res.State != "draft" || res.HoldReason != "review" {
+		t.Fatalf("code: %+v", res)
+	}
+	got := decode[Draft](t, h.get("/api/v1/drafts/"+d.ID, agent))
+	var found bool
+	for _, c := range got.Review.Checks {
+		for _, x := range c.Extracted {
+			found = true
+			if x.MessageID != otp || x.Subject != "Your verification code is 482913" {
+				t.Errorf("extracted %+v", x)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no extracted finding: %+v", got.Review)
+	}
+
+	// Another thread's mail cited: reported, and held for a recall.
+	cited := h.heldCiting(invoice)
+	refOf := func(e OutboxEntry) ReviewRef {
+		for _, c := range e.Review.Checks {
+			if c.Name == "cross_thread" && len(c.Refs) == 1 {
+				return c.Refs[0]
+			}
+		}
+		return ReviewRef{}
+	}
+	if r := refOf(decode[OutboxEntry](t, h.get("/api/v1/outbox/"+cited, agent))); r.MessageID != invoice || r.Subject != "Invoice and logo" {
+		t.Errorf("outbox entry ref %+v", r)
+	}
+	page := decode[OutboxPage](t, h.get("/api/v1/outbox?state=held", agent))
+	i := slices.IndexFunc(page.Entries, func(e OutboxEntry) bool { return e.ID == cited })
+	if i < 0 || refOf(page.Entries[i]).Subject != "Invoice and logo" {
+		t.Errorf("outbox list: %+v", page.Entries)
+	}
+
+	// hold_reason= keeps held drafts held for those reasons only.
+	ids := func(path string) []string {
+		var out []string
+		for _, d := range decode[DraftPage](t, h.get(path, agent)).Drafts {
+			out = append(out, d.ID)
+		}
+		return out
+	}
+	if got := ids("/api/v1/drafts?hold_reason=review"); !slices.Equal(got, []string{d.ID}) {
+		t.Errorf("hold_reason=review: %q, want %s", got, d.ID)
+	}
+	if got := ids("/api/v1/drafts?state=draft,held,outbox&hold_reason=policy,owner"); len(got) != 0 {
+		t.Errorf("hold_reason=policy,owner: %q", got)
+	}
+	if w := h.get("/api/v1/drafts?hold_reason=bogus", agent); w.Code != http.StatusBadRequest {
+		t.Errorf("hold_reason=bogus: %d", w.Code)
+	}
+}
+
+// The sidebar's counts, each as its list would show the viewer; the
+// outbox only to a credential that may list it.
+func TestCounts(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.held()
+	h.unknown()
+	h.draft(h.agent, store.Draft{FromAddr: "arisu@example.com"})
+	msg := decode[MessagePage](t, h.get("/api/v1/messages?limit=1", h.token(auth.MessageRead))).Messages[0]
+	h.proposal(h.agent, msg.ID, "counted")
+
+	op := decode[Counts](t, h.get("/api/v1/counts", h.tokenFor(h.human, auth.MessageRead, auth.DeliveryRead)))
+	if op.Outbox == nil || *op.Outbox != (OutboxCounts{Held: 1, Unknown: 1, Attention: 1}) || op.Proposals != 1 ||
+		op.Drafts != (DraftCounts{Open: 1}) {
+		t.Errorf("operator: %+v %+v", op, op.Outbox)
+	}
+	// An agent: its own drafts and proposals; no outbox without
+	// delivery:read.
+	c := decode[Counts](t, h.get("/api/v1/counts", h.token(auth.MessageRead)))
+	if c.Outbox != nil || c.Proposals != 1 || c.Drafts != (DraftCounts{Open: 1}) {
+		t.Errorf("agent: %+v", c)
+	}
+	momoi := decode[Counts](t, h.get("/api/v1/counts", h.tokenFor(principalNamed(t, h, "agent", "momoi"), auth.MessageRead, auth.DeliveryRead)))
+	if momoi.Outbox == nil || momoi.Outbox.Held != 1 || momoi.Proposals != 0 || momoi.Drafts != (DraftCounts{}) {
+		t.Errorf("another agent: %+v %+v", momoi, momoi.Outbox)
 	}
 }
 
