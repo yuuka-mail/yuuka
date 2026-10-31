@@ -258,10 +258,13 @@ func TestPrefixStatsQuery(t *testing.T) {
 	t.Parallel()
 	db, pool := load(t)
 	at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := pool.Exec(t.Context(), `INSERT INTO prefixes (zone, prefix, first_seen, last_seen, leak_suspect, note, expected_domains)
-		VALUES ('example.com', 'leaky', $1, $1, true, 'gave it to a shop', '{shop.example.net}')`, at); err != nil {
+	// Given to example.org; the OTP mail, proven to be from example.net,
+	// arrives there all the same.
+	if _, err := pool.Exec(t.Context(), `INSERT INTO prefixes (zone, prefix, state, note, expected_domains)
+		VALUES ('example.com', 'leaky', 1, 'gave it to a shop', '{example.org}')`); err != nil {
 		t.Fatal(err)
 	}
+	deliver(t, db, "plain-otp.eml", nil, "leaky", at)
 	yes := true
 	leaks, err := db.PrefixStats(t.Context(), operator, store.PrefixQuery{LeakSuspect: &yes})
 	if err != nil {
@@ -270,8 +273,8 @@ func TestPrefixStatsQuery(t *testing.T) {
 	if leaks.Total != 1 || len(leaks.Prefixes) != 1 {
 		t.Fatalf("leaks %+v", leaks)
 	}
-	if l := leaks.Prefixes[0]; l.Prefix != "leaky" || !l.LeakSuspect || l.Messages != 0 || l.State != store.PrefixDiscovered ||
-		l.Note != "gave it to a shop" || !slices.Equal(l.ExpectedDomains, []string{"shop.example.net"}) || !l.Active {
+	if l := leaks.Prefixes[0]; l.Prefix != "leaky" || !l.Suspect() || l.Leaks != 1 || l.Messages != 1 || l.State != store.PrefixClaimed ||
+		l.Note != "gave it to a shop" || !slices.Equal(l.ExpectedDomains, []string{"example.org"}) || !l.Active {
 		t.Errorf("leaky %+v", l)
 	}
 	// The totals count all visible mail whatever the filter.
@@ -300,6 +303,10 @@ func TestReadsRefuseNilViewer(t *testing.T) {
 		"MessageByID":  func() error { _, err := db.MessageByID(t.Context(), nil, id); return err },
 		"ThreadByID":   func() error { _, err := db.ThreadByID(t.Context(), nil, id); return err },
 		"PrefixStats":  func() error { _, err := db.PrefixStats(t.Context(), nil, store.PrefixQuery{}); return err },
+		"PrefixByAddress": func() error {
+			_, err := db.PrefixByAddress(t.Context(), nil, "example.com", "a", 10)
+			return err
+		},
 	}
 	for name, read := range reads {
 		if err := read(); err == nil || errors.Is(err, store.ErrNotFound) {

@@ -382,8 +382,18 @@ func TestVisibility(t *testing.T) {
 		t.Fatalf("sent copy did not fold into the delivered message: %+v", f)
 	}
 
+	// Proven to be from example.org, to the same prefix as in-open but
+	// through the closed account: a leak only a viewer of that account
+	// may learn of, sender domain included.
+	msgs["leak-closed"] = inbound(t, db, closed, "a", letter("x@example.org", "a@example.com", "leak-closed",
+		"Message-ID: <leak-closed@example.org>\r\nAuthentication-Results: mx.cloudflare.net; dmarc=pass header.from=example.org\r\n",
+		"hidden leak"), tick())
+
 	// in-open arrived on a claimed prefix, so its Cc is trusted (§8.9).
-	if _, err := pool.Exec(ctx, `UPDATE prefixes SET state = 1 WHERE zone = 'example.com' AND prefix = 'a'`); err != nil {
+	// The prefix was given to example.net, which in-open claims to be
+	// without proving it.
+	if _, err := pool.Exec(ctx, `UPDATE prefixes SET state = 1, expected_domains = '{example.net}'
+		WHERE zone = 'example.com' AND prefix = 'a'`); err != nil {
 		t.Fatal(err)
 	}
 	// Someone only the hidden reply went to.
@@ -395,7 +405,7 @@ func TestVisibility(t *testing.T) {
 	}
 
 	visibleTo := map[*auth.Viewer][]string{
-		everyone:   {"both", "in-closed", "in-open", "sent-closed", "sent-open"},
+		everyone:   {"both", "in-closed", "in-open", "leak-closed", "sent-closed", "sent-open"},
 		restricted: {"both", "in-open", "sent-open"},
 		nobody:     {},
 	}
@@ -433,7 +443,7 @@ func TestVisibility(t *testing.T) {
 			for _, h := range res.Hits {
 				ids = append(ids, h.ID)
 			}
-			wantBodies := slices.DeleteFunc(slices.Clone(want), func(n string) bool { return n == "in-open" || n == "in-closed" })
+			wantBodies := slices.DeleteFunc(slices.Clone(want), func(n string) bool { return strings.HasPrefix(n, "in-") || n == "leak-closed" })
 			if got := names(ids); !slices.Equal(got, wantBodies) || res.Total != len(wantBodies) {
 				t.Errorf("Search %q (total %d), want %q", got, res.Total, wantBodies)
 			}
@@ -533,13 +543,36 @@ func TestVisibility(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantDelivered := 0
-			for _, n := range []string{"in-open", "in-closed", "both"} {
+			for _, n := range []string{"in-open", "in-closed", "both", "leak-closed"} {
 				if v == everyone || (v == restricted && n == "in-open") {
 					wantDelivered++
 				}
 			}
 			if sum.Messages != wantDelivered {
 				t.Errorf("PrefixStats counts %d messages, want %d", sum.Messages, wantDelivered)
+			}
+
+			// The leak check of prefix a judges only what v may read:
+			// in-open spoofs example.net, and leak-closed's sender is
+			// header data of a hidden message.
+			pa, err := db.PrefixByAddress(ctx, v, "example.com", "a", 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantLeaks, wantSpoofs, wantObserved := 0, 0, 0
+			if slices.Contains(want, "leak-closed") {
+				wantLeaks, wantObserved = 1, 1
+			}
+			if slices.Contains(want, "in-open") {
+				wantSpoofs = 1
+			}
+			ids = ids[:0]
+			for _, o := range pa.Offenses {
+				ids = append(ids, o.Message.ID)
+			}
+			if pa.Leaks != wantLeaks || pa.Spoofs != wantSpoofs || len(pa.Observed) != wantObserved ||
+				!slices.Equal(names(ids), slices.DeleteFunc([]string{"in-open", "leak-closed"}, func(n string) bool { return !slices.Contains(want, n) })) {
+				t.Errorf("PrefixByAddress a: %+v, offenses %q", pa.LeakStats, names(ids))
 			}
 
 			// The outbox: the rows sent as an identity of a readable

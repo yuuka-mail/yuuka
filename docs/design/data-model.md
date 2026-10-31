@@ -19,7 +19,7 @@
 | `threads` | 派生 | 消息图的连通分量（§4.1）。reparse 整体重建，旧 id 能沿用就沿用，但不像 message id 那样承诺稳定 | [0002](../../internal/store/migrations/0002_content.sql) |
 | `message_state` | 决定 | 人对一封信的标注、改判（`class_override`）、钉住（§9.6 卸载跳过）；本地标注层，远端永不覆盖（§9.2） | [0002](../../internal/store/migrations/0002_content.sql) |
 | `message_aliases` | 决定 | 折叠算法换版本后被合并掉的旧 id 指向存活的 id，`yuuka://` 锚点和外键引用因此不失效 | [0002](../../internal/store/migrations/0002_content.sql) |
-| `prefixes` | 决定；`first_seen` / `last_seen` 是观测值 | `(zone, prefix)` 注册表：我把它给了谁、实际谁在发、claimed / discovered 两态（§3.3、§4.3） | [0002](../../internal/store/migrations/0002_content.sql)、[0004](../../internal/store/migrations/0004_prefix_claim.sql) |
+| `prefixes` | 决定；`first_seen` / `last_seen` 是观测值 | `(zone, prefix)` 注册表：我把它给了谁（`expected_domains`，存组织域）、claimed / discovered 两态（§3.3、§4.3）。实际谁在发、有没有泄漏或仿冒不存，读时从投递现算（§3.3） | [0002](../../internal/store/migrations/0002_content.sql)、[0004](../../internal/store/migrations/0004_prefix_claim.sql) |
 | `changes` | 日志 | 全局变更日志：§8.6 的 `since_state`、JMAP `queryChanges`、前端 SSE 共用。M1 建表就开始写 | [0002](../../internal/store/migrations/0002_content.sql) |
 | `principals` `credentials` `passkeys` `enrollment_tokens` `recovery_codes` | 配置与授权 | 主体、凭据、WebUI 登录（§13.2、§13.3、§13.7） | [0003](../../internal/store/migrations/0003_identity.sql) |
 | `identity_grants` `account_access` | 配置与授权 | 谁能以哪个身份发信、发到哪一步（§13.5）；谁能读哪个账户（§13.8）。M1 建表，M2 补外键 | [0003](../../internal/store/migrations/0003_identity.sql)、[0005](../../internal/store/migrations/0005_sending.sql) |
@@ -33,7 +33,8 @@
 迁移里与本节设计不同的地方都以 `M0:` / `M1:` / `M2:` 注明，主要是这几类：
 
 - 有几列已建、暂不写：`messages.spam_score`（§4.3 的降级现算）、`messages.body_html_key`、
-  `deliveries.spf_recheck`（二次 SPF 判定还没接）、`prefixes.observed_domains`（随泄漏检测，M3）
+  `deliveries.spf_recheck`（二次 SPF 判定还没接）、`prefixes.observed_domains` 和 `prefixes.leak_suspect`
+  （泄漏检测按可见性现算，§3.3；存一份会绕过 §13.8。两列不删：删列要迁移，留着不读没有代价）
 - M2 的 `outbox.state` 已经容纳 `held` 和 `withdrawn`、`outbox.review` / `hold_until` 已建，
   但 M2 只做 `draft` 和 `auto` 两档，不写它们；`review` 档（M3）不必改约束
 - **出口（transport）不是表**。出口按名字定义在进程配置里（主机、端口、caps、凭据文件路径），
@@ -232,6 +233,10 @@ Cloudflare Email Routing 基本不做内容过滤，`spam_score` 字段必须有
   地址往往在给出去时就认领，那时还没收到过信：这样的前缀照样建行，`first_seen` / `last_seen` 为空，
   第一封信到达时由 ingest 填上（`least` / `greatest` 跳过 NULL），而不是把认领时刻冒充成观测值。
   对还没收到过信的前缀取消认领会删掉这一行：一个从未被投递、也没人认领的前缀不描述任何事实
+  （连同写过的 `expected_domains`；已收过信的前缀取消认领时期望保留，再认领即恢复）
+- `yuuka prefix expect` 只改 `expected_domains`，记账方式同上；只接受已认领的前缀，
+  未认领的不参与泄漏检测（§3.3），给它写期望只会是一条看不到效果的决定。降级和泄漏判定各管各的：
+  `dmarc=fail` 冒充期望发件方的信判为仿冒，同时照旧降级；冒充别人的只降级、不判定（理由见 §3.3）
 - Cloudflare 入站会加 `X-CF-SpamH-Score: <n>`（§10.1.1 实测）。刻度没有文档，
   先原样记进 `deliveries.auth`、作为一个信号，积累样本后再决定阈值
 - 内容层面的判定（垃圾、钓鱼、注入）交给决策模型，判定是 ingest 之后的观测事实（§15）。

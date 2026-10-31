@@ -24,6 +24,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/classify"
+	"github.com/yuuka-mail/yuuka/internal/leak"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/store"
@@ -38,6 +39,7 @@ type Store interface {
 	MessageByID(ctx context.Context, v *auth.Viewer, id string) (store.MessageDetail, error)
 	ThreadByID(ctx context.Context, v *auth.Viewer, id string) (store.ThreadView, error)
 	PrefixStats(ctx context.Context, v *auth.Viewer, q store.PrefixQuery) (store.PrefixSummary, error)
+	PrefixByAddress(ctx context.Context, v *auth.Viewer, zone, prefix string, limit int) (store.PrefixDetail, error)
 	Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (store.SearchResult, error)
 	// RecordAction appends to the audit log (attachment downloads).
 	RecordAction(ctx context.Context, a store.Action) error
@@ -114,6 +116,9 @@ var routes = []route{
 		"application/octet-stream", read, (*API).attachment),
 	jsonRoute(http.MethodGet, "/api/v1/threads/{id}", "Get a thread", read, (*API).thread),
 	jsonRoute(http.MethodGet, "/api/v1/prefixes", "List prefixes with message counts", prefix, (*API).prefixes),
+	// The offending mail is listed as messages, so this needs both.
+	jsonRoute(http.MethodGet, "/api/v1/prefixes/{address}", "Get a prefix with its leak check and the latest mail that leaked or spoofed",
+		[]auth.Scope{auth.PrefixRead, auth.MessageRead}, (*API).prefix),
 	jsonRoute(http.MethodGet, "/api/v1/search", "Search messages, newest first", read, (*API).search),
 	jsonRoute(http.MethodGet, "/api/v1/messages/{id}/reply-identities", "List the identities a reply defaults to, best first",
 		[]auth.Scope{auth.MessageRead, auth.DraftCreate}, (*API).replyIdentities),
@@ -302,6 +307,11 @@ func (a *API) message(ctx context.Context, v *auth.Viewer, p IDParams) (Message,
 				EnvelopeFrom: f.EnvelopeFrom, EnvelopeTo: f.EnvelopeTo, ReceivedAt: f.ReceivedAt,
 				Auth: authOf(f.Auth),
 			}
+			if f.Leak.Verdict != leak.None {
+				out.Deliveries[i].Leak = &agentview.LeakCheck{
+					To: f.Prefix + "@" + f.Zone, Verdict: agentview.LeakVerdict(f.Leak.Verdict), Domain: f.Leak.Domain,
+				}
+			}
 		}
 	}
 	return out, nil
@@ -369,13 +379,39 @@ func (a *API) prefixes(ctx context.Context, v *auth.Viewer, p PrefixesParams) (P
 	}
 	out := PrefixList{Messages: sum.Messages, Downgraded: sum.Downgraded, Total: sum.Total, Prefixes: make([]Prefix, len(sum.Prefixes))}
 	for i, p := range sum.Prefixes {
-		out.Prefixes[i] = Prefix{
-			Zone: p.Zone, Prefix: p.Prefix, Address: p.Prefix + "@" + p.Zone,
-			Claimed: p.State == store.PrefixClaimed, Label: p.Label,
-			FirstSeen: p.FirstSeen, LastSeen: p.LastSeen, Messages: p.Messages, Downgraded: p.Downgraded,
-		}
+		out.Prefixes[i] = prefixOut(p)
 	}
 	return out, nil
+}
+
+// offenseLimit is how many offending messages the prefix detail lists:
+// enough to see a pattern, the rest is the prefix's message list.
+const offenseLimit = 20
+
+func (a *API) prefix(ctx context.Context, v *auth.Viewer, p PrefixParams) (PrefixDetail, error) {
+	d, err := a.db.PrefixByAddress(ctx, v, p.Address.Zone, p.Address.Prefix, offenseLimit)
+	if err != nil {
+		return PrefixDetail{}, err
+	}
+	out := PrefixDetail{Prefix: prefixOut(d.PrefixStat), Offenses: make([]Offense, len(d.Offenses))}
+	for i, o := range d.Offenses {
+		out.Offenses[i] = Offense{Message: summary(o.Message), Verdict: agentview.LeakVerdict(o.Verdict), Domain: o.Domain, DeliveredAt: o.DeliveredAt}
+	}
+	return out, nil
+}
+
+func prefixOut(p store.PrefixStat) Prefix {
+	out := Prefix{
+		Zone: p.Zone, Prefix: p.Prefix, Address: p.Prefix + "@" + p.Zone,
+		Claimed: p.State == store.PrefixClaimed, Label: p.Label,
+		FirstSeen: p.FirstSeen, LastSeen: p.LastSeen, Messages: p.Messages, Downgraded: p.Downgraded,
+		ExpectedDomains: nonNil(p.ExpectedDomains), Observed: make([]ObservedDomain, len(p.Observed)),
+		Leaks: p.Leaks, Unverified: p.Unverified, Spoofs: p.Spoofs, LastOffense: p.LastOffense,
+	}
+	for i, o := range p.Observed {
+		out.Observed[i] = ObservedDomain{Domain: o.Domain, Messages: o.Messages, LastSeen: o.LastSeen, Expected: o.Expected}
+	}
+	return out
 }
 
 func (a *API) search(ctx context.Context, v *auth.Viewer, p SearchParams) (SearchResult, error) {

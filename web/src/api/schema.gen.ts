@@ -783,6 +783,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/prefixes/{address}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a prefix with its leak check and the latest mail that leaked or spoofed */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description prefix@zone */
+                    address: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PrefixDetail"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search": {
         parameters: {
             query?: never;
@@ -1293,6 +1341,7 @@ export interface components {
             /** Format: date-time */
             received_at: string;
             auth?: components["schemas"]["DeliveryAuth"];
+            leak?: components["schemas"]["LeakCheck"];
         };
         DeliveryAuth: {
             trusted: boolean;
@@ -1362,6 +1411,7 @@ export interface components {
             sent?: components["schemas"]["Sent"];
             auth: components["schemas"]["Auth"];
             downgraded: boolean;
+            leak_checks?: components["schemas"]["LeakCheck"][];
             warnings?: string[];
             stripped: components["schemas"]["Stripped"];
         };
@@ -1372,6 +1422,13 @@ export interface components {
         };
         /** @enum {string} */
         Kind: "heading" | "para" | "item" | "pre" | "quote";
+        LeakCheck: {
+            to: string;
+            verdict: components["schemas"]["LeakVerdict"];
+            domain?: string;
+        };
+        /** @enum {string} */
+        LeakVerdict: "ok" | "leak" | "spoof";
         /** @enum {string} */
         Level: "snippet" | "sections" | "part";
         Limits: {
@@ -1431,6 +1488,20 @@ export interface components {
             recipients: string[];
             outgoing?: components["schemas"]["Outgoing"];
         };
+        ObservedDomain: {
+            domain: string;
+            messages: number;
+            /** Format: date-time */
+            last_seen: string;
+            expected: boolean;
+        };
+        Offense: {
+            message: components["schemas"]["MessageSummary"];
+            verdict: components["schemas"]["LeakVerdict"];
+            domain?: string;
+            /** Format: date-time */
+            delivered_at: string;
+        };
         OutboxEntry: {
             id: string;
             state: components["schemas"]["OutboxState"];
@@ -1483,6 +1554,33 @@ export interface components {
             last_seen?: string;
             messages: number;
             downgraded: number;
+            expected_domains: string[];
+            observed: components["schemas"]["ObservedDomain"][];
+            leaks: number;
+            unverified: number;
+            spoofs: number;
+            /** Format: date-time */
+            last_offense?: string;
+        };
+        PrefixDetail: {
+            zone: string;
+            address: string;
+            claimed: boolean;
+            label: string;
+            /** Format: date-time */
+            first_seen?: string;
+            /** Format: date-time */
+            last_seen?: string;
+            messages: number;
+            downgraded: number;
+            expected_domains: string[];
+            observed: components["schemas"]["ObservedDomain"][];
+            leaks: number;
+            unverified: number;
+            spoofs: number;
+            /** Format: date-time */
+            last_offense?: string;
+            offenses: components["schemas"]["Offense"][];
         };
         PrefixList: {
             messages: number;

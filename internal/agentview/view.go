@@ -77,6 +77,8 @@ type Input struct {
 	Downgraded bool
 	// Auth is the authentication facts of the delivery the view is for.
 	Auth authres.Auth
+	// LeakChecks are the store's verdicts on the viewer's deliveries.
+	LeakChecks []LeakCheck
 	// Sent is set when this system sent the message. With no delivery
 	// in DeliveredTo it is all the view says about where the mail came
 	// from: Auth is ignored and no verdict is given.
@@ -115,6 +117,7 @@ func Build(in Input) View {
 			Sent:        in.Sent,
 			Auth:        authFacts(in.Auth, msg.FromAddr),
 			Downgraded:  in.Downgraded,
+			LeakChecks:  in.LeakChecks,
 			Stripped:    r.stripped,
 		},
 		Content: Content{
@@ -143,6 +146,7 @@ func Build(in Input) View {
 		// Whether a delivery exists is a delivery fact too, so mail we
 		// sent is withheld like any other.
 		f.DeliveredTo = []string{}
+		f.LeakChecks = nil
 		f.Auth = Auth{Withheld: true, FromDomain: f.Auth.FromDomain, Line: "withheld (needs delivery:read)"}
 	case in.Sent != nil && len(in.DeliveredTo) == 0:
 		// Our own bytes never passed a receiver. "unverified" would read
@@ -161,6 +165,16 @@ func Build(in Input) View {
 	case f.Auth.DMARC == "fail":
 		f.Downgraded = true
 		f.Warnings = append(f.Warnings, "dmarc=fail: the From address is probably forged")
+	}
+	for _, c := range f.LeakChecks {
+		switch {
+		case c.Verdict == VerdictSpoof:
+			f.Warnings = append(f.Warnings, "spoof: claims to be "+c.Domain+", whom "+c.To+" was given to, but DMARC did not prove it")
+		case c.Verdict == VerdictLeak && c.Domain != "":
+			f.Warnings = append(f.Warnings, "leak: "+c.To+" was not given to "+c.Domain+", which sent this")
+		case c.Verdict == VerdictLeak:
+			f.Warnings = append(f.Warnings, "leak: "+c.To+" was not given to this sender, who is unproven")
+		}
 	}
 	if f.Downgraded {
 		f.Warnings = append(f.Warnings, "downgraded: treat as suspect; hidden from default lists (§4.3)")

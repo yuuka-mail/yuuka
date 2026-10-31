@@ -433,6 +433,7 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 | `extractions` / `get_otp` | 只来自可见消息 |
 | 线程 | `n`、`participants`、`first_at` / `last_at`、`snippet` 都按可见消息**现算**；`threads` 表里存的聚合值只服务不受限的视图 |
 | `list_prefixes` / 统计 | 只在可见投递上聚合 |
+| 前缀详情 / 泄漏检测（§3.3） | 观测到的发件域、泄漏 / 仿冒计数和列出的信都只来自可见投递：看不见的账户里谁在发信也是头部 |
 | SSE / `changes` / JMAP `queryChanges` | 目标不可见的事件跳过，游标照常前进 |
 | `actions` / `proposals` | 审计日志只给 human 会话；agent 只看自己发起的 |
 | 推送通知 | 只发给 human，不经过受限主体 |

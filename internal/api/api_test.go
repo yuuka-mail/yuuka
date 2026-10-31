@@ -76,6 +76,11 @@ func (s *spy) PrefixStats(ctx context.Context, v *auth.Viewer, q store.PrefixQue
 	return s.DB.PrefixStats(ctx, v, q)
 }
 
+func (s *spy) PrefixByAddress(ctx context.Context, v *auth.Viewer, zone, prefix string, limit int) (store.PrefixDetail, error) {
+	s.saw("PrefixByAddress", v)
+	return s.DB.PrefixByAddress(ctx, v, zone, prefix, limit)
+}
+
 func (s *spy) Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (store.SearchResult, error) {
 	s.saw("Search", v)
 	return s.DB.Search(ctx, v, q)
@@ -368,6 +373,7 @@ func TestACL(t *testing.T) {
 		"GET /api/v1/messages/{id}/attachments/{part}": {path: "/api/v1/messages/" + att + "/attachments/2", reads: []string{"MessageByID"}},
 		"GET /api/v1/threads/{id}":                     {path: "/api/v1/threads/" + msg.ThreadID, reads: []string{"ThreadByID"}},
 		"GET /api/v1/prefixes":                         {path: "/api/v1/prefixes", reads: []string{"PrefixStats"}},
+		"GET /api/v1/prefixes/{address}":               {path: "/api/v1/prefixes/github@example.com", reads: []string{"PrefixByAddress"}},
 		"GET /api/v1/search":                           {path: "/api/v1/search?q=verification", reads: []string{"Search"}},
 		"GET /api/v1/messages/{id}/reply-identities": {
 			path: "/api/v1/messages/" + msg.ID + "/reply-identities", reads: []string{"ReplyIdentities", "Standings"},
@@ -678,6 +684,36 @@ func TestPrefixesAndSearch(t *testing.T) {
 	for _, bad := range []string{"state=spam", "offset=-1", "limit=0", "limit=501"} {
 		if w := h.get("/api/v1/prefixes?"+bad, h.token(auth.PrefixRead)); w.Code != http.StatusBadRequest {
 			t.Errorf("prefixes %s: %d", bad, w.Code)
+		}
+	}
+	// The leak check: alice was given to example.net only, and the
+	// corpus has proven mail from example.org for her.
+	if _, err := h.pool.Exec(t.Context(), `UPDATE prefixes SET expected_domains = '{example.net}' WHERE prefix = 'alice'`); err != nil {
+		t.Fatal(err)
+	}
+	both := h.token(auth.PrefixRead, auth.MessageRead, auth.DeliveryRead)
+	d := decode[PrefixDetail](t, h.get("/api/v1/prefixes/Alice@example.com", both))
+	org := slices.IndexFunc(d.Observed, func(o ObservedDomain) bool { return o.Domain == "example.org" })
+	if d.Address != "alice@example.com" || d.Leaks == 0 || len(d.Offenses) == 0 || org < 0 || d.Observed[org].Expected ||
+		!slices.Equal(d.ExpectedDomains, []string{"example.net"}) || d.LastOffense == nil {
+		t.Fatalf("alice: %+v", d)
+	}
+	leaked := slices.IndexFunc(d.Offenses, func(o Offense) bool { return o.Domain == "example.org" })
+	if leaked < 0 || d.Offenses[leaked].Verdict != agentview.VerdictLeak || d.Offenses[leaked].Message.Subject == "" {
+		t.Fatalf("offenses: %+v", d.Offenses)
+	}
+	m := decode[Message](t, h.get("/api/v1/messages/"+d.Offenses[leaked].Message.ID, both))
+	if i := slices.IndexFunc(m.Deliveries, func(x Delivery) bool { return x.Prefix == "alice" }); i < 0 ||
+		m.Deliveries[i].Leak == nil || *m.Deliveries[i].Leak != (agentview.LeakCheck{To: "alice@example.com", Verdict: agentview.VerdictLeak, Domain: "example.org"}) {
+		t.Errorf("deliveries: %+v", m.Deliveries)
+	}
+	view := decode[agentview.View](t, h.get("/api/v1/messages/"+m.ID+"/view?level=snippet", both))
+	if !slices.Contains(view.Facts.LeakChecks, agentview.LeakCheck{To: "alice@example.com", Verdict: agentview.VerdictLeak, Domain: "example.org"}) {
+		t.Errorf("view facts: %+v", view.Facts)
+	}
+	for path, code := range map[string]int{"nobody@example.com": http.StatusNotFound, "no-zone": http.StatusBadRequest} {
+		if w := h.get("/api/v1/prefixes/"+path, both); w.Code != code {
+			t.Errorf("prefix %s: %d, want %d", path, w.Code, code)
 		}
 	}
 	read := h.token(auth.MessageRead)

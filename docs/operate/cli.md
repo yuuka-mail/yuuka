@@ -45,9 +45,17 @@ catch-all 域上的任何地址都收，第一次见到的前缀自动登记为 
 yuuka prefix ls [--state claimed|discovered] [--zone example.com]
 yuuka prefix claim shop@example.com
 yuuka prefix unclaim shop@example.com
+yuuka prefix expect shop@example.com --domains example.net[,example.org]
 ```
 
-`ls` 列出每个前缀的首次、最近一次出现和投递数。
+`ls` 列出每个前缀的首次、最近一次出现和投递数；已认领的前缀还有期望的发件域（EXPECTED）、
+DMARC 证实过的发件域和各自的信数（OBSERVED，不在期望里的前面带 `!`）、泄漏数（LEAKS，括号里是发件方没有证实的）和仿冒数（SPOOFS）。
+
+`expect` 写下这个地址给了谁，替换原来的列表，`--domains ''` 清空。只对已认领的前缀有效。
+写子域也行，存下来的是组织域（`mail.example.net` 记作 `example.net`），命令会说一声。
+之后发件方 DMARC 通过但不在列表里的信算泄漏，自称是列表里的域却没过 DMARC 的算仿冒；
+这对已有的信立刻生效，命令会顺带报出现在有多少
+（[判定规则](../design/architecture.md#3-八条设计原则)）。没写期望的前缀不判定，`ls` 的 OBSERVED 列可以拿来定期望。
 
 ## 发信地址与授权
 

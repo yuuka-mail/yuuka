@@ -39,6 +39,11 @@ const Zone = "example.com"
 // others stay discovered, so their mail is downgraded (§4.3).
 var Claimed = []string{"alice", "github", "me", "svc-shop", "bank", "svc-ci"}
 
+// Expected are the domains some claimed prefixes were given to, so the
+// leak check (§3 principle 3) has something to judge: the generated
+// mail lands on prefixes at random, and some of it from other senders.
+var Expected = map[string][]string{"github": {"example.net"}, "svc-shop": {"example.cn"}}
+
 // variantSubjects are the subjects of generated mail; %d is a counter.
 var variantSubjects = []string{
 	"Your verification code is %06d",
@@ -111,9 +116,13 @@ func Load(ctx context.Context, db *store.DB, pool *pgxpool.Pool, o Options) (int
 	// Claim first, so the newest mail is judged against the final state
 	// (the downgrade is computed live anyway).
 	for _, p := range Claimed {
+		expected := Expected[p]
+		if expected == nil {
+			expected = []string{}
+		}
 		if _, err := pool.Exec(ctx, `
-			INSERT INTO prefixes (zone, prefix, first_seen, last_seen, state) VALUES ($1, $2, $3, $3, $4)
-			ON CONFLICT (zone, prefix) DO UPDATE SET state = $4`, Zone, p, o.Now, store.PrefixClaimed); err != nil {
+			INSERT INTO prefixes (zone, prefix, first_seen, last_seen, state, expected_domains) VALUES ($1, $2, $3, $3, $4, $5)
+			ON CONFLICT (zone, prefix) DO UPDATE SET state = $4, expected_domains = $5`, Zone, p, o.Now, store.PrefixClaimed, expected); err != nil {
 			return n, fmt.Errorf("claim %s: %w", p, err)
 		}
 	}

@@ -18,9 +18,10 @@ yuuka migrate                           # 以 schema owner 身份应用待执行
 yuuka reconcile                         # 手动跑一轮 §2.1 的 reconcile，可选全量对账
 yuuka ingest --once                     # 手动跑一轮 pull driver
 yuuka reparse                           # 从不可变原件重建派生数据（§3.1、§4.2）
-yuuka prefix ls                         # 列出前缀：状态、首次 / 末次投递、投递数
+yuuka prefix ls                         # 列出前缀：状态、首次 / 末次投递、投递数、期望 / 观测到的发件域、泄漏 / 仿冒数
 yuuka prefix claim                      # 认领前缀：其信不再降级，此后的新信推送（§4.3）
 yuuka prefix unclaim                    # 取消认领，回到 discovered
+yuuka prefix expect                     # 写下前缀给了哪些域（expected_domains），泄漏 / 仿冒据此判定（§3.3）
 yuuka prefix label|leaks                # 前缀注册表的标注与泄漏视图（§3.3）
 yuuka token issue                       # 给 agent / service 签发 bearer token，只显示一次（§13.3）
 yuuka token ls                          # 列出 token：主体、scope、各时间点，不含秘密

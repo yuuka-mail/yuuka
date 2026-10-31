@@ -306,8 +306,36 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
    这里要分清两个问题。**地址是否泄漏**不需要认证：任何意料之外的发件方都说明地址被别人知道了。
    **「自称是 X 的信到底是不是 X」**看的是收件人看到的信头 `From`，能证明它的只有
    可信接收方给出的 **DMARC** 结果（SPF 或 DKIM 通过且与 From 域对齐，§10.1.1）。
-   所以 `observed_domains` 只记 DMARC 通过的 From 组织域，这样泄漏才能归因到具体一方；
+   所以「观测到的发件域」只算 DMARC 通过的 From 组织域，这样泄漏才能归因到具体一方；
    未验证的信照样计入泄漏信号，但不归因到任何域；自称是 `expected_domains` 却没过 DMARC 的，标为仿冒。
+   已实现（M3），判定是 [`internal/leak`](../../internal/leak/leak.go) 里的纯函数，store 在读的时候现算：
+
+   | 一条投递（认领前缀、`expected_domains` 非空） | 判定 | 归因 |
+   |---|---|---|
+   | DMARC 通过，From 组织域在 `expected_domains` 里 | `ok` | 该域 |
+   | DMARC 通过，From 组织域不在里面 | `leak` | 该域 |
+   | DMARC 没通过（`fail`、`none`、未验证），From 声称的组织域在里面 | `spoof` | 声称的域 |
+   | DMARC 是 `none` 或未验证，From 不声称任何期望的域 | `leak` | 无 |
+   | DMARC 是 `fail`，From 不声称任何期望的域 | 不判定 | — |
+
+   - **按组织域比较**：两边都取 Public Suffix List 的可注册域（`golang.org/x/net/publicsuffix`，含私有后缀），
+     和 DMARC 的宽松对齐同一个粒度：给了 `example.net`，`mail.example.net` 发来的也算。
+     `expected_domains` 存的就是组织域，`yuuka prefix expect` 写入时归一化，比的就是看到的。
+     代价是分不出同一组织下的子域；要按子域细分时再加精确匹配，而不是改这条默认
+   - 「DMARC 通过」要求可信接收方那条结果的 `header.from` 和信头 From 是同一个组织域（没给 `header.from` 时就认 From）：
+     它评判的若是另一个 From（多个 From 头、解析器取了别的那个），这个 pass 证明不了读信人看到的发件方
+   - **不参与**的：未认领前缀（字典攻击，见下）、还没写 `expected_domains` 的前缀——没有期望就无从判定，
+     只列观测到的发件域，供人据此写期望
+   - **`dmarc=fail` 只判仿冒**：认领前缀上唯一的降级就是 `dmarc=fail`（§4.3）。它冒充期望的发件方时是最典型的仿冒，
+     计入仿冒数、侧栏的标记和前缀详情，信本身照旧降级（不推送、不进聚合视图）。冒充别人的则不判定：
+     接收方已经说了 From 是伪造的，它能说明的「谁知道这个地址」不比任何一封垃圾信多，算成泄漏只会让群发的伪造信
+     淹没真正的泄漏；它留在「降级」里。要是哪天发现这类信确实先于泄漏出现，再把它算成不归因的泄漏
+   - **不存储**，和 §4.3 的降级一样现算：改 `expected_domains` 立刻对已有的信生效，reparse 改了 `auth` 也随之变。
+     观测到的发件域同理从 `deliveries.auth` 和 `messages.from_addr` 现算，二者本身都是派生的（§4.2），
+     所以 `prefixes.observed_domains` 一列留空；更要紧的是可见性（§13.8）：一个主体只能经它读得到的投递「观测」到发件域，
+     存在 `prefixes` 上的一份会把看不见的账户里的发件方透露给所有人。代价是每次读前缀表多一次按
+     （前缀、DMARC 结果、From 域）分组的查询；个人信箱的量级可以忽略，量大时再考虑物化
+   - 「某前缀的发件域集合突然变化」还没做：它要一条时间上的基线，等有了足够的观测再定
    SPF 单独证明不了 From：它验证的是信封 `MAIL FROM` 域或 HELO，转发还会让它失败。
    `ix64/spf` 的二次判定因此只是辅助信号——可信接收方没给 SPF 结果时补一个、给 agent 视图多一条证据，
    不参与 From 身份判断，也不覆盖可信接收方的结论。它的输入只从可信那一行 `Received` 里取，

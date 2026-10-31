@@ -60,6 +60,10 @@ type Facts struct {
 	// downgrade (unclaimed prefix, or dmarc=fail from the trusted
 	// receiver). Agents treat such mail as suspect.
 	Downgraded bool `json:"downgraded"`
+	// LeakChecks judge each delivery to a claimed prefix that expects
+	// mail from known domains (§3 principle 3). Absent when nothing was
+	// judged, and withheld with the other delivery facts.
+	LeakChecks []LeakCheck `json:"leak_checks,omitempty"`
 	// Warnings are short sentences for the reader, in a fixed vocabulary.
 	Warnings []string `json:"warnings,omitempty"`
 	Stripped Stripped `json:"stripped"`
@@ -98,6 +102,31 @@ type Auth struct {
 	// Line is the one-line form, e.g.
 	// "spf=pass dkim=pass dmarc=pass from_domain=example.com".
 	Line string `json:"line"`
+}
+
+// LeakVerdict is the leak check of one delivery to a claimed prefix
+// (§3 principle 3): ok when DMARC proved an expected sender, leak when
+// the sender is not one the address was given to, spoof when the From
+// claims an expected sender that DMARC did not prove.
+type LeakVerdict string
+
+const (
+	VerdictOK    LeakVerdict = "ok"
+	VerdictLeak  LeakVerdict = "leak"
+	VerdictSpoof LeakVerdict = "spoof"
+)
+
+func (LeakVerdict) Enum() []string { return []string{"ok", "leak", "spoof"} }
+
+// LeakCheck is the verdict on one delivery.
+type LeakCheck struct {
+	// To is the prefix@zone the delivery went to.
+	To      string      `json:"to"`
+	Verdict LeakVerdict `json:"verdict"`
+	// Domain is an organizational domain: the DMARC-proven sender for ok
+	// and leak, the claimed one for spoof. A leak without it proved
+	// nothing about its sender.
+	Domain string `json:"domain,omitempty"`
 }
 
 // Stripped counts what the view left out, so a reader knows it is there.

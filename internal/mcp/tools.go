@@ -189,7 +189,7 @@ func (s *Server) getMessage(ctx context.Context, v *auth.Viewer, in GetInput) (r
 
 // PrefixesInput is the input of list_prefixes.
 type PrefixesInput struct {
-	LeakSuspect *bool `json:"leak_suspect,omitempty" jsonschema:"only prefixes flagged (true) or not flagged (false) as leaked"`
+	LeakSuspect *bool `json:"leak_suspect,omitempty" jsonschema:"only prefixes where mail leaked or was spoofed (true), or neither (false)"`
 	Limit       int   `json:"limit,omitempty" jsonschema:"at most this many prefixes, default 200, at most 1000"`
 }
 
@@ -210,11 +210,28 @@ type Prefix struct {
 	ExpectedDomains []string `json:"expected_domains,omitempty"`
 	// FirstSeen and LastSeen are absent for a prefix claimed before any
 	// mail reached it.
-	FirstSeen   *time.Time `json:"first_seen,omitempty"`
-	LastSeen    *time.Time `json:"last_seen,omitempty"`
-	LeakSuspect bool       `json:"leak_suspect,omitempty"`
-	Inactive    bool       `json:"inactive,omitempty"`
-	Messages    int        `json:"messages"`
+	FirstSeen *time.Time `json:"first_seen,omitempty"`
+	LastSeen  *time.Time `json:"last_seen,omitempty"`
+	Inactive  bool       `json:"inactive,omitempty"`
+	Messages  int        `json:"messages"`
+	// The leak check of a claimed prefix (§3 principle 3). Observed are
+	// the sender domains the trusted receiver's DMARC proved. Leaks
+	// counts mail from senders the address was not given to, Unverified
+	// those of them that proved nothing; Spoofs counts mail claiming an
+	// expected domain without proving it.
+	ObservedDomains []ObservedDomain `json:"observed_domains,omitempty"`
+	LeakSuspect     bool             `json:"leak_suspect,omitempty"`
+	Leaks           int              `json:"leaks,omitempty"`
+	Unverified      int              `json:"unverified,omitempty"`
+	Spoofs          int              `json:"spoofs,omitempty"`
+}
+
+// ObservedDomain is an organizational domain DMARC proved to have sent
+// mail to a prefix.
+type ObservedDomain struct {
+	Domain   string `json:"domain"`
+	Messages int    `json:"messages"`
+	Expected bool   `json:"expected"`
 }
 
 const (
@@ -236,7 +253,12 @@ func (s *Server) listPrefixes(ctx context.Context, v *auth.Viewer, in PrefixesIn
 		out.Prefixes[i] = Prefix{
 			Address: p.Prefix + "@" + p.Zone, Claimed: p.State == store.PrefixClaimed, Label: p.Label, Note: p.Note,
 			ExpectedDomains: p.ExpectedDomains, FirstSeen: utc(p.FirstSeen), LastSeen: utc(p.LastSeen),
-			LeakSuspect: p.LeakSuspect, Inactive: !p.Active, Messages: p.Messages,
+			Inactive: !p.Active, Messages: p.Messages,
+			LeakSuspect: p.Suspect(), Leaks: p.Leaks, Unverified: p.Unverified, Spoofs: p.Spoofs,
+		}
+		for _, o := range p.Observed {
+			out.Prefixes[i].ObservedDomains = append(out.Prefixes[i].ObservedDomains,
+				ObservedDomain{Domain: o.Domain, Messages: o.Messages, Expected: o.Expected})
 		}
 	}
 	return result{
@@ -255,9 +277,6 @@ func prefixesText(out PrefixesOutput) string {
 		if p.LastSeen != nil {
 			line = fmt.Sprintf("%s · %d messages · last seen %s", p.Address, p.Messages, p.LastSeen.Format(time.RFC3339))
 		}
-		if p.LeakSuspect {
-			line += " · leak suspect"
-		}
 		if p.Inactive {
 			line += " · inactive"
 		}
@@ -270,6 +289,19 @@ func prefixesText(out PrefixesOutput) string {
 		}
 		if len(p.ExpectedDomains) > 0 {
 			line += " · expects " + strings.Join(p.ExpectedDomains, ", ")
+		}
+		if len(p.ObservedDomains) > 0 {
+			var seen []string
+			for _, o := range p.ObservedDomains {
+				seen = append(seen, fmt.Sprintf("%s (%d)", o.Domain, o.Messages))
+			}
+			line += " · DMARC-verified senders " + strings.Join(seen, ", ")
+		}
+		if p.Leaks > 0 {
+			line += fmt.Sprintf(" · leak suspect: %d from senders it was not given to, %d of them unverified", p.Leaks, p.Unverified)
+		}
+		if p.Spoofs > 0 {
+			line += fmt.Sprintf(" · spoofed: %d claim an expected sender without passing DMARC", p.Spoofs)
 		}
 		if p.Note != "" {
 			line += fmt.Sprintf(" · note %q", p.Note)

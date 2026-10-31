@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
+	"github.com/yuuka-mail/yuuka/internal/leak"
 	"github.com/yuuka-mail/yuuka/internal/store"
 )
 
@@ -23,6 +24,12 @@ func InputOf(v *auth.Viewer, m store.MessageDetail, raw []byte) Input {
 	for _, d := range m.Deliveries {
 		if !slices.Contains(in.DeliveredTo, d.EnvelopeTo) {
 			in.DeliveredTo = append(in.DeliveredTo, d.EnvelopeTo)
+		}
+		if d.Leak.Verdict != leak.None {
+			c := LeakCheck{To: d.Prefix + "@" + d.Zone, Verdict: LeakVerdict(d.Leak.Verdict), Domain: d.Leak.Domain}
+			if !slices.Contains(in.LeakChecks, c) {
+				in.LeakChecks = append(in.LeakChecks, c)
+			}
 		}
 	}
 	if len(m.Deliveries) > 0 && m.Deliveries[0].Auth != nil {

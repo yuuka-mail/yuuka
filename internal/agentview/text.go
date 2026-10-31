@@ -30,6 +30,13 @@ func (v View) Text() string {
 	}
 	fmt.Fprintf(&b, "class: %s\n", f.Class)
 	fmt.Fprintf(&b, "auth: %s\n", f.Auth.Line)
+	for _, c := range f.LeakChecks {
+		fmt.Fprintf(&b, "leak check: %s %s", c.To, c.Verdict)
+		if c.Domain != "" {
+			fmt.Fprintf(&b, " (%s)", c.Domain)
+		}
+		b.WriteByte('\n')
+	}
 	for _, w := range f.Warnings {
 		fmt.Fprintf(&b, "warning: %s\n", w)
 	}

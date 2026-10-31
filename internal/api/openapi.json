@@ -251,6 +251,9 @@
           },
           "auth": {
             "$ref": "#/components/schemas/DeliveryAuth"
+          },
+          "leak": {
+            "$ref": "#/components/schemas/LeakCheck"
           }
         },
         "required": [
@@ -509,6 +512,12 @@
           "downgraded": {
             "type": "boolean"
           },
+          "leak_checks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LeakCheck"
+            }
+          },
           "warnings": {
             "type": "array",
             "items": {
@@ -565,6 +574,33 @@
           "item",
           "pre",
           "quote"
+        ]
+      },
+      "LeakCheck": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "string"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/LeakVerdict"
+          },
+          "domain": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "to",
+          "verdict"
+        ],
+        "additionalProperties": false
+      },
+      "LeakVerdict": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "leak",
+          "spoof"
         ]
       },
       "Level": {
@@ -804,6 +840,55 @@
         ],
         "additionalProperties": false
       },
+      "ObservedDomain": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "integer"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expected": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "domain",
+          "messages",
+          "last_seen",
+          "expected"
+        ],
+        "additionalProperties": false
+      },
+      "Offense": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/MessageSummary"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/LeakVerdict"
+          },
+          "domain": {
+            "type": "string"
+          },
+          "delivered_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "message",
+          "verdict",
+          "delivered_at"
+        ],
+        "additionalProperties": false
+      },
       "OutboxEntry": {
         "type": "object",
         "properties": {
@@ -996,6 +1081,31 @@
           },
           "downgraded": {
             "type": "integer"
+          },
+          "expected_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "observed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObservedDomain"
+            }
+          },
+          "leaks": {
+            "type": "integer"
+          },
+          "unverified": {
+            "type": "integer"
+          },
+          "spoofs": {
+            "type": "integer"
+          },
+          "last_offense": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -1005,7 +1115,89 @@
           "claimed",
           "label",
           "messages",
-          "downgraded"
+          "downgraded",
+          "expected_domains",
+          "observed",
+          "leaks",
+          "unverified",
+          "spoofs"
+        ],
+        "additionalProperties": false
+      },
+      "PrefixDetail": {
+        "type": "object",
+        "properties": {
+          "zone": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "claimed": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          },
+          "first_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "messages": {
+            "type": "integer"
+          },
+          "downgraded": {
+            "type": "integer"
+          },
+          "expected_domains": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "observed": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObservedDomain"
+            }
+          },
+          "leaks": {
+            "type": "integer"
+          },
+          "unverified": {
+            "type": "integer"
+          },
+          "spoofs": {
+            "type": "integer"
+          },
+          "last_offense": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "offenses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Offense"
+            }
+          }
+        },
+        "required": [
+          "zone",
+          "address",
+          "claimed",
+          "label",
+          "messages",
+          "downgraded",
+          "expected_domains",
+          "observed",
+          "leaks",
+          "unverified",
+          "spoofs",
+          "offenses"
         ],
         "additionalProperties": false
       },
@@ -2452,6 +2644,58 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PrefixList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/prefixes/{address}": {
+      "get": {
+        "summary": "Get a prefix with its leak check and the latest mail that leaked or spoofed",
+        "security": [
+          {
+            "bearer": [
+              "prefix:read",
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "prefix:read",
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "address",
+            "in": "path",
+            "description": "prefix@zone",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PrefixDetail"
                 }
               }
             }

@@ -179,6 +179,12 @@ type Delivery struct {
 	ReceivedAt    time.Time `json:"received_at"`
 	// Auth is absent for deliveries ingested before auth was extracted.
 	Auth *DeliveryAuth `json:"auth,omitempty"`
+	// Leak is the leak check of this delivery (§3 principle 3), judged
+	// against the prefix's expected domains as they are now. Absent for
+	// an unclaimed prefix, a prefix that expects nothing yet, or a DMARC
+	// failure that does not claim an expected sender (one that does is a
+	// spoof, and stays downgraded).
+	Leak *agentview.LeakCheck `json:"leak,omitempty"`
 }
 
 // Message is GET /api/v1/messages/{id}: parsed fields and the plain text
@@ -229,6 +235,54 @@ type Prefix struct {
 	LastSeen   *time.Time `json:"last_seen,omitempty"`
 	Messages   int        `json:"messages"`
 	Downgraded int        `json:"downgraded"`
+	// ExpectedDomains are the organizational domains the address was
+	// given to, the operator's decision (yuuka prefix expect).
+	ExpectedDomains []string `json:"expected_domains"`
+	// The leak check of a claimed prefix (§3 principle 3), over the mail
+	// the viewer may read; empty and zero for an unclaimed one.
+	// Observed are the senders the trusted receiver's DMARC proved, most
+	// mail first. Leaks counts messages from senders the address was not
+	// given to, Unverified those of them that proved nothing about their
+	// sender; Spoofs counts messages whose From claims an expected domain
+	// without DMARC proving it. Leaks and spoofs stay zero while nothing
+	// is expected.
+	Observed    []ObservedDomain `json:"observed"`
+	Leaks       int              `json:"leaks"`
+	Unverified  int              `json:"unverified"`
+	Spoofs      int              `json:"spoofs"`
+	LastOffense *time.Time       `json:"last_offense,omitempty"`
+}
+
+// ObservedDomain is an organizational domain DMARC proved to have sent
+// mail to a prefix.
+type ObservedDomain struct {
+	Domain   string    `json:"domain"`
+	Messages int       `json:"messages"`
+	LastSeen time.Time `json:"last_seen"`
+	// Expected is whether the prefix was given to it.
+	Expected bool `json:"expected"`
+}
+
+// PrefixParams name one prefix.
+type PrefixParams struct {
+	Address Mailbox `path:"address" jsonschema:"prefix@zone"`
+}
+
+// PrefixDetail is GET /api/v1/prefixes/{address}: the prefix and the
+// latest mail that leaked or spoofed, newest first.
+type PrefixDetail struct {
+	Prefix
+	Offenses []Offense `json:"offenses"`
+}
+
+// Offense is one message judged a leak or a spoof at the prefix.
+type Offense struct {
+	Message MessageSummary        `json:"message"`
+	Verdict agentview.LeakVerdict `json:"verdict"`
+	// Domain is the DMARC-proven sender of a leak, the claimed one of a
+	// spoof; absent for a leak that proved nothing about its sender.
+	Domain      string    `json:"domain,omitempty"`
+	DeliveredAt time.Time `json:"delivered_at"`
 }
 
 // PrefixList is GET /api/v1/prefixes. Messages and Downgraded are

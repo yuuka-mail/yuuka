@@ -1,11 +1,54 @@
 package main
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/yuuka-mail/yuuka/internal/store"
 )
+
+func TestPrefixExpect(t *testing.T) {
+	t.Parallel()
+	e := newHostEnv(t)
+	e.must("prefix", "claim", "github@example.com")
+	out, msg, err := e.run("prefix", "expect", "GitHub@example.com", "--domains", "mail.example.net, example.org")
+	if err != nil || !strings.Contains(out, "github@example.com expects example.net, example.org") ||
+		!strings.Contains(msg, "mail.example.net counts as example.net") {
+		t.Errorf("expect: %q %q %v", out, msg, err)
+	}
+	_, _, args := e.lastAction("prefix.expect")
+	if args["via"] != "cli" || args["prefix"] != "github" || fmt.Sprint(args["expected_domains"]) != "[example.net example.org]" {
+		t.Errorf("recorded %v", args)
+	}
+	// Flags first works too; the same list changes nothing.
+	if out := e.must("prefix", "expect", "--domains", "example.org,example.net", "github@example.com"); !strings.Contains(out, "already expects") {
+		t.Errorf("expect again: %q", out)
+	}
+	if out := e.must("prefix", "ls"); !strings.Contains(out, "EXPECTED") || !strings.Contains(out, "example.net,example.org") {
+		t.Errorf("ls:\n%s", out)
+	}
+	if out := e.must("prefix", "expect", "github@example.com", "--domains", ""); !strings.Contains(out, "expects nothing") {
+		t.Errorf("clear: %q", out)
+	}
+	if _, err := e.pool.Exec(t.Context(), `INSERT INTO prefixes (zone, prefix, first_seen, last_seen) VALUES ('example.com', 'random', now(), now())`); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"expect", "random@example.com", "--domains", "example.net"}, "not claimed"},
+		{[]string{"expect", "nobody@example.com", "--domains", "example.net"}, "not in the prefix registry"},
+		{[]string{"expect", "github@example.com"}, "--domains is required"},
+		{[]string{"expect", "github@example.com", "--domains", "com"}, "public suffix"},
+		{[]string{"expect", "--domains", "example.net"}, "usage"},
+	} {
+		if _, _, err := e.run("prefix", bad.args...); err == nil || !strings.Contains(err.Error(), bad.want) {
+			t.Errorf("prefix %v: %v, want %q", bad.args, err, bad.want)
+		}
+	}
+}
 
 func TestPrefixCommands(t *testing.T) {
 	t.Parallel()

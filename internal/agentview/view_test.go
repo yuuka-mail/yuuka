@@ -313,6 +313,40 @@ func TestWithholdDelivery(t *testing.T) {
 	}
 }
 
+// The store's leak verdicts are facts with a warning each, and delivery
+// facts like the rest: withheld without delivery:read.
+func TestLeakChecks(t *testing.T) {
+	in := input(t, "untrusted-receiver")
+	in.LeakChecks = []LeakCheck{
+		{To: "github@example.com", Verdict: VerdictSpoof, Domain: "example.net"},
+		{To: "shop@example.com", Verdict: VerdictLeak},
+		{To: "news@example.com", Verdict: VerdictLeak, Domain: "example.org"},
+		{To: "me@example.com", Verdict: VerdictOK, Domain: "example.net"},
+	}
+	v := Build(in)
+	var keys []string
+	for _, w := range v.Facts.Warnings {
+		k, _, _ := strings.Cut(w, ":")
+		keys = append(keys, k)
+	}
+	if len(v.Facts.LeakChecks) != 4 || strings.Join(keys, " ") != "unverified spoof leak leak" {
+		t.Errorf("facts %+v", v.Facts)
+	}
+	text := v.Text()
+	for _, line := range []string{
+		"leak check: github@example.com spoof (example.net)\n", "leak check: shop@example.com leak\n",
+		"leak check: me@example.com ok (example.net)\n", "warning: leak: news@example.com was not given to example.org",
+	} {
+		if !strings.Contains(text, line) {
+			t.Errorf("text lacks %q:\n%s", line, text)
+		}
+	}
+	in.WithholdDelivery = true
+	if v := Build(in); v.Facts.LeakChecks != nil || strings.Contains(v.Text(), "leak") {
+		t.Errorf("withheld: %+v\n%s", v.Facts, v.Text())
+	}
+}
+
 func TestParseURI(t *testing.T) {
 	for in, want := range map[string]Anchor{
 		"yuuka://message/" + testID:                      {},
