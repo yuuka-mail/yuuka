@@ -9,6 +9,21 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+
+	"github.com/pires/go-proxyproto"
+)
+
+var (
+	v2Sig = proxyproto.SIGV2
+	// v2MaxBody is the largest v2 length go-proxyproto accepts.
+	v2MaxBody = int(proxyproto.MaxV2HeaderSize)
+)
+
+const (
+	// v1MaxLen is the longest v1 line the spec allows, CRLF included.
+	v1MaxLen = 107
+	// v2HeaderLen is the fixed part of a v2 header.
+	v2HeaderLen = 16
 )
 
 // v2 builds a v2 header: verCmd and famProto bytes, then body, with the
@@ -57,7 +72,6 @@ func TestReadHeader(t *testing.T) {
 		{name: "v2 tlv garbage is skipped", in: v2(0x21, 0x11, append(inet4Body("203.0.113.7", "192.0.2.1", 1, 2), 0xff, 0xff)), src: "203.0.113.7:1"},
 		{name: "v2 local", in: v2(0x20, 0x00, nil), local: true},
 		{name: "v2 local ignores family and body", in: v2(0x20, 0x11, inet4Body("203.0.113.7", "192.0.2.1", 1, 2)), local: true},
-		{name: "v2 proxy unspec", in: v2(0x21, 0x00, nil), local: true},
 		{name: "v2 max length", in: v2(0x21, 0x11, append(inet4Body("203.0.113.7", "192.0.2.1", 1, 2), make([]byte, v2MaxBody-12)...)), src: "203.0.113.7:1"},
 
 		{name: "not a header", in: []byte{0x16, 0x03, 0x01}, err: ErrMissingHeader},
@@ -84,11 +98,18 @@ func TestReadHeader(t *testing.T) {
 		{name: "v1 bad dst port", in: []byte("PROXY TCP4 1.2.3.4 5.6.7.8 1 x\r\n"), err: errMalformed},
 		{name: "v1 oversized", in: []byte("PROXY UNKNOWN " + strings.Repeat("a", 200) + "\r\n"), err: errMalformed},
 		{name: "v1 one byte over", in: []byte("PROXY UNKNOWN " + strings.Repeat("a", v1MaxLen-len("PROXY UNKNOWN ")-1) + "\r\n"), err: errMalformed},
-		{name: "v1 truncated", in: []byte("PROXY TCP4 1.2.3.4"), err: io.ErrUnexpectedEOF},
+		// go-proxyproto refuses a v1 line not in the buffer at once rather
+		// than wait on a peer that may be stalling on purpose.
+		{name: "v1 truncated", in: []byte("PROXY TCP4 1.2.3.4"), err: errMalformed},
 
-		{name: "v2 bad signature", in: append([]byte("\r\n\r\nXXXXXXXX"), 0x21, 0x11, 0, 0), err: errMalformed},
-		{name: "v2 short bad signature", in: []byte("\r\nEHLO"), err: errMalformed},
-		{name: "v2 truncated fixed part", in: v2Sig[:8], err: io.ErrUnexpectedEOF},
+		// Not the full v2 signature is no PROXY header at all; a peer that
+		// sends fewer than 12 bytes and waits runs into the deadline.
+		{name: "v2 bad signature", in: append([]byte("\r\n\r\nXXXXXXXX"), 0x21, 0x11, 0, 0), err: ErrMissingHeader},
+		{name: "v2 short bad signature", in: []byte("\r\nEHLO"), err: ErrMissingHeader},
+		{name: "v2 truncated signature", in: v2Sig[:8], err: ErrMissingHeader},
+		// PROXY with UNSPEC would attribute the client to the proxy.
+		{name: "v2 proxy unspec", in: v2(0x21, 0x00, nil), err: errMalformed},
+		{name: "v2 truncated after signature", in: v2(0x21, 0x11, nil)[:14], err: io.ErrUnexpectedEOF},
 		{name: "v2 version 1", in: v2(0x11, 0x11, inet4Body("1.2.3.4", "5.6.7.8", 1, 2)), err: errMalformed},
 		{name: "v2 command 2", in: v2(0x22, 0x11, inet4Body("1.2.3.4", "5.6.7.8", 1, 2)), err: errMalformed},
 		{name: "v2 udp", in: v2(0x21, 0x12, inet4Body("1.2.3.4", "5.6.7.8", 1, 2)), err: errMalformed},

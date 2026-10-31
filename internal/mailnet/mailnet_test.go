@@ -316,13 +316,14 @@ func TestNewListenerRefusesPlaintextWithoutProxies(t *testing.T) {
 }
 
 // A peer that sends half a header and stalls holds only its own
-// goroutine, until the deadline; others are accepted meanwhile.
+// goroutine, until the deadline; others are accepted meanwhile. Half a
+// v2 signature, because half a v1 line is refused at once.
 func TestSlowHeaderDoesNotBlockAccept(t *testing.T) {
 	const timeout = time.Second
 	h := listen(t, "tcp", "127.0.0.1:0", Config{HandshakeTimeout: timeout, Proxies: proxies(t, "127.0.0.1")})
 	start := time.Now()
 	slow := h.dial(t)
-	if _, err := slow.Write([]byte("PROXY TCP4 203.0.")); err != nil {
+	if _, err := slow.Write(v2Sig[:6]); err != nil {
 		t.Fatal(err)
 	}
 	fast := h.dial(t)
@@ -359,7 +360,7 @@ func isReset(err error) bool {
 func TestCloseAbortsHandshakes(t *testing.T) {
 	h := listen(t, "tcp", "127.0.0.1:0", Config{HandshakeTimeout: time.Minute, Proxies: proxies(t, "127.0.0.1")})
 	slow := h.dial(t)
-	if _, err := slow.Write([]byte("PROXY ")); err != nil {
+	if _, err := slow.Write(v2Sig[:6]); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(50 * time.Millisecond) // let the listener start reading

@@ -27,6 +27,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pires/go-proxyproto"
+
 	"github.com/yuuka-mail/yuuka/internal/clientip"
 )
 
@@ -54,10 +56,10 @@ var (
 // which is how every implicit-TLS client opens.
 const tlsHandshake = 0x16
 
-// bufSize must hold the largest v2 header, which readV2 peeks whole.
+// bufSize is the read buffer of a vetted connection. A v1 header must
+// arrive in one read of it (go-proxyproto refuses one split across
+// reads), and whatever follows the header stays in it for the protocol.
 const bufSize = 4096
-
-var _ [bufSize - v2HeaderLen - v2MaxBody]struct{} // bufSize is big enough
 
 // Config says how a Listener vets connections.
 type Config struct {
@@ -196,7 +198,7 @@ func (l *Listener) handshake(raw net.Conn) (net.Conn, error) {
 			return nil, err
 		}
 		switch {
-		case b[0] == 'P' || b[0] == v2Sig[0]:
+		case b[0] == proxyproto.SIGV1[0] || b[0] == proxyproto.SIGV2[0]:
 			return nil, ErrUntrustedHeader
 		case b[0] != tlsHandshake:
 			return nil, ErrPlaintext

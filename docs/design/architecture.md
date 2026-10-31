@@ -407,6 +407,7 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 | MIME 解析 | `github.com/emersion/go-message` (+ `mail`) | 编码/多部分/inline 处理成熟；`enmime` 作为宽容兜底备选 |
 | 发信 | 标准库组装（§10.2.1）+ `net/smtp` over TLS 465 | **MIME 自己组装，transport 只投递字节**；一个 smtp driver 覆盖 CF/Resend/SES/Gmail/工作邮箱，差别只是配置（§10.2）。不引第三方 SDK |
 | SMTP submission 口（服务端，§13.6） | `github.com/emersion/go-smtp` 的 server 侧（带进 `github.com/emersion/go-sasl`） | 和已在用的 `go-message`、以后的 `go-imap` 同一作者同一生态，维护多年，除 `go-sasl` 外没有依赖。自己写要处理 ESMTP 扩展、`DATA` 的点转义、`BDAT`、管线化和 SASL，全是协议细节而不是 yuuka 的逻辑。它不能关掉 `8BITMIME`、`CHUNKING` 的宣告，这对 yuuka 无害（§13.6）。只用协议部分：监听、TLS、PROXY protocol 由 `internal/mailnet` 做，认证、限速、审计在 yuuka 这边 |
+| PROXY protocol 解析（§13.6） | `github.com/pires/go-proxyproto` | 只依赖 `x/net`。起初自己写，换掉是因为它带着被广泛部署才学到的边角：客户端证书 TLV 的长度余量、LOCAL 下的非法 family、修过的远程 panic。只用 `Read` 解析一个头；监听、超时、只收 TCP 来源这些策略在 `internal/mailnet` |
 | Markdown 渲染（发信正文，§10.2.1） | `github.com/yuin/goldmark` | Go 生态的事实标准，CommonMark 合规，无传递依赖。用它的渲染钩子把样式内联进 HTML，不另引 CSS inliner |
 | **拉取**外部邮箱 | `go-imap/v2` client + IDLE，PLAIN 或 OAuth2(XOAUTH2) | M365 已关基础认证，必须 OAuth。Gmail 个人账户开两步验证后**仍可用 app password**，而 OAuth 同意屏在 Testing 模式下 refresh token 7 天过期、转正式又要应用审核——个人项目 Gmail 默认走 app password，OAuth 留给 M365。Gmail 以后可升级到 Gmail API（`history.list` 增量 + Pub/Sub push），增量比 IMAP 可靠 |
 | 以后要真 IMAP（服务端） | `github.com/emersion/go-imap/v2` 的 server 侧 | **因为后端常驻，IMAP 永远是可加的一层，不依赖 CF 的私测功能** |
