@@ -17,8 +17,10 @@ import (
 	"strings"
 )
 
-// Proxies is the set of addresses whose X-Forwarded-For is believed. The
-// zero value believes nobody.
+// Proxies is a set of proxy addresses. For HTTP it is the set whose
+// X-Forwarded-For is believed; internal/mailnet uses a separate instance
+// for the PROXY protocol, with the same syntax. The zero value believes
+// nobody.
 type Proxies struct {
 	trusted []netip.Prefix
 }
@@ -48,7 +50,13 @@ func ParseProxies(s string) (Proxies, error) {
 	return p, nil
 }
 
-func (p Proxies) trusts(a netip.Addr) bool {
+// Empty reports whether no proxy is trusted.
+func (p Proxies) Empty() bool { return len(p.trusted) == 0 }
+
+// Trusts reports whether a is one of the proxies. A 4-in-6 address
+// matches its IPv4 form; a zone is ignored.
+func (p Proxies) Trusts(a netip.Addr) bool {
+	a = a.WithZone("").Unmap()
 	for _, pfx := range p.trusted {
 		if pfx.Contains(a) {
 			return true
@@ -72,7 +80,7 @@ func (p Proxies) Client(r *http.Request) string {
 	if !ok {
 		return r.RemoteAddr
 	}
-	if !p.trusts(peer) {
+	if !p.Trusts(peer) {
 		return peer.String()
 	}
 	var hops []string
@@ -85,7 +93,7 @@ func (p Proxies) Client(r *http.Request) string {
 		if !ok {
 			return peer.String()
 		}
-		if !p.trusts(a) {
+		if !p.Trusts(a) {
 			return a.String()
 		}
 		leftmost = a
