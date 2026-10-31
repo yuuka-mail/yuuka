@@ -34,10 +34,38 @@ type Grant struct {
 	CreatedAt   time.Time
 
 	// Read only, filled by the reads.
-	IdentityAddress string
-	PrincipalKind   string
-	PrincipalName   string
+	IdentityAddress   string
+	IdentityOwnerID   string
+	IdentityOwnerKind string
+	IdentityOwnerName string
+	IdentityDisabled  bool
+	PrincipalKind     string
+	PrincipalName     string
 }
+
+// input is the policy input of this row with no submission: who, as
+// what, under which grant (row false: as if there were none).
+func (g Grant) input(row bool) sendpolicy.Input {
+	in := sendpolicy.Input{
+		Submitter: sendpolicy.Principal{ID: g.PrincipalID, Kind: g.PrincipalKind},
+		Identity: sendpolicy.Identity{
+			ID: g.IdentityID, OwnerID: g.IdentityOwnerID, OwnerKind: g.IdentityOwnerKind, Disabled: g.IdentityDisabled,
+		},
+	}
+	if row {
+		p := g.ForPolicy()
+		in.Grant = &p
+	}
+	return in
+}
+
+// Applied is what this row lets its principal do (sendpolicy.Applied):
+// limits resolved, the tier after the owner cap. A read fills the
+// fields it needs.
+func (g Grant) Applied() sendpolicy.Grant { return sendpolicy.Applied(g.input(true)) }
+
+// Default is what would apply to the same pair without the row.
+func (g Grant) Default() sendpolicy.Grant { return sendpolicy.Applied(g.input(false)) }
 
 // ForPolicy converts the row for sendpolicy.
 func (g Grant) ForPolicy() sendpolicy.Grant {
@@ -55,10 +83,11 @@ func (g Grant) ForPolicy() sendpolicy.Grant {
 
 const grantCols = `g.identity_id, g.principal_id, g.send_policy, g.recipient_scope, g.recipient_allowlist,
 	g.max_per_hour, g.max_per_day, g.max_new_recipients_per_day, g.hold_seconds, g.suspended_at, g.created_at,
-	coalesce(i.prefix, '*') || '@' || i.zone, p.kind, p.name`
+	coalesce(i.prefix, '*') || '@' || i.zone, i.owner_id, o.kind, o.name, i.disabled_at IS NOT NULL, p.kind, p.name`
 
 const grantFrom = ` FROM identity_grants g
 	JOIN identities i ON i.id = g.identity_id
+	JOIN principals o ON o.id = i.owner_id
 	JOIN principals p ON p.id = g.principal_id`
 
 func scanGrant(row pgx.Row) (Grant, error) {
@@ -66,7 +95,7 @@ func scanGrant(row pgx.Row) (Grant, error) {
 	var policy, scope string
 	err := row.Scan(&g.IdentityID, &g.PrincipalID, &policy, &scope, &g.Allowlist,
 		&g.MaxPerHour, &g.MaxPerDay, &g.MaxNewRecipientsPerDay, &g.HoldSeconds, &g.SuspendedAt, &g.CreatedAt,
-		&g.IdentityAddress, &g.PrincipalKind, &g.PrincipalName)
+		&g.IdentityAddress, &g.IdentityOwnerID, &g.IdentityOwnerKind, &g.IdentityOwnerName, &g.IdentityDisabled, &g.PrincipalKind, &g.PrincipalName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return g, ErrNotFound
 	}
@@ -112,6 +141,18 @@ func (db *DB) Grants(ctx context.Context, identityID, principalID string) ([]Gra
 // keeps the table from saying something that never happens, and tells
 // the operator at the moment they try instead of at the first held mail.
 func (db *DB) SetGrant(ctx context.Context, g Grant, a Action) error {
+	return pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
+		if err := lockGrant(ctx, tx, g.IdentityID, g.PrincipalID); err != nil {
+			return err
+		}
+		return setGrant(ctx, tx, g, a)
+	})
+}
+
+// setGrant is SetGrant in tx, which holds the grant's lock: the one
+// place a grant row is written, so its checks hold for the host CLI and
+// for a tightening in the WebUI alike.
+func setGrant(ctx context.Context, tx pgx.Tx, g Grant, a Action) error {
 	if _, err := sendpolicy.ParseTier(string(g.Policy)); err != nil {
 		return err
 	}
@@ -121,43 +162,41 @@ func (db *DB) SetGrant(ctx context.Context, g Grant, a Action) error {
 	if g.Allowlist == nil {
 		g.Allowlist = []string{}
 	}
-	return pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
-		// A rule has no sending identity and never gets one (§8.5).
-		if err := refuseRulePrincipal(ctx, tx, g.PrincipalID); err != nil {
-			return err
-		}
-		// FOR SHARE: the owner checked is the owner when this commits.
-		var ownerID, ownerKind string
-		err := tx.QueryRow(ctx, `
-			SELECT i.owner_id, p.kind FROM identities i JOIN principals p ON p.id = i.owner_id
-			WHERE i.id = $1 FOR SHARE OF i`, g.IdentityID).Scan(&ownerID, &ownerKind)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("identity %s: %w", g.IdentityID, ErrNotFound)
-		}
-		if err != nil {
-			return fmt.Errorf("set grant: %w", err)
-		}
-		capped := sendpolicy.OwnerCapped(g.PrincipalID, sendpolicy.Identity{OwnerID: ownerID, OwnerKind: ownerKind})
-		if capped && g.Policy != sendpolicy.None && g.Policy != sendpolicy.Draft {
-			return ErrOwnerCap
-		}
-		_, err = tx.Exec(ctx, `
-			INSERT INTO identity_grants (identity_id, principal_id, send_policy, recipient_scope, recipient_allowlist,
-			                             max_per_hour, max_per_day, max_new_recipients_per_day, hold_seconds,
-			                             suspended_at, created_at)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-			ON CONFLICT (identity_id, principal_id) DO UPDATE SET
-				send_policy = excluded.send_policy, recipient_scope = excluded.recipient_scope,
-				recipient_allowlist = excluded.recipient_allowlist, max_per_hour = excluded.max_per_hour,
-				max_per_day = excluded.max_per_day, max_new_recipients_per_day = excluded.max_new_recipients_per_day,
-				hold_seconds = excluded.hold_seconds, suspended_at = excluded.suspended_at`,
-			g.IdentityID, g.PrincipalID, string(g.Policy), string(g.RecipientScope), g.Allowlist,
-			g.MaxPerHour, g.MaxPerDay, g.MaxNewRecipientsPerDay, g.HoldSeconds, g.SuspendedAt, a.At)
-		if err != nil {
-			return fmt.Errorf("set grant: %w", err)
-		}
-		return insertAction(ctx, tx, a)
-	})
+	// A rule has no sending identity and never gets one (§8.5).
+	if err := refuseRulePrincipal(ctx, tx, g.PrincipalID); err != nil {
+		return err
+	}
+	// FOR SHARE: the owner checked is the owner when this commits.
+	var ownerID, ownerKind string
+	err := tx.QueryRow(ctx, `
+		SELECT i.owner_id, p.kind FROM identities i JOIN principals p ON p.id = i.owner_id
+		WHERE i.id = $1 FOR SHARE OF i`, g.IdentityID).Scan(&ownerID, &ownerKind)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("identity %s: %w", g.IdentityID, ErrNotFound)
+	}
+	if err != nil {
+		return fmt.Errorf("set grant: %w", err)
+	}
+	capped := sendpolicy.OwnerCapped(g.PrincipalID, sendpolicy.Identity{OwnerID: ownerID, OwnerKind: ownerKind})
+	if capped && g.Policy != sendpolicy.None && g.Policy != sendpolicy.Draft {
+		return ErrOwnerCap
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO identity_grants (identity_id, principal_id, send_policy, recipient_scope, recipient_allowlist,
+		                             max_per_hour, max_per_day, max_new_recipients_per_day, hold_seconds,
+		                             suspended_at, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT (identity_id, principal_id) DO UPDATE SET
+			send_policy = excluded.send_policy, recipient_scope = excluded.recipient_scope,
+			recipient_allowlist = excluded.recipient_allowlist, max_per_hour = excluded.max_per_hour,
+			max_per_day = excluded.max_per_day, max_new_recipients_per_day = excluded.max_new_recipients_per_day,
+			hold_seconds = excluded.hold_seconds, suspended_at = excluded.suspended_at`,
+		g.IdentityID, g.PrincipalID, string(g.Policy), string(g.RecipientScope), g.Allowlist,
+		g.MaxPerHour, g.MaxPerDay, g.MaxNewRecipientsPerDay, g.HoldSeconds, g.SuspendedAt, a.At)
+	if err != nil {
+		return fmt.Errorf("set grant: %w", err)
+	}
+	return insertAction(ctx, tx, a)
 }
 
 // RemoveGrant deletes the grant of (identity, principal) and records a.
@@ -165,15 +204,22 @@ func (db *DB) SetGrant(ctx context.Context, g Grant, a Action) error {
 // nothing. ErrNotFound if there is no such grant.
 func (db *DB) RemoveGrant(ctx context.Context, identityID, principalID string, a Action) error {
 	return pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `DELETE FROM identity_grants WHERE identity_id = $1 AND principal_id = $2`, identityID, principalID)
-		if err != nil {
-			return fmt.Errorf("remove grant: %w", err)
+		if err := lockGrant(ctx, tx, identityID, principalID); err != nil {
+			return err
 		}
-		if tag.RowsAffected() == 0 {
-			return ErrNotFound
-		}
-		return insertAction(ctx, tx, a)
+		return removeGrant(ctx, tx, identityID, principalID, a)
 	})
+}
+
+func removeGrant(ctx context.Context, tx pgx.Tx, identityID, principalID string, a Action) error {
+	tag, err := tx.Exec(ctx, `DELETE FROM identity_grants WHERE identity_id = $1 AND principal_id = $2`, identityID, principalID)
+	if err != nil {
+		return fmt.Errorf("remove grant: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return insertAction(ctx, tx, a)
 }
 
 // grantLockKey is the first key of the advisory lock lockGrant takes;
@@ -185,6 +231,8 @@ const grantLockKey = 0x79756b
 // one slot left. An advisory lock rather than a row lock: a human sending
 // as their own identity usually has no grant row to lock. WithDecision
 // takes it, reads the policy input again under it and decides on that.
+// Every write of a grant row takes it first too, so once a suspension or
+// a revocation returns, no decision is still running on the old row.
 func lockGrant(ctx context.Context, tx pgx.Tx, identityID, principalID string) error {
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1, hashtext($2))`, grantLockKey, identityID+"/"+principalID)
 	if err != nil {

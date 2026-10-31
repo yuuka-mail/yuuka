@@ -191,16 +191,18 @@ func (db *DB) IdentityAt(ctx context.Context, zone, prefix string) (Identity, er
 // any more (sendpolicy refuses a disabled identity, and resolution skips
 // it). ErrNotFound if there is no such enabled identity.
 func (db *DB) DisableIdentity(ctx context.Context, id string, a Action) error {
-	return pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE identities SET disabled_at = $2 WHERE id = $1 AND disabled_at IS NULL`, id, a.At)
-		if err != nil {
-			return fmt.Errorf("disable identity %s: %w", id, err)
-		}
-		if tag.RowsAffected() == 0 {
-			return ErrNotFound
-		}
-		return insertAction(ctx, tx, a)
-	})
+	return pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error { return disableIdentity(ctx, tx, id, a) })
+}
+
+func disableIdentity(ctx context.Context, tx pgx.Tx, id string, a Action) error {
+	tag, err := tx.Exec(ctx, `UPDATE identities SET disabled_at = $2 WHERE id = $1 AND disabled_at IS NULL`, id, a.At)
+	if err != nil {
+		return fmt.Errorf("disable identity %s: %w", id, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return insertAction(ctx, tx, a)
 }
 
 // ResolveIdentity returns the identity that sending from addr goes out
