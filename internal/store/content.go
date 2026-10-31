@@ -13,6 +13,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/classify"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
+	"github.com/yuuka-mail/yuuka/internal/rules"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
@@ -291,7 +292,7 @@ func (w *writer) updateMessage(ctx context.Context, id string, msg mimeparse.Mes
 			message_id = $2, in_reply_to = $3, refs = $4, date_header = $5,
 			subject = $6, snippet = $7, from_addr = $8, from_name = $9, class = $10,
 			has_attach = $11, body_text = $12, parser_version = $13, parse_error = $14,
-			to_addrs = $15, cc_addrs = $16, reply_to_addrs = $17
+			to_addrs = $15, cc_addrs = $16, reply_to_addrs = $17, list_id = $18
 		FROM (SELECT raw_id, received_at FROM (
 		          SELECT raw_id, received_at, 0 AS src, id FROM deliveries WHERE message_id = $1
 		          UNION ALL
@@ -301,13 +302,13 @@ func (w *writer) updateMessage(ctx context.Context, id string, msg mimeparse.Mes
 		      ) src ORDER BY received_at, src, id LIMIT 1) first
 		WHERE m.id = $1 AND (m.canonical_raw_id, m.received_at, m.message_id, m.in_reply_to, m.refs,
 			m.date_header, m.subject, m.snippet, m.from_addr, m.from_name, m.class, m.has_attach,
-			m.body_text, m.parser_version, m.parse_error, m.to_addrs, m.cc_addrs, m.reply_to_addrs)
+			m.body_text, m.parser_version, m.parse_error, m.to_addrs, m.cc_addrs, m.reply_to_addrs, m.list_id)
 		IS DISTINCT FROM (first.raw_id, first.received_at, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-			$11, $12, $13, $14, $15::text[], $16::text[], $17::text[])`,
+			$11, $12, $13, $14, $15::text[], $16::text[], $17::text[], $18::text)`,
 		id, nullIfEmpty(msg.MessageID), nullIfEmpty(msg.InReplyTo), msg.References, date,
 		msg.Subject, msg.Snippet, msg.FromAddr, msg.FromName, int16(classify.Of(msg, prefixes)),
 		msg.HasAttach, msg.BodyText, mimeparse.Version, problem,
-		foldAddrs(msg.To), foldAddrs(msg.Cc), foldAddrs(msg.ReplyTo))
+		foldAddrs(msg.To), foldAddrs(msg.Cc), foldAddrs(msg.ReplyTo), rules.ListID(msg.ListID))
 	if err != nil {
 		return fmt.Errorf("update message: %w", err)
 	}

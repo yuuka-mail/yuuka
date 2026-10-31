@@ -54,6 +54,17 @@ func (db *DB) UnreadRecipients(ctx context.Context, limit int) ([]ReparseTarget,
 		ORDER BY mm.id LIMIT $1`, limit)
 }
 
+// UnreadListIDs returns up to limit messages, in id order, whose list_id
+// was never read: written before migration 0010 added it. The backlog
+// pass rebuilds them as it does UnreadRecipients.
+func (db *DB) UnreadListIDs(ctx context.Context, limit int) ([]ReparseTarget, error) {
+	return db.reparseTargets(ctx, `SELECT mm.id, mm.content_hash FROM messages mm
+		WHERE mm.list_id IS NULL
+		  AND (EXISTS (SELECT 1 FROM deliveries d WHERE d.message_id = mm.id)
+		    OR EXISTS (SELECT 1 FROM raw_objects sr WHERE sr.content_hash = mm.content_hash AND `+isSentCopy+`))
+		ORDER BY mm.id LIMIT $1`, limit)
+}
+
 // reparseTargets loads the sources of the messages (id, content_hash)
 // that the query pick selects.
 func (db *DB) reparseTargets(ctx context.Context, pick string, args ...any) ([]ReparseTarget, error) {
