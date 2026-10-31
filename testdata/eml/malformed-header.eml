@@ -1,0 +1,30 @@
+Received: from mail.example.net (192.0.2.10)
+	by cloudflare-email.net (cloudflare) id tx0007 for <random123@example.com>;
+	Fri, 31 Oct 2026 01:41:38 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net; cv=none;
+	b=AAAA
+ARC-Message-Signature: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net;
+	bh=BBBB; b=CCCC
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=example.org header.s=s1 header.b=DDDD;
+	dmarc=fail header.from=example.org policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mail.example.net) smtp.helo=mail.example.net;
+	spf=pass (mx.cloudflare.net: domain of x@spam.example designates 192.0.2.10 as permitted sender) smtp.mailfrom=x@spam.example;
+	arc=none smtp.remote-ip=192.0.2.10
+Received-SPF: pass (mx.cloudflare.net: domain of x@spam.example designates 192.0.2.10 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=192.0.2.10; envelope-from="x@spam.example"; helo=mail.example.net;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.org header.s=s1 header.b=DDDD;
+	dmarc=fail (p=NONE sp=NONE dis=NONE) header.from=example.org policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mail.example.net) smtp.helo=mail.example.net;
+	spf=pass (mx.cloudflare.net: domain of x@spam.example designates 192.0.2.10 as permitted sender) smtp.mailfrom=x@spam.example;
+	arc=none smtp.remote-ip=192.0.2.10
+X-CF-SpamH-Score: 0
+From: "Prize Desk <winner@spam.example
+To: random123@example.com
+this line is not a header field
+Subject: You have won
+Message-ID: no-angle-brackets@spam.example
+Date: someday soon
+
+Claim your prize now.

@@ -1,0 +1,30 @@
+Received: from mail.example.net (192.0.2.10)
+	by cloudflare-email.net (cloudflare) id tx0013 for <alice@example.com>;
+	Fri, 31 Oct 2026 01:41:38 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net; cv=none;
+	b=AAAA
+ARC-Message-Signature: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net;
+	bh=BBBB; b=CCCC
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=example.net header.s=s1 header.b=DDDD;
+	dmarc=pass header.from=example.net policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mail.example.net) smtp.helo=mail.example.net;
+	spf=pass (mx.cloudflare.net: domain of bounce@example.net designates 192.0.2.10 as permitted sender) smtp.mailfrom=bounce@example.net;
+	arc=none smtp.remote-ip=192.0.2.10
+Received-SPF: pass (mx.cloudflare.net: domain of bounce@example.net designates 192.0.2.10 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=192.0.2.10; envelope-from="bounce@example.net"; helo=mail.example.net;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.net header.s=s1 header.b=DDDD;
+	dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=example.net policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mail.example.net) smtp.helo=mail.example.net;
+	spf=pass (mx.cloudflare.net: domain of bounce@example.net designates 192.0.2.10 as permitted sender) smtp.mailfrom=bounce@example.net;
+	arc=none smtp.remote-ip=192.0.2.10
+X-CF-SpamH-Score: 0
+From: Grace <grace@example.net>
+To: alice@example.com
+Subject: =?x-made-up?Q?caf=E9?=
+Message-ID: <uc-13@example.net>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=x-made-up
+
+Plain ASCII survives an unknown charset.

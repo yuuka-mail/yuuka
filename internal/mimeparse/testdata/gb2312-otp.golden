@@ -1,0 +1,18 @@
+{
+  "subject": "【示例】验证码通知",
+  "from_addr": "service@example.cn",
+  "from_name": "示例服务",
+  "date": "2026-10-31T02:15:00Z",
+  "message_id": "20261031101500.1234@example.cn",
+  "in_reply_to": "",
+  "references": [],
+  "snippet": "您好： 您的验证码是 739201，五分钟内有效。请勿告诉他人。 示例服务",
+  "body_text": "您好：\r\n\r\n您的验证码是 739201，五分钟内有效。请勿告诉他人。\r\n\r\n示例服务",
+  "has_attach": false,
+  "media_type": "text/plain",
+  "list_id": "",
+  "list_unsubscribe": false,
+  "auto_submitted": "",
+  "precedence": "",
+  "problem": ""
+}

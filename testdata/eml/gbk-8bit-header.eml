@@ -1,0 +1,36 @@
+Received: from mx.example.cn (203.0.113.5)
+	by cloudflare-email.net (cloudflare) id tx0005 for <team@example.com>;
+	Fri, 31 Oct 2026 01:41:38 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net; cv=none;
+	b=AAAA
+ARC-Message-Signature: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net;
+	bh=BBBB; b=CCCC
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=example.cn header.s=s1 header.b=DDDD;
+	dmarc=pass header.from=example.cn policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mx.example.cn) smtp.helo=mx.example.cn;
+	spf=pass (mx.cloudflare.net: domain of zhang@example.cn designates 203.0.113.5 as permitted sender) smtp.mailfrom=zhang@example.cn;
+	arc=none smtp.remote-ip=203.0.113.5
+Received-SPF: pass (mx.cloudflare.net: domain of zhang@example.cn designates 203.0.113.5 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=203.0.113.5; envelope-from="zhang@example.cn"; helo=mx.example.cn;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.cn header.s=s1 header.b=DDDD;
+	dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=example.cn policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mx.example.cn) smtp.helo=mx.example.cn;
+	spf=pass (mx.cloudflare.net: domain of zhang@example.cn designates 203.0.113.5 as permitted sender) smtp.mailfrom=zhang@example.cn;
+	arc=none smtp.remote-ip=203.0.113.5
+X-CF-SpamH-Score: 0
+From: 张三 <zhang@example.cn>
+To: team@example.com
+Subject: 关于会议时间调整（堃、喆）
+Date: Fri, 31 Oct 2026 11:00:00 +0800
+Message-ID: <gbk-5@example.cn>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="GBK"
+Content-Transfer-Encoding: quoted-printable
+
+=D5=C5=88=D2=A1=A2=C0=EE=86=B4=A3=BA
+
+=BB=E1=D2=E9=B8=C4=B5=BD=D6=DC=CE=E5=CF=C2=CE=E7=C8=FD=B5=E3=A3=AC=B5=D8=B5=
+=E3=B2=BB=B1=E4=A1=A3
+

@@ -1,0 +1,18 @@
+{
+  "subject": "photos",
+  "from_addr": "dave@example.net",
+  "from_name": "Dave",
+  "date": "0001-01-01T00:00:00Z",
+  "message_id": "tr-9@example.net",
+  "in_reply_to": "",
+  "references": [],
+  "snippet": "Here are the photos from the weekend.",
+  "body_text": "Here are the photos from the weekend.",
+  "has_attach": true,
+  "media_type": "multipart/mixed",
+  "list_id": "",
+  "list_unsubscribe": false,
+  "auto_submitted": "",
+  "precedence": "",
+  "problem": ""
+}

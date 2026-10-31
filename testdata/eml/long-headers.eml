@@ -1,0 +1,61 @@
+Received: from mail.example.net (192.0.2.10)
+	by cloudflare-email.net (cloudflare) id tx0006 for <lists@example.com>;
+	Fri, 31 Oct 2026 01:41:38 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net; cv=none;
+	b=AAAA
+ARC-Message-Signature: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net;
+	bh=BBBB; b=CCCC
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=lists.example.org header.s=s1 header.b=DDDD;
+	dmarc=pass header.from=lists.example.org policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mail.example.net) smtp.helo=mail.example.net;
+	spf=pass (mx.cloudflare.net: domain of list-bounces@lists.example.org designates 192.0.2.10 as permitted sender) smtp.mailfrom=list-bounces@lists.example.org;
+	arc=none smtp.remote-ip=192.0.2.10
+Received-SPF: pass (mx.cloudflare.net: domain of list-bounces@lists.example.org designates 192.0.2.10 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=192.0.2.10; envelope-from="list-bounces@lists.example.org"; helo=mail.example.net;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=lists.example.org header.s=s1 header.b=DDDD;
+	dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=lists.example.org policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mail.example.net) smtp.helo=mail.example.net;
+	spf=pass (mx.cloudflare.net: domain of list-bounces@lists.example.org designates 192.0.2.10 as permitted sender) smtp.mailfrom=list-bounces@lists.example.org;
+	arc=none smtp.remote-ip=192.0.2.10
+X-CF-SpamH-Score: 0
+From: "Long Name, With Comma" <carol@example.org>
+To: a@example.com, b@example.com, c@example.com, d@example.com, e@example.com,
+ f@example.com, g@example.com, h@example.com
+Subject: =?utf-8?B?UmU6IFtkZXZdIOWFs+S6juWPkeW4g+a1geeoi+eahOiuqOiuuu+8jA==?=
+ =?utf-8?Q?=E4=BB=A5=E5=8F=8A=E4=B8=8B=E4=B8=80=E4=B8=AA=E7=89=88=E6=9C=AC=E7=9A=84=E8=AE=A1=E5=88=92_?=
+ and a plain ASCII tail that goes on
+ and on
+Date: Tue, 28 Oct 2026 07:30:00 +0000
+Message-ID: <thread-21@lists.example.org>
+In-Reply-To: <thread-20@lists.example.org>
+References: <thread-01@lists.example.org>
+ <thread-02@lists.example.org>
+ <thread-03@lists.example.org>
+ <thread-04@lists.example.org>
+ <thread-05@lists.example.org>
+ <thread-06@lists.example.org>
+ <thread-07@lists.example.org>
+ <thread-08@lists.example.org>
+ <thread-09@lists.example.org>
+ <thread-10@lists.example.org>
+ <thread-11@lists.example.org>
+ <thread-12@lists.example.org>
+ <thread-13@lists.example.org>
+ <thread-14@lists.example.org>
+ <thread-15@lists.example.org>
+ <thread-16@lists.example.org>
+ <thread-17@lists.example.org>
+ <thread-18@lists.example.org>
+ <thread-19@lists.example.org>
+ <thread-20@lists.example.org>
+List-Id: <dev.lists.example.org>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8; format=flowed
+
+I agree with the proposal.
+
+On Mon, Dan wrote:
+> We should cut the release on Thursday.
+> Any objections?

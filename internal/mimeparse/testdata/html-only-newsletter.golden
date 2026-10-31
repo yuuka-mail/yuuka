@@ -1,0 +1,18 @@
+{
+  "subject": "This week at Example",
+  "from_addr": "weekly@news.example.net",
+  "from_name": "Example Weekly",
+  "date": "2026-10-29T14:00:00Z",
+  "message_id": "weekly-44@news.example.net",
+  "in_reply_to": "",
+  "references": [],
+  "snippet": "This week \u0026 next Five things you missed — read on. Item Price Widget $3 Unsubscribe here.",
+  "body_text": "This week \u0026 next\nFive things you missed — read on.\n\nItem Price\nWidget $3\n\nUnsubscribe here.",
+  "has_attach": false,
+  "media_type": "text/html",
+  "list_id": "Example Weekly \u003cweekly.news.example.net\u003e",
+  "list_unsubscribe": true,
+  "auto_submitted": "",
+  "precedence": "bulk",
+  "problem": ""
+}

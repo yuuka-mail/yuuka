@@ -1,0 +1,33 @@
+Received: from mx.example.cn (203.0.113.5)
+	by cloudflare-email.net (cloudflare) id tx0004 for <svc-shop@example.com>;
+	Fri, 31 Oct 2026 01:41:38 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net; cv=none;
+	b=AAAA
+ARC-Message-Signature: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net;
+	bh=BBBB; b=CCCC
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=example.cn header.s=s1 header.b=DDDD;
+	dmarc=pass header.from=example.cn policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mx.example.cn) smtp.helo=mx.example.cn;
+	spf=pass (mx.cloudflare.net: domain of mailer@example.cn designates 203.0.113.5 as permitted sender) smtp.mailfrom=mailer@example.cn;
+	arc=none smtp.remote-ip=203.0.113.5
+Received-SPF: pass (mx.cloudflare.net: domain of mailer@example.cn designates 203.0.113.5 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=203.0.113.5; envelope-from="mailer@example.cn"; helo=mx.example.cn;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.cn header.s=s1 header.b=DDDD;
+	dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=example.cn policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mx.example.cn) smtp.helo=mx.example.cn;
+	spf=pass (mx.cloudflare.net: domain of mailer@example.cn designates 203.0.113.5 as permitted sender) smtp.mailfrom=mailer@example.cn;
+	arc=none smtp.remote-ip=203.0.113.5
+X-CF-SpamH-Score: 0
+From: =?gb2312?B?yr7A/bf+zvE=?= <service@example.cn>
+To: svc-shop@example.com
+Subject: =?gb2312?B?ob7KvsD9ob/R6dakwuvNqNaq?=
+Date: Fri, 31 Oct 2026 10:15:00 +0800
+Message-ID: <20261031101500.1234@example.cn>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=gb2312
+Content-Transfer-Encoding: base64
+
+xPq6w6O6DQoNCsT6tcTR6dakwuvKxyA3MzkyMDGjrM7lt9bW08Ta09DQp6Gjx+vO8Ljmy9/L+8jL
+oaMNCg0Kyr7A/bf+zvENCg==

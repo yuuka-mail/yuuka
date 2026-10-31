@@ -1,0 +1,18 @@
+{
+  "subject": "relayed",
+  "from_addr": "someone@example.net",
+  "from_name": "",
+  "date": "0001-01-01T00:00:00Z",
+  "message_id": "ur-16@example.net",
+  "in_reply_to": "",
+  "references": [],
+  "snippet": "Body.",
+  "body_text": "Body.",
+  "has_attach": false,
+  "media_type": "text/plain",
+  "list_id": "",
+  "list_unsubscribe": false,
+  "auto_submitted": "",
+  "precedence": "",
+  "problem": ""
+}

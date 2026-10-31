@@ -1,0 +1,18 @@
+{
+  "subject": "Your verification code is 482913",
+  "from_addr": "noreply@example.net",
+  "from_name": "Example Service",
+  "date": "2026-10-31T01:41:30Z",
+  "message_id": "otp-1@mail.example.net",
+  "in_reply_to": "",
+  "references": [],
+  "snippet": "Hello, Your verification code is 482913. It expires in 10 minutes. If you did not request this code, ignore this message.",
+  "body_text": "Hello,\r\n\r\nYour verification code is 482913. It expires in 10 minutes.\r\n\r\nIf you did not request this code, ignore this message.",
+  "has_attach": false,
+  "media_type": "text/plain",
+  "list_id": "",
+  "list_unsubscribe": false,
+  "auto_submitted": "",
+  "precedence": "",
+  "problem": ""
+}

@@ -1,0 +1,18 @@
+{
+  "subject": "You have won",
+  "from_addr": "winner@spam.example",
+  "from_name": "Prize Desk",
+  "date": "0001-01-01T00:00:00Z",
+  "message_id": "no-angle-brackets@spam.example",
+  "in_reply_to": "",
+  "references": [],
+  "snippet": "Claim your prize now.",
+  "body_text": "Claim your prize now.",
+  "has_attach": false,
+  "media_type": "text/plain",
+  "list_id": "",
+  "list_unsubscribe": false,
+  "auto_submitted": "",
+  "precedence": "",
+  "problem": "header: message: malformed MIME header line: this line is not a header field\r\n"
+}

@@ -1,0 +1,18 @@
+{
+  "subject": "broken multipart",
+  "from_addr": "sender@example.net",
+  "from_name": "",
+  "date": "0001-01-01T00:00:00Z",
+  "message_id": "nb-8@example.net",
+  "in_reply_to": "",
+  "references": [],
+  "snippet": "--whatever Content-Type: text/plain The text is still here. --whatever--",
+  "body_text": "--whatever\r\nContent-Type: text/plain\r\n\r\nThe text is still here.\r\n--whatever--",
+  "has_attach": false,
+  "media_type": "multipart/mixed",
+  "list_id": "",
+  "list_unsubscribe": false,
+  "auto_submitted": "",
+  "precedence": "",
+  "problem": "multipart/mixed: multipart: boundary is empty"
+}

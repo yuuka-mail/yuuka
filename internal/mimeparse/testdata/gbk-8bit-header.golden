@@ -1,0 +1,18 @@
+{
+  "subject": "关于会议时间调整（堃、喆）",
+  "from_addr": "zhang@example.cn",
+  "from_name": "张三",
+  "date": "2026-10-31T03:00:00Z",
+  "message_id": "gbk-5@example.cn",
+  "in_reply_to": "",
+  "references": [],
+  "snippet": "张堃、李喆： 会议改到周五下午三点，地点不变。",
+  "body_text": "张堃、李喆：\r\n\r\n会议改到周五下午三点，地点不变。",
+  "has_attach": false,
+  "media_type": "text/plain",
+  "list_id": "",
+  "list_unsubscribe": false,
+  "auto_submitted": "",
+  "precedence": "",
+  "problem": ""
+}

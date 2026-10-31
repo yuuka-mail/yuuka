@@ -1,0 +1,20 @@
+{
+  "subject": "Re: Lunch on Friday?",
+  "from_addr": "bob@example.org",
+  "from_name": "Bob Example",
+  "date": "2026-10-30T10:02:11Z",
+  "message_id": "reply-2@example.org",
+  "in_reply_to": "orig-1@example.com",
+  "references": [
+    "orig-1@example.com"
+  ],
+  "snippet": "Friday works. Noon at the usual place?",
+  "body_text": "Friday works. Noon at the usual place?\r\n\r\n\u003e Are you free for lunch on Friday?\r\n\u003e — Alice",
+  "has_attach": false,
+  "media_type": "multipart/alternative",
+  "list_id": "",
+  "list_unsubscribe": false,
+  "auto_submitted": "",
+  "precedence": "",
+  "problem": ""
+}

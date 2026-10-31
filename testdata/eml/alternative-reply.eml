@@ -1,0 +1,45 @@
+Received: from smtp.example.org (198.51.100.7)
+	by cloudflare-email.net (cloudflare) id tx0002 for <alice@example.com>;
+	Fri, 31 Oct 2026 01:41:38 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net; cv=none;
+	b=AAAA
+ARC-Message-Signature: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net;
+	bh=BBBB; b=CCCC
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=example.org header.s=s1 header.b=DDDD;
+	dmarc=pass header.from=example.org policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@smtp.example.org) smtp.helo=smtp.example.org;
+	spf=pass (mx.cloudflare.net: domain of bob@example.org designates 198.51.100.7 as permitted sender) smtp.mailfrom=bob@example.org;
+	arc=none smtp.remote-ip=198.51.100.7
+Received-SPF: pass (mx.cloudflare.net: domain of bob@example.org designates 198.51.100.7 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=198.51.100.7; envelope-from="bob@example.org"; helo=smtp.example.org;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.org header.s=s1 header.b=DDDD;
+	dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=example.org policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@smtp.example.org) smtp.helo=smtp.example.org;
+	spf=pass (mx.cloudflare.net: domain of bob@example.org designates 198.51.100.7 as permitted sender) smtp.mailfrom=bob@example.org;
+	arc=none smtp.remote-ip=198.51.100.7
+X-CF-SpamH-Score: 0
+From: Bob Example <Bob@Example.org>
+To: Alice <alice@example.com>
+Subject: Re: Lunch on Friday?
+Date: Thu, 30 Oct 2026 18:02:11 +0800
+Message-ID: <reply-2@example.org>
+In-Reply-To: <orig-1@example.com>
+References: <orig-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-boundary"
+
+--alt-boundary
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+Friday works. Noon at the usual place?
+
+> Are you free for lunch on Friday?
+> =E2=80=94 Alice
+--alt-boundary
+Content-Type: text/html; charset=utf-8
+
+<div>Friday works. Noon at the usual place?</div><blockquote>Are you free for lunch on Friday?</blockquote>
+--alt-boundary--

@@ -1,0 +1,30 @@
+Received: from spam.example (203.0.113.66)
+	by cloudflare-email.net (cloudflare) id tx0015 for <github@example.com>;
+	Fri, 31 Oct 2026 01:41:38 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net; cv=none;
+	b=AAAA
+ARC-Message-Signature: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net;
+	bh=BBBB; b=CCCC
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=example.com header.s=s1 header.b=DDDD;
+	dmarc=fail header.from=example.com policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@spam.example) smtp.helo=spam.example;
+	spf=fail (mx.cloudflare.net: domain of x@spam.example designates 203.0.113.66 as permitted sender) smtp.mailfrom=x@spam.example;
+	arc=none smtp.remote-ip=203.0.113.66
+Received-SPF: fail (mx.cloudflare.net: domain of x@spam.example designates 203.0.113.66 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=203.0.113.66; envelope-from="x@spam.example"; helo=spam.example;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.com header.s=s1 header.b=DDDD;
+	dmarc=fail (p=NONE sp=NONE dis=NONE) header.from=example.com policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@spam.example) smtp.helo=spam.example;
+	spf=fail (mx.cloudflare.net: domain of x@spam.example designates 203.0.113.66 as permitted sender) smtp.mailfrom=x@spam.example;
+	arc=none smtp.remote-ip=203.0.113.66
+X-CF-SpamH-Score: 9
+Authentication-Results: mx.cloudflare.net; dmarc=pass header.from=example.com; spf=pass smtp.mailfrom=example.com
+X-CF-SpamH-Score: 0
+From: Example Security <security@example.com>
+To: github@example.com
+Subject: Verify your account
+Message-ID: <forged-15@spam.example>
+
+Click here.

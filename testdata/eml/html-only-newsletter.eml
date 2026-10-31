@@ -1,0 +1,42 @@
+Received: from mail.example.net (192.0.2.10)
+	by cloudflare-email.net (cloudflare) id tx0003 for <news@example.com>;
+	Fri, 31 Oct 2026 01:41:38 +0000
+ARC-Seal: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net; cv=none;
+	b=AAAA
+ARC-Message-Signature: i=1; a=rsa-sha256; s=2024; d=cloudflare-email.net;
+	bh=BBBB; b=CCCC
+ARC-Authentication-Results: i=1; mx.cloudflare.net;
+	dkim=pass header.d=example.net header.s=s1 header.b=DDDD;
+	dmarc=pass header.from=example.net policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mail.example.net) smtp.helo=mail.example.net;
+	spf=pass (mx.cloudflare.net: domain of bounce@example.net designates 192.0.2.10 as permitted sender) smtp.mailfrom=bounce@example.net;
+	arc=none smtp.remote-ip=192.0.2.10
+Received-SPF: pass (mx.cloudflare.net: domain of bounce@example.net designates 192.0.2.10 as permitted sender)
+	receiver=mx.cloudflare.net; client-ip=192.0.2.10; envelope-from="bounce@example.net"; helo=mail.example.net;
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.net header.s=s1 header.b=DDDD;
+	dmarc=pass (p=NONE sp=NONE dis=NONE) header.from=example.net policy.dmarc=none;
+	spf=none (mx.cloudflare.net: no SPF records found for postmaster@mail.example.net) smtp.helo=mail.example.net;
+	spf=pass (mx.cloudflare.net: domain of bounce@example.net designates 192.0.2.10 as permitted sender) smtp.mailfrom=bounce@example.net;
+	arc=none smtp.remote-ip=192.0.2.10
+X-CF-SpamH-Score: 0
+From: Example Weekly <weekly@news.example.net>
+To: news@example.com
+Subject: This week at Example
+Date: Wed, 29 Oct 2026 09:00:00 -0500
+Message-ID: <weekly-44@news.example.net>
+List-Id: Example Weekly <weekly.news.example.net>
+List-Unsubscribe: <https://example.net/u>, <mailto:unsub@news.example.net>
+Precedence: bulk
+MIME-Version: 1.0
+Content-Type: text/html; charset="UTF-8"
+Content-Transfer-Encoding: base64
+
+PCFET0NUWVBFIGh0bWw+PGh0bWw+PGhlYWQ+PHRpdGxlPldlZWtseTwvdGl0bGU+PHN0eWxlPnB7
+Y29sb3I6cmVkfTwvc3R5bGU+PC9oZWFkPjxib2R5PjxzY3JpcHQ+dHJhY2soKTwvc2NyaXB0Pjxo
+MT5UaGlzIHdlZWsgJmFtcDsgbmV4dDwvaDE+PHA+Rml2ZSB0aGluZ3MgeW91IG1pc3NlZCZuYnNw
+OyZtZGFzaDsgcmVhZCBvbi48L3A+PHRhYmxlPjx0cj48dGQ+SXRlbTwvdGQ+PHRkPlByaWNlPC90
+ZD48L3RyPjx0cj48dGQ+V2lkZ2V0PC90ZD48dGQ+JiMzNjszPC90ZD48L3RyPjwvdGFibGU+PCEt
+LSBoaWRkZW4gY29tbWVudCAtLT48aW1nIHNyYz0iaHR0cHM6Ly9leGFtcGxlLm5ldC9wLmdpZiIg
+d2lkdGg9MSBoZWlnaHQ9MT48cD5VbnN1YnNjcmliZSA8YSBocmVmPSJodHRwczovL2V4YW1wbGUu
+bmV0L3UiPmhlcmU8L2E+LjwvcD48L2JvZHk+PC9odG1sPg==

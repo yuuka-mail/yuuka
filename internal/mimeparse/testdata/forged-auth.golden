@@ -1,0 +1,18 @@
+{
+  "subject": "Verify your account",
+  "from_addr": "security@example.com",
+  "from_name": "Example Security",
+  "date": "0001-01-01T00:00:00Z",
+  "message_id": "forged-15@spam.example",
+  "in_reply_to": "",
+  "references": [],
+  "snippet": "Click here.",
+  "body_text": "Click here.",
+  "has_attach": false,
+  "media_type": "text/plain",
+  "list_id": "",
+  "list_unsubscribe": false,
+  "auto_submitted": "",
+  "precedence": "",
+  "problem": ""
+}

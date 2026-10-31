@@ -1,0 +1,18 @@
+{
+  "subject": "Invoice and logo",
+  "from_addr": "frank@example.net",
+  "from_name": "Frank",
+  "date": "2026-10-31T03:00:00Z",
+  "message_id": "inl-12@example.net",
+  "in_reply_to": "",
+  "references": [],
+  "snippet": "Invoice attached. Logo below.",
+  "body_text": "Invoice attached. Logo below.",
+  "has_attach": true,
+  "media_type": "multipart/mixed",
+  "list_id": "",
+  "list_unsubscribe": false,
+  "auto_submitted": "",
+  "precedence": "",
+  "problem": ""
+}

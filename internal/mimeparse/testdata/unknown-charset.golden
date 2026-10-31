@@ -1,0 +1,18 @@
+{
+  "subject": "=?x-made-up?Q?caf=E9?=",
+  "from_addr": "grace@example.net",
+  "from_name": "Grace",
+  "date": "0001-01-01T00:00:00Z",
+  "message_id": "uc-13@example.net",
+  "in_reply_to": "",
+  "references": [],
+  "snippet": "Plain ASCII survives an unknown charset.",
+  "body_text": "Plain ASCII survives an unknown charset.",
+  "has_attach": false,
+  "media_type": "text/plain",
+  "list_id": "",
+  "list_unsubscribe": false,
+  "auto_submitted": "",
+  "precedence": "",
+  "problem": ""
+}

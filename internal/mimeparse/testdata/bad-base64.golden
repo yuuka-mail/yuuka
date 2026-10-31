@@ -1,0 +1,18 @@
+{
+  "subject": "corrupt body",
+  "from_addr": "erin@example.net",
+  "from_name": "Erin",
+  "date": "0001-01-01T00:00:00Z",
+  "message_id": "b64-10@example.net",
+  "in_reply_to": "",
+  "references": [],
+  "snippet": "Hello wor",
+  "body_text": "Hello wor",
+  "has_attach": false,
+  "media_type": "text/plain",
+  "list_id": "",
+  "list_unsubscribe": false,
+  "auto_submitted": "",
+  "precedence": "",
+  "problem": "text/plain body: illegal base64 data at input byte 15"
+}
