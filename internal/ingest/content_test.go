@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/contenthash"
 	"github.com/yuuka-mail/yuuka/internal/contract"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
@@ -78,11 +79,11 @@ func TestSpamDowngrade(t *testing.T) {
 		t.Fatalf("random1 registered as %d (%v), want discovered", state, err)
 	}
 	// Excluded from default search, found when asked for.
-	res, err := e.in.cfg.DB.Search(t.Context(), store.Viewer{}, store.SearchQuery{})
+	res, err := e.in.cfg.DB.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{})
 	if err != nil || res.Total != 1 {
 		t.Fatalf("default search total %d (%v), want 1", res.Total, err)
 	}
-	res, err = e.in.cfg.DB.Search(t.Context(), store.Viewer{}, store.SearchQuery{IncludeDowngraded: true})
+	res, err = e.in.cfg.DB.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{IncludeDowngraded: true})
 	if err != nil || res.Total != 3 {
 		t.Fatalf("full search total %d (%v), want 3", res.Total, err)
 	}
@@ -203,7 +204,7 @@ func TestQuarantineKeepsMail(t *testing.T) {
 	if problem == nil || subject != "You have won" {
 		t.Fatalf("subject %q problem %v: want quarantined with what could be read", subject, problem)
 	}
-	res, err := e.in.cfg.DB.Search(t.Context(), store.Viewer{}, store.SearchQuery{Text: "prize", IncludeDowngraded: true})
+	res, err := e.in.cfg.DB.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{Text: "prize", IncludeDowngraded: true})
 	if err != nil || res.Total != 1 || !res.Hits[0].Quarantined {
 		t.Fatalf("search %+v %v", res, err)
 	}
@@ -252,7 +253,7 @@ func TestBacklogAfterUpgrade(t *testing.T) {
 	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE message_id IS NULL`); n != 0 {
 		t.Fatalf("%d deliveries left without a message", n)
 	}
-	res, err := e.in.cfg.DB.Search(t.Context(), store.Viewer{}, store.SearchQuery{Text: "验证码"})
+	res, err := e.in.cfg.DB.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{Text: "验证码"})
 	if err != nil || res.Total != 1 || res.Hits[0].Subject != "【示例】验证码通知" {
 		t.Fatalf("search %+v %v", res, err)
 	}

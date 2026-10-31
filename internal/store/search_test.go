@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/contenthash"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
@@ -58,7 +59,7 @@ func load(t *testing.T) (*store.DB, *pgxpool.Pool) {
 func TestSearch(t *testing.T) {
 	t.Parallel()
 	db, _ := load(t)
-	v := store.Viewer{Principal: "human:operator"}
+	v := &auth.Viewer{PrincipalKind: "human", PrincipalName: "operator"}
 	cases := []struct {
 		text      string
 		downgrade bool
@@ -94,7 +95,7 @@ func TestSearch(t *testing.T) {
 func TestSearchPaging(t *testing.T) {
 	t.Parallel()
 	db, _ := load(t)
-	all, err := db.Search(t.Context(), store.Viewer{}, store.SearchQuery{IncludeDowngraded: true})
+	all, err := db.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{IncludeDowngraded: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,14 +103,14 @@ func TestSearchPaging(t *testing.T) {
 	if all.Total != len(files) || len(all.Hits) != len(files) {
 		t.Fatalf("total %d hits %d, want %d", all.Total, len(all.Hits), len(files))
 	}
-	page, err := db.Search(t.Context(), store.Viewer{}, store.SearchQuery{IncludeDowngraded: true, Limit: 3, Offset: 3})
+	page, err := db.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{IncludeDowngraded: true, Limit: 3, Offset: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if page.Total != all.Total || len(page.Hits) != 3 || page.Hits[0].ID != all.Hits[3].ID {
 		t.Fatalf("page %+v", page)
 	}
-	past, err := db.Search(t.Context(), store.Viewer{}, store.SearchQuery{IncludeDowngraded: true, Offset: 1000})
+	past, err := db.Search(t.Context(), &auth.Viewer{}, store.SearchQuery{IncludeDowngraded: true, Offset: 1000})
 	if err != nil || past.Total != all.Total || len(past.Hits) != 0 {
 		t.Fatalf("past the end: %+v %v", past, err)
 	}
@@ -147,5 +148,14 @@ func TestSearchUsesTrigramIndex(t *testing.T) {
 	}
 	if !strings.Contains(plan.String(), "messages_search") {
 		t.Fatalf("plan does not use messages_search:\n%s", plan.String())
+	}
+}
+
+// A read without a viewer must fail rather than see everything (§13.8).
+func TestSearchRefusesNilViewer(t *testing.T) {
+	t.Parallel()
+	db, _ := storetest.New(t)
+	if _, err := db.Search(t.Context(), nil, store.SearchQuery{}); err == nil {
+		t.Fatal("search with a nil viewer succeeded")
 	}
 }

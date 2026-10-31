@@ -2,22 +2,16 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/classify"
 )
-
-// Viewer is the principal a read runs for (§13.8). Every read function of
-// the store takes one, so the account-level filter has exactly one place
-// to land. M1 has neither accounts nor account_access, so every viewer
-// sees every message; the filter arrives with them (M3.5).
-type Viewer struct {
-	Principal string
-}
 
 // SearchQuery is a substring search over subject, sender and body.
 type SearchQuery struct {
@@ -60,8 +54,16 @@ const searchDoc = `(m.subject || ' ' || m.from_name || ' ' || m.from_addr || ' '
 
 // Search runs q for v. Total and hits are computed over the same set in
 // one snapshot, so they agree.
-func (db *DB) Search(ctx context.Context, v Viewer, q SearchQuery) (SearchResult, error) {
-	_ = v // M1: every viewer sees everything; see Viewer.
+//
+// Every read function of the store takes the viewer it runs for (§13.8), so
+// the account-level filter has exactly one place to land. M1 has no
+// accounts yet, so every viewer sees every message; the filter arrives with
+// account_access (M3.5). A nil viewer is refused rather than treated as
+// "everyone", so a forgotten viewer fails loudly.
+func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (SearchResult, error) {
+	if v == nil {
+		return SearchResult{}, errors.New("search: no viewer")
+	}
 	limit := q.Limit
 	if limit <= 0 {
 		limit = 50
