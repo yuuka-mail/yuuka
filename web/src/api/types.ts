@@ -10,6 +10,8 @@ export type Problem = S["Problem"];
 
 export type Class = S["Class"];
 export type MessageSummary = S["MessageSummary"];
+export type Extracted = S["Extracted"];
+export type Extraction = S["Extraction"];
 export type MessagePage = S["MessagePage"];
 export type Message = S["Message"];
 export type Delivery = S["Delivery"];

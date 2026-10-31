@@ -9,6 +9,9 @@ import { listTime, localPart, sender } from "@/lib/format";
 import { OutgoingMark } from "@/send/marks";
 import { cn } from "@/lib/utils";
 
+import { shownExtraction } from "./extracted";
+import { ExtractedLine } from "./extracted-line";
+
 const rowHeight = 56;
 
 /**
@@ -89,14 +92,23 @@ export function MessageList({
 }
 
 function Row({ m, selected, tag, onSelect }: { m: MessageSummary; selected: boolean; tag?: boolean; onSelect: (id: string) => void }) {
+  const x = shownExtraction(m);
+  // A row is a focusable option rather than a button, so that the copy
+  // button and the link of an extraction can sit inside it.
   return (
-    <button
-      type="button"
+    <div
       role="option"
+      tabIndex={0}
       aria-selected={selected}
       onClick={() => onSelect(m.id)}
+      onKeyDown={(e) => {
+        if (e.target === e.currentTarget && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onSelect(m.id);
+        }
+      }}
       className={cn(
-        "flex h-full w-full flex-col justify-center gap-0.5 border-b px-3 text-left outline-none hover:bg-muted focus-visible:bg-muted",
+        "flex h-full w-full cursor-default flex-col justify-center gap-0.5 border-b px-3 text-left outline-none hover:bg-muted focus-visible:bg-muted",
         selected && "bg-accent text-accent-foreground shadow-[inset_2px_0_0_var(--color-foreground)] hover:bg-accent",
         m.downgraded && !selected && "text-muted-foreground",
       )}
@@ -115,10 +127,14 @@ function Row({ m, selected, tag, onSelect }: { m: MessageSummary; selected: bool
           {listTime(m.received_at)}
         </span>
       </span>
-      <span className="truncate text-ui">
-        {m.subject || <span className="text-muted-foreground">(no subject)</span>}
-        {m.snippet && <span className="text-muted-foreground"> — {m.snippet}</span>}
-      </span>
-    </button>
+      {x ? (
+        <ExtractedLine x={x} verified={m.sender_verified} subject={m.subject} />
+      ) : (
+        <span className="truncate text-ui">
+          {m.subject || <span className="text-muted-foreground">(no subject)</span>}
+          {m.snippet && <span className="text-muted-foreground"> — {m.snippet}</span>}
+        </span>
+      )}
+    </div>
   );
 }

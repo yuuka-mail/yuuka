@@ -26,6 +26,8 @@ const problems = [];
 
 async function page(scheme, size, storageState) {
   const ctx = await browser.newContext({ colorScheme: scheme, viewport: sizes[size], deviceScaleFactor: size === "narrow" ? 2 : 1, storageState });
+  // The copy button of an extracted code writes to the clipboard.
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(base).origin });
   const p = await ctx.newPage();
   // A signed-out /auth/session is a 401 by design; anything else is a problem.
   p.on("console", (m) => m.type() === "error" && !/status of 401/.test(m.text()) && problems.push(`${scheme}/${size} ${p.url()}: ${m.text()}`));
@@ -129,6 +131,16 @@ if (enrollURL) {
         await s.goto(base + `/?area=${area}`);
         await s.getByRole("listbox", { name: "Messages" }).waitFor();
         await shot(s, `area-${area}-${tag}`);
+      }
+      // The code is the row in the notification zone (§12.9): copied
+      // with one press, which says so for a moment.
+      await s.goto(base + "/?area=notifications");
+      await s.getByRole("listbox", { name: "Messages" }).waitFor();
+      const copy = s.getByRole("button", { name: /^Copy / }).first();
+      if (await copy.count()) {
+        await copy.click();
+        await s.getByRole("button", { name: "Copied" }).first().waitFor();
+        await shot(s, `area-notifications-copied-${tag}`);
       }
       await s.goto(base + "/?area=unclaimed");
       await s.getByRole("list", { name: "Unclaimed prefixes" }).waitFor();

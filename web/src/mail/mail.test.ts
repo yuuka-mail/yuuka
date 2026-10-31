@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { Message, View } from "@/api/types";
+import type { Message, MessageSummary, View } from "@/api/types";
 
+import { openable, shownExtraction, timeLeft } from "./extracted";
 import { isQuiet, leakParts, strippedText, warnings } from "./facts";
 import { claimedHost, linkTarget } from "./links";
 import { attachmentHref, merge } from "./reading-data";
@@ -93,5 +94,29 @@ describe("attachment links", () => {
   it("point at the download endpoint with both segments encoded", () => {
     expect(attachmentHref("01M68JFX8Z9E5RB2VCA8TXVF4E", "1.3")).toBe("/api/v1/messages/01M68JFX8Z9E5RB2VCA8TXVF4E/attachments/1.3");
     expect(attachmentHref("a/b", "../2")).toBe("/api/v1/messages/a%2Fb/attachments/..%2F2");
+  });
+});
+
+describe("extracted values", () => {
+  const now = Date.parse("2026-10-31T01:45:00Z");
+  it("count down to the expiry, then say expired", () => {
+    expect(timeLeft("2026-10-31T01:45:30Z", now)).toEqual({ text: "30 s left", expired: false });
+    expect(timeLeft("2026-10-31T01:51:30Z", now)).toEqual({ text: "7 min left", expired: false });
+    expect(timeLeft("2026-10-31T05:45:00Z", now)).toEqual({ text: "4 h left", expired: false });
+    expect(timeLeft("2026-11-03T01:45:00Z", now)).toEqual({ text: "3 d left", expired: false });
+    expect(timeLeft("2026-10-31T01:45:00Z", now)).toEqual({ text: "expired", expired: true });
+    expect(timeLeft("not a time", now).expired).toBe(true);
+  });
+  it("offer only web links, by the host they really go to", () => {
+    expect(openable("https://app.example.com/auth/magic?t=1")).toEqual({ href: "https://app.example.com/auth/magic?t=1", host: "app.example.com" });
+    expect(openable("https://bücher.example/x")?.host).toBe("xn--bcher-kva.example");
+    expect(openable("javascript:alert(1)")).toBeUndefined();
+    expect(openable("mailto:a@example.com")).toBeUndefined();
+  });
+  it("show in notification rows only", () => {
+    const x = { code: { kind: "otp", value: "482913", confidence: 95, source: "subject" }, expired: false } as const;
+    const m = { class: "machine", extracted: x } as unknown as MessageSummary;
+    expect(shownExtraction(m)).toBe(x);
+    expect(shownExtraction({ ...m, class: "human" })).toBeUndefined();
   });
 });
