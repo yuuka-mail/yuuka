@@ -72,9 +72,11 @@ CREATE INDEX extractions_kind_message ON extractions (kind, message_id DESC);
 -- tick; reconcile and reparse run it too) re-extracts every message
 -- below extract.Version from its raw, so this migration needs nothing
 -- beyond `yuuka migrate`, and a better extractor reaches old mail the
--- same way without a reparse. It rewrites only extractions and this
--- column, never the other content columns, and logs a message change
--- only when the rows differ.
+-- same way without a reparse. It rewrites extractions, this column and
+-- messages.class (which consults the extractor, §3 principle 4; this
+-- column therefore also says which extractor the class was computed
+-- with), never the other content columns, and logs a message change
+-- only when something differs.
 --
 -- On the messages row, not on the extraction rows: a message with
 -- nothing to extract has no row to carry it. NOT NULL DEFAULT 0 rather
