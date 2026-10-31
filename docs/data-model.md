@@ -33,6 +33,18 @@
 - 有几列已建、暂不写：`messages.spam_score`（§4.3 的降级现算）、`messages.body_html_key`、
   `deliveries.spf_recheck`（二次 SPF 判定还没接）、`prefixes.observed_domains`（随泄漏检测，M3）
 
+**数据库角色**：部署时 yuuka 用两个非超级用户角色连库（建法见 [`deploy/postgres-roles.sh`](../deploy/postgres-roles.sh)，
+接线见 [`cmd/yuuka/db.go`](../cmd/yuuka/db.go)）：owner 拥有库和 schema、只用来在启动时跑迁移；
+app 只有表上的增删改查和序列的 `USAGE`（经 `ALTER DEFAULT PRIVILEGES`，以后迁移建的表自动覆盖），
+没有任何 DDL。运行时的一切查询都以 app 身份执行，所以一条被请求影响的 SQL 最多改行，
+改不了表结构、删不了表、也碰不到别的库。`pg_trgm` 是 trusted 扩展，库的 owner 就能装，不需要超级用户。
+放弃的东西：`serve` 启动时要迁移，所以进程环境里仍有 owner 的连接串，拿到进程环境的人照样拿到 owner；
+真正隔开要把迁移挪到单独的一次性步骤，那需要一个迁移子命令，目前不值得为它新增 CLI 面。
+另一个小缺口：`schema_migrations` 也是 owner 建的表，app 能改它的行，后果是迁移重放失败、
+`serve` 拒绝启动，不会丢数据。不设 owner 连接串时一个角色兼做两件事，开发和测试都这样跑；
+测试夹具则按部署的形状给每个测试建 schema（[`storetest`](../internal/store/storetest/storetest.go)），
+所以整个测试集都在 app 角色下跑过一遍。
+
 尚未实现的表和列（设计）：
 
 ```sql

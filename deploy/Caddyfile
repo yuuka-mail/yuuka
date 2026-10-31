@@ -1,4 +1,5 @@
-# Caddy in front of yuuka (deploy/compose.yaml).
+# The bundled Caddy in front of yuuka (compose.yaml, profile "caddy"). For
+# a Caddy already running on the host, see Caddyfile.host instead.
 #
 # The site address is YUUKA_WEB_ORIGIN from .env, e.g.
 # https://mail.example.com, so the WebUI origin yuuka checks passkeys and
@@ -15,6 +16,14 @@
 {
 	# Uncomment to get ACME expiry notices.
 	# email ops@example.com
+
+	# Only if this Caddy sits behind a CDN proxy such as Cloudflare: trust
+	# its ranges, so the X-Forwarded-For passed to yuuka names the real
+	# client. The list is in Caddyfile.host; yuuka then needs the same
+	# ranges in YUUKA_EXTRA_TRUSTED_PROXIES (.env). README.md, "客户端地址".
+	# servers {
+	# 	trusted_proxies static <ranges>
+	# }
 }
 
 {$YUUKA_WEB_ORIGIN} {
@@ -30,5 +39,12 @@
 
 	# yuuka sets the Content-Security-Policy and X-Frame-Options of the
 	# WebUI itself (web/embed.go), next to the code they constrain.
-	reverse_proxy yuuka:31480
+	reverse_proxy yuuka:31480 {
+		# GET /healthz is 200 while yuuka can reach Postgres, 503
+		# otherwise, and needs no credential (§13.7). While it fails,
+		# Caddy answers 503 itself instead of forwarding.
+		health_uri /healthz
+		health_interval 15s
+		health_timeout 5s
+	}
 }

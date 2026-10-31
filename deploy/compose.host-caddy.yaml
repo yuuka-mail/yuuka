@@ -1,0 +1,14 @@
+# For a host that already runs a reverse proxy (e.g. Caddy under systemd)
+# on 80/443: leave the bundled caddy service off and add this file, e.g. in
+# .env:
+#
+#   COMPOSE_FILE=compose.yaml:compose.host-caddy.yaml
+#
+# yuuka is then published on the host's loopback only, never on a public
+# interface; the host proxy forwards to it (Caddyfile.host). Requests
+# arrive from the "edge" network's gateway, which compose.yaml already
+# trusts as a proxy.
+services:
+  yuuka:
+    ports:
+      - "127.0.0.1:${YUUKA_HOST_PORT:-31480}:31480"

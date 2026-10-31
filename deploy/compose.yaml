@@ -1,13 +1,20 @@
-# yuuka behind Caddy, with Postgres and a scheduled pg_dump. See README.md.
+# yuuka with Postgres and a scheduled pg_dump, behind Caddy. See README.md.
 #
 # Two files next to this one hold the deployment's own values, both
-# gitignored: .env (read by Compose for the ${...} below; template:
-# compose.env.example) and yuuka.env (yuuka's configuration; template:
-# yuuka.env.example).
+# gitignored: .env (read by Compose for the ${...} below, and for
+# COMPOSE_PROFILES / COMPOSE_FILE; template: compose.env.example) and
+# yuuka.env (yuuka's configuration; template: yuuka.env.example).
 #
-# Only caddy publishes ports. yuuka and postgres share the internal
-# "backend" network, which has no route outside; yuuka is also on "edge"
-# so Caddy can reach it and it can reach R2 and Telegram.
+# Two ways to put a TLS proxy in front (README.md, "两种模式"):
+#   - the bundled caddy service, in the "caddy" profile: it is the only
+#     service publishing ports (80/443);
+#   - a reverse proxy already running on the host: leave the profile off
+#     and add compose.host-caddy.yaml, which publishes yuuka on the host's
+#     loopback only.
+#
+# yuuka and postgres share the internal "backend" network, which has no
+# route outside; yuuka is also on "edge" so a proxy can reach it and it can
+# reach R2 and Telegram.
 
 name: yuuka
 
@@ -21,6 +28,7 @@ x-hardening: &hardening
 services:
   caddy:
     <<: *hardening
+    profiles: [caddy]
     image: caddy:2.11.7@sha256:36c24ad91a7ff7bc4c87fe22bfa8df3c4b18da0773d73fc12ee2c52b98c0bb7e
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
@@ -42,16 +50,25 @@ services:
     image: ${YUUKA_IMAGE:?set YUUKA_IMAGE in .env}
     # The image's default command is serve; `docker compose run --rm yuuka
     # admin enroll` and friends reuse this service's environment.
+    # No healthcheck: the image is distroless, with no shell or curl to
+    # run one. The proxy checks GET /healthz instead (Caddyfile).
     read_only: true
     cap_drop: [ALL]
     env_file: [yuuka.env]
     # These follow from the shape of this file, so they are set here and
     # override anything in yuuka.env.
     environment:
-      YUUKA_DATABASE_URL: postgres://yuuka:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/yuuka?sslmode=disable
+      # Everything runs as yuuka_app; only migrations, on start, run as
+      # yuuka_owner (postgres-roles.sh).
+      YUUKA_DATABASE_URL: postgres://yuuka_app:${YUUKA_DB_APP_PASSWORD:?set YUUKA_DB_APP_PASSWORD in .env}@postgres:5432/yuuka?sslmode=disable
+      YUUKA_DATABASE_OWNER_URL: postgres://yuuka_owner:${YUUKA_DB_OWNER_PASSWORD:?set YUUKA_DB_OWNER_PASSWORD in .env}@postgres:5432/yuuka?sslmode=disable
       YUUKA_WEB_ORIGIN: ${YUUKA_WEB_ORIGIN}
       YUUKA_DATA_DIR: /var/lib/yuuka
       YUUKA_LISTEN: 0.0.0.0:31480
+      # Whoever reaches yuuka over "edge" is a proxy: the bundled Caddy,
+      # or a host process through the loopback port, which arrives from
+      # the network's gateway. Their X-Forwarded-For names the client.
+      YUUKA_TRUSTED_PROXIES: ${YUUKA_EDGE_SUBNET:-10.213.77.0/24},${YUUKA_EXTRA_TRUSTED_PROXIES:-}
     volumes:
       - yuuka-data:/var/lib/yuuka
     networks: [edge, backend]
@@ -62,18 +79,25 @@ services:
     <<: *hardening
     image: postgres:18.6-trixie@sha256:979bccfde35445db618c65107d27d08c6c21339d8dc3ad4c830c6633947be0e4
     environment:
-      POSTGRES_USER: yuuka
+      # The superuser, for initdb and maintenance only; no service
+      # connects as it.
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       POSTGRES_DB: yuuka
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Read by postgres-roles.sh.
+      YUUKA_DB_OWNER_PASSWORD: ${YUUKA_DB_OWNER_PASSWORD}
+      YUUKA_DB_APP_PASSWORD: ${YUUKA_DB_APP_PASSWORD}
+      YUUKA_DB_BACKUP_PASSWORD: ${YUUKA_DB_BACKUP_PASSWORD:?set YUUKA_DB_BACKUP_PASSWORD in .env}
     volumes:
       # Postgres 18 keeps PGDATA in a versioned directory below this, which
       # leaves room for pg_upgrade --link next to it.
       - postgres-data:/var/lib/postgresql
+      - ./postgres-roles.sh:/docker-entrypoint-initdb.d/10-yuuka-roles.sh:ro
     networks: [backend]
     shm_size: 256m
     stop_grace_period: 1m
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "yuuka", "-d", "yuuka"]
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "yuuka"]
       interval: 10s
       timeout: 5s
       retries: 6
@@ -89,9 +113,10 @@ services:
     cap_drop: [ALL]
     environment:
       PGHOST: postgres
-      PGUSER: yuuka
+      # Read-only (postgres-roles.sh): this runs unattended on a timer.
+      PGUSER: yuuka_backup
       PGDATABASE: yuuka
-      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGPASSWORD: ${YUUKA_DB_BACKUP_PASSWORD}
       BACKUP_INTERVAL: ${BACKUP_INTERVAL:-86400}
       BACKUP_KEEP: ${BACKUP_KEEP:-14}
     volumes:
@@ -106,7 +131,12 @@ services:
       start_period: 5m
 
 networks:
-  edge: {}
+  edge:
+    # A fixed subnet so YUUKA_TRUSTED_PROXIES above can name it. Change
+    # YUUKA_EDGE_SUBNET in .env if it collides with a network on the host.
+    ipam:
+      config:
+        - subnet: ${YUUKA_EDGE_SUBNET:-10.213.77.0/24}
   backend:
     internal: true
 

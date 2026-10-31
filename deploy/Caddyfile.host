@@ -1,0 +1,40 @@
+# For a Caddy already running on the host (e.g. under systemd) in front of
+# yuuka from compose.yaml + compose.host-caddy.yaml, which listens on
+# 127.0.0.1:31480. Merge into the host's Caddyfile: the global options
+# block, if needed, and the site block with your own hostname, which must
+# equal YUUKA_WEB_ORIGIN. Notes on what not to put in front of yuuka are in
+# Caddyfile; they apply here too.
+
+# Only if Caddy sits behind Cloudflare's proxy (or another CDN): trust its
+# ranges, so that Caddy keeps the client address the CDN reports in
+# X-Forwarded-For instead of replacing it with the CDN's. yuuka needs the
+# same ranges in YUUKA_EXTRA_TRUSTED_PROXIES (.env) to walk past them
+# (README.md, "客户端地址"). This is a static copy: refresh it from
+# https://www.cloudflare.com/ips/ now and then. Leave it out if clients
+# reach Caddy directly; trusting ranges nobody proxies through only lets
+# them pick their own address.
+{
+	servers {
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+	}
+}
+
+mail.example.com {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		-Server
+	}
+
+	reverse_proxy 127.0.0.1:31480 {
+		# GET /healthz is 200 while yuuka can reach Postgres, 503
+		# otherwise, and needs no credential (§13.7).
+		health_uri /healthz
+		health_interval 15s
+		health_timeout 5s
+	}
+}
