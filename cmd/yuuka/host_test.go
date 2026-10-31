@@ -32,6 +32,8 @@ func (e *hostEnv) run(cmd string, args ...string) (string, string, error) {
 	switch cmd {
 	case "prefix":
 		err = h.prefixCmd(e.t.Context(), args)
+	case "token":
+		err = h.tokenCmd(e.t.Context(), args)
 	default:
 		e.t.Fatalf("no command %s", cmd)
 	}

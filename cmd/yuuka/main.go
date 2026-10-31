@@ -13,6 +13,10 @@
 //	yuuka prefix claim <local>@<zone>
 //	yuuka prefix unclaim <local>@<zone>
 //	                         set a prefix claimed or back to discovered (§3.3)
+//	yuuka token issue --principal <kind>:<name> --scope <s1,s2,...> [--label L] [--ttl D]
+//	                         bearer token for an agent or service; printed once
+//	yuuka token ls [--principal <kind>:<name>]
+//	yuuka token revoke <credential-id>
 //	yuuka mcp --stdio        read-only MCP server on stdin/stdout, acting as the
 //	                         bearer token in YUUKA_MCP_TOKEN (§8.7)
 //	yuuka version
@@ -42,7 +46,7 @@
 //	YUUKA_MCP_TOKEN                     bearer token `yuuka mcp --stdio` acts as (required there)
 //
 // `yuuka admin` only needs YUUKA_DATABASE_URL and YUUKA_WEB_ORIGIN;
-// `yuuka prefix` only YUUKA_DATABASE_URL. They run on the host
+// `yuuka prefix` and `yuuka token` only YUUKA_DATABASE_URL. They run on the host
 // without a login; host.go says how their actions are recorded.
 //
 // The webhook is served at POST /ingest/cloudflare (HMAC, §2.2); the login
@@ -93,7 +97,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka mcp --stdio | yuuka version")
+	return errors.New("usage: yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka mcp --stdio | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -153,6 +157,8 @@ func run(args []string, log *slog.Logger) error {
 		return enroll(ctx, log, *name, *ttl)
 	case "prefix":
 		return withHost(ctx, func(h *host) error { return h.prefixCmd(ctx, args[1:]) })
+	case "token":
+		return withHost(ctx, func(h *host) error { return h.tokenCmd(ctx, args[1:]) })
 	}
 	return usage()
 }

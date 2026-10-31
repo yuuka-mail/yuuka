@@ -569,3 +569,41 @@ func TestParseOrigin(t *testing.T) {
 		t.Errorf("parent-domain RP ID: %v", err)
 	}
 }
+
+// Tokens go to agents and services only, with the scopes named; and the
+// token revocation of the CLI revokes tokens only.
+func TestIssueTokenRefuses(t *testing.T) {
+	t.Parallel()
+	h, _, session := enrolled(t)
+	humans, err := h.db.PrincipalsOfKind(t.Context(), "human")
+	if err != nil || len(humans) != 1 {
+		t.Fatalf("humans %v %v", humans, err)
+	}
+	agent, err := h.db.EnsurePrincipal(t.Context(), store.Principal{ID: "01M67SX66B38NKRKAYDXR834N5", Kind: "agent", Name: "arisu", DisplayName: "arisu", CreatedAt: h.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := []auth.Scope{auth.MessageRead}
+	for name, req := range map[string]TokenRequest{
+		"human":         {PrincipalID: humans[0].ID, Scopes: read},
+		"system":        {PrincipalID: store.SystemPrincipalID, Scopes: read},
+		"no scopes":     {PrincipalID: agent.ID},
+		"unknown scope": {PrincipalID: agent.ID, Scopes: []auth.Scope{"message:everything"}},
+		"negative ttl":  {PrincipalID: agent.ID, Scopes: read, TTL: -time.Hour},
+		"no principal":  {PrincipalID: "01M67SX66B38NKRKAYDXR834N6", Scopes: read},
+	} {
+		if _, err := h.svc.IssueToken(t.Context(), req); err == nil {
+			t.Errorf("%s: issued", name)
+		}
+	}
+	if n := h.count(`SELECT count(*) FROM credentials WHERE kind = 'token'`); n != 0 {
+		t.Errorf("%d tokens issued", n)
+	}
+	id, _, _ := auth.ParseSecret(auth.PrefixSession, session.Value)
+	if err := RevokeToken(t.Context(), h.db, h.now, id, store.SystemPrincipalID, nil); err == nil {
+		t.Error("revoked a session as a token")
+	}
+	if err := RevokeToken(t.Context(), h.db, h.now, "01M67SX66B38NKRKAYDXR834N7", store.SystemPrincipalID, nil); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("unknown token: %v", err)
+	}
+}

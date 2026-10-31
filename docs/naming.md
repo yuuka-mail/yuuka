@@ -17,6 +17,9 @@ yuuka prefix ls|label|leaks             # 前缀注册表（§3.3）
 yuuka prefix ls [--state …] [--zone …]  # 列出前缀：状态、首次 / 末次投递、投递数
 yuuka prefix claim <local>@<zone>       # 认领前缀：其信不再降级，此后的新信推送（§4.3）
 yuuka prefix unclaim <local>@<zone>     # 取消认领，回到 discovered
+yuuka token issue --principal … --scope …  # 给 agent / service 签发 bearer token，只显示一次（§13.3）
+yuuka token ls [--principal …]          # 列出 token：主体、scope、各时间点，不含秘密
+yuuka token revoke <credential-id>      # 吊销 token，REST 与 MCP 下一次请求起失效
 yuuka outbox ls|retry|dead              # 出口状态机（§3.6）
 yuuka account add|sync|caps             # 多账户（§9）
 yuuka doctor                            # DNS / SPF / DKIM / 出口授权自检（§10.4.4）

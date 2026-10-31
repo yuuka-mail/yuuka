@@ -84,6 +84,25 @@ passkey 不是 `credentials` 的一行：它是产生 `session` 凭据的登录�
 私钥也从不离开验证器。它单独一张 `passkeys` 表，列按 WebAuthn 的 credential record 展开
 （公钥、签名计数、AAGUID、BE/BS 标志），不把任何库的序列化格式冻结进库里。
 
+**`token` 的签发（M1）**：只有主机上的 CLI 能签发，WebUI 入口还没有（§13.7 的 CLI 规则）。
+
+```
+yuuka token issue --principal agent:arisu --scope message:read,prefix:read [--label L] [--ttl D]
+yuuka token ls [--principal agent:arisu]
+yuuka token revoke <credential-id>
+```
+
+- 只发给 `agent` 和 `service`。`human` 的凭据只有 passkey 登录产生的 `session`，
+  `issue` 遇到 human 直接拒绝并指向 `admin enroll`：给人发一把长期 token，等于在 passkey 旁边开一扇不防钓鱼的后门。
+  这条在 `authn.IssueToken` 里也查一遍，不只靠 CLI
+- 指名的主体不存在就建（`display_name` 先等于 name），建主体本身记一条 `principal.create`
+- token 明文只打印一次，单独一行写到 stdout（说明写 stderr），便于直接重定向进密钥文件；库里只有哈希，丢了只能吊销重发。
+  `--ttl` 缺省为不过期：token 靠显式吊销收回，`ls` 的 `last_used_at` 让闲置的那把看得见
+- `ls` 列出 id、主体、label、scope、创建 / 过期 / 最后使用 / 吊销时间，已吊销的也列，永远不显示秘密
+- `revoke` 只收 `token` 类凭据（会话由登出撤销），记 `auth.credential.revoke`。
+  吊销立即生效：REST 和 MCP 的 HTTP 形态每个请求重新认证，stdio 形态每次工具调用重新认证（§8.7），
+  没有任何缓存的认证结果要等它过期
+
 ### 13.4 scope 是唯一的权限语言
 
 ```
@@ -99,6 +118,9 @@ prefix:manage       account:manage      rule:manage      admin
 | human 浏览器会话 | 全部 |
 | `agent:arisu` 的 MCP token | `message:read` `delivery:read` `prefix:read` `message:annotate` `draft:create` `submission:send` |
 | `service:monitoring` 的 SMTP 密码 | `submission:send` |
+
+签发时 scope **必须逐个写明**：没有默认集合、没有 `all` 之类的简写，不认识的名字直接拒绝，
+空列表也拒绝而不是当成「全部」或「只读」。多给一个 scope 的代价是一次越权，少给一个只是 agent 报一次「缺 scope」。
 
 scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一步由 §13.5 的授权表回答**。
 所以 agent 持有 `submission:send` 不等于能发信：没有 `identity_grants` 的身份它用不了，
@@ -224,9 +246,9 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
   恢复入口被刷爆时运维者仍有 CLI
 - 进行中的 WebAuthn 仪式（challenge）放在内存里，键是一个 `HttpOnly` cookie，用一次即删。
   重启只意味着重试一次；哪天要多副本部署再挪进 Postgres
-- **主机上的 CLI 不登录，也不冒充任何人**。`yuuka admin enroll`、`yuuka prefix`
+- **主机上的 CLI 不登录，也不冒充任何人**。`yuuka admin enroll`、`yuuka prefix`、`yuuka token`
   在服务器上跑，能跑就是最高权限，但 yuuka 并不知道是哪个人在敲：它们写进 `actions` 的
-  `actor` 是 `system`、`credential_id` 为空；管理命令（`prefix`）还在 `args` 里带 `via: "cli"`
+  `actor` 是 `system`、`credential_id` 为空；管理命令（`prefix`、`token`）还在 `args` 里带 `via: "cli"`
   和执行它的系统用户名 `host_user`。
   记成 `human:<operator>` 会凭空制造一次没有发生过的登录；多人共用一台主机时，`host_user` 才是真实可查的那一条线索
 - WebAuthn 的 RP ID 与 origin 来自配置（`YUUKA_WEB_ORIGIN`、`YUUKA_WEBAUTHN_RP_ID`），
@@ -294,8 +316,8 @@ account_access(account_id → accounts, principal_id → principals, can_read bo
 
 | 阶段 | 内容 |
 |---|---|
-| M1 | **`principals` / `credentials` / `identity_grants` / `account_access` / `actions` 建表**，WebUI 内置 passkey 登录、走 session 凭据（M1 只有 JSON 端点，页面在第二阶段） |
-| M2 | SMTP submission 口（跟发信能力一起做）；MCP token；`identities` 建表后给 `identity_grants` 补外键 |
+| M1 | **`principals` / `credentials` / `identity_grants` / `account_access` / `actions` 建表**，WebUI 内置 passkey 登录、走 session 凭据（M1 只有 JSON 端点，页面在第二阶段）；只读 MCP 与 REST 的 bearer token，由 `yuuka token` 签发 |
+| M2 | SMTP submission 口（跟发信能力一起做）；`identities` 建表后给 `identity_grants` 补外键 |
 | M3.5 | `account_access` 生效：读路径按 §13.8 过滤（跟多账户一起做）；`accounts` 建表后补外键 |
 
 `identity_grants` 和 `account_access` 在 M1 只建表、不读：外键指向的 `identities`、`accounts`

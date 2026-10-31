@@ -205,7 +205,12 @@ M1 的落法（`internal/mcp`）：
     它保证的是 agent 走 API 时的 scope 和审计。不可信的 agent 应该用 HTTP 形态，拿不到数据库凭据
 - MCP 库用官方 Go SDK（`github.com/modelcontextprotocol/go-sdk`）：MCP 组织与 Go 团队共同维护，
   跟着协议版本走；自己实现要长期追协议协商、streamable HTTP 和 SSE 的变化，不值得
-- 还没有签发 token 的 CLI 或 WebUI 入口（`authn.IssueToken` 只在代码里），这是接上真实 agent 前要补的一步
+- **agent 怎么拿到 token**：运维者在主机上跑
+  `yuuka token issue --principal agent:arisu --scope message:read,delivery:read,prefix:read --label <用在哪>`
+  （主体不存在会建；scope 逐个写明，没有默认值，§13.3、§13.4）。stdout 上那一行就是 token，只出现这一次：
+  HTTP 形态放进客户端的 `Authorization: Bearer <token>`，stdio 形态放进启动 `yuuka mcp --stdio` 的环境变量
+  `YUUKA_MCP_TOKEN`。只读的三件工具用不到别的 scope，多给的也不会让它多做什么，只会扩大泄漏面。
+  `yuuka token ls` 看哪把还在用，`yuuka token revoke <id>` 收回，下一次调用起失效。WebUI 入口还没有
 
 ### 8.8 审计与回放
 

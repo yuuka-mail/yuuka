@@ -238,30 +238,65 @@ func authenticate(ctx context.Context, db *store.DB, log *slog.Logger, now time.
 type TokenRequest struct {
 	PrincipalID string
 	Label       string
-	Scopes      []auth.Scope
+	// Scopes are what the token may do, and there is no default: an empty
+	// list is refused rather than read as "everything" or "read only".
+	Scopes []auth.Scope
 	// TTL zero means no expiry; tokens are revoked explicitly.
 	TTL time.Duration
 	// IssuedBy is the principal recorded as the actor.
 	IssuedBy string
+	// AuditArgs are added to the recorded action, e.g. how the CLI was
+	// run. Never a secret.
+	AuditArgs map[string]any
 }
 
 // IssueToken creates a bearer token and returns its text, which is shown
 // once and never stored.
 func (s *Service) IssueToken(ctx context.Context, req TokenRequest) (string, error) {
-	now := s.now()
+	return IssueToken(ctx, s.db, s.now(), req)
+}
+
+// IssueToken is Service.IssueToken for callers without the WebUI login,
+// such as `yuuka token issue`: bearer tokens work where no WebUI origin is
+// configured. Only agent and service principals get tokens; a human signs
+// in with a passkey and gets a session (§13.7).
+func IssueToken(ctx context.Context, db *store.DB, now time.Time, req TokenRequest) (string, error) {
+	if len(req.Scopes) == 0 {
+		return "", errors.New("issue token: no scopes; a token holds exactly the scopes it is given")
+	}
+	if _, err := auth.ParseScopes(auth.Strings(req.Scopes)); err != nil {
+		return "", fmt.Errorf("issue token: %w", err)
+	}
+	if req.TTL < 0 {
+		return "", fmt.Errorf("issue token: negative lifetime %v", req.TTL)
+	}
+	p, err := db.Principal(ctx, req.PrincipalID)
+	if err != nil {
+		return "", fmt.Errorf("issue token: %w", err)
+	}
+	if p.Kind != "agent" && p.Kind != "service" {
+		return "", fmt.Errorf("issue token: %s:%s is a %s principal; tokens are for agent and service principals", p.Kind, p.Name, p.Kind)
+	}
+	if p.DisabledAt != nil {
+		return "", fmt.Errorf("issue token: %s:%s is disabled", p.Kind, p.Name)
+	}
 	sec := auth.NewSecret(auth.PrefixToken, ulid.New(now))
 	var expires *time.Time
 	if req.TTL > 0 {
 		t := now.Add(req.TTL)
 		expires = &t
 	}
-	err := s.db.CreateCredential(ctx, store.Credential{
+	args := map[string]any{"credential_id": sec.ID, "principal_id": req.PrincipalID, "label": req.Label, "scopes": req.Scopes}
+	if expires != nil {
+		args["expires_at"] = expires.UTC()
+	}
+	for k, v := range req.AuditArgs {
+		args[k] = v
+	}
+	err = db.CreateCredential(ctx, store.Credential{
 		ID: sec.ID, PrincipalID: req.PrincipalID, Kind: auth.KindToken, Label: req.Label,
 		SecretHash: sec.Hash[:], Scopes: auth.Strings(req.Scopes), CreatedAt: now, ExpiresAt: expires,
-	}, store.Action{
-		ID: ulid.New(now), Actor: req.IssuedBy, Tool: "auth.token.issue", At: now,
-		Args: map[string]any{"credential_id": sec.ID, "principal_id": req.PrincipalID, "label": req.Label, "scopes": req.Scopes},
-	})
+	}, store.Action{ID: ulid.New(now), Actor: req.IssuedBy, Tool: "auth.token.issue", At: now, Args: args})
 	if err != nil {
 		return "", fmt.Errorf("issue token: %w", err)
 	}
@@ -275,6 +310,32 @@ func (s *Service) Revoke(ctx context.Context, v *auth.Viewer, credentialID strin
 		ID: ulid.New(now), Actor: v.PrincipalID, CredentialID: v.CredentialID, Tool: "auth.credential.revoke", At: now,
 		Args: map[string]any{"credential_id": credentialID},
 	})
+}
+
+// RevokeToken revokes the bearer token credentialID for `yuuka token
+// revoke`, recording actor and auditArgs. The token stops working on the
+// next request: REST, MCP over HTTP and every MCP stdio tool call
+// authenticate again. It returns store.ErrNotFound if no unrevoked token
+// has that id; other credential kinds are refused, not revoked.
+func RevokeToken(ctx context.Context, db *store.DB, now time.Time, credentialID, actor string, auditArgs map[string]any) error {
+	c, err := db.CredentialForAuth(ctx, credentialID)
+	if err != nil {
+		return fmt.Errorf("revoke %s: %w", credentialID, err)
+	}
+	if c.Kind != auth.KindToken {
+		return fmt.Errorf("revoke %s: a %s credential, not a token", credentialID, c.Kind)
+	}
+	args := map[string]any{"credential_id": credentialID, "principal_id": c.PrincipalID}
+	for k, v := range auditArgs {
+		args[k] = v
+	}
+	err = db.RevokeCredential(ctx, credentialID, store.Action{
+		ID: ulid.New(now), Actor: actor, Tool: "auth.credential.revoke", At: now, Args: args,
+	})
+	if err != nil {
+		return fmt.Errorf("revoke %s: %w", credentialID, err)
+	}
+	return nil
 }
 
 // Enrollment is what `yuuka admin enroll` prints.

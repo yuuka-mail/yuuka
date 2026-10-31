@@ -173,6 +173,34 @@ func (db *DB) PrincipalsOfKind(ctx context.Context, kind string) ([]Principal, e
 	return out, nil
 }
 
+// PrincipalByName returns the principal kind:name.
+func (db *DB) PrincipalByName(ctx context.Context, kind, name string) (Principal, error) {
+	p, err := scanPrincipal(db.pool.QueryRow(ctx,
+		`SELECT `+principalCols+` FROM principals WHERE kind = $1 AND name = $2`, kind, name))
+	if err != nil {
+		return p, fmt.Errorf("principal %s:%s: %w", kind, name, err)
+	}
+	return p, nil
+}
+
+// CreatePrincipal inserts p and records a in one transaction. It returns
+// ErrDuplicate if p's kind:name exists.
+func (db *DB) CreatePrincipal(ctx context.Context, p Principal, a Action) error {
+	return pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO principals (id, kind, name, display_name, owner_id, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6)`,
+			p.ID, p.Kind, p.Name, p.DisplayName, nullable(p.OwnerID), p.CreatedAt)
+		if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "23505" {
+			return ErrDuplicate
+		}
+		if err != nil {
+			return fmt.Errorf("create principal %s:%s: %w", p.Kind, p.Name, err)
+		}
+		return insertAction(ctx, tx, a)
+	})
+}
+
 // EnsurePrincipal returns the principal (kind, name), creating it from p
 // if it does not exist.
 func (db *DB) EnsurePrincipal(ctx context.Context, p Principal) (Principal, error) {
@@ -220,6 +248,33 @@ func (db *DB) CredentialForAuth(ctx context.Context, id string) (CredentialPrinc
 		return c, fmt.Errorf("credential %s: %w", id, err)
 	}
 	return c, nil
+}
+
+// Tokens lists the bearer tokens of one principal, or of all principals
+// when principalID is empty, oldest first, revoked and expired ones
+// included. SecretHash is not loaded.
+func (db *DB) Tokens(ctx context.Context, principalID string) ([]CredentialPrincipal, error) {
+	rows, err := db.pool.Query(ctx, `
+		SELECT c.id, c.principal_id, c.kind, c.label, c.scopes,
+		       c.created_at, c.expires_at, c.last_used_at, c.revoked_at,
+		       p.kind, p.name, p.disabled_at IS NOT NULL
+		FROM credentials c JOIN principals p ON p.id = c.principal_id
+		WHERE c.kind = 'token' AND ($1::text IS NULL OR c.principal_id = $1)
+		ORDER BY c.created_at, c.id`, nullable(principalID))
+	if err != nil {
+		return nil, fmt.Errorf("list tokens: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (CredentialPrincipal, error) {
+		var c CredentialPrincipal
+		err := r.Scan(&c.ID, &c.PrincipalID, &c.Kind, &c.Label, &c.Scopes,
+			&c.CreatedAt, &c.ExpiresAt, &c.LastUsedAt, &c.RevokedAt,
+			&c.PrincipalKind, &c.PrincipalName, &c.PrincipalDisabled)
+		return c, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list tokens: %w", err)
+	}
+	return out, nil
 }
 
 // TouchCredential records a use. It writes at most once per minute per
