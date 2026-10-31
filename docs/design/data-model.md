@@ -27,7 +27,7 @@
 | `actions` | 决定 | 审计日志（§8.8） | [0003](../../internal/store/migrations/0003_identity.sql) |
 | `rules` | 决定 | 规则（§8.5）：匹配树和动作存规范化的 JSON，`revision` 每次改动加一，软删除。每条规则有自己的 `rule:<id>` 主体 | [0009](../../internal/store/migrations/0009_rules.sql) |
 | `proposals` | 决定 | agent 的提案和人的决定（§8.5）；`expired` 读时现算 | [0009](../../internal/store/migrations/0009_rules.sql) |
-| `notes` | 决定 | 主体在一封信或一个线程上的笔记，每个作者每个目标一条、覆盖写；不可信，不驱动任何东西（§8.10） | [0012](../../internal/store/migrations/0012_notes.sql) |
+| `notes` | 决定 | 主体在一封信或一个线程上的笔记，每个作者每个目标一条、覆盖写；是作者的判读、不是事实，不驱动任何东西（§8.10） | [0012](../../internal/store/migrations/0012_notes.sql) |
 | `annotation_log` | 决定 | 对 class / archived / 每个标签的每次改动：谁、什么等级、前后值。来源追溯、撤销和优先级都靠它（§8.5） | [0009](../../internal/store/migrations/0009_rules.sql) |
 | `identities` | 配置与授权 | 能用来发信的地址（精确地址或 `*@zone`）、所属账户、出口名、归属主体（§9.3、§8.9） | [0005](../../internal/store/migrations/0005_sending.sql) |
 | `drafts` | 决定 | 写好了、没发出的信；提交超出授权时停在这里，`hold_reason` 说明原因（§8.9） | [0005](../../internal/store/migrations/0005_sending.sql) |
@@ -110,11 +110,30 @@ notifications(id, message_id, channel, state, sent_at)
 ```
 
 全文检索：Postgres 原生 FTS 对中文很弱。先用 `pg_trgm` 够个人用量，
-中文体验不行再上 PGroonga 或外置 bleve 索引（这是可替换的一层，不影响模型）。
+中文体验不行再换 Postgres 里的做法（Go 侧切词写 `tsvector`、pg_bigm、PGroonga），这是可替换的一层，不影响模型。
 M1 做的是子串匹配：一个 trigram GIN 表达式索引（迁移 0002 的 `messages_search`），
 查询按空白切词、每个词都要命中（[`internal/store/search.go`](../../internal/store/search.go)）。
 子串匹配不需要分词，中文天然可用；少于三个字符的词用不上 trigram 索引，退化为顺序扫描，
 结果仍然正确，个人量级可以接受。`body_text` 有长度上限：它只服务检索和摘要，原件才是正文的来源。
+
+检索留在 Postgres 里，不用外置引擎（Meilisearch、bleve 一类）。外置索引要把可见性再算一遍：
+命中、`total`、分面都只能在 Viewer 可见的信上算（§13.8），搬到引擎里就成了第二份 ACL；
+标签、归档、`class_override`、降级这些随时会变的过滤条件也要一路同步过去，
+同步出错，搜索就和列表对不上。它还是第二个有状态服务，`reparse` 得能重建它。
+
+向量检索（pgvector 加 bge-m3 一类 embedding）暂不做。对中文语料的检索实测里，
+向量的增益集中在「换说法」的查询上，专名、原话、错别字和字面检索持平甚至更差；
+搜邮件多是字面查询（发件人、订单号、主题里的词），而 agent 搜不到会自己换词重试。代价却不小：
+- 经第三方接口做向量，等于把全部正文（验证码、密码重置、账单）交出去；本地推理要一个 sidecar，
+  或者引入 cgo，打破单个静态二进制
+- catch-all 谁都能投，写一封语义上贴近「发票」「密码重置」的信挤进 agent 的搜索结果，
+  比骗过字面匹配容易，放大了 §8.3 的不可信输入面
+- 要求 Postgres 带 `vector` 扩展，共享实例上的部署者未必装得了
+
+向量本身是内容派生的数据，能放进可 `reparse` 重建的表（每个向量记下生成它的模型），模型上没有障碍。
+重新考虑的条件：有一份按真实查询写的邮件检索评测集证明增益；embedding 能在本地生成，或按账户显式开启；
+只为已认领前缀里的非垃圾信生成。到那时它是和字面检索融合排序的一路，不替换字面检索。
+在那之前更值得补的是字段限定（发件人、主题、有无附件）和按相关度排序。
 
 ### 4.1 折叠键：内容哈希，不是 Message-ID
 
@@ -257,7 +276,7 @@ Cloudflare Email Routing 基本不做内容过滤，`spam_score` 字段必须有
   `dmarc=fail` 冒充期望发件方的信判为仿冒，同时照旧降级；冒充别人的只降级、不判定（理由见 §3.3）
 - Cloudflare 入站会加 `X-CF-SpamH-Score: <n>`（§10.1.1 实测）。刻度没有文档，
   先原样记进 `deliveries.auth`、作为一个信号，积累样本后再决定阈值
-- 内容层面的判定（垃圾、钓鱼、注入）交给决策模型，判定是 ingest 之后的观测事实（§15）。
+- 内容层面的判定（垃圾、钓鱼）交给决策模型，判定是 ingest 之后的观测事实（§15）。
   原先计划的旁路 rspamd 不再是下一步，理由见 §15.7
 
 ### 4.4 只有头部的信
