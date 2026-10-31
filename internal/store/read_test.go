@@ -78,8 +78,8 @@ func TestListMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 17 {
-		t.Fatalf("got %d messages, want 17 (the corpus, folded, and one more)", len(all))
+	if len(all) != 20 {
+		t.Fatalf("got %d messages, want 20 (the corpus, folded, and one more)", len(all))
 	}
 	for i := 1; i < len(all); i++ {
 		if all[i].ReceivedAt.After(all[i-1].ReceivedAt) {
@@ -207,16 +207,16 @@ func TestPrefixStats(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The OTP went to two prefixes and counts once.
-	if sum.Messages != 17 || sum.Downgraded != 3 {
-		t.Errorf("totals %d/%d, want 17/3", sum.Messages, sum.Downgraded)
+	if sum.Messages != 20 || sum.Downgraded != 4 {
+		t.Errorf("totals %d/%d, want 20/4", sum.Messages, sum.Downgraded)
 	}
 	ps := sum.Prefixes
 	got := map[string]store.PrefixStat{}
 	for _, p := range ps {
 		got[p.Prefix] = p
 	}
-	// a: the whole corpus; two of it fail DMARC.
-	if a := got["a"]; a.State != store.PrefixClaimed || a.Messages != 16 || a.Downgraded != 2 {
+	// a: the whole corpus; three of it fail DMARC.
+	if a := got["a"]; a.State != store.PrefixClaimed || a.Messages != 19 || a.Downgraded != 3 {
 		t.Errorf("a: %+v", a)
 	}
 	// shop: the OTP escapes via a, what only shop got is downgraded.

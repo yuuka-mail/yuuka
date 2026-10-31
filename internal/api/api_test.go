@@ -268,12 +268,14 @@ func TestPrefixesAndSearch(t *testing.T) {
 		t.Errorf("random456: %+v", p)
 	}
 	read := h.token(auth.MessageRead)
+	// Generated variants may reuse the body under another subject.
 	res := decode[SearchResult](t, h.get("/api/v1/search?q=usual+place", read))
-	if res.Total != 1 || res.Hits[0].Subject != "Re: Lunch on Friday?" || res.Hits[0].Class != ClassHuman {
+	i := slices.IndexFunc(res.Hits, func(m MessageSummary) bool { return m.Subject == "Re: Lunch on Friday?" })
+	if i < 0 || res.Hits[i].Class != ClassHuman {
 		t.Fatalf("search: %+v", res)
 	}
 	// devseed adds the question and an answer around the corpus reply.
-	th := decode[Thread](t, h.get("/api/v1/threads/"+res.Hits[0].ThreadID, read))
+	th := decode[Thread](t, h.get("/api/v1/threads/"+res.Hits[i].ThreadID, read))
 	if len(th.Messages) != 3 || th.Subject != "Lunch on Friday?" || len(th.Participants) != 2 {
 		t.Errorf("thread: %+v", th)
 	}
