@@ -116,6 +116,7 @@ M1 做的是子串匹配：一个 trigram GIN 表达式索引（迁移 0002 的 
 查询按空白切词、每个词都要命中（[`internal/store/search.go`](../../internal/store/search.go)）。
 子串匹配不需要分词，中文天然可用；少于三个字符的词用不上 trigram 索引，退化为顺序扫描，
 结果仍然正确，个人量级可以接受。`body_text` 有长度上限：它只服务检索和摘要，原件才是正文的来源。
+查询怎么表示、条件有哪些、和 JMAP 怎么对齐，见 [§16](search.md)。
 
 检索留在 Postgres 里，不用外置引擎（Meilisearch、bleve 一类）。外置索引要把可见性再算一遍：
 命中、`total`、分面都只能在 Viewer 可见的信上算（§13.8），搬到引擎里就成了第二份 ACL；
