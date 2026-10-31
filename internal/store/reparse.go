@@ -36,8 +36,29 @@ func (t ReparseTarget) Canonical() RawRef {
 // in id order after the id after ("" to start). A message with neither a
 // delivery nor a sent copy has nothing to be rebuilt from and is skipped.
 func (db *DB) ReparseTargets(ctx context.Context, since time.Time, after string, limit int) ([]ReparseTarget, error) {
+	return db.reparseTargets(ctx, `SELECT id, content_hash FROM messages
+		WHERE received_at >= $1 AND id > $2 ORDER BY id LIMIT $3`, since, after, limit)
+}
+
+// UnreadRecipients returns up to limit messages, in id order, whose
+// to_addrs, cc_addrs and reply_to_addrs were never read: written before
+// migration 0007 added them. The backlog pass rebuilds them, so an
+// upgrade fills them without a reparse. Messages with nothing to rebuild
+// from are left out, as by ReparseTargets; otherwise they would fill
+// every page and hide the rest.
+func (db *DB) UnreadRecipients(ctx context.Context, limit int) ([]ReparseTarget, error) {
+	return db.reparseTargets(ctx, `SELECT mm.id, mm.content_hash FROM messages mm
+		WHERE mm.to_addrs IS NULL
+		  AND (EXISTS (SELECT 1 FROM deliveries d WHERE d.message_id = mm.id)
+		    OR EXISTS (SELECT 1 FROM raw_objects sr WHERE sr.content_hash = mm.content_hash AND `+isSentCopy+`))
+		ORDER BY mm.id LIMIT $1`, limit)
+}
+
+// reparseTargets loads the sources of the messages (id, content_hash)
+// that the query pick selects.
+func (db *DB) reparseTargets(ctx context.Context, pick string, args ...any) ([]ReparseTarget, error) {
 	rows, err := db.pool.Query(ctx, `
-		WITH m AS (SELECT id, content_hash FROM messages WHERE received_at >= $1 AND id > $2 ORDER BY id LIMIT $3)
+		WITH m AS (`+pick+`)
 		SELECT m.id, `+rawRefCols+`, d.id
 		FROM m JOIN deliveries d ON d.message_id = m.id
 		JOIN raw_objects r ON r.id = d.raw_id
@@ -45,7 +66,7 @@ func (db *DB) ReparseTargets(ctx context.Context, since time.Time, after string,
 		SELECT m.id, `+sentRawCols+`, sr.id
 		FROM m JOIN raw_objects sr ON sr.content_hash = m.content_hash
 		WHERE `+isSentCopy+`
-		ORDER BY 1, 9, 10`, since, after, limit)
+		ORDER BY 1, 9, 10`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("reparse targets: %w", err)
 	}

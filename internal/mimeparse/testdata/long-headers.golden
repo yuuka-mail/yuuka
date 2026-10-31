@@ -27,6 +27,18 @@
     "thread-19@lists.example.org",
     "thread-20@lists.example.org"
   ],
+  "to": [
+    "a@example.com",
+    "b@example.com",
+    "c@example.com",
+    "d@example.com",
+    "e@example.com",
+    "f@example.com",
+    "g@example.com",
+    "h@example.com"
+  ],
+  "cc": [],
+  "reply_to": [],
   "snippet": "I agree with the proposal. On Mon, Dan wrote:",
   "body_text": "I agree with the proposal.\r\n\r\nOn Mon, Dan wrote:\r\n\u003e We should cut the release on Thursday.\r\n\u003e Any objections?",
   "has_attach": false,

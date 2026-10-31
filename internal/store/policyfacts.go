@@ -15,7 +15,7 @@ import (
 )
 
 // What sendpolicy.Decide needs from the database (§8.9): the grant, the
-// recent activity of the grant, who is in the replied-to thread.
+// recent activity of the grant, who corresponds in the replied-to thread.
 
 // contactedStates are the outbox states in which a message went, or is
 // going, to its recipients: an address in one of them has been
@@ -28,13 +28,27 @@ type ReplyFacts struct {
 	// MessageID is the message, aliases resolved; ThreadID its thread.
 	MessageID string
 	ThreadID  string
-	// Participants are the folded addresses already in the thread, as
-	// the viewer sees it: the senders of its visible messages, and whom
-	// our own mail in it went to. The To and Cc of inbound mail are not
-	// stored (only from_addr is), so someone only ever copied is not a
-	// participant until they write; recipient_scope thread then holds a
-	// reply to them as a draft, the safe side.
-	Participants []string
+	// Correspondents are the folded addresses recipient_scope thread
+	// admits (§8.9), as the viewer sees the thread: who wrote into it,
+	// whom its mail was addressed to, and whom our own mail in it went
+	// to. Not threads.participants, which lists the senders for display.
+	//
+	// Each visible message contributes by how far its headers can be
+	// trusted, judged on its visible deliveries only:
+	//   - From, if it went somewhere: it arrived, or it is the sent copy
+	//     of an outbox row that reached or is reaching its recipients.
+	//     A withdrawn or dead sent copy reached nobody.
+	//   - To and Cc, if a delivery escapes the §4.3 downgrade (claimed
+	//     prefix, DMARC not failing), or it is such a sent copy. Anyone
+	//     can write any Cc into mail to an unclaimed prefix and thread it
+	//     in by References.
+	//   - Reply-To, if such a delivery also passed DMARC: on a forged
+	//     From it is the forger's own mailbox. Our own sent copies'
+	//     Reply-To does not count; nobody replies to us through it.
+	// Plus every recipient of our own mail in the thread (Bcc included,
+	// from outbox_recipients). A message read before migration 0007 and
+	// not yet rebuilt by the backlog pass adds only its sender.
+	Correspondents []string
 	// Machine: classified machine, by the classifier or by a human
 	// override. internal/classify counts Auto-Submitted (not "no") and
 	// Precedence bulk|list among its signals, so this covers the RFC 3834
@@ -73,13 +87,32 @@ func (db *DB) replyFacts(ctx context.Context, q dbtx, v *auth.Viewer, id string)
 	if err != nil {
 		return f, fmt.Errorf("message %s: %w", id, err)
 	}
-	// Our mail in the thread is found two ways: its sent copy folded into
-	// a message of the thread (outbox.raw_id -> content hash -> message),
-	// and, while that copy is not parsed yet, the draft it came from
-	// replying to a message of the thread.
+	// The header addresses of the thread's messages, by the rules on
+	// Correspondents. Every condition is built from the visibility
+	// helpers, so a hidden delivery or outbox row neither adds addresses
+	// nor makes a visible message's addresses count; the downgrade is
+	// notDowngraded, as in the lists.
+	//
+	// Our mail in the thread is found two more ways: its sent copy folded
+	// into a message of the thread (outbox.raw_id -> content hash ->
+	// message), and, while that copy is not parsed yet, the draft it came
+	// from replying to a message of the thread. Those give the envelope
+	// recipients, Bcc included, which no header names.
 	rows, err := q.Query(ctx, `
-		SELECT m.from_addr FROM messages m
-		WHERE m.thread_id = $1 AND m.from_addr <> '' AND `+db.visibleMessage(v, "m")+`
+		SELECT a FROM messages m
+		CROSS JOIN LATERAL (SELECT
+			EXISTS (SELECT 1 `+db.visibleOutbox(v, "m")+` AND so.state IN `+contactedStates+`) AS sent,
+			EXISTS (SELECT 1 FROM deliveries d WHERE d.message_id = m.id AND `+db.visibleDelivery(v, "d")+`) AS arrived,
+			EXISTS (SELECT 1 FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
+			        WHERE d.message_id = m.id AND `+db.visibleDelivery(v, "d")+` AND `+notDowngraded+`) AS trusted,
+			EXISTS (SELECT 1 FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
+			        WHERE d.message_id = m.id AND `+db.visibleDelivery(v, "d")+` AND `+notDowngraded+`
+			          AND d.auth->>'dmarc' = 'pass') AS verified) w
+		CROSS JOIN LATERAL unnest(
+			CASE WHEN w.sent OR w.arrived THEN ARRAY[m.from_addr] END
+			|| CASE WHEN w.sent OR w.trusted THEN m.to_addrs || m.cc_addrs END
+			|| CASE WHEN w.verified THEN m.reply_to_addrs END) a
+		WHERE m.thread_id = $1 AND a <> '' AND `+db.visibleMessage(v, "m")+`
 		UNION
 		SELECT r.addr_fold FROM messages m
 		CROSS JOIN LATERAL (SELECT so.id, so.state `+db.visibleOutbox(v, "m")+`) o
@@ -95,14 +128,14 @@ func (db *DB) replyFacts(ctx context.Context, q dbtx, v *auth.Viewer, id string)
 		  AND `+db.readableAccount(v, "oi.account_id")+` AND `+db.visibleMessage(v, "m")+`
 		ORDER BY 1`, f.ThreadID)
 	if err != nil {
-		return f, fmt.Errorf("thread participants: %w", err)
+		return f, fmt.Errorf("thread correspondents: %w", err)
 	}
-	f.Participants, err = pgx.CollectRows(rows, pgx.RowTo[string])
+	f.Correspondents, err = pgx.CollectRows(rows, pgx.RowTo[string])
 	if err != nil {
-		return f, fmt.Errorf("thread participants: %w", err)
+		return f, fmt.Errorf("thread correspondents: %w", err)
 	}
-	for i, p := range f.Participants {
-		f.Participants[i] = FoldAddr(p)
+	for i, p := range f.Correspondents {
+		f.Correspondents[i] = FoldAddr(p)
 	}
 	return f, nil
 }
@@ -287,7 +320,7 @@ func (db *DB) policyInput(ctx context.Context, q dbtx, v *auth.Viewer, s Submiss
 			return f, err
 		}
 		f.Reply, threadID = &r, r.ThreadID
-		in.Reply = &sendpolicy.Reply{Participants: r.Participants, Machine: r.Machine}
+		in.Reply = &sendpolicy.Reply{Correspondents: r.Correspondents, Machine: r.Machine}
 	}
 	in.Counters, err = sendCounters(ctx, q, ident.ID, in.Submitter.ID, s.Recipients, threadID, s.Now)
 	if err != nil {

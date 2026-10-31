@@ -27,7 +27,7 @@ func grant(t Tier, s RecipientScope, allow ...string) *Grant {
 	return &Grant{Policy: t, RecipientScope: s, Allowlist: allow}
 }
 
-func reply(participants ...string) *Reply { return &Reply{Participants: participants} }
+func reply(correspondents ...string) *Reply { return &Reply{Correspondents: correspondents} }
 
 type want struct {
 	queue    bool
@@ -201,7 +201,7 @@ func TestDecide(t *testing.T) {
 			want{reason: HoldRecipients, tier: Auto},
 		},
 		{
-			"thread: participant in another spelling",
+			"thread: correspondent in another spelling",
 			Input{
 				Submitter: agentP, CanSubmit: true, Identity: arisuID,
 				Grant: grant(Auto, ScopeThread), Recipients: bob, Reply: reply("bob@example.net", "carol@example.org"),

@@ -8,6 +8,11 @@
   "references": [
     "orig-17@example.com"
   ],
+  "to": [
+    "alice@example.com"
+  ],
+  "cc": [],
+  "reply_to": [],
   "snippet": "Release checklist Steps left: - Tag the build - Update the notes at https://docs.example.org/release. On Thu, 30 Oct 2026 at 09:00, Alice \u003calice@example.com\u003e wrote:",
   "body_text": "Release checklist\r\n\r\nSteps left:\r\n- Tag the build\r\n- Update the notes at https://docs.example.org/release.\r\n\r\nOn Thu, 30 Oct 2026 at 09:00, Alice \u003calice@example.com\u003e wrote:\r\n\u003e Can you send the remaining steps?\r\n\u003e Thanks",
   "has_attach": true,

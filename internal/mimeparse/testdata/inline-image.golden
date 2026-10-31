@@ -6,6 +6,11 @@
   "message_id": "inl-12@example.net",
   "in_reply_to": "",
   "references": [],
+  "to": [
+    "alice@example.com"
+  ],
+  "cc": [],
+  "reply_to": [],
   "snippet": "Invoice attached. Logo below.",
   "body_text": "Invoice attached. Logo below.",
   "has_attach": true,

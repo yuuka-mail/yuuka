@@ -6,6 +6,11 @@
   "message_id": "",
   "in_reply_to": "",
   "references": [],
+  "to": [
+    "alerts@example.com"
+  ],
+  "cc": [],
+  "reply_to": [],
   "snippet": "backup of /srv finished in 42s",
   "body_text": "backup of /srv finished in 42s",
   "has_attach": false,

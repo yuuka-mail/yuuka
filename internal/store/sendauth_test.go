@@ -696,8 +696,14 @@ func TestPolicyFacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"bob@example.net", "carol@example.org", "dave@example.net", "erin@example.net", "grace@example.net"}
-	if rf.ThreadID != thread || !slices.Equal(rf.Participants, want) || rf.Machine {
+	// The mail arrived on an unclaimed prefix, so its To does not count
+	// (§8.9), except m2's: we sent that content too (dave's row), and our
+	// own mail's To counts.
+	want := []string{
+		"bob@example.net", "carol@example.org", "dave@example.net", "erin@example.net",
+		"github@example.com", "grace@example.net",
+	}
+	if rf.ThreadID != thread || !slices.Equal(rf.Correspondents, want) || rf.Machine {
 		t.Errorf("reply facts = %+v, want participants %v", rf, want)
 	}
 	if rf, _ := e.db.ReplyFacts(ctx, e.arisu, m3); !rf.Machine {
@@ -740,7 +746,7 @@ func TestPolicyFacts(t *testing.T) {
 	}
 	in := f.Input
 	if f.FromAddr != "arisu@example.com" || in.Identity.ID != e.arisuID.ID || in.Submitter.ID != arisu || !in.CanSubmit ||
-		in.Grant != nil || in.Reply == nil || len(in.Reply.Participants) != 5 || in.Counters.SentLastDay != 3 {
+		in.Grant != nil || in.Reply == nil || len(in.Reply.Correspondents) != len(want) || in.Counters.SentLastDay != 3 {
 		t.Errorf("input = %+v", in)
 	}
 	// No grant row: arisu on its own identity defaults to review.

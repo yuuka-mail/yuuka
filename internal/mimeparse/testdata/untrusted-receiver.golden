@@ -6,6 +6,11 @@
   "message_id": "ur-16@example.net",
   "in_reply_to": "",
   "references": [],
+  "to": [
+    "me@example.com"
+  ],
+  "cc": [],
+  "reply_to": [],
   "snippet": "Body.",
   "body_text": "Body.",
   "has_attach": false,

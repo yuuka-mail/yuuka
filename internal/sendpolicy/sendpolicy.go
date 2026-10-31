@@ -1,7 +1,7 @@
 // Package sendpolicy decides where one outbound submission goes (§8.9,
 // §13.5): into the outbox, or back to a draft with a reason. It is a pure
 // function of its input: no clock, no database. The store gathers the
-// facts (grant, counters, thread participants) and calls Decide itself,
+// facts (grant, counters, thread correspondents) and calls Decide itself,
 // inside the transaction that holds the grant's lock
 // (store.WithDecision); an outbox row can only be created through the
 // store.PolicyTx that carries that decision, and only when it is Queue.
@@ -193,9 +193,11 @@ type Counters struct {
 
 // Reply describes the message replied to.
 type Reply struct {
-	// Participants are the folded addresses already in the thread: who
-	// wrote into it and whom we sent to in it.
-	Participants []string
+	// Correspondents are the folded addresses recipient_scope thread
+	// admits: who wrote into the thread, whom its mail was addressed to,
+	// as far as its headers can be trusted, and whom we sent to in it
+	// (store.ReplyFacts says which headers count).
+	Correspondents []string
 	// The RFC 3834 signals of the message replied to, when known from its
 	// headers, and whether it is classified machine (internal/classify
 	// already counts Auto-Submitted and Precedence among its signals, so
@@ -435,8 +437,8 @@ func outsideScope(g Grant, reply *Reply, rcpts []string) (string, string) {
 			return rcpts[0], "recipient scope thread admits replies to an existing thread only"
 		}
 		for _, r := range rcpts {
-			if !slices.Contains(fold(reply.Participants), r) {
-				return r, "not a participant of the thread (recipient scope thread)"
+			if !slices.Contains(fold(reply.Correspondents), r) {
+				return r, "not a correspondent in the thread (recipient scope thread)"
 			}
 		}
 		return "", ""

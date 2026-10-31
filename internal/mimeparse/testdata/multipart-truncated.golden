@@ -6,6 +6,11 @@
   "message_id": "tr-9@example.net",
   "in_reply_to": "",
   "references": [],
+  "to": [
+    "alice@example.com"
+  ],
+  "cc": [],
+  "reply_to": [],
   "snippet": "Here are the photos from the weekend.",
   "body_text": "Here are the photos from the weekend.",
   "has_attach": true,

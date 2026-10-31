@@ -21,6 +21,9 @@ func (in *Ingester) fold(ctx context.Context, ref store.RawRef, raw []byte) (sto
 		// The problem text may quote header bytes; the id is enough.
 		in.cfg.Log.Warn("quarantined: MIME could not be parsed cleanly", "raw", ref.RawID, "message", f.MessageID)
 	}
+	if err == nil && f.NewMessage {
+		in.addrsCapped(msg, ref.RawID, f.MessageID)
+	}
 	return f, err
 }
 
@@ -69,7 +72,20 @@ func (in *Ingester) foldSent(ctx context.Context, ref store.RawRef) error {
 		// submission (§13.6) might.
 		in.cfg.Log.Warn("quarantined: sent copy could not be parsed cleanly", "raw", ref.RawID, "message", f.MessageID)
 	}
+	if err == nil && f.NewMessage {
+		in.addrsCapped(msg, ref.RawID, f.MessageID)
+	}
 	return err
+}
+
+// addrsCapped logs, once per message (when it is created), that its To,
+// Cc or Reply-To was cut short (mimeparse.AddrsCapped): fewer people are
+// on its thread than the header lists.
+func (in *Ingester) addrsCapped(msg mimeparse.Message, rawID, messageID string) {
+	if msg.AddrsCapped {
+		in.cfg.Log.Warn("address list cut short: too many addresses in To, Cc or Reply-To",
+			"raw", rawID, "message", messageID)
+	}
 }
 
 // backlogBatch bounds one query of the backlog pass.
@@ -84,47 +100,61 @@ type BacklogStats struct {
 // ProcessBacklog runs the content step for deliveries that have no
 // message: everything M0 committed before parsing existed, and deliveries
 // whose content step failed after the commit point. It then does the same
-// for sent copies that have no message (IndexSent failed or never ran).
+// for sent copies that have no message (IndexSent failed or never ran),
+// and rebuilds the messages whose recipients were never read (written
+// before migration 0007), so an upgrade fills them without a reparse.
 // It never notifies: the mail is not new to anyone by now, and an upgrade
 // must not replay the whole M0 history into the IM channel.
 func (in *Ingester) ProcessBacklog(ctx context.Context) (BacklogStats, error) {
 	var st BacklogStats
-	passes := []struct {
-		name    string // the log key of key(ref)
-		list    func(context.Context, int) ([]store.RawRef, error)
-		key     func(store.RawRef) string
-		process func(context.Context, store.RawRef) error
-	}{
-		{"delivery", in.cfg.DB.Unprocessed, func(r store.RawRef) string { return r.DeliveryID }, in.processOne},
-		{"raw", in.cfg.DB.UnindexedSent, func(r store.RawRef) string { return r.RawID }, in.foldSent},
+	err := backlogPass(ctx, in, &st, "delivery", in.cfg.DB.Unprocessed,
+		func(r store.RawRef) string { return r.DeliveryID }, in.processOne)
+	if err != nil {
+		return st, err
 	}
-	for _, p := range passes {
-		failed := map[string]bool{}
-		for {
-			refs, err := p.list(ctx, backlogBatch+len(failed))
-			if err != nil {
-				return st, err
+	err = backlogPass(ctx, in, &st, "raw", in.cfg.DB.UnindexedSent,
+		func(r store.RawRef) string { return r.RawID }, in.foldSent)
+	if err != nil {
+		return st, err
+	}
+	return st, backlogPass(ctx, in, &st, "message", in.cfg.DB.UnreadRecipients,
+		func(t store.ReparseTarget) string { return t.MessageID },
+		func(ctx context.Context, t store.ReparseTarget) error {
+			_, err := in.rebuild(ctx, t)
+			return err
+		})
+}
+
+// backlogPass processes what list returns until it returns nothing new.
+// A failed item is logged under name and skipped for the rest of the pass;
+// the next pass tries it again.
+func backlogPass[T any](ctx context.Context, in *Ingester, st *BacklogStats, name string,
+	list func(context.Context, int) ([]T, error), key func(T) string, process func(context.Context, T) error,
+) error {
+	failed := map[string]bool{}
+	for {
+		items, err := list(ctx, backlogBatch+len(failed))
+		if err != nil {
+			return err
+		}
+		progress := false
+		for _, it := range items {
+			if failed[key(it)] {
+				continue
 			}
-			progress := false
-			for _, ref := range refs {
-				if failed[p.key(ref)] {
-					continue
-				}
-				if err := p.process(ctx, ref); err != nil {
-					in.cfg.Log.Error("backlog: content step", p.name, p.key(ref), "err", err)
-					failed[p.key(ref)] = true
-					st.Failed++
-					continue
-				}
-				st.Processed++
-				progress = true
+			if err := process(ctx, it); err != nil {
+				in.cfg.Log.Error("backlog: content step", name, key(it), "err", err)
+				failed[key(it)] = true
+				st.Failed++
+				continue
 			}
-			if !progress || len(refs) < backlogBatch+len(failed) {
-				break
-			}
+			st.Processed++
+			progress = true
+		}
+		if !progress || len(items) < backlogBatch+len(failed) {
+			return nil
 		}
 	}
-	return st, nil
 }
 
 func (in *Ingester) processOne(ctx context.Context, ref store.RawRef) error {

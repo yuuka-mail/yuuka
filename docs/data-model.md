@@ -15,7 +15,7 @@
 | `raw_objects` | 投递事实 | 原件存储里的每个对象一行，带 `sha256` 和 `content_hash`（§4.1）；发件方重投的那份照样落盘，用 `duplicate_of` 指向第一份，不再生成 delivery。yuuka 为外发组装或规范化的字节（Sent 副本，`sent/` 前缀）也是这里的行，发没发出看 outbox（§4.6） | [0001](../internal/store/migrations/0001_ingest.sql)、[0006](../internal/store/migrations/0006_sent_copies.sql) |
 | `accounts` | 配置与授权 | 账户（§9.2）。M2 只有 `cf_catchall` 一种，就是 `YUUKA_ACCOUNT` 命名的那个 | [0005](../internal/store/migrations/0005_sending.sql) |
 | `deliveries` | 投递事实；只有 `message_id`、`auth` 两列是派生 | 每次投递一行：账户、信封、`(zone, prefix)`、这一路自己的原件（Received / ARC / DKIM 每一路都不同）和认证结果。投递是 ingest 记下的事实，不是从 MIME 派生的：信封、远端定位、卸载状态都不在原件里。`(account_id, source_key)` 是幂等键（§10.1） | [0001](../internal/store/migrations/0001_ingest.sql)、[0005](../internal/store/migrations/0005_sending.sql) |
-| `messages` | 派生（id 除外，id 跨 reparse 稳定） | 内容，按 `content_hash` 折叠；隔离状态 `parse_error` 也在这一层（§4.2） | [0002](../internal/store/migrations/0002_content.sql) |
+| `messages` | 派生（id 除外，id 跨 reparse 稳定） | 内容，按 `content_hash` 折叠；隔离状态 `parse_error` 也在这一层（§4.2）。To / Cc / Reply-To 只存折叠后的地址，供线程通信方（§8.9）匹配 | [0002](../internal/store/migrations/0002_content.sql)、[0007](../internal/store/migrations/0007_message_recipients.sql) |
 | `threads` | 派生 | 消息图的连通分量（§4.1）。reparse 整体重建，旧 id 能沿用就沿用，但不像 message id 那样承诺稳定 | [0002](../internal/store/migrations/0002_content.sql) |
 | `message_state` | 决定 | 人对一封信的标注、改判（`class_override`）、钉住（§9.6 卸载跳过）；本地标注层，远端永不覆盖（§9.2） | [0002](../internal/store/migrations/0002_content.sql) |
 | `message_aliases` | 决定 | 折叠算法换版本后被合并掉的旧 id 指向存活的 id，`yuuka://` 锚点和外键引用因此不失效 | [0002](../internal/store/migrations/0002_content.sql) |
@@ -201,6 +201,15 @@ metadata 恢复（§2.1），但外部账户的远端定位和卸载状态只在
   它不写 `message_state`、`message_aliases`、前缀的认领与标注；`prefixes` 只会补上缺的行、放宽观测区间。
   隔离状态（`parse_error`）是派生的：换了更好的解析器，reparse 会把它清掉。
   所以它放在 `messages` 上，而不是 `raw_objects.ingest_state`——`raw_objects` 是 reparse 不碰的事实
+- **给派生表加列，迁移里填不了**：值要解析原件才有。0007 加 `to_addrs` / `cc_addrs` / `reply_to_addrs` 时，
+  旧行留 NULL 表示「还没读过」，补跑（`ProcessBacklog`，`serve` 启动时和每个对账周期都跑）按原件逐条重建这些信，
+  运维只需 `yuuka migrate`，不必手动 reparse。没填上之前读者把 NULL 当作「没有」，结果偏向保守（§8.9）。
+  代价在升级后的第一个周期：补跑在 `serve` 的对账循环里同步执行，逐条读原件、重建，每条信写一行 `changes`
+  （SSE 和增量同步的消费方会收到一波 `message` 事件）；信多时这一轮要跑很久，跑完之前下一次对账不会开始
+  （webhook 的实时收信不走这个循环，不受影响）。
+  个人信箱的量级可以接受；要是哪天不行，给这一遍限速或者让它不写 `changes`
+  另一种做法是每次升 `mimeparse.Version` 都自动重建 `parser_version` 落后的行；那等于把 reparse 变成升级的默认动作，
+  而 reparse 要全库重建线程，没有这么做。下一次再给 `messages` 加派生列，照 0007 的写法：可空、部分索引找空行、补跑填
 
 ### 4.3 垃圾判定要有来源
 

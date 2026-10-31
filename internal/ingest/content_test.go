@@ -1,10 +1,13 @@
 package ingest
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -340,6 +343,105 @@ func TestReparse(t *testing.T) {
 	}
 	if after := e.count(t, `SELECT count(*) FROM changes`); after != before {
 		t.Errorf("idempotent reparse logged %d changes", after-before)
+	}
+}
+
+// Messages stored before migration 0007 have no recipients yet. The
+// backlog pass fills them from the raw, without a reparse, and what it
+// writes is what a reparse writes.
+func TestRecipientsAfterUpgrade(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	hdr := "From: Bob <bob@example.net>\r\nSubject: s\r\nCc: Carol <Carol@Example.org>, dan@example.net\r\n" +
+		"Reply-To: list@example.net\r\n"
+	a := e.ingest(t, 0, "a@example.com", mail("a@example.com", "pass", hdr+"Message-ID: <1@x>\r\n", "one"))
+	b := e.ingest(t, time.Second, "b@example.com", mail("b@example.com", "pass", hdr+"Message-ID: <2@x>\r\n", "two"))
+	// A malformed list costs only its broken elements, and never the mail.
+	c := e.ingest(t, 2*time.Second, "c@example.com", mail("c@example.com", "pass",
+		"From: s@example.net\r\nSubject: broken\r\nCc: @@, , =?bogus?= <ok@example.net>, \"unterminated <x@example.net>\r\n"+
+			"Reply-To: <<<>>>\r\n", "three"))
+	type row struct {
+		to, cc, replyTo []string
+		version         int
+	}
+	read := func(raw string) row {
+		t.Helper()
+		id, _ := e.messageOf(t, raw)
+		var r row
+		if err := e.pool.QueryRow(t.Context(), `SELECT to_addrs, cc_addrs, reply_to_addrs, parser_version
+			FROM messages WHERE id = $1`, id).Scan(&r.to, &r.cc, &r.replyTo, &r.version); err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	want := map[string]row{
+		a.ID: {[]string{"a@example.com"}, []string{"carol@example.org", "dan@example.net"}, []string{"list@example.net"}, mimeparse.Version},
+		b.ID: {[]string{"b@example.com"}, []string{"carol@example.org", "dan@example.net"}, []string{"list@example.net"}, mimeparse.Version},
+		c.ID: {[]string{"c@example.com"}, []string{"ok@example.net"}, []string{}, mimeparse.Version},
+	}
+	check := func(when string) {
+		t.Helper()
+		for raw, w := range want {
+			if r := read(raw); !slices.Equal(r.to, w.to) || !slices.Equal(r.cc, w.cc) || !slices.Equal(r.replyTo, w.replyTo) ||
+				r.replyTo == nil || r.version != w.version {
+				t.Errorf("%s: %s = %+v, want %+v", when, raw, r, w)
+			}
+		}
+	}
+	check("ingest")
+
+	// What the M2 binary left behind.
+	if _, err := e.pool.Exec(t.Context(), `UPDATE messages SET to_addrs = NULL, cc_addrs = NULL, reply_to_addrs = NULL,
+		parser_version = 1`); err != nil {
+		t.Fatal(err)
+	}
+	st, err := e.in.ProcessBacklog(t.Context())
+	if err != nil || st != (BacklogStats{Processed: 3}) {
+		t.Fatalf("backlog %+v %v", st, err)
+	}
+	check("backlog")
+	if st, err := e.in.ProcessBacklog(t.Context()); err != nil || st != (BacklogStats{}) {
+		t.Fatalf("second backlog %+v %v", st, err)
+	}
+	e.in.Wait()
+	if got := e.notes.got(); len(got) != 0 {
+		t.Fatalf("backlog notified %q", got)
+	}
+	rs, err := e.in.Reparse(t.Context(), time.Time{})
+	if err != nil || rs.Messages != 3 || rs.Changed != 0 || rs.Failed != 0 {
+		t.Fatalf("reparse after the backlog: %+v %v", rs, err)
+	}
+	check("reparse")
+}
+
+// Too many addresses in one field: the list is cut short and the cut
+// logged once, but the mail is not quarantined; its content is all there.
+func TestAddressCap(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	var logged bytes.Buffer
+	e.in.cfg.Log = slog.New(slog.NewTextHandler(&logged, nil))
+	cc := ""
+	for i := range 1500 {
+		cc += fmt.Sprintf("u%d@example.net, ", i)
+	}
+	m := e.ingest(t, 0, "a@example.com", mail("a@example.com", "pass",
+		"From: s@example.net\r\nSubject: many\r\nCc: "+cc+"z@example.net\r\n", "body"))
+	id, _ := e.messageOf(t, m.ID)
+	var n int
+	var problem *string
+	if err := e.pool.QueryRow(t.Context(), `SELECT cardinality(cc_addrs), parse_error FROM messages WHERE id = $1`, id).
+		Scan(&n, &problem); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1000 {
+		t.Errorf("cc_addrs holds %d addresses, want the first 1000", n)
+	}
+	if problem != nil {
+		t.Errorf("quarantined for a long Cc: %q", *problem)
+	}
+	if got := strings.Count(logged.String(), "address list cut short"); got != 1 {
+		t.Errorf("logged the cut %d times:\n%s", got, logged.String())
 	}
 }
 

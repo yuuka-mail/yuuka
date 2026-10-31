@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -79,6 +81,59 @@ func TestNeverPanics(t *testing.T) {
 	}
 	for _, in := range inputs {
 		_ = Parse([]byte(in))
+	}
+}
+
+// To, Cc and Reply-To say who is on a thread (§8.9). What does not parse
+// is skipped, never guessed; nothing here may fail the parse.
+func TestAddresses(t *testing.T) {
+	cases := []struct {
+		name, header string
+		want         []string
+	}{
+		{"plain", "A <A@Example.com>, b@example.com", []string{"A@Example.com", "b@example.com"}},
+		{"undisclosed", "undisclosed-recipients:;", []string{}},
+		{
+			"group", "Team: a@example.com, B <b@example.com>;, c@example.com",
+			[]string{"a@example.com", "b@example.com", "c@example.com"},
+		},
+		{"quoted comma", `"Doe, John" <j@example.com>`, []string{"j@example.com"}},
+		{"encoded name", "=?utf-8?q?=E5=BC=A0?= <z@example.com>", []string{"z@example.com"}},
+		{
+			"one broken", `a@example.com, not an address, "x, y" <b@example.com>`,
+			[]string{"a@example.com", "b@example.com"},
+		},
+		{"all broken", "<@route:a@example.com>, nobody", []string{}},
+		{"undeclared 8-bit name", "\xd5\xc5 <g@example.com>, broken", []string{"g@example.com"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			raw := "From: s@example.net\r\nTo: " + c.header + "\r\nCc: " + c.header + "\r\nReply-To: " + c.header +
+				"\r\nContent-Type: text/plain; charset=gbk\r\n\r\nbody\r\n"
+			m := Parse([]byte(raw))
+			for field, got := range map[string][]string{"To": m.To, "Cc": m.Cc, "Reply-To": m.ReplyTo} {
+				if !slices.Equal(got, c.want) || got == nil {
+					t.Errorf("%s = %#v, want %q", field, got, c.want)
+				}
+			}
+			if m.Problem != "" {
+				t.Errorf("problem %q", m.Problem)
+			}
+		})
+	}
+
+	none := Parse([]byte("From: s@example.net\r\n\r\nbody\r\n"))
+	if none.To == nil || none.Cc == nil || none.ReplyTo == nil || len(none.To)+len(none.Cc)+len(none.ReplyTo) != 0 {
+		t.Errorf("no fields: %#v %#v %#v", none.To, none.Cc, none.ReplyTo)
+	}
+	var long strings.Builder
+	for i := range maxAddrs + 1 {
+		fmt.Fprintf(&long, "a%d@example.com, ", i)
+	}
+	capped := Parse([]byte("To: " + long.String() + "z@example.com\r\n\r\nbody\r\n"))
+	if len(capped.To) != maxAddrs || !capped.AddrsCapped || capped.Problem != "" {
+		t.Errorf("%d addresses, capped %v, problem %q: want %d, capped, no problem",
+			len(capped.To), capped.AddrsCapped, capped.Problem, maxAddrs)
 	}
 }
 

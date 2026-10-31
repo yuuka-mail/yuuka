@@ -361,7 +361,7 @@ func TestVisibility(t *testing.T) {
 	tick := func() time.Time { at = at.Add(time.Minute); return at }
 	msgs := map[string]string{}
 	msgs["in-open"] = inbound(t, db, open, "a", letter("x@example.net", "a@example.com", "in-open",
-		"Message-ID: <in-open@example.net>\r\n", "visible inbound"), tick())
+		"Message-ID: <in-open@example.net>\r\nCc: copied-open@example.net\r\n", "visible inbound"), tick())
 	msgs["in-closed"] = inbound(t, db, closed, "b", letter("x@example.net", "b@example.com", "in-closed", "Message-ID: <in-closed@example.net>\r\n", "hidden inbound"), tick())
 	sendAs := func(name, identity, headers string) {
 		raw := letter("me@example.com", "x@example.net", name, headers, name+" body")
@@ -370,7 +370,8 @@ func TestVisibility(t *testing.T) {
 	}
 	sendAs("sent-open", mine, "Message-ID: <sent-open@example.com>\r\n")
 	// Hidden, in the same thread as in-open.
-	sendAs("sent-closed", theirs, "In-Reply-To: <in-open@example.net>\r\nMessage-ID: <sent-closed@example.com>\r\n")
+	sendAs("sent-closed", theirs, "In-Reply-To: <in-open@example.net>\r\nMessage-ID: <sent-closed@example.com>\r\n"+
+		"Cc: copied-hidden@example.org\r\nReply-To: reply-hidden@example.org\r\n")
 	// One content, delivered to the closed account and sent as an open
 	// identity: visible through the sent copy only, so its delivery, raw
 	// and recipients stay hidden.
@@ -381,6 +382,10 @@ func TestVisibility(t *testing.T) {
 		t.Fatalf("sent copy did not fold into the delivered message: %+v", f)
 	}
 
+	// in-open arrived on a claimed prefix, so its Cc is trusted (§8.9).
+	if _, err := pool.Exec(ctx, `UPDATE prefixes SET state = 1 WHERE zone = 'example.com' AND prefix = 'a'`); err != nil {
+		t.Fatal(err)
+	}
 	// Someone only the hidden reply went to.
 	if _, err := pool.Exec(ctx, `INSERT INTO outbox_recipients (outbox_id, addr, addr_fold, kind)
 		SELECT so.id, 'hidden@example.org', 'hidden@example.org', 'to'
@@ -504,8 +509,20 @@ func TestVisibility(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if slices.Contains(rf.Participants, "hidden@example.org") != slices.Contains(want, "sent-closed") {
-					t.Errorf("participants of in-open's thread: %q", rf.Participants)
+				// Header addresses of a hidden message are header
+				// data (§13.8): they must not reach a viewer that
+				// cannot read it, not even as a policy input.
+				for _, a := range []string{"hidden@example.org", "copied-hidden@example.org"} {
+					if slices.Contains(rf.Correspondents, a) != slices.Contains(want, "sent-closed") {
+						t.Errorf("correspondents of in-open's thread: %q (%s)", rf.Correspondents, a)
+					}
+				}
+				// Our own Reply-To is nobody's reply address to us.
+				if slices.Contains(rf.Correspondents, "reply-hidden@example.org") {
+					t.Errorf("correspondents of in-open's thread hold a sent copy's Reply-To: %q", rf.Correspondents)
+				}
+				if !slices.Contains(rf.Correspondents, "copied-open@example.net") {
+					t.Errorf("correspondents of in-open's thread lack its Cc: %q", rf.Correspondents)
 				}
 			}
 

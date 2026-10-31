@@ -31,7 +31,9 @@ import (
 
 // Version is messages.parser_version. Bump it whenever the output for the
 // same input changes, so rows parsed by an older parser can be found.
-const Version = 1
+//
+// 2: To, Cc and Reply-To.
+const Version = 2
 
 // Limits keep hostile input from costing unbounded work. Hitting one is a
 // Problem, not a failure: what was read so far is kept.
@@ -42,6 +44,13 @@ const (
 	// of truth; the column only has to serve search and snippets.
 	MaxBodyText = 1 << 20
 	snippetLen  = 200
+	// maxAddrs bounds the addresses read from one of To, Cc, Reply-To.
+	// Personal mail never comes near it; a header listing more is hostile
+	// or broken, and the rest of the list is dropped. Unlike the other
+	// limits this is no Problem: the content is all there, only fewer
+	// people are on the thread, which is the safe side (§8.9). It is
+	// reported in AddrsCapped instead.
+	maxAddrs = 1000
 )
 
 // Message is what parsing yields for one raw message.
@@ -53,9 +62,20 @@ type Message struct {
 	MessageID  string    `json:"message_id"`
 	InReplyTo  string    `json:"in_reply_to"`
 	References []string  `json:"references"`
-	Snippet    string    `json:"snippet"`
-	BodyText   string    `json:"body_text"`
-	HasAttach  bool      `json:"has_attach"`
+	// To, Cc and ReplyTo are the addresses of those fields as written
+	// (case kept, display names and groups dropped), in order. Elements
+	// that do not parse are skipped, never guessed at: these lists say
+	// who is on a thread (§8.9), so a missing address is the safe side.
+	To      []string `json:"to"`
+	Cc      []string `json:"cc"`
+	ReplyTo []string `json:"reply_to"`
+	// AddrsCapped: one of them listed more than maxAddrs addresses, and
+	// the rest were dropped. The caller logs it; the message is not
+	// quarantined for it.
+	AddrsCapped bool   `json:"addrs_capped,omitempty"`
+	Snippet     string `json:"snippet"`
+	BodyText    string `json:"body_text"`
+	HasAttach   bool   `json:"has_attach"`
 
 	// Header signals for classification (§3 principle 4).
 	MediaType       string `json:"media_type"`
@@ -158,6 +178,9 @@ func (p *parser) headers(h mail.Header) {
 	if p.m.References == nil {
 		p.m.References = []string{}
 	}
+	p.m.To = p.addrs(h, "To")
+	p.m.Cc = p.addrs(h, "Cc")
+	p.m.ReplyTo = p.addrs(h, "Reply-To")
 	mt, _, _ := h.ContentType()
 	p.m.MediaType = strings.ToLower(mt)
 	p.m.ListID = clean(p.text(h, "List-Id"))
@@ -175,12 +198,19 @@ func (p *parser) text(h mail.Header, key string) string {
 	if err != nil {
 		v = h.Get(key)
 	}
-	if !utf8.ValidString(v) {
-		if _, params, err := mime.ParseMediaType(p.charset); err == nil && params["charset"] != "" {
-			if r, err := charset.Reader(params["charset"], strings.NewReader(v)); err == nil {
-				if b, err := io.ReadAll(r); err == nil {
-					v = string(b)
-				}
+	return p.undeclared(v)
+}
+
+// undeclared reads v in the charset the message body declares if it is
+// not UTF-8, and returns it unchanged otherwise or if that fails.
+func (p *parser) undeclared(v string) string {
+	if utf8.ValidString(v) {
+		return v
+	}
+	if _, params, err := mime.ParseMediaType(p.charset); err == nil && params["charset"] != "" {
+		if r, err := charset.Reader(params["charset"], strings.NewReader(v)); err == nil {
+			if b, err := io.ReadAll(r); err == nil {
+				return string(b)
 			}
 		}
 	}
@@ -211,6 +241,70 @@ func (p *parser) from(h mail.Header) {
 		return
 	}
 	p.m.FromName = text
+}
+
+// addrs reads the address list of field key; never nil. A list that
+// does not parse as a whole is read element by element, so one broken
+// address does not cost the others. Groups contribute their members;
+// an empty group ("undisclosed-recipients:;") contributes nothing.
+func (p *parser) addrs(h mail.Header, key string) []string {
+	out := []string{}
+	v := h.Get(key)
+	if strings.TrimSpace(v) == "" {
+		return out
+	}
+	list, err := h.AddressList(key)
+	if err != nil {
+		// Undeclared 8-bit display names are the common cause.
+		v = p.undeclared(v)
+		list, err = mail.ParseAddressList(v)
+	}
+	if err != nil {
+		list = nil
+		for _, el := range splitList(v) {
+			if l, err := mail.ParseAddressList(el); err == nil {
+				list = append(list, l...)
+			}
+		}
+	}
+	for _, a := range list {
+		if len(out) == maxAddrs {
+			p.m.AddrsCapped = true
+			break
+		}
+		if utf8.ValidString(a.Address) && !strings.ContainsFunc(a.Address, unicode.IsControl) {
+			out = append(out, a.Address)
+		}
+	}
+	return out
+}
+
+// splitList splits an address list at the commas outside quoted strings,
+// comments and angle brackets: the elements of a list that does not parse
+// as a whole. It does not need to be exact; what it gets wrong fails to
+// parse and is skipped.
+func splitList(v string) []string {
+	var out []string
+	quoted, escaped, depth, start := false, false, 0, 0
+	for i := 0; i < len(v); i++ {
+		switch c := v[i]; {
+		case escaped:
+			escaped = false
+		case c == '\\':
+			escaped = true
+		case c == '"':
+			quoted = !quoted
+		case quoted:
+		case c == '(' || c == '<':
+			depth++
+		case (c == ')' || c == '>') && depth > 0:
+			depth--
+		case c == ',' && depth == 0:
+			out = append(out, v[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, v[start:])
 }
 
 // msgID reads one msg-id without angle brackets. Malformed values are
@@ -449,6 +543,7 @@ func validField(line []byte) bool {
 // whole raw message becomes the body so it is at least searchable.
 func (p *parser) fallback(raw []byte) (Message, Entity) {
 	p.m.References = []string{}
+	p.m.To, p.m.Cc, p.m.ReplyTo = []string{}, []string{}, []string{}
 	p.m.BodyText = truncate(strings.TrimSpace(strings.ToValidUTF8(string(raw), "�")), MaxBodyText)
 	p.m.Snippet = snippet(p.m.BodyText)
 	p.m.Problem = strings.Join(p.problems, "; ")

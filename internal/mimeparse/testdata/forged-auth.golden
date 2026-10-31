@@ -6,6 +6,11 @@
   "message_id": "forged-15@spam.example",
   "in_reply_to": "",
   "references": [],
+  "to": [
+    "github@example.com"
+  ],
+  "cc": [],
+  "reply_to": [],
   "snippet": "Click here.",
   "body_text": "Click here.",
   "has_attach": false,

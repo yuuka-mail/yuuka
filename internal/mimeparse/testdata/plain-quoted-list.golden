@@ -6,6 +6,11 @@
   "message_id": "reply-18@example.org",
   "in_reply_to": "orig-18@example.com",
   "references": [],
+  "to": [
+    "alice@example.com"
+  ],
+  "cc": [],
+  "reply_to": [],
   "snippet": "Sounds good. Two things: 1. Book the train (see https://rail.example.org/booking?id=42). 2. Pack light and bring a charger. On Thu, 30 Oct 2026, Alice wrote: Cheers, Dave -----Original Message----- Fr",
   "body_text": "Sounds good. Two things:\r\n\r\n1. Book the train (see https://rail.example.org/booking?id=42).\r\n2. Pack light\r\n   and bring a charger.\r\n\r\nOn Thu, 30 Oct 2026, Alice wrote:\r\n\u003e Shall we go on Saturday?\r\n\u003e\r\n\u003e \u003e Earlier: how about the weekend?\r\n\r\nCheers,\r\nDave\r\n\r\n-----Original Message-----\r\nFrom: Alice\r\nSent: Thursday\r\nSubject: Trip plan\r\n\r\nOlder text that a client appended without quoting.",
   "has_attach": false,

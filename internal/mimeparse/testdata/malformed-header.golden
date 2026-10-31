@@ -6,6 +6,11 @@
   "message_id": "no-angle-brackets@spam.example",
   "in_reply_to": "",
   "references": [],
+  "to": [
+    "random123@example.com"
+  ],
+  "cc": [],
+  "reply_to": [],
   "snippet": "Claim your prize now.",
   "body_text": "Claim your prize now.",
   "has_attach": false,

@@ -316,8 +316,35 @@ agent 的工作不会丢，人也不会被一堆报错淹没。凭据缺 `submis
 
 「自动」指提交者不是 human。确认路径里 agent 写的信由人放行，是人的信，不加 `Auto-Submitted`。
 `recipient_scope = allowlist` 的条目是地址（精确）或域（精确，不含子域），大小写不敏感。
-`thread` 的「既有参与者」是线程里可见消息的发件人，加上我们在这个线程里发过信的收件人；
-收信的 To / Cc 没有入库（`messages` 只有 `from_addr`），只被抄送过、自己没写过信的人不算——宁可停在草稿。
+`thread` 放行的是线程的**通信方**（`ReplyFacts.Correspondents`；不叫「参与者」，免得和线程视图里
+只列发件人的 `participants` 混淆）。线程里每封查询者看得见的信按它的头部有多可信贡献地址，
+判断只看可见的投递：
+
+| 头部 | 什么时候算 |
+|---|---|
+| From | 这封信确实发出过：收到的信都算（降级的也算，和 0007 之前一样）；我们自己的信要有一条已经或正在发给收件人的 outbox 行，即不在 `held`、`withdrawn`、`dead` |
+| To、Cc | 有一条投递没被 §4.3 降级（前缀已认领、DMARC 不是 fail；和列表的降级判断是同一个 `notDowngraded`），或者它是上面那样发出过的我们自己的信 |
+| Reply-To | 有一条投递没被降级，**而且** DMARC 是 pass；我们自己发的信上的 Reply-To 不算 |
+
+再加上我们在这个线程里发过信的全部收件人（`outbox_recipients`，含 Bcc）。地址按 `store.FoldAddr` 折叠后比较，
+实现见 [`ReplyFacts`](../internal/store/policyfacts.go)。取舍：
+
+- **只被抄送的人也算**。回复全部是线程里最常见的回信，只认发件人会把它一律停成草稿，
+  `thread` 档就只剩「回给发件人」这一种用法
+- **但只信没被降级的信**。通信方由发信方写的头部决定：任何人都能往未认领的前缀投一封信，
+  用 References 挂进一个已知线程，在 Cc 里写任意多个地址。降级的信照样算发件人（只认 From 时就是这样），
+  To / Cc 不算。代价是前缀没认领时，抄送的人要等认领后才放行
+- **Reply-To 还要 DMARC pass**。它是写信人要求回信去的地址（RFC 5322 §3.6.2），邮件列表、工单系统都靠它；
+  但伪造发件人的钓鱼信里，Reply-To 正是攻击者自己的信箱。From 验证过，Reply-To 才是那个域的主人写的。
+  没有 DMARC 结果（未验证）也不算。我们自己的信不经 Reply-To 收回信，它的 Reply-To 不给任何人放行
+- **撤回、作废的信不贡献任何人**，From 也不算：每条 outbox 行的 Sent 副本都是 message（§4.6），
+  可那封信没人收到过
+- **自己的地址不过滤**：收到的信 To 里的 `github@example.com` 之类也是通信方，回给自己没有外泄风险
+- **Bcc 只有我们自己知道**：收到的信里看不到别人的 Bcc；我们发的信的 Bcc 在 `outbox_recipients` 里，从那里算
+- 通信方只来自查询者看得见的信和投递（§13.8）：看不见的信的收件人是头部数据，不能经授权决定泄露出去；
+  看不见的投递也不能让一封看得见的信的头部变得可信
+- 存的是 `messages.to_addrs` / `cc_addrs` / `reply_to_addrs`（[0007](../internal/store/migrations/0007_message_recipients.sql)，派生列）。
+  0007 之前入库的信上它们是 NULL，补跑（§4.2）填上之前这些信只贡献发件人，即 0007 之前的规则——宁可停在草稿
 
 一次提交的去向：
 
@@ -342,7 +369,7 @@ flowchart TD
 每条授权带自己的限额（`max_per_hour`、`max_per_day`、`max_new_recipients_per_day`）
 和收件人范围（`recipient_scope`）：
 
-- `thread`：只能回复已有线程，收件人必须是该线程的既有参与者
+- `thread`：只能回复已有线程，收件人必须是该线程的通信方（见上）
 - `allowlist`：收件人在 `recipient_allowlist`（地址或域）里
 - `any`：不限
 

@@ -6,6 +6,11 @@
   "message_id": "nb-8@example.net",
   "in_reply_to": "",
   "references": [],
+  "to": [
+    "random456@example.com"
+  ],
+  "cc": [],
+  "reply_to": [],
   "snippet": "--whatever Content-Type: text/plain The text is still here. --whatever--",
   "body_text": "--whatever\r\nContent-Type: text/plain\r\n\r\nThe text is still here.\r\n--whatever--",
   "has_attach": false,
