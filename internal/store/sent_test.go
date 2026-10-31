@@ -659,6 +659,18 @@ func TestVisibility(t *testing.T) {
 				}
 			}
 
+			// The report counts the scores of what v sees, and the
+			// mail of known senders only where v sees it.
+			if c, err := db.ScoreCounts(ctx, v, laya, time.Time{}); err != nil || c.Scored != len(want) {
+				t.Errorf("ScoreCounts %+v, %v; want %d scored", c, err, len(want))
+			}
+			for n, id := range msgs {
+				_, err := db.KnownSender(ctx, v, id)
+				if slices.Contains(want, n) != (err == nil) || err != nil && !errors.Is(err, store.ErrNotFound) {
+					t.Errorf("KnownSender %s: %v", n, err)
+				}
+			}
+
 			// What a draft rule is generalized from: the deliveries v
 			// can see, none for mail it sees as a sent copy only.
 			for n, id := range msgs {

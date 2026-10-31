@@ -17,6 +17,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
+	"github.com/yuuka-mail/yuuka/internal/triage/score"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
@@ -303,6 +304,11 @@ func TestReadsRefuseNilViewer(t *testing.T) {
 		"MessageByID":  func() error { _, err := db.MessageByID(t.Context(), nil, id); return err },
 		"ThreadByID":   func() error { _, err := db.ThreadByID(t.Context(), nil, id); return err },
 		"PrefixStats":  func() error { _, err := db.PrefixStats(t.Context(), nil, store.PrefixQuery{}); return err },
+		"KnownSender":  func() error { _, err := db.KnownSender(t.Context(), nil, id); return err },
+		"ScoreCounts": func() error {
+			_, err := db.ScoreCounts(t.Context(), nil, score.Profile{Scorer: "laya-ml-1", Questions: 1}, time.Time{})
+			return err
+		},
 		"PrefixByAddress": func() error {
 			_, err := db.PrefixByAddress(t.Context(), nil, "example.com", "a", 10)
 			return err
