@@ -106,7 +106,7 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 	sdk.AddTool(srv, &sdk.Tool{
 		Name:        "search_messages",
 		InputSchema: input[SearchInput](),
-		Description: `Search mail. q: words and "phrases" that must all occur in subject, sender or body; -x, a OR b, (groups); ` +
+		Description: `Search mail. q: words and "phrases" that must all occur in subject, sender, recipients or body; -x, a OR b, (groups); ` +
 			`from: to: cc: bcc: subject: body: list: label: class:machine|human|unknown is:archived|sent|downgraded ` +
 			`has:attachment after:/before: (YYYY-MM-DD, RFC 3339, -7d) triage:phishing:yes (a model's leaning, not a verdict). ` +
 			`to: is what the sender wrote; deliveredto:shop@example.com is where yuuka received it. ` +

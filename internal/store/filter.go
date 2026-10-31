@@ -24,9 +24,11 @@ import (
 // parameter. The tree is bounded by the parser (search.MaxConditions,
 // search.MaxDepth).
 
-// searchDoc must stay identical to the expression of the messages_search
-// trigram index, or the index is not used.
-const searchDoc = `(m.subject || ' ' || m.from_name || ' ' || m.from_addr || ' ' || m.body_text)`
+// searchText is the text JMAP's text condition searches: subject,
+// sender, To and Cc addresses and names, body (§16.4). It must stay the
+// expression of the messages_search_text trigram index (0016), argument
+// for argument, or the index is not used.
+const searchText = `message_search_text(m.subject, m.from_name, m.from_addr, m.to_addrs, m.to_names, m.cc_addrs, m.cc_names, m.body_text)`
 
 type compiler struct {
 	db     *DB
@@ -69,36 +71,44 @@ func (c *compiler) filter(f *search.Filter) (string, error) {
 func (c *compiler) cond(k search.Condition) (string, error) {
 	switch k.Field {
 	case search.Text:
-		return searchDoc + ` ILIKE ` + c.like(k.Term), nil
-	// A field is a substring of searchDoc, so also asking searchDoc
+		p := c.like(k.Term)
+		if !c.v.Has(auth.DeliveryRead) {
+			return searchText + ` ILIKE ` + p, nil
+		}
+		// The Bcc of our own mail is in no header, so not in searchText:
+		// the subquery finds the messages whose visible outbox row has a
+		// matching Bcc. Uncorrelated, Postgres computes it once (an
+		// initplan) and ORs the content_hash index with the trigram one.
+		// Only with delivery:read, as bcc: (§16.4); text being implicit,
+		// it leaves the branch out rather than refuse.
+		return `(` + searchText + ` ILIKE ` + p + ` OR m.content_hash = ANY(ARRAY(SELECT sr.content_hash ` +
+			c.db.visibleOutboxRows(c.v) + ` AND ` + bccMatches(p) + `)))`, nil
+	// A field is a substring of searchText, so also asking searchText
 	// changes nothing but lets the trigram index find the candidates.
 	case search.From:
 		p := c.like(k.Term)
-		return `(` + searchDoc + ` ILIKE ` + p + ` AND (m.from_name ILIKE ` + p + ` OR m.from_addr ILIKE ` + p + `))`, nil
+		return `(` + searchText + ` ILIKE ` + p + ` AND (m.from_name ILIKE ` + p + ` OR m.from_addr ILIKE ` + p + `))`, nil
 	case search.Subject:
 		p := c.like(k.Term)
-		return `(` + searchDoc + ` ILIKE ` + p + ` AND m.subject ILIKE ` + p + `)`, nil
+		return `(` + searchText + ` ILIKE ` + p + ` AND m.subject ILIKE ` + p + `)`, nil
 	case search.Body:
 		p := c.like(k.Term)
-		return `(` + searchDoc + ` ILIKE ` + p + ` AND m.body_text ILIKE ` + p + `)`, nil
-	// The folded addresses of 0007; their names join with §16.7 step 2.
-	// A row not read yet (NULL) has none.
+		return `(` + searchText + ` ILIKE ` + p + ` AND m.body_text ILIKE ` + p + `)`, nil
+	// The folded addresses of 0007 and the names of 0016. A row not read
+	// yet (NULL) has none: array || NULL is the array.
 	case search.To:
-		return `EXISTS (SELECT 1 FROM unnest(m.to_addrs) a WHERE a ILIKE ` + c.like(k.Term) + `)`, nil
+		p := c.like(k.Term)
+		return `(` + searchText + ` ILIKE ` + p + ` AND EXISTS (SELECT 1 FROM unnest(m.to_addrs || m.to_names) a WHERE a ILIKE ` + p + `))`, nil
 	case search.Cc:
-		return `EXISTS (SELECT 1 FROM unnest(m.cc_addrs) a WHERE a ILIKE ` + c.like(k.Term) + `)`, nil
+		p := c.like(k.Term)
+		return `(` + searchText + ` ILIKE ` + p + ` AND EXISTS (SELECT 1 FROM unnest(m.cc_addrs || m.cc_names) a WHERE a ILIKE ` + p + `))`, nil
 	case search.Bcc:
 		// Envelope recipients are delivery facts (§13.4). Refused rather
 		// than empty: -bcc:x would otherwise be everything.
 		if !c.v.Has(auth.DeliveryRead) {
 			return "", &search.Error{At: k.At, Scope: auth.DeliveryRead, Msg: "bcc: needs the delivery:read scope"}
 		}
-		// The names stay on the draft the row was submitted from (0014);
-		// mail submitted over SMTP has none.
-		p := c.like(k.Term)
-		return `EXISTS (SELECT 1 ` + c.db.visibleOutbox(c.v, "m") + ` AND (EXISTS (SELECT 1 FROM outbox_recipients br
-			WHERE br.outbox_id = so.id AND br.kind = 'bcc' AND br.addr_fold ILIKE ` + p + `)
-			OR EXISTS (SELECT 1 FROM drafts bd CROSS JOIN unnest(bd.bcc_names) bn WHERE bd.id = so.draft_id AND bn ILIKE ` + p + `)))`, nil
+		return `EXISTS (SELECT 1 ` + c.db.visibleOutbox(c.v, "m") + ` AND ` + bccMatches(c.like(k.Term)) + `)`, nil
 	case search.ListID:
 		return `coalesce(m.list_id, '') ILIKE ` + c.like(k.Term), nil
 	case search.After:
@@ -131,6 +141,15 @@ func (c *compiler) cond(k search.Condition) (string, error) {
 		return f.condition(c.arg), nil
 	}
 	return "", errors.New("filter condition " + string(k.Field))
+}
+
+// bccMatches: the outbox row so has a Bcc whose address or name matches
+// the pattern p. The names stay on the draft the row was submitted from
+// (0014); mail submitted over SMTP has none.
+func bccMatches(p string) string {
+	return `(EXISTS (SELECT 1 FROM outbox_recipients br
+			WHERE br.outbox_id = so.id AND br.kind = 'bcc' AND br.addr_fold ILIKE ` + p + `)
+		OR EXISTS (SELECT 1 FROM drafts bd CROSS JOIN unnest(bd.bcc_names) bn WHERE bd.id = so.draft_id AND bn ILIKE ` + p + `))`
 }
 
 // like is a parameter matching term anywhere, case-insensitively.

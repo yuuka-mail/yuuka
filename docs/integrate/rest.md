@@ -76,6 +76,7 @@ WebUI 用的是浏览器会话，程序不要模仿它。
 - **搜索**（`GET /api/v1/search`）的条件全写在 `q` 里，写法见 [§16](../design/search.md)：空白分隔的项都要成立，
   `"短语"`、`-否定`、`a OR b`、括号分组；运算符有 `from:` `to:` `cc:` `bcc:` `subject:` `body:` `list:` `label:`
   `deliveredto:` `class:` `is:archived|downgraded|sent` `has:attachment` `after:` `before:` `triage:`。
+  不带运算符的词查主题、发件人、To / Cc 的名字和地址、正文；有 `delivery:read` 时还查自己发出的信的密送。
   `to:` 是发件人写的收件人，`deliveredto:` 是 yuuka 实际收信的前缀。日期按 `tz`（IANA 时区名，默认 UTC）取当天零点，
   也可以写 RFC 3339 或 `-7d`、`-12h`、`-2w`。响应的 `query` 是规范化后的查询，`hints` 列出被当成文本、
   但像是拼错了运算符的项（如 `form:alice` → `from:`）。写错的值回 `400 invalid_param`，`detail` 带字符位置；

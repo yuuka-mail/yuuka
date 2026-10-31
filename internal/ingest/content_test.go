@@ -347,9 +347,9 @@ func TestReparse(t *testing.T) {
 	}
 }
 
-// Messages stored before migration 0007 have no recipients yet. The
-// backlog pass fills them from the raw, without a reparse, and what it
-// writes is what a reparse writes.
+// Messages stored before migration 0007 have no recipients yet, and
+// before 0016 none of their names. The backlog pass fills them from the
+// raw, without a reparse, and what it writes is what a reparse writes.
 func TestRecipientsAfterUpgrade(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -362,29 +362,31 @@ func TestRecipientsAfterUpgrade(t *testing.T) {
 		"From: s@example.net\r\nSubject: broken\r\nCc: @@, , =?bogus?= <ok@example.net>, \"unterminated <x@example.net>\r\n"+
 			"Reply-To: <<<>>>\r\n", "three"))
 	type row struct {
-		to, cc, replyTo []string
-		version         int
+		to, cc, replyTo  []string
+		toNames, ccNames []string
+		version          int
 	}
 	read := func(raw string) row {
 		t.Helper()
 		id, _ := e.messageOf(t, raw)
 		var r row
-		if err := e.pool.QueryRow(t.Context(), `SELECT to_addrs, cc_addrs, reply_to_addrs, parser_version
-			FROM messages WHERE id = $1`, id).Scan(&r.to, &r.cc, &r.replyTo, &r.version); err != nil {
+		if err := e.pool.QueryRow(t.Context(), `SELECT to_addrs, cc_addrs, reply_to_addrs, to_names, cc_names, parser_version
+			FROM messages WHERE id = $1`, id).Scan(&r.to, &r.cc, &r.replyTo, &r.toNames, &r.ccNames, &r.version); err != nil {
 			t.Fatal(err)
 		}
 		return r
 	}
 	want := map[string]row{
-		a.ID: {[]string{"a@example.com"}, []string{"carol@example.org", "dan@example.net"}, []string{"list@example.net"}, mimeparse.Version},
-		b.ID: {[]string{"b@example.com"}, []string{"carol@example.org", "dan@example.net"}, []string{"list@example.net"}, mimeparse.Version},
-		c.ID: {[]string{"c@example.com"}, []string{"ok@example.net"}, []string{}, mimeparse.Version},
+		a.ID: {[]string{"a@example.com"}, []string{"carol@example.org", "dan@example.net"}, []string{"list@example.net"}, []string{}, []string{"Carol"}, mimeparse.Version},
+		b.ID: {[]string{"b@example.com"}, []string{"carol@example.org", "dan@example.net"}, []string{"list@example.net"}, []string{}, []string{"Carol"}, mimeparse.Version},
+		c.ID: {[]string{"c@example.com"}, []string{"ok@example.net"}, []string{}, []string{}, []string{"=?bogus?="}, mimeparse.Version},
 	}
 	check := func(when string) {
 		t.Helper()
 		for raw, w := range want {
 			if r := read(raw); !slices.Equal(r.to, w.to) || !slices.Equal(r.cc, w.cc) || !slices.Equal(r.replyTo, w.replyTo) ||
-				r.replyTo == nil || r.version != w.version {
+				r.replyTo == nil || !slices.Equal(r.toNames, w.toNames) || r.toNames == nil || !slices.Equal(r.ccNames, w.ccNames) ||
+				r.version != w.version {
 				t.Errorf("%s: %s = %+v, want %+v", when, raw, r, w)
 			}
 		}
@@ -393,7 +395,7 @@ func TestRecipientsAfterUpgrade(t *testing.T) {
 
 	// What the M2 binary left behind.
 	if _, err := e.pool.Exec(t.Context(), `UPDATE messages SET to_addrs = NULL, cc_addrs = NULL, reply_to_addrs = NULL,
-		parser_version = 1`); err != nil {
+		to_names = NULL, cc_names = NULL, parser_version = 1`); err != nil {
 		t.Fatal(err)
 	}
 	st, err := e.in.ProcessBacklog(t.Context())

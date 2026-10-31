@@ -76,8 +76,15 @@ func (db *DB) visibleDelivery(v *auth.Viewer, d string) string {
 // visibleOutbox is the FROM and WHERE of the outbox rows (so) whose sent
 // copy (sr) is the message aliased m and that v may see.
 func (db *DB) visibleOutbox(v *auth.Viewer, m string) string {
+	return db.visibleOutboxRows(v) + ` AND sr.content_hash = ` + m + `.content_hash`
+}
+
+// visibleOutboxRows is the FROM and WHERE of every outbox row (so) v may
+// see, with its sent copy's raw (sr): visibleOutbox not tied to one
+// message, for a subquery that finds the messages instead.
+func (db *DB) visibleOutboxRows(v *auth.Viewer) string {
 	return `FROM outbox so JOIN raw_objects sr ON sr.id = so.raw_id JOIN identities si ON si.id = so.identity_id
-		WHERE sr.content_hash = ` + m + `.content_hash AND ` + db.readableAccount(v, "si.account_id")
+		WHERE ` + db.readableAccount(v, "si.account_id")
 }
 
 // visibleMessage is the condition on a message aliased m.

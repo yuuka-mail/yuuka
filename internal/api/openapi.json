@@ -7102,7 +7102,7 @@
           {
             "name": "q",
             "in": "query",
-            "description": "the query (§16): words and \"phrases\" that must all occur in subject, sender or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything",
+            "description": "the query (§16): words and \"phrases\" that must all occur in subject, sender, recipients or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything",
             "schema": {
               "type": "string"
             }

@@ -72,6 +72,7 @@ agent 不用预先知道这些，`list_identities` 会告诉它。
 `search_messages` 只有 `q`、`limit`、`include_downgraded` 三个参数，条件都写在 `q` 里（[§16](../design/search.md)）：
 
 - 空白分隔的项都要成立；`"短语"` 原样连续出现；`-x` 否定；`a OR b`（大写）；括号分组。匹配不区分大小写、按子串
+- 不带运算符的词查主题、发件人、To / Cc 的名字和地址、正文；有 `delivery:read` 时还查自己发出的信的密送
 - `from:` `to:` `cc:` `bcc:` `subject:` `body:` `list:`（List-Id）`label:`（精确，区分大小写）
   `deliveredto:shop` 或 `deliveredto:shop@example.com`、`class:machine|human|unknown`、`is:archived|downgraded|sent`、
   `has:attachment`、`after:` / `before:`（`YYYY-MM-DD` 按 UTC，RFC 3339，或 `-7d`、`-12h`、`-2w`）、`triage:phishing:yes`

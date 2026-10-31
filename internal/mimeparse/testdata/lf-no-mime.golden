@@ -11,6 +11,8 @@
   ],
   "cc": [],
   "reply_to": [],
+  "to_names": [],
+  "cc_names": [],
   "snippet": "backup of /srv finished in 42s",
   "body_text": "backup of /srv finished in 42s",
   "has_attach": false,

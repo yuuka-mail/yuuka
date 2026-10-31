@@ -11,6 +11,8 @@
   ],
   "cc": [],
   "reply_to": [],
+  "to_names": [],
+  "cc_names": [],
   "snippet": "I'm sorry to have to inform you that your message could not be delivered to one or more recipients. \u003cnobody@example.org\u003e: host mx.example.org said: 550 5.1.1 User unknown",
   "body_text": "I'm sorry to have to inform you that your message could not\r\nbe delivered to one or more recipients.\r\n\r\n\u003cnobody@example.org\u003e: host mx.example.org said: 550 5.1.1 User unknown",
   "has_attach": false,

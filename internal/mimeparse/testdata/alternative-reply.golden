@@ -13,6 +13,10 @@
   ],
   "cc": [],
   "reply_to": [],
+  "to_names": [
+    "Alice"
+  ],
+  "cc_names": [],
   "snippet": "Friday works. Noon at the usual place?",
   "body_text": "Friday works. Noon at the usual place?\r\n\r\n\u003e Are you free for lunch on Friday?\r\n\u003e — Alice",
   "has_attach": false,

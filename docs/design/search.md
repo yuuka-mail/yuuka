@@ -4,9 +4,10 @@
 
 ## 16. 检索
 
-> 状态：16.7 的第 1 步已实现。文本写法的解析、规范化回显和改写提示在 [`internal/search`](../../internal/search/)，
+> 状态：16.7 的第 1、2 步已实现。文本写法的解析、规范化回显和改写提示在 [`internal/search`](../../internal/search/)，
 > 编译成 SQL 在 [`internal/store/filter.go`](../../internal/store/filter.go)，REST 的 `GET /api/v1/search` 和 MCP 的
-> `search_messages` 只收 `q`。第 2 步（收件人显示名、新的检索文本和索引、`text` 的 Bcc 分支）和第 3 步（WebUI）未做。
+> `search_messages` 只收 `q`。收件人显示名、检索文本函数和它的索引在迁移
+> [0016](../../internal/store/migrations/0016_search_names.sql)。第 3 步（WebUI）未做。
 > 存储和索引的取舍（trigram、不用外置引擎、暂不做向量）在 §4 的「全文检索」，本节不重复。
 
 改之前有三个问题（第 3 条等第 3 步）：
@@ -141,23 +142,29 @@ JMAP 的 `subject: "foo bar"`（值里不带引号）意思是两个词都要出
 文本写法里 `subject:foo` 只带一项，要写短语就用 `subject:"foo bar"`。两条入口最后产出同一种「项」：
 每个叶子一项，JMAP 的多项值解码成多个叶子的 `AND`，匹配只有一处实现（`ILIKE '%项%'`，`%`、`_`、`\` 转义成字面）。
 
-第 1 步里 `to:`、`cc:` 只匹配 0007 的折叠地址，`text` 还是 0002 的检索文本（主题、发件人、正文）；
-第 2 步补上下面的名字和 Bcc 分支后自动扩大，查询的写法不变。
+第 1 步里 `to:`、`cc:` 只匹配 0007 的折叠地址，`text` 只查主题、发件人、正文；第 2 步补上下面的名字和 Bcc 分支后，
+同样的查询命中得更全，写法不变。这是 16.7 预先说好的唯一一次扩大。
 
 #### 收件人的名字和 Bcc
 
 两处都按 JMAP 做全：
 
-- **To / Cc 的显示名**。0007 只存了折叠后的地址，显示名留在原件里。现在加两个派生列 `to_names`、`cc_names`
-  （解码后的显示名，没有就不存），和地址列一样由 mimeparse 从规范原件读出，`reparse` 会重写它们。
+- **To / Cc 的显示名**。0007 只存了折叠后的地址，显示名留在原件里。0016 加了两个派生列 `to_names`、`cc_names`，
+  和地址列一样由 mimeparse 从规范原件读出，`reparse` 会重写它们。只存非空的名字、去重，不和地址一一对应：
+  搜索只问「有没有这个名字」，要知道名字属于哪个地址的视图仍然现解析原件（`mimeparse.ParseRecipients`），
+  对齐的数组得为空名字占位，还要多守一条约束。名字不折叠，`ILIKE` 本来就不区分大小写，
+  而 SQL 的 `lower()` 对非 ASCII 的结果随数据库 locale 变（§4.6）。
   这两列为 NULL 表示「还没读」，存量信由 backlog（`ingest.ProcessBacklog`）回填，和 0007、0010 的做法一样，
   升级时只需要 `yuuka migrate`。还没回填的信，暂时只能按地址匹配
 - **Bcc**。收到的信本来就没有 Bcc。自己发出的信，Sent 副本里也没有 Bcc 头（§10.2.1），所以按 RFC 的字面意思，
   `bcc` 永远不会匹配。yuuka 改用 outbox 的信封密送地址（`outbox_recipients` 里 `kind = 'bcc'` 的 `addr_fold`），比 RFC 多给了一步。
   显式的 `bcc:` 第 1 步已经这样做，按地址或草稿上的名字匹配（[`filter.go`](../../internal/store/filter.go)）。
   outbox 是决定表，不是派生内容，所以 Bcc 不能放进 `messages` 的派生列，也就进不了 trigram 索引。
-  `text` 因此多一条分支：`m.id = ANY(ARRAY(子查询))`，子查询找出密送地址命中、而且调用者看得见的 outbox 行对应的信。
-  Postgres 把它当作只算一次的 initplan，再和 trigram 索引做 BitmapOr，所以不会让每次搜索都退化成顺序扫描。
+  `text` 因此多一条分支：`m.content_hash = ANY(ARRAY(子查询))`，子查询找出密送命中、而且调用者看得见的 outbox 行的
+  Sent 副本的内容哈希，也就是它们折叠成的信（§4.6，和可见性判断 outbox 行属于哪封信的方式相同）。
+  子查询不引用外层的信，Postgres 把它当作只算一次的 initplan，再把 `content_hash` 的唯一索引和 trigram 索引做 BitmapOr，
+  所以不会让每次搜索都退化成顺序扫描（`TestSearchUsesTrigramIndex` 看着执行计划）。
+  用内容哈希而不是 `m.id`，是为了让子查询从 outbox 出发，不必再连一次 `messages`。
   Bcc 的名字只有撰写的信有：撰写（WebUI、REST、MCP）的收件人可以带显示名，Bcc 的名字不写进 Sent 副本，
   留在 outbox 行所来自的草稿上（`drafts.bcc_names`，0014，与 `bcc_addrs` 一一对应）。所以 Bcc 分支的子查询经
   `outbox.draft_id` 连上草稿，按地址或名字匹配；SMTP 提交直接发出的信没有草稿，Bcc 只在信封里（`RCPT TO` 不带名字，
@@ -194,13 +201,14 @@ JMAP 的 `subject: "foo bar"`（值里不带引号）意思是两个词都要出
   `text` 是隐式的，没有这个 scope 时就不带 Bcc 分支。`deliveredto:` 只要 `message:read`，和列表里的 `recipients` 一样。
   scope 在编译器里查（它拿着 Viewer），REST 回 `403 scope_required`；同样，没配评分器时 `triage:` 报错而不是返回空
 - **索引能用就要用上**。`text` 由 trigram 表达式索引支撑（§4）。字段条件在 SQL 里额外带上一个对整份检索文本的同样的 `ILIKE`：
-  字段是检索文本的子串，所以结果不变，而顶层 AND 里的 `subject:`、`from:`、`body:`（第 2 步起还有 `to:`）也能走索引
+  字段是检索文本的子串，所以结果不变，而顶层 AND 里的 `subject:`、`from:`、`body:`、`to:`、`cc:` 也能走索引
   （`TestSearchUsesTrigramIndex`）。
   `OR` 和否定可能用不上索引，个人量级下顺序扫描可以接受，条件数的上限保证它有界
-- **检索文本的定义只有一处**。新的检索文本由一个声明为 `IMMUTABLE` 的 SQL 函数拼出：主题、发件人名和地址、
-  To / Cc 的地址和名字、正文（`array_to_string` 本身不是 immutable，不能直接写进索引表达式）。
-  一个追加的迁移在这个函数上建新索引，再删掉 0002 的 `messages_search`；store 里的表达式和它逐字一致。
-  NULL 的列（还没回填的）按空串处理
+- **检索文本的定义只有一处**：0016 的 SQL 函数 `message_search_text`，索引建在它上面，
+  store 里的 `searchText` 用同样的参数调用它。用函数而不是直接写表达式，是因为拼数组要 `array_to_string`，
+  Postgres 把它标成 `STABLE`，进不了索引表达式；对 `text[]` 它其实只取决于参数，函数因此可以声明为 `IMMUTABLE`。
+  以后往里加别的类型的列，要先重新确认这一点。0002 的 `messages_search` 在同一个迁移里删掉了。
+  函数体用 SQL 标准写法（`RETURN …`），建函数时就解析绑定，索引维护不受写入者 `search_path` 的影响
 
 ### 16.5 界面与工具
 
@@ -238,10 +246,11 @@ JMAP 的 `subject: "foo bar"`（值里不带引号）意思是两个词都要出
 
 1. （已完成）解析器、规范化回显和改写提示、Filter 编译；REST 和 MCP 的搜索改用它，去掉旧参数，同步改接入文档。
    WebUI 的搜索框原样作为 `q` 发出，倾向视图里的搜索在前面加一项 `triage:问题:选项`，并带上浏览器的 `tz`
-2. 补齐 JMAP：`to_names` / `cc_names` 两个派生列和回填，新的检索文本函数和索引，`text` 的 Bcc 分支
+2. （已完成）补齐 JMAP：`to_names` / `cc_names` 两个派生列和回填，新的检索文本函数和索引，`text` 的 Bcc 分支
 3. WebUI：按视图预填、运算符说明、值补全、回显提示
 4. 以后再做：`is:unread`（等已读状态接上）、`has:` 按提取值过滤（验证码、链接，§12.9）、`minsize:` / `maxsize:`、
    命中高亮、从搜索生成规则草稿
 
 第 1 步不依赖第 2 步：`to:` / `cc:` 先只匹配地址，`text` 先不含 To / Cc 和 Bcc，第 2 步落地后自动补全，查询的写法不用改。
+第 2 步要跑一次 backlog 回填名字；回填前同一个查询只是少命中按名字才找得到的信，不会多命中。
 不提前做 `is:unread` 和提取值过滤：前者没有数据，后者等通知区真有「按码找信」的需求再加，加的时候不改已有查询的含义。

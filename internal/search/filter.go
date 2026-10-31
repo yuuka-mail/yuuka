@@ -31,13 +31,14 @@ type Field string
 // The conditions of §16.3. Fields JMAP defines but this version does not
 // support have no Field: the parser reports them (Error.Unsupported).
 const (
-	// Text matches the subject, the sender's name and address and the
-	// body. To / Cc names and Bcc join it with §16.7 step 2.
+	// Text matches the subject, the sender, the To and Cc addresses and
+	// names, the body, and for a caller with delivery:read the Bcc of
+	// our own mail as Bcc matches it.
 	Text    Field = "text"
 	From    Field = "from"
-	To      Field = "to"  // the To addresses (names: step 2)
-	Cc      Field = "cc"  // the Cc addresses (names: step 2)
-	Bcc     Field = "bcc" // the envelope Bcc of our own mail
+	To      Field = "to"  // the To addresses and names
+	Cc      Field = "cc"  // the Cc addresses and names
+	Bcc     Field = "bcc" // the envelope Bcc of our own mail, and its names on the draft
 	Subject Field = "subject"
 	Body    Field = "body"
 	// After is received_at >= Time, Before received_at < Time.

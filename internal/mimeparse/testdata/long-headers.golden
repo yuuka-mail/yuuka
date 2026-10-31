@@ -39,6 +39,8 @@
   ],
   "cc": [],
   "reply_to": [],
+  "to_names": [],
+  "cc_names": [],
   "snippet": "I agree with the proposal. On Mon, Dan wrote:",
   "body_text": "I agree with the proposal.\r\n\r\nOn Mon, Dan wrote:\r\n\u003e We should cut the release on Thursday.\r\n\u003e Any objections?",
   "has_attach": false,

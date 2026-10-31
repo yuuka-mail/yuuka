@@ -119,7 +119,7 @@ func (PrefixState) Enum() []string { return []string{"claimed", "discovered"} }
 // that narrows the search is written in q (§16); the response echoes how
 // it was read.
 type SearchParams struct {
-	Q string `query:"q" jsonschema:"the query (§16): words and \"phrases\" that must all occur in subject, sender or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything"`
+	Q string `query:"q" jsonschema:"the query (§16): words and \"phrases\" that must all occur in subject, sender, recipients or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything"`
 	// include adds downgraded mail; so does is:downgraded anywhere in q.
 	Downgraded SearchDowngraded `query:"downgraded" default:"hide"`
 	TZ         *TimeZone        `query:"tz" jsonschema:"IANA time zone in which a date in q (after:2026-10-01) starts its day; UTC when absent"`

@@ -109,8 +109,9 @@ type BacklogStats struct {
 // message: everything M0 committed before parsing existed, and deliveries
 // whose content step failed after the commit point. It then does the same
 // for sent copies that have no message (IndexSent failed or never ran),
-// rebuilds the messages whose recipients or List-Id were never read
-// (written before migration 0007 or 0010), and re-extracts the messages
+// rebuilds the messages whose recipients, List-Id or recipient names
+// were never read (written before migration 0007, 0010 or 0016), and
+// re-extracts the messages
 // an older extractor (or none, before migration 0008) went over, so
 // neither an upgrade nor a better extractor needs a reparse. Rebuilding
 // never runs rules (§8.5).
@@ -137,6 +138,9 @@ func (in *Ingester) ProcessBacklog(ctx context.Context) (BacklogStats, error) {
 		return st, err
 	}
 	if err := backlogPass(ctx, in, &st, "message", in.cfg.DB.UnreadListIDs, messageID, rebuild); err != nil {
+		return st, err
+	}
+	if err := backlogPass(ctx, in, &st, "message", in.cfg.DB.UnreadNames, messageID, rebuild); err != nil {
 		return st, err
 	}
 	return st, backlogPass(ctx, in, &st, "message", in.cfg.DB.UnextractedMessages, messageID,

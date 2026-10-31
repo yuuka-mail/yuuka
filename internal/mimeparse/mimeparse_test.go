@@ -137,7 +137,8 @@ func TestAddresses(t *testing.T) {
 	}
 }
 
-// ParseRecipients reads the same addresses as Parse, with their names.
+// ParseRecipients reads the same addresses as Parse, with their names;
+// Parse keeps the names of To and Cc too.
 func TestParseRecipients(t *testing.T) {
 	raw := "From: s@example.net\r\n" +
 		"To: \"Doe, John\" <j@example.com>, =?utf-8?q?=E5=BC=A0?= <z@example.com>, broken, b@example.com\r\n" +
@@ -157,6 +158,20 @@ func TestParseRecipients(t *testing.T) {
 		if got.To[i].Addr != a {
 			t.Errorf("To[%d] = %q, Parse has %q", i, got.To[i].Addr, a)
 		}
+	}
+	// Parse keeps the names for search: empty ones and repeats dropped.
+	if want := []string{"Doe, John", "张"}; !slices.Equal(m.ToNames, want) {
+		t.Errorf("ToNames = %q, want %q", m.ToNames, want)
+	}
+	if want := []string{"张"}; !slices.Equal(m.CcNames, want) {
+		t.Errorf("CcNames = %q, want %q", m.CcNames, want)
+	}
+	twice := Parse([]byte("To: Ann <a@example.com>, Ann <b@example.com>, c@example.com\r\n\r\nbody\r\n"))
+	if !slices.Equal(twice.ToNames, []string{"Ann"}) || twice.CcNames == nil || len(twice.CcNames) != 0 {
+		t.Errorf("names %#v %#v, want [Ann] and none", twice.ToNames, twice.CcNames)
+	}
+	if junk := Parse([]byte("\x00\x01 not: a: header\r\n")); junk.ToNames == nil || junk.CcNames == nil {
+		t.Errorf("names of junk: %#v %#v", junk.ToNames, junk.CcNames)
 	}
 	if empty := ParseRecipients([]byte("not a message")); empty.To == nil || empty.Cc == nil || empty.ReplyTo == nil {
 		t.Errorf("ParseRecipients of junk: %#v", empty)

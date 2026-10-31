@@ -11,6 +11,8 @@
   ],
   "cc": [],
   "reply_to": [],
+  "to_names": [],
+  "cc_names": [],
   "snippet": "Invoice attached. Logo below.",
   "body_text": "Invoice attached. Logo below.",
   "has_attach": true,

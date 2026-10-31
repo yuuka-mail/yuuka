@@ -16,6 +16,7 @@ import (
 	"io"
 	"mime"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -34,7 +35,8 @@ import (
 //
 // 2: To, Cc and Reply-To.
 // 3: Links of the HTML parts.
-const Version = 3
+// 4: Display names of To and Cc.
+const Version = 4
 
 // Limits keep hostile input from costing unbounded work. Hitting one is a
 // Problem, not a failure: what was read so far is kept.
@@ -70,6 +72,12 @@ type Message struct {
 	To      []string `json:"to"`
 	Cc      []string `json:"cc"`
 	ReplyTo []string `json:"reply_to"`
+	// ToNames and CcNames are the display names of To and Cc, decoded,
+	// in order of first appearance; empty names and repeats are dropped,
+	// so they do not line up with To and Cc. Search reads them (§16.3);
+	// a view that shows who a name belongs to uses ParseRecipients.
+	ToNames []string `json:"to_names"`
+	CcNames []string `json:"cc_names"`
 	// AddrsCapped: one of them listed more than maxAddrs addresses, and
 	// the rest were dropped. The caller logs it; the message is not
 	// quarantined for it.
@@ -196,9 +204,10 @@ func (p *parser) headers(h mail.Header) {
 	if p.m.References == nil {
 		p.m.References = []string{}
 	}
-	p.m.To = p.addrs(h, "To")
-	p.m.Cc = p.addrs(h, "Cc")
-	p.m.ReplyTo = p.addrs(h, "Reply-To")
+	to, cc := p.mailboxes(h, "To"), p.mailboxes(h, "Cc")
+	p.m.To, p.m.ToNames = addrs(to), names(to)
+	p.m.Cc, p.m.CcNames = addrs(cc), names(cc)
+	p.m.ReplyTo = addrs(p.mailboxes(h, "Reply-To"))
 	mt, _, _ := h.ContentType()
 	p.m.MediaType = strings.ToLower(mt)
 	p.m.ListID = clean(p.text(h, "List-Id"))
@@ -292,12 +301,23 @@ func ParseRecipients(raw []byte) Recipients {
 	return Recipients{To: p.mailboxes(h, "To"), Cc: p.mailboxes(h, "Cc"), ReplyTo: p.mailboxes(h, "Reply-To")}
 }
 
-// addrs is the bare addresses of mailboxes.
-func (p *parser) addrs(h mail.Header, key string) []string {
-	mbs := p.mailboxes(h, key)
+// addrs is the bare addresses of mbs; never nil.
+func addrs(mbs []Mailbox) []string {
 	out := make([]string, len(mbs))
 	for i, m := range mbs {
 		out[i] = m.Addr
+	}
+	return out
+}
+
+// names is the display names of mbs, empty ones and repeats dropped;
+// never nil.
+func names(mbs []Mailbox) []string {
+	out := []string{}
+	for _, m := range mbs {
+		if m.Name != "" && !slices.Contains(out, m.Name) {
+			out = append(out, m.Name)
+		}
 	}
 	return out
 }
@@ -603,6 +623,7 @@ func validField(line []byte) bool {
 func (p *parser) fallback(raw []byte) (Message, Entity) {
 	p.m.References = []string{}
 	p.m.To, p.m.Cc, p.m.ReplyTo = []string{}, []string{}, []string{}
+	p.m.ToNames, p.m.CcNames = []string{}, []string{}
 	p.m.BodyText = truncate(strings.TrimSpace(strings.ToValidUTF8(string(raw), "�")), MaxBodyText)
 	p.m.Snippet = snippet(p.m.BodyText)
 	p.m.Problem = strings.Join(p.problems, "; ")

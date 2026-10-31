@@ -11,6 +11,8 @@
   ],
   "cc": [],
   "reply_to": [],
+  "to_names": [],
+  "cc_names": [],
   "snippet": "--whatever Content-Type: text/plain The text is still here. --whatever--",
   "body_text": "--whatever\r\nContent-Type: text/plain\r\n\r\nThe text is still here.\r\n--whatever--",
   "has_attach": false,

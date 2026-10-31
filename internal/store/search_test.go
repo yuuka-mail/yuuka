@@ -118,7 +118,7 @@ func TestSearch(t *testing.T) {
 		{"body:missed", false, []string{weekly}},
 		{"to:news@", false, []string{weekly}},
 		{"to:svc-shop@example.com", false, []string{otp}},
-		{"to:Alice friday", false, []string{lunch}}, // addresses only until §16.7 step 2
+		{"to:Alice friday", false, []string{lunch}},
 		{"list:weekly.news", false, []string{weekly}},
 		{"list:WEEKLY", false, []string{weekly}},
 		{"class:human friday", false, []string{lunch}},
@@ -161,10 +161,10 @@ func TestSearchNegation(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT array_agg(id ORDER BY received_at) FROM messages`).Scan(&ids); err != nil {
 		t.Fatal(err)
 	}
-	// One message not read by the 0007 and 0010 backlog yet, one copied
-	// to someone, one labelled, archived and reclassified.
-	if _, err := pool.Exec(ctx, `UPDATE messages SET to_addrs = NULL, cc_addrs = NULL, reply_to_addrs = NULL, list_id = NULL
-		WHERE id = $1`, ids[0]); err != nil {
+	// One message not read by the 0007, 0010 and 0016 backlog yet, one
+	// copied to someone, one labelled, archived and reclassified.
+	if _, err := pool.Exec(ctx, `UPDATE messages SET to_addrs = NULL, cc_addrs = NULL, reply_to_addrs = NULL, list_id = NULL,
+		to_names = NULL, cc_names = NULL WHERE id = $1`, ids[0]); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE messages SET cc_addrs = '{copied@example.net}' WHERE id = $1`, ids[1]); err != nil {
@@ -198,6 +198,117 @@ func TestSearchNegation(t *testing.T) {
 			t.Errorf("%q: %d hits, want %d", q, got, want)
 		}
 	}
+}
+
+// to:, cc: and text match the display names of To and Cc (0016), which
+// are derived: written from the raw, NULL until the backlog pass reads a
+// row from before the migration, and rewritten the same by a rebuild.
+func TestSearchRecipientNames(t *testing.T) {
+	t.Parallel()
+	db, pool := storetest.New(t)
+	ctx := t.Context()
+	acct := storetest.Account(t, db)
+	at := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	namedRaw := letter("a@example.net", "=?utf-8?b?546L5bCP5piO?= <wang@example.com>, wang@example.com", "plan",
+		"Cc: \"Dev Team\" <dev@example.org>, Ops <ops@example.org>, Ops <ops2@example.org>\r\n", "x")
+	named := inbound(t, db, acct, "a", namedRaw, at)
+	plain := inbound(t, db, acct, "a", letter("b@example.net", "lee@example.com", "plan", "", "y"), at.Add(time.Minute))
+	names := func(id string) (to, cc []string) {
+		t.Helper()
+		if err := pool.QueryRow(ctx, `SELECT to_names, cc_names FROM messages WHERE id = $1`, id).Scan(&to, &cc); err != nil {
+			t.Fatal(err)
+		}
+		return to, cc
+	}
+	if to, cc := names(named); !slices.Equal(to, []string{"王小明"}) || !slices.Equal(cc, []string{"Dev Team", "Ops"}) {
+		t.Errorf("names %q %q", to, cc)
+	}
+	if to, cc := names(plain); to == nil || cc == nil || len(to)+len(cc) != 0 {
+		t.Errorf("no names: %#v %#v, want empty, not NULL", to, cc)
+	}
+
+	v := &auth.Viewer{PrincipalKind: "human", PrincipalName: "operator"}
+	ids := func(q string) []string {
+		t.Helper()
+		// The prefix is not claimed: the mail is downgraded.
+		res, err := db.Search(ctx, v, store.SearchQuery{Filter: storetest.Query(t, q), IncludeDowngraded: true})
+		if err != nil {
+			t.Fatalf("%q: %v", q, err)
+		}
+		out := []string{}
+		for _, h := range res.Hits {
+			out = append(out, h.ID)
+		}
+		if res.Total != len(out) {
+			t.Errorf("%q: total %d, %d hits", q, res.Total, len(out))
+		}
+		return out
+	}
+	check := func(when string, cases map[string][]string) {
+		t.Helper()
+		for q, want := range cases {
+			if got := ids(q); !slices.Equal(got, want) {
+				t.Errorf("%s: %q: %q, want %q", when, q, got, want)
+			}
+		}
+	}
+	check("read", map[string][]string{
+		"to:王小明":           {named},
+		"to:wang@":         {named},
+		`to:"dev team"`:    {},
+		`cc:"dev team"`:    {named},
+		"cc:OPS":           {named},
+		"王小明":              {named},
+		`"Dev Team"`:       {named},
+		"lee@example.com":  {plain},
+		"-to:王小明":          {plain},
+		"to:王小明 cc:ops":    {named},
+		"to:王小明 OR to:lee": {plain, named},
+	})
+
+	// A row from before 0016: found by its addresses only, until the
+	// backlog pass reads it.
+	if _, err := pool.Exec(ctx, `UPDATE messages SET to_names = NULL WHERE id = $1`, named); err == nil {
+		t.Error("to_names NULL without cc_names: the pending marker would be ambiguous")
+	}
+	if _, err := pool.Exec(ctx, `UPDATE messages SET to_names = NULL, cc_names = NULL WHERE id = $1`, named); err != nil {
+		t.Fatal(err)
+	}
+	check("unread", map[string][]string{
+		"to:王小明":   {},
+		"-to:王小明":  {plain, named},
+		"王小明":      {},
+		"to:wang@": {named},
+		"cc:ops@":  {named},
+	})
+	pending, err := db.UnreadNames(ctx, 10)
+	if err != nil || len(pending) != 1 || pending[0].MessageID != named {
+		t.Fatalf("unread names %+v, %v", pending, err)
+	}
+	rebuild := func() bool {
+		t.Helper()
+		d := pending[0].Deliveries[0]
+		changed, err := db.Rebuild(ctx, pending[0], mimeparse.Parse(namedRaw),
+			map[string]authres.Auth{d.DeliveryID: authres.Extract(namedRaw, "mx.cloudflare.net")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return changed
+	}
+	if !rebuild() {
+		t.Error("filling the names changed nothing")
+	}
+	if pending, err := db.UnreadNames(ctx, 10); err != nil || len(pending) != 0 {
+		t.Errorf("after rebuild: %+v, %v", pending, err)
+	}
+	if to, cc := names(named); !slices.Equal(to, []string{"王小明"}) || !slices.Equal(cc, []string{"Dev Team", "Ops"}) {
+		t.Errorf("names after rebuild %q %q", to, cc)
+	}
+	// Reparse is deterministic: the same raw writes the same names.
+	if rebuild() {
+		t.Error("rebuilding from the same raw changed something")
+	}
+	check("rebuilt", map[string][]string{"to:王小明": {named}, "王小明": {named}})
 }
 
 // Dates start their day in the query's zone; after is inclusive and
@@ -377,8 +488,24 @@ func TestSearchUsesTrigramIndex(t *testing.T) {
 	if _, err := tx.Exec(t.Context(), `SET LOCAL enable_seqscan = off`); err != nil {
 		t.Fatal(err)
 	}
-	for _, q := range []string{"verification", "subject:verification", "from:example", "body:code"} {
-		where, args, err := db.CompileSearch(&auth.Viewer{}, storetest.Query(t, q))
+	// With delivery:read, text also looks for a Bcc of our own mail: an
+	// initplan whose content hashes are ORed with the trigram index, so
+	// the index still serves the rest of it.
+	bcc := &auth.Viewer{Scopes: []auth.Scope{auth.DeliveryRead}}
+	for _, c := range []struct {
+		q string
+		v *auth.Viewer
+	}{
+		{"verification", &auth.Viewer{}},
+		{"subject:verification", &auth.Viewer{}},
+		{"from:example", &auth.Viewer{}},
+		{"body:code", &auth.Viewer{}},
+		{"to:alice", &auth.Viewer{}},
+		{"cc:example", &auth.Viewer{}},
+		{"verification", bcc},
+	} {
+		q, v := c.q, c.v
+		where, args, err := db.CompileSearch(v, storetest.Query(t, q))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -394,8 +521,11 @@ func TestSearchUsesTrigramIndex(t *testing.T) {
 			}
 			plan.WriteString(line + "\n")
 		}
-		if !strings.Contains(plan.String(), "messages_search") {
-			t.Errorf("%q: plan does not use messages_search:\n%s", q, plan.String())
+		if !strings.Contains(plan.String(), "messages_search_text") {
+			t.Errorf("%q: plan does not use messages_search_text:\n%s", q, plan.String())
+		}
+		if v == bcc && (!strings.Contains(plan.String(), "BitmapOr") || !strings.Contains(plan.String(), "messages_content_hash_key")) {
+			t.Errorf("%q with delivery:read: the Bcc branch is not ORed with the index:\n%s", q, plan.String())
 		}
 	}
 }

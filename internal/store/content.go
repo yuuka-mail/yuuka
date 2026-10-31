@@ -325,7 +325,8 @@ func (w *writer) updateMessage(ctx context.Context, id string, msg mimeparse.Mes
 			message_id = $2, in_reply_to = $3, refs = $4, date_header = $5,
 			subject = $6, snippet = $7, from_addr = $8, from_name = $9, class = $10,
 			has_attach = $11, body_text = $12, parser_version = $13, parse_error = $14,
-			to_addrs = $15, cc_addrs = $16, reply_to_addrs = $17, list_id = $18
+			to_addrs = $15, cc_addrs = $16, reply_to_addrs = $17, list_id = $18,
+			to_names = $19, cc_names = $20
 		FROM (SELECT raw_id, received_at FROM (
 		          SELECT raw_id, received_at, 0 AS src, id FROM deliveries WHERE message_id = $1
 		          UNION ALL
@@ -335,13 +336,15 @@ func (w *writer) updateMessage(ctx context.Context, id string, msg mimeparse.Mes
 		      ) src ORDER BY received_at, src, id LIMIT 1) first
 		WHERE m.id = $1 AND (m.canonical_raw_id, m.received_at, m.message_id, m.in_reply_to, m.refs,
 			m.date_header, m.subject, m.snippet, m.from_addr, m.from_name, m.class, m.has_attach,
-			m.body_text, m.parser_version, m.parse_error, m.to_addrs, m.cc_addrs, m.reply_to_addrs, m.list_id)
+			m.body_text, m.parser_version, m.parse_error, m.to_addrs, m.cc_addrs, m.reply_to_addrs, m.list_id,
+			m.to_names, m.cc_names)
 		IS DISTINCT FROM (first.raw_id, first.received_at, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-			$11, $12, $13, $14, $15::text[], $16::text[], $17::text[], $18::text)`,
+			$11, $12, $13, $14, $15::text[], $16::text[], $17::text[], $18::text, $19::text[], $20::text[])`,
 		id, nullIfEmpty(msg.MessageID), nullIfEmpty(msg.InReplyTo), msg.References, date,
 		msg.Subject, msg.Snippet, msg.FromAddr, msg.FromName, int16(classify.Of(msg, prefixes)),
 		msg.HasAttach, msg.BodyText, mimeparse.Version, problem,
-		foldAddrs(msg.To), foldAddrs(msg.Cc), foldAddrs(msg.ReplyTo), rules.ListID(msg.ListID))
+		foldAddrs(msg.To), foldAddrs(msg.Cc), foldAddrs(msg.ReplyTo), rules.ListID(msg.ListID),
+		orEmpty(msg.ToNames), orEmpty(msg.CcNames))
 	if err != nil {
 		return fmt.Errorf("update message: %w", err)
 	}
@@ -376,6 +379,15 @@ func foldAddrs(addrs []string) []string {
 		}
 	}
 	return out
+}
+
+// orEmpty is s, or an empty list for nil, which pgx would write as NULL,
+// the "not read yet" of 0016's to_names and cc_names.
+func orEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func nullIfEmpty(s string) *string {

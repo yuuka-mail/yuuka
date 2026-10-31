@@ -2496,7 +2496,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description the query (§16): words and "phrases" that must all occur in subject, sender or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything */
+                    /** @description the query (§16): words and "phrases" that must all occur in subject, sender, recipients or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything */
                     q?: string;
                     downgraded?: "hide" | "include";
                     /** @description IANA time zone in which a date in q (after:2026-10-01) starts its day; UTC when absent */

@@ -11,6 +11,8 @@
   ],
   "cc": [],
   "reply_to": [],
+  "to_names": [],
+  "cc_names": [],
   "snippet": "Plain ASCII survives an unknown charset.",
   "body_text": "Plain ASCII survives an unknown charset.",
   "has_attach": false,

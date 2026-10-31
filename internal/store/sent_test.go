@@ -805,10 +805,16 @@ func TestVisibility(t *testing.T) {
 				"-bcc:blind":                 except("sent-closed", "sent-open"),
 				"bcc:blind@example.org":      hidden("sent-closed"),
 				`bcc:"blind reader"`:         hidden("sent-open"),
-				"cc:copied":                  hidden("in-open", "sent-closed"),
-				"label:mine":                 hidden("both", "in-open", "sent-open"),
-				"-label:seen":                {},
-				"triage:kind:spam":           want,
+				// text covers the Bcc too, only of visible outbox rows.
+				"blind":             hidden("sent-closed", "sent-open"),
+				"-blind":            except("sent-closed", "sent-open"),
+				`"blind reader"`:    hidden("sent-open"),
+				"blind@example.org": hidden("sent-closed"),
+				"copied-hidden":     hidden("sent-closed"),
+				"cc:copied":         hidden("in-open", "sent-closed"),
+				"label:mine":        hidden("both", "in-open", "sent-open"),
+				"-label:seen":       {},
+				"triage:kind:spam":  want,
 			} {
 				res, err := db.Search(ctx, &withDelivery, store.SearchQuery{Filter: storetest.Query(t, q), IncludeDowngraded: true, Triage: &laya})
 				if err != nil {
@@ -820,6 +826,22 @@ func TestVisibility(t *testing.T) {
 				}
 				if got := names(ids); !slices.Equal(got, wantQ) || res.Total != len(wantQ) {
 					t.Errorf("Search %s: %q (total %d), want %q", q, got, res.Total, wantQ)
+				}
+			}
+
+			// Without delivery:read, text leaves the Bcc out rather
+			// than refuse, as bcc: does: it is implicit.
+			for q, wantQ := range map[string][]string{"blind": {}, "-blind": want, `"blind reader"`: {}} {
+				res, err := db.Search(ctx, v, store.SearchQuery{Filter: storetest.Query(t, q), IncludeDowngraded: true})
+				if err != nil {
+					t.Fatalf("Search %s without delivery:read: %v", q, err)
+				}
+				ids = ids[:0]
+				for _, h := range res.Hits {
+					ids = append(ids, h.ID)
+				}
+				if got := names(ids); !slices.Equal(got, wantQ) || res.Total != len(wantQ) {
+					t.Errorf("Search %s without delivery:read: %q (total %d), want %q", q, got, res.Total, wantQ)
 				}
 			}
 
