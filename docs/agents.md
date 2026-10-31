@@ -139,8 +139,10 @@ Resource URI 统一 `yuuka://`，让 agent 能把引用直接递给人。
 
 ### 8.8 审计与回放
 
-`actions(id, actor → principals.id, tool, args, result, undo_token, at)`（主体模型见 §13.2）
-记录每一次动作。可以随时回答"昨天 agent 干了什么"，并一键回滚标注类动作。
+`actions(id, actor → principals.id, credential_id → credentials.id, tool, args, result, undo_token, at)`
+（主体模型见 §13.2）记录每一次动作。`credential_id` 回答「是哪一把凭据干的」——一个主体可以有多把（§13.3）。
+认证事件也写在这里（登录、登出、注册 passkey、恢复码、越权被拒）；
+还没认证成功的调用方（登录失败、错误的恢复码）没有主体，`actor` 为空。可以随时回答"昨天 agent 干了什么"，并一键回滚标注类动作。
 配合 §3.1 的不可变原件：agent 够不到原件，**收件侧的一切都可恢复**。
 
 外发是 agent 唯一不可逆的动作，所以它被四层收窄：身份（以人的身份只到草稿）、

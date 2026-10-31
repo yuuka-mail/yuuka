@@ -31,9 +31,11 @@ func TestMigrateIsIdempotent(t *testing.T) {
 	if err := db.Migrate(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	var n int
-	if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil || n != 2 {
-		t.Fatalf("schema_migrations rows = %d, %v", n, err)
+	// Applied once each: one row per version, versions 1..n.
+	var n, maxVersion int
+	err := pool.QueryRow(t.Context(), `SELECT count(*), max(version) FROM schema_migrations`).Scan(&n, &maxVersion)
+	if err != nil || n == 0 || n != maxVersion {
+		t.Fatalf("schema_migrations rows = %d, max version %d, %v", n, maxVersion, err)
 	}
 }
 
