@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/leak"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
@@ -187,4 +188,44 @@ func equalObserved(a, b []store.ObservedDomain) bool {
 	return slices.EqualFunc(a, b, func(x, y store.ObservedDomain) bool {
 		return x.Domain == y.Domain && x.Messages == y.Messages && x.LastSeen.Equal(y.LastSeen) && x.Expected == y.Expected
 	})
+}
+
+// "Verified sender" has one definition: the summary's SenderVerified and
+// the rules' from.verified are both leak.SenderOf, a DMARC pass about
+// the From the reader sees. A pass the receiver reports for another
+// organization's header.from proves nothing about this From, so the
+// list must not call it verified when a from.verified rule would not
+// match it.
+func TestSenderVerifiedIsFromVerified(t *testing.T) {
+	t.Parallel()
+	db, _ := storetest.New(t)
+	ctx := t.Context()
+	v := &auth.Viewer{PrincipalID: store.SystemPrincipalID, PrincipalKind: "human", PrincipalName: "operator"}
+	at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name string
+		edit []string
+		want bool
+	}{
+		{"pass for the From", nil, true},
+		{"pass for another organization", []string{"header.from=example.net", "header.from=example.org"}, false},
+		{"no trusted result", []string{"mx.cloudflare.net;", "mx.example.org;"}, false},
+	} {
+		at = at.Add(time.Minute)
+		// Authentication headers are not content (§4.1): the subject
+		// makes each its own message.
+		edit := strings.NewReplacer(append(c.edit, "Subject: Your", "Subject: "+c.name+": your")...)
+		id := deliver(t, db, "plain-otp.eml", edit, "github", at)
+		d, err := db.MessageByID(ctx, v, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.SenderVerified == nil || *d.SenderVerified != c.want {
+			t.Errorf("%s: sender verified %v, want %v", c.name, d.SenderVerified, c.want)
+		}
+		res, err := db.Search(ctx, v, store.SearchQuery{Text: d.Subject, IncludeDowngraded: true, Since: at})
+		if err != nil || len(res.Hits) != 1 || res.Hits[0].SenderVerified == nil || *res.Hits[0].SenderVerified != c.want {
+			t.Errorf("%s: search hit %+v %v", c.name, res.Hits, err)
+		}
+	}
 }
