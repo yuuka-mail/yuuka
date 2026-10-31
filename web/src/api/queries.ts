@@ -12,6 +12,7 @@ export const keys = {
   messages: (p: string) => ["messages", p] as const,
   search: (q: string, dg: string) => ["search", q, dg] as const,
   message: (id: string) => ["message", id] as const,
+  reading: (id: string) => ["reading", id] as const,
   thread: (id: string) => ["thread", id] as const,
 };
 

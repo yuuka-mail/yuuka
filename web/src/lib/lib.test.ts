@@ -51,6 +51,13 @@ describe("view state", () => {
   it("ignores junk", () => {
     expect(parseView(new URLSearchParams("class=spam&dg=maybe&q=%20"))).toEqual({ dg: "hide" });
   });
+  it("keeps an anchor only with its message", () => {
+    expect(parseView(new URLSearchParams("m=01ABC&a=part/1.2/para/7"))).toEqual({ dg: "hide", m: "01ABC", a: "part/1.2/para/7" });
+    expect(parseView(new URLSearchParams("a=part/1"))).toEqual({ dg: "hide" });
+    expect(parseView(new URLSearchParams("m=01ABC&a=part/0/para/1")).a).toBeUndefined();
+    expect(parseView(new URLSearchParams("m=01ABC&a=javascript:x")).a).toBeUndefined();
+    expect(viewHref({ dg: "hide", a: "part/1" })).toBe("/");
+  });
   it("shows a prefix's downgraded mail", () => {
     expect(effectiveDowngrade({ dg: "hide" })).toBe("hide");
     expect(effectiveDowngrade({ dg: "hide", prefix: "k3x9q@example.com" })).toBe("include");

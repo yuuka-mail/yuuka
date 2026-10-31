@@ -130,7 +130,7 @@ M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里�
 - **页面壳不需要会话**。`go:embed` 的 `index.html` 对任何非文件路径都返回（`no-store`），
   哈希命名的 `assets/` 缓存一年；壳加载后再同源 `fetch /auth/session`，401 就原地显示登录，
   URL 不变，所以从 TG 链接点进来、登录后直接落在那封信上。视图状态全部在 query string 里
-  （`prefix` `class` `dg` `q` `m`），不引路由库
+  （`prefix` `class` `dg` `q` `m`，以及 `a`：打开的信里的锚点），不引路由库
 - **`web/dist/` 只跟踪 `.gitkeep`**，让新克隆不先构建前端也能编译 Go；这样的二进制对页面请求回 503
   并提示 `mise run web:build`。代价是 Vite 不能清空输出目录，改为构建前只删 `dist/assets`
 - **CSP** 是 `default-src 'none'` 加 self 的脚本、样式、图片、连接，`frame-ancestors 'none'`。
@@ -138,11 +138,17 @@ M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里�
 - **登录页不链接恢复入口**（§13.7：恢复码不出现在日常登录路径上）；`/recover` 换到令牌后直接跳
   `/enroll#<token>`。`/enroll` 读完片段立刻从地址栏抹掉；没有令牌但有会话时，它变成「再加一把 passkey」
 - **系统声音与 agent 声音**（§12.5）落成 `--system-*` / `--agent-*` 两组 token 和一个
-  `Voice` 组件：颜色、标记形状（方 / 圆）、署名都不同。M1 只有系统在说：阅读区的认证结果、降级原因、
-  隔离原因、接收时间是 yuuka 的事实陈述，与信头自称的 `Date` 分开显示
-- **阅读区 M1 先显示解析字段和纯文本 `body_text`**，不是 §12.1 说的结构化视图——结构化视图
-  （`internal/agentview`）与它并行实现。换入点只有两个文件：`web/src/mail/reading-data.ts`（取数）
-  和 `reading-body.tsx`（渲染）
+  `Voice` 组件：颜色、标记形状（方 / 圆）、署名都不同。M1 只有系统在说：阅读区的认证结果、警告、
+  剥掉了什么、接收时间是 yuuka 的事实陈述（结构化视图的 `facts`），与信头自称的 `Date` 分开显示。
+  `dmarc=fail` 和隔离是错误色、带边框；未验证和降级是警告色，都排在事实框最上面
+- **阅读区渲染结构化视图**（§12.1），和 agent 的 `get_message` 是同一棵树：信头和线程条仍取
+  `messages/{id}`，正文和事实取 `messages/{id}/view?level=part`，按 `more` 分段续取
+  （`web/src/mail/reading-data.ts`），`reading-body.tsx` 把块渲染成 DOM，块的锚点就是 DOM id。
+  `?m=<id>&a=part/1/para/3` 打开时滚到那一块并高亮，不在第一段里就自动续取到它出现为止；
+  悬停块左侧的 ¶ 把锚点写进地址栏并复制 `yuuka://` URI。正文一律是文本节点，不用
+  `dangerouslySetInnerHTML`；链接 `rel="noopener noreferrer"`、不带 referrer，旁边显示真实主机名
+  （punycode 原样显示），链接文字自称的主机和真实主机对不上时标成错误色。附件只列出，不链接。
+  取舍：引用折叠后只剩一行标记，看不到被引的原文——那是线程里的另一封信，点线程条去看
 - **shadcn 选 Base UI 作底层**（`components.json` 的 `base-nova`），只拷了 Button / Input / Badge /
   ToggleGroup / Skeleton / Separator；三栏、列表、阅读区按 §12.3 自己写
 - **lint 用 oxlint 而不是 ESLint**：仓库固定 TypeScript 7（与 Worker 一致），typescript-eslint
@@ -151,5 +157,5 @@ M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里�
 - **开发**：`mise run web:dev` 在 `localhost:31473` 起 Vite，把 `/api`、`/auth` 代理到
   `YUUKA_DEV_API`（默认 `127.0.0.1:31480`）；那个 `yuuka serve` 的 `YUUKA_WEB_ORIGIN` 要设成
   `http://localhost:31473`，WebAuthn 和跨源检查才认。`go run ./internal/devseed/cmd` 把合成语料
-  和生成的变体灌进开发库；`npm run screenshots`（`web/scripts/screenshots.mjs`）用 Chrome 的虚拟
+  和生成的变体灌进开发库，原件写进 `YUUKA_DATA_DIR`（或 `-data-dir`），结构化视图从那里读；`npm run screenshots`（`web/scripts/screenshots.mjs`）用 Chrome 的虚拟
   认证器走完注册和登录，截亮、暗、窄屏三套图

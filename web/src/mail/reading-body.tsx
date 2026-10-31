@@ -1,13 +1,183 @@
-import type { Message } from "@/api/types.gen";
+import { ExternalLinkIcon, PaperclipIcon, QuoteIcon } from "lucide-react";
+import { useEffect, useRef } from "react";
+
+import type { Attachment, Block, Span } from "@/api/agentview.gen";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+import { claimedHost, linkTarget } from "./links";
+import type { Reading } from "./reading-data";
 
 /**
- * The message body. M1 renders body_text as plain text: mail is untrusted
- * input (§8.3), and text in a text node can do nothing. The structured
- * view and, in M2, the sandboxed iframe replace this component.
+ * The message text as the structured view (§8.1, §12.1) gives it: blocks
+ * with stable anchors, which are their DOM ids, so a cite
+ * yuuka://message/<id>#part/1/para/3 opens on its paragraph.
+ *
+ * Mail is untrusted input (§8.3). Everything here is a React text node;
+ * nothing the sender wrote reaches innerHTML. Links keep their real
+ * target, open without opener or referrer, and show the host they go to.
  */
-export function ReadingBody({ message }: { message: Message }) {
-  if (!message.body_text.trim()) {
-    return <p className="text-sm text-muted-foreground italic">No text body.</p>;
+export function ReadingBody({
+  uri,
+  reading,
+  anchor,
+  onAnchor,
+  loadMore,
+  isFetchingMore,
+}: {
+  uri: string;
+  reading: Reading;
+  anchor?: string;
+  onAnchor: (anchor: string) => void;
+  loadMore: () => void;
+  isFetchingMore: boolean;
+}) {
+  const { parts, more } = reading;
+  const found = !anchor || parts.some((p) => p.anchor === anchor || p.blocks.some((b) => b.anchor === anchor));
+
+  // A deep link to text past the first stretch loads on until it is in.
+  useEffect(() => {
+    if (!found && more && !isFetchingMore) loadMore();
+  }, [found, more, isFetchingMore, loadMore]);
+
+  // Scroll to the anchor once it is rendered, once per anchor: clicking
+  // another paragraph's mark should not jump the page.
+  const scrolled = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!anchor || !found || scrolled.current === anchor) return;
+    scrolled.current = anchor;
+    document.getElementById(anchor)?.scrollIntoView({ block: "center" });
+  }, [anchor, found]);
+
+  return (
+    <div className="flex max-w-[78ch] flex-col gap-3 text-sm leading-relaxed">
+      {parts.length === 0 && <p className="text-muted-foreground italic">No text body.</p>}
+      {parts.map((p) => (
+        <section key={p.anchor} id={p.anchor} aria-label={parts.length > 1 ? `Part ${p.anchor.slice(5)}` : undefined} className="flex flex-col gap-2">
+          {parts.length > 1 && (
+            <p className="border-b pb-0.5 font-mono text-[11px] text-muted-foreground">
+              {p.anchor} · {p.media_type}
+            </p>
+          )}
+          {p.blocks.map((b) => (
+            <BlockView key={b.anchor} block={b} uri={uri} highlight={b.anchor === anchor} onAnchor={onAnchor} />
+          ))}
+        </section>
+      ))}
+      {more && (
+        <Button variant="outline" size="sm" className="self-start" disabled={isFetchingMore} onClick={loadMore}>
+          {isFetchingMore ? "Loading…" : "Load the rest"}
+        </Button>
+      )}
+      {!found && !more && <p className="text-xs text-muted-foreground">There is no {anchor} in this message; it may have been cited from an older view.</p>}
+      {reading.content.attachments && <Attachments list={reading.content.attachments} />}
+    </div>
+  );
+}
+
+function BlockView({ block: b, uri, highlight, onAnchor }: { block: Block; uri: string; highlight: boolean; onAnchor: (a: string) => void }) {
+  return (
+    <div id={b.anchor} className={cn("group relative -mx-1.5 rounded-sm px-1.5 scroll-mt-4", highlight && "bg-accent ring-1 ring-ring/50")}>
+      <button
+        type="button"
+        aria-label={`Link to ${b.anchor}`}
+        title={`${uri}#${b.anchor}`}
+        onClick={() => {
+          onAnchor(b.anchor);
+          void navigator.clipboard?.writeText(`${uri}#${b.anchor}`).catch(() => undefined);
+        }}
+        className="absolute top-0 -left-4 hidden font-mono text-xs text-muted-foreground group-hover:block hover:text-foreground focus-visible:block"
+      >
+        ¶
+      </button>
+      <BlockContent b={b} />
+    </div>
+  );
+}
+
+function BlockContent({ b }: { b: Block }) {
+  const spans = <Spans spans={b.spans ?? []} />;
+  switch (b.kind) {
+    case "heading": {
+      const level = Math.min(Math.max(b.level ?? 1, 1), 5);
+      const H = `h${level + 1}` as "h2" | "h3" | "h4" | "h5" | "h6";
+      return <H className={cn("pt-1 font-semibold break-words", level === 1 ? "text-base" : "text-sm")}>{spans}</H>;
+    }
+    case "item":
+      return (
+        <div className="flex gap-2 break-words" style={{ paddingLeft: `${Math.max((b.level ?? 1) - 1, 0)}rem` }}>
+          <span aria-hidden className="text-muted-foreground select-none">
+            {(b.level ?? 1) > 1 ? "◦" : "•"}
+          </span>
+          <span className="min-w-0 whitespace-pre-wrap">{spans}</span>
+        </div>
+      );
+    case "pre":
+      return <pre className="overflow-x-auto rounded-sm bg-muted px-2 py-1 font-mono text-xs leading-normal whitespace-pre">{spans}</pre>;
+    case "quote":
+      return (
+        <div className="flex items-baseline gap-1.5 border-l-2 pl-2 text-xs text-muted-foreground">
+          <QuoteIcon aria-hidden className="size-3 shrink-0 self-center" />
+          <span className="min-w-0 break-words">
+            {b.spans?.length ? <span className="italic">{spans}</span> : "Quoted text"}
+            {b.lines ? ` · ${b.lines} line${b.lines === 1 ? "" : "s"} collapsed` : ""}
+          </span>
+        </div>
+      );
+    default:
+      return <p className="break-words whitespace-pre-wrap">{spans}</p>;
   }
-  return <div className="max-w-[78ch] text-sm leading-relaxed break-words whitespace-pre-wrap">{message.body_text}</div>;
+}
+
+function Spans({ spans }: { spans: Span[] }) {
+  return spans.map((s, i) => {
+    const t = s.href ? linkTarget(s.href, s.text) : undefined;
+    if (!t) return <span key={i}>{s.text}</span>;
+    // A link whose text already shows its host, or that has no text and
+    // so shows the host as its text, needs no second copy.
+    const echoed = !s.text || claimedHost(s.text) === t.shown || s.text.includes(t.shown);
+    return (
+      <span key={i}>
+        <a
+          href={t.href}
+          title={t.href}
+          target="_blank"
+          rel="noopener noreferrer"
+          referrerPolicy="no-referrer"
+          className="text-primary underline decoration-muted-foreground/50 underline-offset-2 hover:decoration-current"
+        >
+          {s.text || t.shown}
+        </a>
+        {(t.mismatch || !echoed) && (
+          <span
+            title={t.mismatch ? `The text names another site; this link goes to ${t.shown}` : `Goes to ${t.shown}`}
+            className={cn("ml-1 inline-flex items-baseline gap-0.5 font-mono text-[11px]", t.mismatch ? "font-semibold text-destructive" : "text-muted-foreground")}
+          >
+            <ExternalLinkIcon aria-hidden className="size-2.5 self-center" />
+            {t.shown}
+          </span>
+        )}
+      </span>
+    );
+  });
+}
+
+/** Attachments are listed for what they are; their bytes are not served in M1. */
+function Attachments({ list }: { list: Attachment[] }) {
+  return (
+    <section className="mt-1 border-t pt-2 text-xs">
+      <h2 className="mb-1 font-medium text-muted-foreground">
+        {list.length} attachment{list.length === 1 ? "" : "s"}
+      </h2>
+      <ul className="flex flex-col gap-0.5">
+        {list.map((a) => (
+          <li key={a.section} className="flex items-baseline gap-2">
+            <PaperclipIcon aria-hidden className="size-3 shrink-0 self-center text-muted-foreground" />
+            <span className="min-w-0 truncate">{a.filename || "(no file name)"}</span>
+            <span className="shrink-0 font-mono text-[11px] text-muted-foreground">{a.media_type}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }

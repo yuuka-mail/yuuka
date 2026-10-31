@@ -16,22 +16,32 @@ export interface View {
   q?: string;
   /** The open message. */
   m?: string;
+  /**
+   * An anchor in the open message's structured view, such as
+   * part/1/para/3: the fragment of yuuka://message/<m>#part/1/para/3.
+   */
+  a?: string;
 }
 
 export type Downgraded = "hide" | "include" | "only";
 
 const classes: readonly Class[] = ["machine", "human", "unknown"];
 const downgrades: readonly Downgraded[] = ["hide", "include", "only"];
+// The anchor grammar of §8.1, without yuuka://message/<id>#.
+const anchorPattern = /^part\/[1-9][0-9]*(\.[1-9][0-9]*)*(\/para\/[1-9][0-9]*)?$/;
 
 export function parseView(search: URLSearchParams): View {
   const cls = search.get("class") as Class | null;
   const dg = search.get("dg") as Downgraded | null;
+  const m = search.get("m") || undefined;
+  const a = search.get("a") ?? "";
   return {
     prefix: search.get("prefix") || undefined,
     cls: cls && classes.includes(cls) ? cls : undefined,
     dg: dg && downgrades.includes(dg) ? dg : "hide",
     q: search.get("q")?.trim() || undefined,
-    m: search.get("m") || undefined,
+    m,
+    a: m && anchorPattern.test(a) ? a : undefined,
   };
 }
 
@@ -42,6 +52,7 @@ export function viewHref(v: View): string {
   if (v.dg !== "hide") p.set("dg", v.dg);
   if (v.q) p.set("q", v.q);
   if (v.m) p.set("m", v.m);
+  if (v.m && v.a) p.set("a", v.a);
   const s = p.toString();
   return s ? `/?${s}` : "/";
 }

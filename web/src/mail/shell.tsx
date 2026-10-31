@@ -32,7 +32,11 @@ export function MailShell({ session }: { session: SessionInfo }) {
 
   // Opening a message replaces the history entry; changing what the list
   // shows pushes one, so Back returns to the previous list.
-  const go = (next: Partial<View>, replace = false) => navigate(viewHref({ ...view, ...next }), { replace });
+  const go = (next: Partial<View>, replace = false) => {
+    // An anchor points into one message; opening another drops it.
+    const a = "a" in next ? next.a : "m" in next && next.m !== view.m ? undefined : view.a;
+    navigate(viewHref({ ...view, ...next, a }), { replace });
+  };
   const pick = (next: Partial<View>) => {
     setShowPrefixes(false);
     go({ cls: undefined, q: undefined, m: undefined, ...next });
@@ -76,7 +80,14 @@ export function MailShell({ session }: { session: SessionInfo }) {
 
         <main className={cn("min-h-0 min-w-0 flex-col", view.m ? "flex" : "hidden md:flex")}>
           {view.m ? (
-            <ReadingPane key={view.m} id={view.m} onBack={() => go({ m: undefined }, true)} onOpen={(m) => go({ m }, true)} />
+            <ReadingPane
+              key={view.m}
+              id={view.m}
+              anchor={view.a}
+              onAnchor={(a) => go({ a }, true)}
+              onBack={() => go({ m: undefined }, true)}
+              onOpen={(m) => go({ m }, true)}
+            />
           ) : (
             <div className="m-auto text-center text-xs text-muted-foreground">
               <p>No message selected.</p>

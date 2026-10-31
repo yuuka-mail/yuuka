@@ -75,13 +75,23 @@ if (enrollURL) {
   await p.getByRole("listbox", { name: "Messages" }).waitFor();
   const state = await p.context().storageState();
 
-  const find = async (text) => {
+  // The first hit for text, or the one with this subject: generated
+  // variants reuse corpus bodies under other subjects.
+  const find = async (text, subject) => {
     const r = await p.evaluate(async (t) => (await fetch(`/api/v1/search?downgraded=include&q=${encodeURIComponent(t)}`)).json(), text);
-    return r.hits[0]?.id;
+    return r.hits.find((h) => !subject || h.subject === subject)?.id;
   };
-  const lunch = await find("usual place");
+  const lunch = await find("usual place", "Re: Lunch on Friday?");
   const otp = await find("482913");
   const forged = await find("Verify your account");
+  // The structured reading view (§12.1) over mail of different shapes,
+  // and a deep link to one block of it.
+  const readings = {
+    newsletter: await find("This week at Example", "This week at Example"),
+    quoted: await find("Trip plan", "Re: Trip plan"),
+    "reply-html": await find("Release checklist", "Re: Release checklist"),
+    phish: await find("confirm your account", "Urgent: confirm your account"),
+  };
   const prefixes = await p.evaluate(async () => (await fetch("/api/v1/prefixes")).json());
   const discovered = prefixes.prefixes.find((x) => !x.claimed)?.address;
   await p.close();
@@ -99,6 +109,17 @@ if (enrollURL) {
       await s.goto(base + `/?m=${otp}`);
       await s.getByText("yuuka").last().waitFor();
       await shot(s, `reading-otp-${tag}`);
+      for (const [name, id] of Object.entries(readings)) {
+        if (!id) continue;
+        await s.goto(base + `/?m=${id}`);
+        await s.locator('[id="part/1/para/1"], [id="part/1.2/para/1"]').first().waitFor();
+        await shot(s, `reading-${name}-${tag}`);
+      }
+      if (readings["reply-html"]) {
+        await s.goto(base + `/?m=${readings["reply-html"]}&a=part/1.2/para/4`);
+        await s.locator('[id="part/1.2/para/4"]').waitFor();
+        await shot(s, `reading-anchor-${tag}`);
+      }
       await s.goto(base + "/?q=verification");
       await s.getByRole("listbox", { name: "Messages" }).waitFor();
       await shot(s, `search-${tag}`);

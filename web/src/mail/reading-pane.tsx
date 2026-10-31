@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, PaperclipIcon } from "lucide-react";
+import { ArrowLeftIcon, OctagonAlertIcon, PaperclipIcon, TriangleAlertIcon } from "lucide-react";
 
 import { useThread } from "@/api/queries";
 import type { Message, MessageSummary } from "@/api/types.gen";
@@ -9,11 +9,20 @@ import { system, Voice } from "@/components/voice";
 import { fullTime, listTime, sender } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-import { systemFacts, type Tone } from "./facts";
+import { systemFacts, warnings, type Tone } from "./facts";
 import { ReadingBody } from "./reading-body";
-import { useMessage } from "./reading-data";
+import { useMessage, useReading } from "./reading-data";
 
-export function ReadingPane({ id, onBack, onOpen }: { id: string; onBack: () => void; onOpen: (id: string) => void }) {
+interface Props {
+  id: string;
+  /** The anchor to open on, part/<section>[/para/<n>]. */
+  anchor?: string;
+  onAnchor: (anchor: string) => void;
+  onBack: () => void;
+  onOpen: (id: string) => void;
+}
+
+export function ReadingPane({ id, onBack, ...rest }: Props) {
   const q = useMessage(id);
   return (
     <article className="flex h-full min-h-0 flex-col">
@@ -25,7 +34,7 @@ export function ReadingPane({ id, onBack, onOpen }: { id: string; onBack: () => 
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {q.data ? (
-          <Reading message={q.data} onOpen={onOpen} />
+          <Reading message={q.data} {...rest} />
         ) : q.error ? (
           <p className="p-6 text-sm text-destructive">{q.error instanceof Error ? q.error.message : "Could not load the message."}</p>
         ) : (
@@ -47,7 +56,10 @@ const toneClass: Record<Tone, string> = {
   plain: "text-foreground",
 };
 
-function Reading({ message: m, onOpen }: { message: Message; onOpen: (id: string) => void }) {
+function Reading({ message: m, anchor, onAnchor, onOpen }: { message: Message } & Omit<Props, "id" | "onBack">) {
+  const body = useReading(m.id);
+  const facts = body.reading?.facts;
+  const warns = warnings(facts);
   return (
     <div className="flex max-w-[56rem] flex-col gap-4 px-4 py-4 md:px-6">
       <header className="flex flex-col gap-1.5">
@@ -73,12 +85,29 @@ function Reading({ message: m, onOpen }: { message: Message; onOpen: (id: string
         </div>
       </header>
 
-      <Voice speaker={system}>
+      <Voice speaker={system} className={cn(warns.some((w) => w.tone === "bad") && "border-destructive/60")}>
+        {warns.length > 0 && (
+          <ul className="mb-1.5 flex flex-col gap-0.5 border-b border-system-border pb-1.5">
+            {warns.map((w) => (
+              <li key={w.key} className={cn("flex items-baseline gap-1.5", w.tone === "bad" ? "text-destructive" : "text-warning")}>
+                {w.tone === "bad" ? (
+                  <OctagonAlertIcon aria-hidden className="size-3.5 shrink-0 self-center" />
+                ) : (
+                  <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0 self-center" />
+                )}
+                <span>
+                  <span className="font-semibold">{w.key}</span>
+                  {w.text && <span className="text-foreground/80"> · {w.text}</span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-          {systemFacts(m).map((f) => (
+          {systemFacts(m, facts).map((f) => (
             <div key={f.label} className="contents">
               <dt className="text-muted-foreground">{f.label}</dt>
-              <dd className="flex flex-wrap gap-x-2 break-all">
+              <dd className="flex flex-wrap gap-x-2 wrap-anywhere">
                 {f.parts.map((p, i) => (
                   <span key={i} className={toneClass[p.tone]}>
                     {p.text}
@@ -92,7 +121,24 @@ function Reading({ message: m, onOpen }: { message: Message; onOpen: (id: string
 
       <ThreadStrip message={m} onOpen={onOpen} />
 
-      <ReadingBody message={m} />
+      {body.reading ? (
+        <ReadingBody
+          uri={`yuuka://message/${m.id}`}
+          reading={body.reading}
+          anchor={anchor}
+          onAnchor={onAnchor}
+          loadMore={body.loadMore}
+          isFetchingMore={body.isFetchingMore}
+        />
+      ) : body.error ? (
+        <p className="text-sm text-destructive">{body.error instanceof Error ? body.error.message : "Could not load the text."}</p>
+      ) : (
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+      )}
 
       {m.message_id && <p className="font-mono text-[11px] break-all text-muted-foreground">Message-ID &lt;{m.message_id}&gt;</p>}
     </div>
