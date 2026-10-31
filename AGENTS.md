@@ -112,10 +112,14 @@
 工具链由 [`mise.toml`](mise.toml) 固定版本，任务也定义在那里：
 
 ```bash
-mise install        # 首次：装好固定版本的 Go、golangci-lint
-mise run check      # lint（含 vet 与格式检查）+ go test -race
+mise install        # 首次：装好固定版本的 Go、golangci-lint、Node
+mise run check      # lint（含 vet 与格式检查）+ go test -race + Worker 检查
 mise run fmt        # 就地格式化
+mise run db:down    # 用完后删掉测试用的 Postgres 容器（test 会自动拉起）
 ```
+
+- **非标准端口一律在 31400–31499 之间**：测试 Postgres 是 `127.0.0.1:31432`，
+  其他需要固定端口的东西（开发服务、本地依赖）也在这个段里挑，不占别的项目常用的端口
 
 - 不要绕过 mise 直接用系统里别的版本；需要新工具时加进 `mise.toml` 并固定版本。
   只被 `go generate` 调用的 Go 工具（sqlc、tygo 等）用 `go.mod` 的 `tool` 指令固定

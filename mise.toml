@@ -5,6 +5,7 @@
 [tools]
 go = "1.27.3"
 golangci-lint = "2.15.0"
+node = "24.22.2"
 
 [tasks.fmt]
 description = "Format Go code in place"
@@ -14,10 +15,31 @@ run = "golangci-lint fmt"
 description = "Lint, vet and check formatting"
 run = "golangci-lint run"
 
+[tasks."db:up"]
+description = "Start a throwaway Postgres for tests on 127.0.0.1:31432"
+run = """
+docker container inspect yuuka-test-pg >/dev/null 2>&1 || \
+  docker run -d --rm --name yuuka-test-pg \
+    -e POSTGRES_PASSWORD=yuuka -e POSTGRES_DB=yuuka_test \
+    -p 127.0.0.1:31432:5432 postgres:18-alpine >/dev/null
+until docker exec yuuka-test-pg pg_isready -U postgres -q; do sleep 0.5; done
+"""
+
+[tasks."db:down"]
+description = "Remove the test Postgres container"
+run = "docker rm -f yuuka-test-pg >/dev/null 2>&1 || true"
+
 [tasks.test]
-description = "Run Go tests with the race detector"
+description = "Run Go tests with the race detector against the test Postgres"
+depends = ["db:up"]
+env = { YUUKA_TEST_DATABASE_URL = "postgres://postgres:yuuka@127.0.0.1:31432/yuuka_test?sslmode=disable" }
 run = "go test -race ./..."
+
+[tasks."worker:check"]
+description = "Type-check and test the Email Worker"
+dir = "worker"
+run = ["npm ci --no-audit --no-fund", "npm run check"]
 
 [tasks.check]
 description = "Everything CI runs; must pass before a change is done"
-depends = ["lint", "test"]
+depends = ["lint", "test", "worker:check"]
