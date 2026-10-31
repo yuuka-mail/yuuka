@@ -54,17 +54,11 @@ func TestLoadSubmissionConfig(t *testing.T) {
 	}
 }
 
-type noCore struct{}
-
-func (noCore) SubmitRaw(context.Context, *auth.Viewer, string, []string, []byte) (smtpd.Result, error) {
-	return smtpd.Result{}, nil
-}
-
-// With certificate files the port terminates TLS itself and greets with
-// the configured name; stop closes it.
-func TestStartSubmission(t *testing.T) {
-	dir := t.TempDir()
-	certFile, keyFile := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
+// testCert writes a self-signed certificate for mail.example.com into
+// dir and returns its files and a pool that trusts it.
+func testCert(t *testing.T, dir string) (certFile, keyFile string, pool *x509.CertPool) {
+	t.Helper()
+	certFile, keyFile = filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -87,6 +81,26 @@ func TestStartSubmission(t *testing.T) {
 	if err := os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: kb}), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool = x509.NewCertPool()
+	pool.AddCert(cert)
+	return certFile, keyFile, pool
+}
+
+type noCore struct{}
+
+func (noCore) SubmitRaw(context.Context, *auth.Viewer, string, []string, []byte) (smtpd.Result, error) {
+	return smtpd.Result{}, nil
+}
+
+// With certificate files the port terminates TLS itself and greets with
+// the configured name; stop closes it.
+func TestStartSubmission(t *testing.T) {
+	dir := t.TempDir()
+	certFile, keyFile, pool := testCert(t, dir)
 
 	// Find a free port, then let the port open it.
 	probe, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
@@ -101,9 +115,6 @@ func TestStartSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pool := x509.NewCertPool()
-	cert, _ := x509.ParseCertificate(der)
-	pool.AddCert(cert)
 	c, err := (&tls.Dialer{Config: &tls.Config{RootCAs: pool, ServerName: "mail.example.com", MinVersion: tls.VersionTLS12}}).DialContext(t.Context(), "tcp", addr)
 	if err != nil {
 		t.Fatal(err)

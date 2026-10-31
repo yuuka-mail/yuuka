@@ -210,7 +210,9 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
   代价：停了很久的信，`Date` 是提交时补的，不是确认时的
 
 **协议层**在 [`internal/smtpd`](../internal/smtpd/smtpd.go)，只管协议；上面那些关于信的规则全在提交核心里，
-协议层一条也不重复。它和核心之间是一个在消费方定义的小接口（`smtpd.Submitter`）。实现时定下的几处：
+协议层一条也不重复。它和核心之间是一个在消费方定义的小接口（`smtpd.Submitter`），`serve` 用
+[`submitPort`](../cmd/yuuka/submission.go) 把 `submit.Service` 接上去：核心的 `ErrRejected` / `ErrNoIdentity`
+转成 `smtpd.ErrRefused`（550），其余错误都是暂时的（451）。实现时定下的几处：
 
 - **只有 AUTH PLAIN**。LOGIN 从没走出草案，`go-sasl` 也不再带它的 server 侧；会说 SMTP 的服务端软件都会 PLAIN。
   真遇到只会 LOGIN 的客户端再加。用户名是凭据 id（§13.3），授权身份（authzid）只能为空或等于用户名，不做代理授权

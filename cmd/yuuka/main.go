@@ -142,7 +142,6 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/outbox"
 	"github.com/yuuka-mail/yuuka/internal/r2"
-	"github.com/yuuka-mail/yuuka/internal/smtpd"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/submit"
 	"github.com/yuuka-mail/yuuka/web"
@@ -286,9 +285,6 @@ type app struct {
 	in      *ingest.Ingester
 	alerter authn.Alerter   // nil without Telegram
 	outbox  *outbox.Service // serve only; see openOutbox
-	// submitter takes messages from the SMTP submission port (§13.6).
-	// serve refuses YUUKA_SUBMISSION_LISTEN while it is nil.
-	submitter smtpd.Submitter
 	// submit is the only way mail enters the outbox (§8.9): the SMTP
 	// submission port, REST and MCP go through it. serve only.
 	submit *submit.Service
@@ -479,10 +475,7 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	var subErrc <-chan error
 	stopSub := func(context.Context) error { return nil }
 	if a.cfg.Submission.Listen != "" {
-		if a.submitter == nil {
-			return errors.New("YUUKA_SUBMISSION_LISTEN is set, but this build has no submission core to take the mail")
-		}
-		if stopSub, subErrc, err = startSubmission(a.cfg.Submission, a.submitter, a.db, a.domain(), log); err != nil {
+		if stopSub, subErrc, err = startSubmission(a.cfg.Submission, submitPort{a.submit}, a.db, a.domain(), log); err != nil {
 			return err
 		}
 	}

@@ -8,11 +8,13 @@ import (
 	"log/slog"
 	"net"
 
+	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/clientip"
 	"github.com/yuuka-mail/yuuka/internal/mailnet"
 	"github.com/yuuka-mail/yuuka/internal/smtpd"
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/submit"
 )
 
 // submissionConfig is the SMTP submission port of serve (§13.6). It is
@@ -53,6 +55,19 @@ func loadSubmissionConfig(getenv func(string) string) (submissionConfig, error) 
 		}
 	}
 	return c, errors.Join(errs...)
+}
+
+// submitPort is the submission core as the port consumes it: the core's
+// refusals (a broken §13.6 rule, tier none, no identity) are the port's
+// final answer, 550; anything else is temporary.
+type submitPort struct{ *submit.Service }
+
+func (p submitPort) SubmitRaw(ctx context.Context, v *auth.Viewer, mailFrom string, rcpts []string, raw []byte) (smtpd.Result, error) {
+	r, err := p.Service.SubmitRaw(ctx, v, mailFrom, rcpts, raw)
+	if errors.Is(err, submit.ErrRejected) || errors.Is(err, submit.ErrNoIdentity) {
+		err = fmt.Errorf("%w: %w", smtpd.ErrRefused, err)
+	}
+	return smtpd.Result(r), err
 }
 
 // startSubmission opens the submission port and serves it in the
