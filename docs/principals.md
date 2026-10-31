@@ -428,7 +428,7 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 | 读路径 | 受限主体看到的 |
 |---|---|
 | 搜索 / `search_messages` | 结果和**计数、分面**都只在可见消息上算 |
-| `get_message` / 附件 / 结构化视图 | 消息可见才可取；附件随消息 |
+| `get_message` / 附件 / 结构化视图 / 消息详情的 To、Cc、Reply-To | 消息可见才可取；附件随消息；收件人头部从可读那一路的原件解析，只经 Sent 副本可见的信给的是 Sent 副本的头 |
 | `extractions` / `get_otp` | 只来自可见消息 |
 | 线程 | `n`、`participants`、`first_at` / `last_at`、`snippet` 都按可见消息**现算**；`threads` 表里存的聚合值只服务不受限的视图 |
 | `list_prefixes` / 统计 | 只在可见投递上聚合 |
@@ -446,7 +446,7 @@ REST 层的 [`TestACL`](../internal/api/api_test.go) 管的是另一半：它遍
 只来自可见的投递、可见的消息和可见的 outbox 行，同在 `TestVisibility` 里。
 线程通信方包含 To / Cc / Reply-To（§8.9），这些是头部数据：看不见的信上的地址不能经授权决定
 （「这个收件人放不放行」）透露给受限主体，测试里专门断言了这一条；判断头部可不可信也只看可见的投递。
-outbox 本身的读路径（`OutboxList`、`OutboxByID`，REST 的 `/api/v1/outbox`）也按这一条过滤：发信身份的账户可读才可见。
+outbox 本身的读路径（`OutboxList`、`OutboxByID`，REST 的 `/api/v1/outbox`）也按这一条过滤：发信身份的账户可读才可见；行上的主题取自它的 Sent 副本，同一个条件保证读得到这条副本。
 TestACL 对草稿类端点另断言：别的 agent 即使持有全部 scope，拿到的也是和「不存在」一样的 404。
 草稿行另有一条 M2 规则（[`drafts.go`](../internal/store/drafts.go) 的 `visibleDraft`，唯一的一处）：
 human 看全部，其他主体只看自己写的。草稿是没发出去的字，常常是替人写的，比信件收得更窄。

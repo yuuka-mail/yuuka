@@ -243,12 +243,53 @@ func (p *parser) from(h mail.Header) {
 	p.m.FromName = text
 }
 
-// addrs reads the address list of field key; never nil. A list that
+// Mailbox is one address of an address field with its display name.
+type Mailbox struct {
+	Name string
+	Addr string
+}
+
+// Recipients are the To, Cc and Reply-To fields of a message with their
+// display names, read the way Parse reads the bare addresses; never nil.
+// They are for showing a message, not stored: the messages columns hold
+// the bare addresses only (§4).
+type Recipients struct {
+	To      []Mailbox
+	Cc      []Mailbox
+	ReplyTo []Mailbox
+}
+
+// ParseRecipients reads the Recipients of raw from its header alone.
+func ParseRecipients(raw []byte) Recipients {
+	var p parser
+	e, err := message.Read(bytes.NewReader(raw))
+	if err != nil && e == nil {
+		e, err = message.Read(bytes.NewReader(sanitizeHeader(raw)))
+		if err != nil && e == nil {
+			return Recipients{To: []Mailbox{}, Cc: []Mailbox{}, ReplyTo: []Mailbox{}}
+		}
+	}
+	p.charset = e.Header.Get("Content-Type")
+	h := mail.Header{Header: e.Header}
+	return Recipients{To: p.mailboxes(h, "To"), Cc: p.mailboxes(h, "Cc"), ReplyTo: p.mailboxes(h, "Reply-To")}
+}
+
+// addrs is the bare addresses of mailboxes.
+func (p *parser) addrs(h mail.Header, key string) []string {
+	mbs := p.mailboxes(h, key)
+	out := make([]string, len(mbs))
+	for i, m := range mbs {
+		out[i] = m.Addr
+	}
+	return out
+}
+
+// mailboxes reads the address list of field key; never nil. A list that
 // does not parse as a whole is read element by element, so one broken
 // address does not cost the others. Groups contribute their members;
 // an empty group ("undisclosed-recipients:;") contributes nothing.
-func (p *parser) addrs(h mail.Header, key string) []string {
-	out := []string{}
+func (p *parser) mailboxes(h mail.Header, key string) []Mailbox {
+	out := []Mailbox{}
 	v := h.Get(key)
 	if strings.TrimSpace(v) == "" {
 		return out
@@ -273,7 +314,7 @@ func (p *parser) addrs(h mail.Header, key string) []string {
 			break
 		}
 		if utf8.ValidString(a.Address) && !strings.ContainsFunc(a.Address, unicode.IsControl) {
-			out = append(out, a.Address)
+			out = append(out, Mailbox{Name: clean(p.undeclared(a.Name)), Addr: a.Address})
 		}
 	}
 	return out

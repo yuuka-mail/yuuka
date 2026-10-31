@@ -554,6 +554,10 @@ func TestVisibility(t *testing.T) {
 				if _, err := db.OutboxByID(ctx, v, r.ID); err != nil {
 					t.Errorf("OutboxByID %s: %v", r.ID, err)
 				}
+				// The subject comes from the sent copy, which v reads.
+				if m, err := db.MessageByID(ctx, v, r.MessageID); err != nil || r.Subject == "" || r.Subject != m.Subject {
+					t.Errorf("outbox %s subject %q, its message %q: %v", r.ID, r.Subject, m.Subject, err)
+				}
 			}
 			wantSent := slices.DeleteFunc(slices.Clone(want), func(n string) bool { return !strings.HasPrefix(n, "sent-") && n != "both" })
 			if got := names(ids); !slices.Equal(got, wantSent) {

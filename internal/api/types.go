@@ -192,6 +192,12 @@ type Message struct {
 	Date       *time.Time `json:"date,omitempty"` // absent if missing or unparseable
 	BodyText   string     `json:"body_text"`
 	ParseError string     `json:"parse_error,omitempty"`
+	// To, Cc and ReplyTo are the header fields with display names, read
+	// from the raw message the viewer may read when it is fetched. Like
+	// everything the sender wrote they are unverified (§8.3).
+	To      []agentview.Address `json:"to"`
+	Cc      []agentview.Address `json:"cc"`
+	ReplyTo []agentview.Address `json:"reply_to"`
 	// Deliveries are envelope and authentication facts. They need
 	// delivery:read and are absent without it.
 	Deliveries []Delivery `json:"deliveries,omitempty"`

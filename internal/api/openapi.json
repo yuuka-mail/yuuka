@@ -331,6 +331,9 @@
           "identity_id": {
             "type": "string"
           },
+          "identity_owner": {
+            "$ref": "#/components/schemas/Actor"
+          },
           "from": {
             "type": "string"
           },
@@ -393,6 +396,7 @@
           "author",
           "state",
           "identity_id",
+          "identity_owner",
           "from",
           "to",
           "cc",
@@ -671,6 +675,24 @@
           "parse_error": {
             "type": "string"
           },
+          "to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
+          "reply_to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Address"
+            }
+          },
           "deliveries": {
             "type": "array",
             "items": {
@@ -694,7 +716,10 @@
           "message_id",
           "in_reply_to",
           "references",
-          "body_text"
+          "body_text",
+          "to",
+          "cc",
+          "reply_to"
         ],
         "additionalProperties": false
       },
@@ -801,6 +826,9 @@
             "type": "string"
           },
           "message_id": {
+            "type": "string"
+          },
+          "subject": {
             "type": "string"
           },
           "submitted_by": {

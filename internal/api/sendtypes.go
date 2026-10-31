@@ -74,14 +74,18 @@ type Draft struct {
 	ID     string     `json:"id"`
 	Author Actor      `json:"author"`
 	State  DraftState `json:"state"`
-	// IdentityID is the identity From goes out as.
-	IdentityID   string   `json:"identity_id"`
-	From         string   `json:"from"`
-	To           []string `json:"to"`
-	Cc           []string `json:"cc"`
-	Bcc          []string `json:"bcc"`
-	Subject      string   `json:"subject"`
-	BodyMarkdown string   `json:"body_markdown"`
+	// IdentityID is the identity From goes out as, and IdentityOwner
+	// owns it: when that is a person other than the viewer, only they
+	// can confirm the draft (§8.9 owner cap), even where the viewer's
+	// own tier on the identity is none and /identities leaves it out.
+	IdentityID    string   `json:"identity_id"`
+	IdentityOwner Actor    `json:"identity_owner"`
+	From          string   `json:"from"`
+	To            []string `json:"to"`
+	Cc            []string `json:"cc"`
+	Bcc           []string `json:"bcc"`
+	Subject       string   `json:"subject"`
+	BodyMarkdown  string   `json:"body_markdown"`
 	// SMTP: a submission of the SMTP port held as a draft. Its body is
 	// the MIME the service sent, not body_markdown; it is confirmed or
 	// deleted, never edited.
@@ -233,8 +237,11 @@ type OutboxEntry struct {
 	From       string `json:"from"`
 	// DraftID is the draft it came from; absent for an SMTP submission
 	// sent directly. MessageID is its sent copy, absent until indexed.
-	DraftID     string `json:"draft_id,omitempty"`
-	MessageID   string `json:"message_id,omitempty"`
+	DraftID   string `json:"draft_id,omitempty"`
+	MessageID string `json:"message_id,omitempty"`
+	// Subject is the sent copy's subject; absent until it is indexed,
+	// or when it has none.
+	Subject     string `json:"subject,omitempty"`
 	SubmittedBy Actor  `json:"submitted_by"`
 	// ApprovedBy let it go: a person, or system for a policy (§8.8).
 	ApprovedBy  *Actor     `json:"approved_by,omitempty"`

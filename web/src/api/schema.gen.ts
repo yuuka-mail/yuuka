@@ -1314,6 +1314,7 @@ export interface components {
             author: components["schemas"]["Actor"];
             state: components["schemas"]["DraftState"];
             identity_id: string;
+            identity_owner: components["schemas"]["Actor"];
             from: string;
             to: string[];
             cc: string[];
@@ -1405,6 +1406,9 @@ export interface components {
             date?: string;
             body_text: string;
             parse_error?: string;
+            to: components["schemas"]["Address"][];
+            cc: components["schemas"]["Address"][];
+            reply_to: components["schemas"]["Address"][];
             deliveries?: components["schemas"]["Delivery"][];
         };
         MessagePage: {
@@ -1435,6 +1439,7 @@ export interface components {
             from: string;
             draft_id?: string;
             message_id?: string;
+            subject?: string;
             submitted_by: components["schemas"]["Actor"];
             approved_by?: components["schemas"]["Actor"];
             /** Format: date-time */

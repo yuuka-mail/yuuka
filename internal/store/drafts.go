@@ -39,11 +39,15 @@ type Draft struct {
 	// IdentityID always follows from FromAddr (ResolveIdentity): the
 	// writes resolve it, so a draft cannot pair an address with an
 	// identity that does not cover it.
-	IdentityID  string
-	FromAddr    string
-	InReplyToID string // "" for a new thread
-	To, Cc, Bcc []string
-	Subject     string
+	IdentityID string
+	// IdentityOwner owns that identity (ID, Kind and Name); read only.
+	// Whoever sees the draft may see whose address it would go out as,
+	// which decides who may confirm it (§8.9 owner cap).
+	IdentityOwner Principal
+	FromAddr      string
+	InReplyToID   string // "" for a new thread
+	To, Cc, Bcc   []string
+	Subject       string
 	// Exactly one body: BodyMD for composed mail, RawID for an SMTP
 	// submission held as a draft (already MIME, stored under sent/).
 	BodyMD string
@@ -77,11 +81,14 @@ func visibleDraft(v *auth.Viewer) string {
 const draftCols = `dr.id, dr.principal_id, ap.kind, ap.name, dr.identity_id, dr.from_addr, coalesce(dr.in_reply_to_id, ''),
 	dr.to_addrs, dr.cc_addrs, dr.bcc_addrs, dr.subject, coalesce(dr.body_md, ''), coalesce(dr.raw_id, ''),
 	dr.cites, coalesce(dr.hold_reason, ''), coalesce(dr.hold_detail, ''), dr.created_at, dr.updated_at,
-	coalesce(o.id, ''), coalesce(o.state, '')`
+	coalesce(o.id, ''), coalesce(o.state, ''), op.id, op.kind, op.name`
 
-// draftFrom joins the newest outbox row that was not withdrawn.
+// draftFrom joins the identity's owner and the newest outbox row that
+// was not withdrawn.
 const draftFrom = ` FROM drafts dr
 	JOIN principals ap ON ap.id = dr.principal_id
+	JOIN identities di ON di.id = dr.identity_id
+	JOIN principals op ON op.id = di.owner_id
 	LEFT JOIN LATERAL (
 		SELECT id, state FROM outbox WHERE draft_id = dr.id AND state <> 'withdrawn'
 		ORDER BY created_at DESC, id DESC LIMIT 1) o ON true`
@@ -91,7 +98,8 @@ func scanDraft(row pgx.Row) (Draft, error) {
 	var reason string
 	err := row.Scan(&d.ID, &d.PrincipalID, &d.AuthorKind, &d.AuthorName, &d.IdentityID, &d.FromAddr, &d.InReplyToID,
 		&d.To, &d.Cc, &d.Bcc, &d.Subject, &d.BodyMD, &d.RawID,
-		&d.Cites, &reason, &d.HoldDetail, &d.CreatedAt, &d.UpdatedAt, &d.OutboxID, &d.OutboxState)
+		&d.Cites, &reason, &d.HoldDetail, &d.CreatedAt, &d.UpdatedAt, &d.OutboxID, &d.OutboxState,
+		&d.IdentityOwner.ID, &d.IdentityOwner.Kind, &d.IdentityOwner.Name)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return d, ErrNotFound
 	}
@@ -221,6 +229,7 @@ func (db *DB) prepareDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, d *Dr
 		return fmt.Errorf("%w: from %s goes out as identity %s (%s), not %s", ErrInvalidDraft, from, ident.ID, ident.Address(), d.IdentityID)
 	}
 	d.IdentityID, d.FromAddr = ident.ID, from
+	d.IdentityOwner = Principal{ID: ident.OwnerID, Kind: ident.OwnerKind, Name: ident.OwnerName}
 	if d.InReplyToID != "" {
 		err := tx.QueryRow(ctx, `SELECT m.id FROM messages m
 			WHERE m.id = coalesce((SELECT new_id FROM message_aliases WHERE old_id = $1), $1)

@@ -527,6 +527,45 @@ func TestDeliveriesNeedDeliveryRead(t *testing.T) {
 	}
 }
 
+// To, Cc and Reply-To come with their names from the raw message, for
+// mail received and mail only sent alike; the outbox row names its sent
+// copy's subject.
+func TestMessageRecipients(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	read := h.token(auth.MessageRead)
+	type addrs = []agentview.Address
+	in := decode[Message](t, h.get("/api/v1/messages/"+h.find("Re: Lunch on Friday?"), read))
+	// devseed also has this conversation the other way round.
+	to := addrs{{Name: "Alice", Addr: "alice@example.com"}}
+	if in.FromAddr == "alice@example.com" {
+		to = addrs{{Name: "Bob Example", Addr: "bob@example.org"}}
+	}
+	if !slices.Equal(in.To, to) || len(in.Cc) != 0 || len(in.ReplyTo) != 0 {
+		t.Errorf("inbound: to %+v, cc %+v, reply-to %+v", in.To, in.Cc, in.ReplyTo)
+	}
+
+	d := h.draft(h.human, store.Draft{
+		FromAddr: "me@example.com", Subject: "Sent only", To: []string{"bob@example.net"}, Cc: []string{"carol@example.net"},
+	})
+	res, err := h.sub.SubmitDraft(t.Context(), viewer(h.human), d.ID)
+	if err != nil || !res.Queued {
+		t.Fatalf("submit: %+v, %v", res, err)
+	}
+	e := decode[OutboxEntry](t, h.get("/api/v1/outbox/"+res.OutboxID, h.token(auth.MessageRead, auth.DeliveryRead)))
+	if e.Subject != "Sent only" || e.MessageID == "" {
+		t.Fatalf("outbox entry: %+v", e)
+	}
+	if page := decode[OutboxPage](t, h.get("/api/v1/outbox", h.token(auth.MessageRead, auth.DeliveryRead))); page.Entries[0].Subject != "Sent only" {
+		t.Errorf("outbox list: %+v", page.Entries[0])
+	}
+	out := decode[Message](t, h.get("/api/v1/messages/"+e.MessageID, read))
+	if !slices.Equal(out.To, addrs{{Addr: "bob@example.net"}}) || !slices.Equal(out.Cc, addrs{{Addr: "carol@example.net"}}) ||
+		len(out.ReplyTo) != 0 || len(out.Deliveries) != 0 {
+		t.Errorf("sent: to %+v, cc %+v, reply-to %+v", out.To, out.Cc, out.ReplyTo)
+	}
+}
+
 // The structured view is the tree get_message gives agents, with the same
 // rule for delivery facts as the message endpoint.
 func TestMessageView(t *testing.T) {

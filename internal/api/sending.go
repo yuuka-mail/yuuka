@@ -152,7 +152,8 @@ func draftOut(d store.Draft) Draft {
 	out := Draft{
 		ID: d.ID, Author: Actor{ID: d.PrincipalID, Kind: d.AuthorKind, Name: d.AuthorName},
 		State: "draft", IdentityID: d.IdentityID, From: d.FromAddr,
-		To: nonNil(d.To), Cc: nonNil(d.Cc), Bcc: nonNil(d.Bcc), Subject: d.Subject,
+		IdentityOwner: Actor{ID: d.IdentityOwner.ID, Kind: d.IdentityOwner.Kind, Name: d.IdentityOwner.Name},
+		To:            nonNil(d.To), Cc: nonNil(d.Cc), Bcc: nonNil(d.Bcc), Subject: d.Subject,
 		BodyMarkdown: d.BodyMD, SMTP: d.RawID != "", InReplyTo: d.InReplyToID, Cites: []Cite{},
 		CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt,
 	}
@@ -298,7 +299,7 @@ func (a *API) resolveOutbox(ctx context.Context, v *auth.Viewer, p ResolveParams
 func outboxOut(e store.OutboxEntry) OutboxEntry {
 	out := OutboxEntry{
 		ID: e.ID, State: OutboxState(e.State), Identity: e.Identity, IdentityID: e.IdentityID, From: e.FromAddr,
-		DraftID: e.DraftID, MessageID: e.MessageID,
+		DraftID: e.DraftID, MessageID: e.MessageID, Subject: e.Subject,
 		SubmittedBy: Actor{ID: e.SubmittedBy.ID, Kind: e.SubmittedBy.Kind, Name: e.SubmittedBy.Name},
 		CreatedAt:   e.CreatedAt, NextRetryAt: e.NextRetryAt, Error: e.Error,
 		Recipients: make([]OutboxRecipient, len(e.Recipients)), Attempts: e.Attempts,

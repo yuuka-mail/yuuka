@@ -24,6 +24,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/classify"
+	"github.com/yuuka-mail/yuuka/internal/mimeparse"
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/submit"
@@ -276,10 +277,21 @@ func (a *API) message(ctx context.Context, v *auth.Viewer, p IDParams) (Message,
 	if err != nil {
 		return Message{}, err
 	}
+	// The recipients with their names come from the raw, like the
+	// structured view: the messages columns keep bare addresses only
+	// (§4). d.Raw is a raw this viewer may read (§13.8), so a viewer who
+	// cannot read the message never gets here, and one who reads it only
+	// through its sent copy gets the sent copy's header.
+	raw, err := a.raw.ReadRaw(ctx, d.Raw)
+	if err != nil {
+		return Message{}, err
+	}
+	rc := mimeparse.ParseRecipients(raw)
 	out := Message{
 		MessageSummary: summary(d.MessageSummary),
 		MessageID:      d.MessageID, InReplyTo: d.InReplyTo, References: nonNil(d.References),
 		Date: d.Date, BodyText: d.BodyText, ParseError: d.ParseError,
+		To: addressesOf(rc.To), Cc: addressesOf(rc.Cc), ReplyTo: addressesOf(rc.ReplyTo),
 	}
 	// Envelope and authentication facts are delivery data (§13.4).
 	if v.Has(auth.DeliveryRead) {
@@ -312,6 +324,14 @@ func (a *API) messageView(ctx context.Context, v *auth.Viewer, p ViewParams) (ag
 		return view, openapi.Errorf(http.StatusNotFound, openapi.CodeNotFound, "anchor %s is not in this message", p.Anchor)
 	}
 	return view, err
+}
+
+func addressesOf(ms []mimeparse.Mailbox) []agentview.Address {
+	out := make([]agentview.Address, len(ms))
+	for i, m := range ms {
+		out[i] = agentview.Address{Name: m.Name, Addr: m.Addr}
+	}
+	return out
 }
 
 func authOf(a *authres.Auth) *DeliveryAuth {

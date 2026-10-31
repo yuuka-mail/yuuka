@@ -44,6 +44,11 @@ func TestSubmitHeldThenConfirmed(t *testing.T) {
 		d.InReplyTo != msg || d.BodyMarkdown != "See you **there**." {
 		t.Errorf("created %+v", d)
 	}
+	// The draft names whose address it is, so a composer can say who may
+	// confirm it whatever /identities lists for the viewer.
+	if o := d.IdentityOwner; o.ID != h.human.ID || o.Kind != "human" || o.Name != "operator" {
+		t.Errorf("created draft's identity owner: %+v", o)
+	}
 	// What a composer shows before sending: as this address the agent
 	// is capped at drafts.
 	ri := decode[ReplyIdentities](t, h.get("/api/v1/messages/"+msg+"/reply-identities", agent))
@@ -58,7 +63,7 @@ func TestSubmitHeldThenConfirmed(t *testing.T) {
 		t.Fatalf("agent submits as the operator: %d %+v", w.Code, res)
 	}
 	held := decode[Draft](t, h.get("/api/v1/drafts/"+d.ID, agent))
-	if held.State != "held" || held.HoldReason != "owner" || held.Outbox != nil {
+	if held.State != "held" || held.HoldReason != "owner" || held.Outbox != nil || held.IdentityOwner != d.IdentityOwner {
 		t.Errorf("held draft: %+v", held)
 	}
 	list := decode[DraftPage](t, h.get("/api/v1/drafts?state=held", agent))

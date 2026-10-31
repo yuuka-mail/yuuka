@@ -137,6 +137,32 @@ func TestAddresses(t *testing.T) {
 	}
 }
 
+// ParseRecipients reads the same addresses as Parse, with their names.
+func TestParseRecipients(t *testing.T) {
+	raw := "From: s@example.net\r\n" +
+		"To: \"Doe, John\" <j@example.com>, =?utf-8?q?=E5=BC=A0?= <z@example.com>, broken, b@example.com\r\n" +
+		"Cc: Team: \xd5\xc5 <g@example.com>;\r\n" +
+		"Content-Type: text/plain; charset=gbk\r\n\r\nbody\r\n"
+	got := ParseRecipients([]byte(raw))
+	want := Recipients{
+		To:      []Mailbox{{"Doe, John", "j@example.com"}, {"张", "z@example.com"}, {"", "b@example.com"}},
+		Cc:      []Mailbox{{"张", "g@example.com"}},
+		ReplyTo: []Mailbox{},
+	}
+	if !slices.Equal(got.To, want.To) || !slices.Equal(got.Cc, want.Cc) || got.ReplyTo == nil || len(got.ReplyTo) != 0 {
+		t.Errorf("ParseRecipients = %#v, want %#v", got, want)
+	}
+	m := Parse([]byte(raw))
+	for i, a := range m.To {
+		if got.To[i].Addr != a {
+			t.Errorf("To[%d] = %q, Parse has %q", i, got.To[i].Addr, a)
+		}
+	}
+	if empty := ParseRecipients([]byte("not a message")); empty.To == nil || empty.Cc == nil || empty.ReplyTo == nil {
+		t.Errorf("ParseRecipients of junk: %#v", empty)
+	}
+}
+
 func TestHTMLToText(t *testing.T) {
 	cases := map[string]string{
 		"<p>a</p><p>b</p>":                          "a\nb",

@@ -834,6 +834,10 @@ type OutboxEntry struct {
 	// indexed (§4.6).
 	DraftID   string
 	MessageID string
+	// Subject is that message's subject, "" until it is indexed. The
+	// outbox row has none of its own; a row v may see has a sent copy v
+	// may read, by the same account rule (§13.8).
+	Subject string
 	// SubmittedBy started it; ApprovedBy let it go (Principal.ID "" while
 	// nobody has).
 	SubmittedBy Principal
@@ -855,8 +859,7 @@ type OutboxRecipientState struct {
 
 const outboxEntryCols = `o.id, coalesce(i.prefix, '*') || '@' || i.zone, i.id, o.state, o.from_addr, o.created_at,
 	o.next_retry_at, coalesce(o.error, ''), coalesce(o.draft_id, ''),
-	coalesce((SELECT m.id FROM raw_objects sr JOIN messages m ON m.content_hash = sr.content_hash
-		WHERE sr.id = o.raw_id ORDER BY m.id LIMIT 1), ''),
+	coalesce(sm.id, ''), coalesce(sm.subject, ''),
 	sp.id, sp.kind, sp.name, coalesce(ap.id, ''), coalesce(ap.kind, ''), coalesce(ap.name, ''),
 	(SELECT count(*) FROM send_attempts a WHERE a.outbox_id = o.id),
 	coalesce((SELECT a.outcome FROM send_attempts a WHERE a.outbox_id = o.id
@@ -871,6 +874,10 @@ func (db *DB) outboxEntryFrom(v *auth.Viewer) string {
 		JOIN identities i ON i.id = o.identity_id
 		JOIN principals sp ON sp.id = o.submitted_by
 		LEFT JOIN principals ap ON ap.id = o.approved_by
+		LEFT JOIN LATERAL (
+			SELECT m.id, m.subject FROM raw_objects sr JOIN messages m ON m.content_hash = sr.content_hash
+			WHERE sr.id = o.raw_id ORDER BY m.id LIMIT 1
+		) sm ON true
 		CROSS JOIN LATERAL (
 			SELECT array_agg(addr ORDER BY array_position(ARRAY['to', 'cc', 'bcc'], kind), addr_fold) AS addrs,
 			       array_agg(kind ORDER BY array_position(ARRAY['to', 'cc', 'bcc'], kind), addr_fold) AS kinds,
@@ -887,7 +894,7 @@ func scanOutboxEntries(rows pgx.Rows) ([]OutboxEntry, error) {
 	s, a := &e.SubmittedBy, &e.ApprovedBy
 	_, err := pgx.ForEachRow(rows, []any{
 		&e.ID, &e.Identity, &e.IdentityID, &e.State, &e.FromAddr, &e.CreatedAt, &e.NextRetryAt, &e.Error,
-		&e.DraftID, &e.MessageID, &s.ID, &s.Kind, &s.Name, &a.ID, &a.Kind, &a.Name,
+		&e.DraftID, &e.MessageID, &e.Subject, &s.ID, &s.Kind, &s.Name, &a.ID, &a.Kind, &a.Name,
 		&e.Attempts, &e.LastOutcome, &addrs, &kinds, &states,
 	}, func() error {
 		e.Recipients = make([]OutboxRecipientState, len(addrs))
