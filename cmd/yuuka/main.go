@@ -2,6 +2,7 @@
 //
 // Usage:
 //
+//	yuuka migrate            apply pending database migrations, as the schema owner
 //	yuuka serve              webhook endpoint + periodic reconcile (+ WebUI and REST API)
 //	yuuka reconcile [--full] one reconcile pass; --full also scans raw/
 //	yuuka reparse [--since T] rebuild derived content of messages received
@@ -23,11 +24,13 @@
 //
 // Configuration comes from the environment:
 //
-//	YUUKA_DATABASE_URL                  Postgres connection URL (required); everything but
-//	                                    migrations runs as its role
+//	YUUKA_DATABASE_URL                  Postgres connection URL (required, except by migrate when
+//	                                    the next one is set); everything but migrations runs as its role
 //	YUUKA_DATABASE_OWNER_URL            Postgres URL of the role that owns the schema, used only
-//	                                    to apply migrations on start (optional; unset, the role of
-//	                                    YUUKA_DATABASE_URL migrates too). See db.go
+//	                                    to apply migrations (optional). `yuuka migrate` connects
+//	                                    as it, or as YUUKA_DATABASE_URL when unset. Any other
+//	                                    command given it migrates on start too, a convenience for
+//	                                    development; deployments give it to migrate alone. See db.go
 //	YUUKA_R2_ENDPOINT                   R2 S3 endpoint, https://<account id>.r2.cloudflarestorage.com (required)
 //	YUUKA_R2_RAW_BUCKET                 raw bucket name (required)
 //	YUUKA_R2_RAW_ACCESS_KEY_ID          read-only token for the raw bucket (required)
@@ -53,17 +56,23 @@
 //	                                    client and the header is ignored). See internal/clientip
 //	YUUKA_MCP_TOKEN                     bearer token `yuuka mcp --stdio` acts as (required there)
 //
-// `yuuka admin` only needs the database URLs and YUUKA_WEB_ORIGIN;
-// `yuuka prefix` and `yuuka token` only the database URLs. They run on the host
-// without a login; host.go says how their actions are recorded.
+// `yuuka migrate`, `yuuka prefix` and `yuuka token` only need the database
+// URLs; `yuuka admin` the database URLs and YUUKA_WEB_ORIGIN. The last
+// three run on the host without a login; host.go says how their actions
+// are recorded.
 //
 // The webhook is served at POST /ingest/cloudflare (HMAC, §2.2); the login
 // endpoints under /auth/ (see internal/authn); the REST API under /api/v1/
 // (see internal/api); MCP over streamable HTTP at /mcp, bearer token only
 // (see internal/mcp); the WebUI at / (see web); an unauthenticated
 // GET /healthz for a reverse proxy's health check (see health.go). The
-// route list in serve says how each authenticates. Migrations are applied
-// on start.
+// route list in serve says how each authenticates.
+//
+// `yuuka migrate` changes the schema. Every other command checks on start
+// that the database is at the version it was built for and refuses to run
+// otherwise; behind, the error says to run `yuuka migrate`. db.go has the
+// one exception, for development: given YUUKA_DATABASE_OWNER_URL, they
+// migrate first.
 package main
 
 import (
@@ -107,7 +116,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka mcp --stdio | yuuka version")
+	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka mcp --stdio | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -120,6 +129,16 @@ func run(args []string, log *slog.Logger) error {
 	case "version":
 		fmt.Printf("yuuka %s\n", version)
 		return nil
+	case "migrate":
+		fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
+		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		d, err := loadMigrateConfig(os.Getenv)
+		if err != nil {
+			return err
+		}
+		return migrate(ctx, d, os.Stdout)
 	case "serve":
 		fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 		if err := fs.Parse(args[1:]); err != nil {

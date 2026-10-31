@@ -44,7 +44,7 @@ func run(dir string, n int, seed uint64, dataDir string) error {
 	}
 	defer pool.Close()
 	db := store.New(pool)
-	if err := db.Migrate(ctx); err != nil {
+	if _, _, err := db.Migrate(ctx); err != nil {
 		return err
 	}
 	start := time.Now()

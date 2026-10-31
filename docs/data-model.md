@@ -34,15 +34,26 @@
   `deliveries.spf_recheck`（二次 SPF 判定还没接）、`prefixes.observed_domains`（随泄漏检测，M3）
 
 **数据库角色**：部署时 yuuka 用两个非超级用户角色连库（建法见 [`deploy/postgres-roles.sh`](../deploy/postgres-roles.sh)，
-接线见 [`cmd/yuuka/db.go`](../cmd/yuuka/db.go)）：owner 拥有库和 schema、只用来在启动时跑迁移；
+接线见 [`cmd/yuuka/db.go`](../cmd/yuuka/db.go)）：owner 拥有库和 schema、只用来跑迁移；
 app 只有表上的增删改查和序列的 `USAGE`（经 `ALTER DEFAULT PRIVILEGES`，以后迁移建的表自动覆盖），
 没有任何 DDL。运行时的一切查询都以 app 身份执行，所以一条被请求影响的 SQL 最多改行，
 改不了表结构、删不了表、也碰不到别的库。`pg_trgm` 是 trusted 扩展，库的 owner 就能装，不需要超级用户。
-放弃的东西：`serve` 启动时要迁移，所以进程环境里仍有 owner 的连接串，拿到进程环境的人照样拿到 owner；
-真正隔开要把迁移挪到单独的一次性步骤，那需要一个迁移子命令，目前不值得为它新增 CLI 面。
-另一个小缺口：`schema_migrations` 也是 owner 建的表，app 能改它的行，后果是迁移重放失败、
-`serve` 拒绝启动，不会丢数据。不设 owner 连接串时一个角色兼做两件事，开发和测试都这样跑；
-测试夹具则按部署的形状给每个测试建 schema（[`storetest`](../internal/store/storetest/storetest.go)），
+
+迁移是单独的一次性步骤 `yuuka migrate`，部署里只有它拿到 owner 的连接串，跑几秒就退出；
+常驻的 `serve` 和其余命令只有 app 的连接串，启动时只读地核对 `schema_migrations` 的版本：
+相等才启动，落后就拒绝并提示先跑 `yuuka migrate`，超前（被新版本迁移过）也拒绝。
+这样拿到 `serve` 进程环境的人拿不到 owner。代价是部署多一个步骤（Compose 里是一个先于 `serve`
+跑完的一次性服务，见 [`deploy/compose.yaml`](../deploy/compose.yaml)），忘了它时 `serve` 起不来，而不是带着旧表结构跑。
+
+要不要迁移只看配置，不探测角色权限：只给一个连接串的命令从不跑 DDL，哪怕这个角色其实能跑。
+否则同一份配置的行为取决于连上的是谁，部署忘了迁移步骤时也可能「碰巧」能用。
+放弃的是单角色开发库的自动迁移：拉到新迁移后要手动 `yuuka migrate` 一次（`devseed` 自己会迁移）。
+保留的便利是：给命令同时设了 owner 连接串时，它启动时先以 owner 迁移，和以前一样，开发和测试可以这么跑；
+部署模板不这样用。
+
+两个小缺口：`schema_migrations` 是 owner 建的表，app 能改它的行，后果是版本核对不过、`serve` 拒绝启动，
+不会丢数据；版本号只说明迁移记录到了哪一步，不核对表结构本身。
+测试夹具按部署的形状给每个测试建 schema（[`storetest`](../internal/store/storetest/storetest.go)），
 所以整个测试集都在 app 角色下跑过一遍。
 
 尚未实现的表和列（设计）：

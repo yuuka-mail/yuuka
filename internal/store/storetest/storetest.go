@@ -43,7 +43,7 @@ func New(t *testing.T) (*store.DB, *pgxpool.Pool) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = store.New(owner).Migrate(ctx)
+	_, _, err = store.New(owner).Migrate(ctx)
 	owner.Close()
 	if err != nil {
 		t.Fatal(err)

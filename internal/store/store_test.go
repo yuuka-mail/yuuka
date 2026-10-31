@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
@@ -30,15 +31,109 @@ func record(n int, contentHash [32]byte, to string) store.Ingest {
 
 func TestMigrateIsIdempotent(t *testing.T) {
 	t.Parallel()
-	db, pool := storetest.New(t)
-	if err := db.Migrate(t.Context()); err != nil {
+	ownerURL, _ := storetest.URLs(t)
+	pool, err := pgxpool.New(t.Context(), ownerURL)
+	if err != nil {
 		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	db := store.New(pool)
+
+	from, latest, err := db.Migrate(t.Context())
+	if err != nil || from != 0 || latest == 0 {
+		t.Fatalf("first migrate: %d -> %d, %v", from, latest, err)
+	}
+	from, to, err := db.Migrate(t.Context())
+	if err != nil || from != latest || to != latest {
+		t.Fatalf("second migrate: %d -> %d, want %d -> %[3]d, %v", from, to, latest, err)
 	}
 	// Applied once each: one row per version, versions 1..n.
 	var n, maxVersion int
-	err := pool.QueryRow(t.Context(), `SELECT count(*), max(version) FROM schema_migrations`).Scan(&n, &maxVersion)
-	if err != nil || n == 0 || n != maxVersion {
-		t.Fatalf("schema_migrations rows = %d, max version %d, %v", n, maxVersion, err)
+	err = pool.QueryRow(t.Context(), `SELECT count(*), max(version) FROM schema_migrations`).Scan(&n, &maxVersion)
+	if err != nil || n != latest || maxVersion != latest {
+		t.Fatalf("schema_migrations rows = %d, max version %d, want %d, %v", n, maxVersion, latest, err)
+	}
+}
+
+// Two migrators starting at once (two `yuuka migrate` runs, or migrate
+// racing a dev serve) queue on the advisory lock: one applies everything,
+// the others find it done, and none fails.
+func TestConcurrentMigrate(t *testing.T) {
+	t.Parallel()
+	ownerURL, _ := storetest.URLs(t)
+	const n = 4
+	var wg sync.WaitGroup
+	froms, tos := make([]int, n), make([]int, n)
+	errs := make([]error, n)
+	for i := range n {
+		// A pool each: separate sessions, as separate processes have.
+		pool, err := pgxpool.New(t.Context(), ownerURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(pool.Close)
+		wg.Go(func() { froms[i], tos[i], errs[i] = store.New(pool).Migrate(t.Context()) })
+	}
+	wg.Wait()
+	applied := 0
+	for i := range n {
+		if errs[i] != nil {
+			t.Fatal(errs[i])
+		}
+		if tos[i] != tos[0] {
+			t.Errorf("migrator %d ended at %d, another at %d", i, tos[i], tos[0])
+		}
+		if froms[i] == 0 {
+			applied++
+		} else if froms[i] != tos[i] {
+			t.Errorf("migrator %d applied %d -> %d after another started", i, froms[i], tos[i])
+		}
+	}
+	if applied != 1 {
+		t.Errorf("%d migrators started from an empty schema, want 1", applied)
+	}
+}
+
+// CheckVersion is what every command but migrate runs on start: it reads
+// and never writes, so the app role can run it, and it tells behind from
+// ahead.
+func TestCheckVersion(t *testing.T) {
+	t.Parallel()
+	ownerURL, appURL := storetest.URLs(t)
+	owner, err := pgxpool.New(t.Context(), ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(owner.Close)
+	app, err := pgxpool.New(t.Context(), appURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(app.Close)
+	db := store.New(app)
+
+	// Empty: version 0, behind.
+	v, ok := errors.AsType[*store.VersionError](db.CheckVersion(t.Context()))
+	if !ok || v.Current != 0 || !v.Behind() {
+		t.Fatalf("empty schema: %+v", v)
+	}
+	_, latest, err := store.New(owner).Migrate(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CheckVersion(t.Context()); err != nil {
+		t.Fatalf("up to date: %v", err)
+	}
+	// Ahead: a newer binary migrated it. Migrate refuses too.
+	if _, err := owner.Exec(t.Context(), `INSERT INTO schema_migrations (version, name) VALUES ($1, 'future.sql')`, latest+1); err != nil {
+		t.Fatal(err)
+	}
+	v, ok = errors.AsType[*store.VersionError](db.CheckVersion(t.Context()))
+	if !ok || v.Current != latest+1 || v.Behind() {
+		t.Fatalf("ahead: %+v", v)
+	}
+	if _, _, err := store.New(owner).Migrate(t.Context()); !errors.As(err, &v) {
+		t.Fatalf("migrate ahead: %v", err)
 	}
 }
 
@@ -68,13 +163,15 @@ func TestAppRoleRefusesDDL(t *testing.T) {
 		}
 	}
 
-	// Up to date, Migrate is a read-only version check the app role
-	// passes (TestMigrateIsIdempotent). With something left to apply it
-	// fails instead of half-applying.
+	// Up to date, Migrate only reads, so even the app role passes it.
+	// With something left to apply it fails instead of half-applying.
+	if _, _, err := db.Migrate(t.Context()); err != nil {
+		t.Fatalf("up-to-date migrate as app role: %v", err)
+	}
 	if _, err := pool.Exec(t.Context(), `DELETE FROM schema_migrations WHERE version = (SELECT max(version) FROM schema_migrations)`); err != nil {
 		t.Fatal(err)
 	}
-	err := db.Migrate(t.Context())
+	_, _, err := db.Migrate(t.Context())
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); !ok || pgErr.Code != "42501" {
 		t.Errorf("migrate as app role: %v, want insufficient_privilege", err)
 	}

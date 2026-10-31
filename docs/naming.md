@@ -14,6 +14,7 @@
 ```
 github.com/yuuka-mail/yuuka             # module
 yuuka serve                             # 常驻：HTTP + ingest + 调度
+yuuka migrate                           # 以 schema owner 身份应用待执行的迁移；部署里唯一持有 owner 凭据的一次性步骤（§4）
 yuuka reconcile                         # 手动跑一轮 §2.1 的 reconcile，可选全量对账
 yuuka ingest --once                     # 手动跑一轮 pull driver
 yuuka reparse                           # 从不可变原件重建派生数据（§3.1、§4.2）
