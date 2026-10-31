@@ -8,8 +8,10 @@
 
 ## 现状
 
-M0、M1 已完成：Cloudflare 收信、入库与重投去重，MIME 解析、线程与搜索，passkey 登录，
-WebUI，agent 结构化视图与只读 MCP。下一步是部署和 M2（发信）。完整设计在 [`docs/`](docs/)
+M0–M2 已完成：Cloudflare 收信、入库与重投去重，MIME 解析、线程与搜索，passkey 登录，
+WebUI，agent 结构化视图与 MCP；发信：outbox 状态机与崩溃恢复、按身份授权（`draft` / `auto` 档）、
+唯一的提交核心、SMTP submission 口、REST/MCP 的草稿与提交、WebUI 撰写。
+下一步是 M3（规则引擎、分区与验证码提取、agent 专属身份的 `review` 外发）。完整设计在 [`docs/`](docs/)
 （中文，节号 §1–§13 全局唯一，索引见 [`docs/README.md`](docs/README.md)），路线见 [`docs/roadmap.md`](docs/roadmap.md)。
 已实现的部分以代码为准，文档只讲为什么（见下文「文档」）。
 动手前按任务读对应章节，不必通读：
@@ -20,7 +22,7 @@ WebUI，agent 结构化视图与只读 MCP。下一步是部署和 M2（发信�
 | 数据库、迁移、去重 | §4 |
 | agent 面、MCP、scope | §8、§13 |
 | REST 端点、API 契约 | §5.1、§12.7、§13.8 |
-| 发信、outbox、SMTP | §3.6、§10.2 |
+| 发信、outbox、SMTP | §3.6、§4.5、§8.9、§10.2、§13.5、§13.6 |
 | 多账户、IMAP、归档卸载 | §9 |
 | 前端 | §12 |
 
