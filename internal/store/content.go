@@ -273,13 +273,9 @@ func (w *writer) insertMessage(ctx context.Context, id string, ref RawRef, msg m
 // were stored, i.e. submission. On a tie a delivery wins, then the lower
 // id; ReparseTarget.Canonical picks the same one.
 func (w *writer) updateMessage(ctx context.Context, id string, msg mimeparse.Message) error {
-	var prefixes []string
-	rows, err := w.tx.Query(ctx, `SELECT DISTINCT prefix FROM deliveries WHERE message_id = $1 ORDER BY prefix`, id)
+	prefixes, err := w.prefixesOf(ctx, id)
 	if err != nil {
-		return fmt.Errorf("message prefixes: %w", err)
-	}
-	if prefixes, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
-		return fmt.Errorf("message prefixes: %w", err)
+		return err
 	}
 	var date *time.Time
 	if !msg.Date.IsZero() {
@@ -319,6 +315,20 @@ func (w *writer) updateMessage(ctx context.Context, id string, msg mimeparse.Mes
 		w.change("message", id)
 	}
 	return w.extract(ctx, id, msg)
+}
+
+// prefixesOf returns the local parts of the deliveries of message id,
+// sorted: the prefixes classify.Of reads.
+func (w *writer) prefixesOf(ctx context.Context, id string) ([]string, error) {
+	rows, err := w.tx.Query(ctx, `SELECT DISTINCT prefix FROM deliveries WHERE message_id = $1 ORDER BY prefix`, id)
+	if err != nil {
+		return nil, fmt.Errorf("message prefixes: %w", err)
+	}
+	prefixes, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("message prefixes: %w", err)
+	}
+	return prefixes, nil
 }
 
 // foldAddrs is messages.to_addrs, cc_addrs and reply_to_addrs of a

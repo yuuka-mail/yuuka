@@ -13,7 +13,7 @@ func TestCorpus(t *testing.T) {
 	want := map[string]Class{
 		"alternative-reply":     Human,   // In-Reply-To
 		"plain-otp":             Machine, // noreply sender
-		"gb2312-otp":            Machine, // 验证码 + digits
+		"gb2312-otp":            Machine, // 验证码是 739201
 		"html-only-newsletter":  Machine, // List-Unsubscribe
 		"dsn-report":            Machine, // multipart/report
 		"lf-no-mime":            Machine, // Auto-Submitted
@@ -30,8 +30,27 @@ func TestCorpus(t *testing.T) {
 		"html-reply-tracking":   Human, // In-Reply-To
 		"plain-quoted-list":     Human, // In-Reply-To
 		"phish-dmarc-fail":      Unknown,
+
+		// The extraction corpus: a code or sign-in link the extractor is
+		// sure of makes a notification, whoever the sender claims to be.
+		"en-alnum-otp":       Machine, // verification code: H7K2QX
+		"en-reset-password":  Machine, // "Reset password" link
+		"en-unverified-otp":  Machine, // login code is 771204
+		"zh-gbk-otp":         Machine, // 动态码为 573920
+		"en-device-code":     Machine, // noreply sender
+		"en-html-otp":        Machine, // no-reply sender
+		"en-magic-link":      Machine, // List-Unsubscribe
+		"en-promo-code":      Machine, // List-Unsubscribe
+		"ja-otp":             Machine, // no-reply sender
+		"zh-subject-otp":     Machine, // noreply sender
+		"en-grouped-code":    Unknown, // "code to finish signing in", a line away: not sure enough
+		"en-booking":         Unknown, // a booking reference is no code
+		"en-invoice-account": Unknown,
+		"en-order-shipped":   Unknown,
+		"en-security-alert":  Unknown,
+		"zh-order-negative":  Unknown,
 	}
-	files, _ := filepath.Glob("../../testdata/eml/*.eml")
+	files, _ := filepath.Glob("../../testdata/*/*.eml")
 	for _, f := range files {
 		name := strings.TrimSuffix(filepath.Base(f), ".eml")
 		raw, err := os.ReadFile(f)
@@ -69,6 +88,21 @@ func TestSignals(t *testing.T) {
 			m.Subject = "Re: the code 1234 you asked about"
 		}, nil, Human},
 		{"year is not a code", func(m *mimeparse.Message) { m.Subject = "plans for 2027" }, nil, Unknown},
+		{"letters and digits code", func(m *mimeparse.Message) { m.BodyText = "Your verification code is: H7K2QX" }, nil, Machine},
+		{"sign-in link", func(m *mimeparse.Message) {
+			m.Links = []mimeparse.Link{{Href: "https://example.org/login?t=1", Text: "Sign in"}}
+		}, nil, Machine},
+		{"a reply quoting a code", func(m *mimeparse.Message) {
+			m.InReplyTo = "x@example.org"
+			m.BodyText = "It worked, thanks.\n\n> Your verification code is 482913"
+		}, nil, Human},
+		{"a reply by References only", func(m *mimeparse.Message) {
+			m.References = []string{"x@example.org"}
+			m.BodyText = "Here it is: your verification code is 482913"
+		}, nil, Human},
+		{"a forwarded code", func(m *mimeparse.Message) { m.Subject = "Fwd: Your verification code is 482913" }, nil, Human},
+		{"a door code from a person", func(m *mimeparse.Message) { m.BodyText = "The door code is 4821, see you at 7." }, nil, Unknown},
+		{"an order number", func(m *mimeparse.Message) { m.Subject = "Order code 12345678 confirmed" }, nil, Unknown},
 	}
 	for _, c := range cases {
 		m := base

@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/yuuka-mail/yuuka/internal/classify"
 	"github.com/yuuka-mail/yuuka/internal/extract"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
 )
@@ -124,9 +125,15 @@ func (db *DB) UnextractedMessages(ctx context.Context, limit int) ([]ReparseTarg
 }
 
 // Reextract rewrites the extractions of message id from msg, a fresh
-// parse of its canonical raw, and nothing else: the other content
-// columns stay as the last fold or reparse left them. It reports whether
-// the extractions changed.
+// parse of its canonical raw, and the class, which reads them
+// (classify.Of): a message the extractor is sure delivers a code is a
+// notification. Nothing else: the other content columns stay as the last
+// fold or reparse left them, and the thread keeps its members, only its
+// stored class follows. That is safe because the extractor only ever
+// moves non-replies between unknown and machine, and threads join by
+// subject and sender for human mail only (§4.1); like every derived
+// change, the next reparse recomputes threads anyway. It reports whether
+// anything changed.
 func (db *DB) Reextract(ctx context.Context, id string, msg mimeparse.Message) (bool, error) {
 	changed := false
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
@@ -136,6 +143,21 @@ func (db *DB) Reextract(ctx context.Context, id string, msg mimeparse.Message) (
 		w := writer{tx: tx}
 		if err := w.extract(ctx, id, msg); err != nil {
 			return err
+		}
+		prefixes, err := w.prefixesOf(ctx, id)
+		if err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE messages SET class = $2 WHERE id = $1 AND class <> $2`,
+			id, int16(classify.Of(msg, prefixes)))
+		if err != nil {
+			return fmt.Errorf("re-extract: class: %w", err)
+		}
+		if tag.RowsAffected() > 0 {
+			w.change("message", id)
+			if err := w.refreshThreadOf(ctx, id); err != nil {
+				return err
+			}
 		}
 		changed = len(w.changes) > 0
 		return w.flush(ctx)

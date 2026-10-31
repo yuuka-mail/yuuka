@@ -88,6 +88,38 @@ func TestExtractionsFollowTheContent(t *testing.T) {
 	}
 }
 
+// The class reads the extractor (classify.Of): mail that delivers a code
+// is a notification, and the re-extraction pass sets the class of mail
+// stored before that, thread aggregate included.
+func TestReextractClassifies(t *testing.T) {
+	t.Parallel()
+	db, pool := storetest.New(t)
+	ctx := t.Context()
+	acct := storetest.Account(t, db)
+	raw := letter("security@example.org", "a@example.com", "Example security code", "", "Your verification code is: H7K2QX")
+	id := inbound(t, db, acct, "a", raw, time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC))
+	if n := count(t, pool, `SELECT count(*) FROM messages m JOIN threads t ON t.id = m.thread_id
+		WHERE m.id = $1 AND m.class = 1 AND t.class = 1`, id); n != 1 {
+		t.Fatal("a letter-and-digit code did not make a notification")
+	}
+	// What the M2 classifier left: unknown, and not extracted yet.
+	for _, q := range []string{
+		`UPDATE messages SET class = 0, extract_version = 0 WHERE id = $1`,
+		`UPDATE threads SET class = 0 WHERE id = (SELECT thread_id FROM messages WHERE id = $1)`,
+	} {
+		if _, err := pool.Exec(ctx, q, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if changed, err := db.Reextract(ctx, id, mimeparse.Parse(raw)); err != nil || !changed {
+		t.Fatalf("re-extract: %v %v", changed, err)
+	}
+	if n := count(t, pool, `SELECT count(*) FROM messages m JOIN threads t ON t.id = m.thread_id
+		WHERE m.id = $1 AND m.class = 1 AND t.class = 1`, id); n != 1 {
+		t.Error("class not set by the re-extraction")
+	}
+}
+
 // Upgrading to 0008: messages already stored have no extractions and
 // version 0, which the backlog pass lists; the migration cannot fill
 // them, since that takes parsing the raw.

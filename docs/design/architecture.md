@@ -346,8 +346,13 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 
 4. **双区分流（machine / human）**
    `class` 字段 + 规则引擎，信号：`List-Unsubscribe`、`Auto-Submitted`、
-   `Precedence: bulk`、`noreply` 类发件人、无 `In-Reply-To` 且命中验证码模式、
+   `Precedence: bulk`、`noreply` 类发件人、不是回信却带着提取器确信的验证码或登录链接、
    前缀命名约定（`svc-*` / `gh-*`）。
+   「验证码模式」就是提取器本身（[`classify`](../../internal/classify/classify.go) 调 `extract`，置信度 ≥ 85，
+   即码或链接紧挨着说明它的词）：分类和码位用同一个判断，不会出现「码位显示了码、信却在会话区」。
+   只看不是回信的信——有 `In-Reply-To` / `References`、或主题带 `Re:` `Fwd:` 的信是人在说话，
+   引用或转发了一个码也还是人写的；判断回信只看头部，零成本。代价：人写的第一封信里如果原样写着
+   「我的验证码是 123456」，会被分进通知区；邮件里不带任何回信标记的人转码，同样。改判可以纠正
    - 通知区：按前缀/服务聚合，自动提取验证码、magic link、过期时间，
      只读、可批量清理、推送到 TG；UI 重点是"一眼看到码"而不是读信。
      提取器（[`internal/extract`](../../internal/extract/extract.go)）偏精确不偏召回：
