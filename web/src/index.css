@@ -21,6 +21,8 @@
  * Light and dark follow the OS; there is no in-app switch in M1.
  */
 :root {
+  /* Native controls (the From select, scrollbars) follow the theme too. */
+  color-scheme: light dark;
   --radius: 0.5rem;
 
   --background: oklch(0.995 0 0);

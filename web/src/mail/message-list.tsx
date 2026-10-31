@@ -6,6 +6,7 @@ import type { MailList } from "@/api/queries";
 import type { MessageSummary } from "@/api/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listTime, localPart, sender } from "@/lib/format";
+import { OutgoingMark } from "@/send/marks";
 import { cn } from "@/lib/utils";
 
 const rowHeight = 56;
@@ -107,6 +108,8 @@ function Row({ m, selected, tag, onSelect }: { m: MessageSummary; selected: bool
         )}
         {tag && <span className="shrink-0 rounded-sm bg-muted px-1 text-meta text-muted-foreground">notification</span>}
         <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-meta text-muted-foreground tabular-nums">
+          {/* Mail we sent says where it stands: its existence is not delivery (§12.10). */}
+          {m.outgoing && <OutgoingMark state={m.outgoing.state} className="mr-1" />}
           {m.quarantined && <TriangleAlertIcon aria-label="quarantined" className="size-3 text-warning" />}
           {m.has_attach && <PaperclipIcon aria-label="attachment" className="size-3" />}
           {listTime(m.received_at)}

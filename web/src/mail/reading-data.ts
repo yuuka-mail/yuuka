@@ -8,9 +8,11 @@ import type { Facts, Content as ViewContent, Part as ViewPart, View as MessageVi
 // gives agents, so a person and an agent read the same paragraphs under
 // the same anchors.
 
-export function useMessage(id: string) {
-  // Derived content changes only on reparse; no need to refetch.
-  return $api.useQuery("get", "/api/v1/messages/{id}", { params: { path: { id } } }, { staleTime: 5 * 60_000 });
+export function useMessage(id: string, enabled = true) {
+  // Derived content changes only on reparse; no need to refetch. The
+  // outbox state on mail we sent does change; that is followed through
+  // the outbox, not here.
+  return $api.useQuery("get", "/api/v1/messages/{id}", { params: { path: { id } } }, { staleTime: 5 * 60_000, enabled: enabled && !!id });
 }
 
 /**

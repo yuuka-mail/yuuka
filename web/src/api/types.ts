@@ -36,6 +36,25 @@ export type Kind = S["Kind"];
 export type Block = S["Block"];
 export type Span = S["Span"];
 
+// Sending (M2, §8.9, §12.10).
+export type Code = S["Code"];
+export type Actor = S["Actor"];
+export type Draft = S["Draft"];
+export type DraftBody = S["DraftBody"];
+export type DraftState = S["DraftState"];
+export type Cite = S["Cite"];
+export type SubmitResult = S["SubmitResult"];
+export type HoldReason = S["HoldReason"];
+export type Tier = S["Tier"];
+export type SendingIdentity = S["SendingIdentity"];
+export type ReplyIdentity = S["ReplyIdentity"];
+export type Outgoing = S["Outgoing"];
+export type OutboxState = S["OutboxState"];
+export type OutboxEntry = S["OutboxEntry"];
+export type RecipientState = S["RecipientState"];
+export type Resolution = S["Resolution"];
+export type Sent = S["Sent"];
+
 // /auth/
 export type SessionInfo = S["SessionInfo"];
 export type RegisterBegin = S["RegisterBegin"];

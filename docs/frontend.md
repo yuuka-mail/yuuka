@@ -144,7 +144,7 @@ M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里�
 - **页面壳不需要会话**。`go:embed` 的 `index.html` 对任何非文件路径都返回（`no-store`），
   哈希命名的 `assets/` 缓存一年；壳加载后再同源 `fetch /auth/session`，401 就原地显示登录，
   URL 不变，所以从 TG 链接点进来、登录后直接落在那封信上。视图状态全部在 query string 里
-  （`area` `prefix` `dg` `q` `m`，以及 `a`：打开的信里的锚点，见 [`web/src/mail/view.ts`](../web/src/mail/view.ts)），不引路由库
+  （`area` `prefix` `dg` `q` `m`，`a`：打开的信里的锚点，以及 M2 撰写和外发用的几项，见 [`web/src/mail/view.ts`](../web/src/mail/view.ts)），不引路由库
 - **`web/dist/` 只跟踪 `.gitkeep`**，让新克隆不先构建前端也能编译 Go；这样的二进制对页面请求回 503
   并提示先构建前端。代价是 Vite 不能清空输出目录，改为构建前只删 `dist/assets`
 - **CSP** 是 `default-src 'none'` 加 self 的脚本、样式、图片、连接，`frame-ancestors 'none'`。
@@ -247,7 +247,7 @@ WebUI 是工具，不是展示面：一天打开几十次，每次几秒——�
 
 #### 侧栏是注意力的入口，不是地址目录
 
-- 从上到下：会话 / 通知 / 全部；已认领的前缀；检查
+- 从上到下：会话 / 通知 / 全部 / 草稿 / 外发（M2，§12.10）；已认领的前缀；检查
 - 已认领的前缀按字母序排，位置稳定，靠记忆找；带标签。一个给出去的地址一行，几十到上百行，列得下；
   超过一屏时顶部出一个筛选框，输入即过滤
 - **未认领的前缀不逐个列出。** catch-all 遇到字典攻击会有成千上万个，§3.3 本来就要求它们静默登记。
@@ -287,23 +287,41 @@ WebUI 是工具，不是展示面：一天打开几十次，每次几秒——�
 - **M2**：会话区按线程列、已读状态、通知的收起（需要写路径）
 - **M3**：提取值填进码位、改判、在界面上认领前缀、泄漏视图
 
-### 12.10 M2 撰写用的端点
+### 12.10 M2 的撰写与外发
 
-撰写器建在这几个端点上，路径、参数、响应以 [`openapi.json`](../internal/api/openapi.json) 为准，
-handler 在 [`internal/api/sending.go`](../internal/api/sending.go)。这里只写界面该怎么用它们、为什么是这个形状：
+撰写器、草稿、outbox 三个视图建在这几组端点上，路径、参数、响应以 [`openapi.json`](../internal/api/openapi.json) 为准，
+handler 在 [`internal/api/sending.go`](../internal/api/sending.go)；界面在 [`web/src/send/`](../web/src/send/)，
+措辞和状态到语气的映射集中在 [`outgoing.ts`](../web/src/send/outgoing.ts)（纯函数，有测试）。这里只写为什么是这个形状：
 
-- **身份选择器**：新信从 `GET /api/v1/identities` 取，回复从 `GET /api/v1/messages/{id}/reply-identities` 取
-  （第一项就是默认值，默认取自原信进来的地址，§9.3）。每个身份带着当前查看者的有效档位和 `sends`：
-  `false` 时同时给 `hold_reason` / `hold_detail`。选择器应当在按发送之前就把「会直接发出」和「会停在草稿等人确认」
-  区分开——这是系统在说（§12.5），不是 agent 在说。`sends` 是预览：收件人范围和限额要到提交时才算
-- **草稿**：`POST /api/v1/drafts` 建，`PUT /api/v1/drafts/{id}` 整体保存（自动保存直接 PUT 整份），
-  `DELETE` 删。`GET /api/v1/drafts` 默认只列还能改的（`state=draft,held`）；`state=outbox` 是已交出去的，
-  带 `outbox.state`。草稿的作者在 `author` 里：agent 写的草稿要用 agent 的设计 token 呈现（§12.5），
-  人按发送就是确认它（§8.9 规则 2），走的是同一个 submit 端点
-- **发送**：`POST /api/v1/drafts/{id}/submit`。`queued: false` 不是错误，是「停在草稿」，
-  界面按 `hold_reason` 原样告诉人为什么，而不是弹错误框；`409 conflict` 是重复提交（按钮防抖之外的兜底）
-- **发出后**：消息摘要、搜索命中和消息详情上的 `outgoing`（outbox id + 状态）说明这是我们发的、走到了哪一步；
-  信本身存在不代表对方收到了。`GET /api/v1/outbox` 和 `/outbox/{id}` 给逐收件人的状态和尝试次数，
-  要 `delivery:read`（里面有 Bcc）。状态为 `unknown` 的那一行由人决定：`POST /api/v1/outbox/{id}/resolve`，
-  `sent` / `resend` / `abandon`，只接受 human 主体，记一条和 CLI 同名的 `outbox.resolve`。
-  `resend` 可能让对方收到两封，界面上要把这个代价写在按钮旁边
+- **信息架构**（§12.9）：侧栏顶组在「全部」下面加「草稿」「外发」两项，不另开顶层导航。草稿的计数是还能改的草稿数，
+  外发的计数只数 `unknown`（警告色）：只有它在等一个人的决定，排队中、已发出都不需要人做什么。
+  外发要 `delivery:read`（里面有 Bcc），会话没有这个 scope 就不显示这一项。撰写器占阅读区那一栏，
+  和打开一封信是同一个位置；顶栏有「Compose」，阅读区有「Reply」，键盘是 `c` / `r`。
+  视图状态仍在 query string 里：`compose=1` 是新信、`reply=<id>` 是回复、`d=<id>` 是草稿、`o=<id>` 是 outbox 行、
+  `st` 是草稿或 outbox 列表的筛选（[`view.ts`](../web/src/mail/view.ts)）
+- **自动保存**：第一次有改动时 `POST` 建草稿，之后防抖 `PUT` 整份；保存排成一条链，建草稿之前不会有 `PUT` 抢跑。
+  建好以后地址栏换成 `d=<id>`，撰写器不重新挂载（字段已经在里面，正在打字）。只打开一个回复、什么都没改，
+  不建草稿——草稿列表里不该出现没人写过一个字的东西。按发送时没有草稿就先建
+- **身份选择器**：新信从 `GET /api/v1/identities`，回复从 `reply-identities`（第一项是默认，取自原信进来的地址，§9.3）。
+  选项文字里带「sends (auto)」或「held: owner cap」，选中项下面一行是 yuuka 署名的预览：「Send queues it · auto · to any recipient · 10/hour」
+  或「Held as a draft: drafts only」加服务端的 `hold_detail` 原文。原因的短语按 `hold_reason` 定，不按 `hold_detail` 的文字分支——
+  后者是给人看的，会改。`*@zone` 这种模式身份要再填本地部分，因为 From 只能是地址。
+  `sends` 只是预览：收件人范围和限额在提交时才算，所以「会发出」可能变成停在草稿，反过来不会
+- **停在草稿是正常结果**（§8.9）：提交返回 `queued: false` 时，表单上方出一个系统声音的框，写原因和「什么都没发出」，
+  草稿留着，可以改了再发。不弹错误框、不用错误色。`queued: true` 时表单变只读，框里是 outbox 这一行的事实，
+  状态还会自己变（排队、发送、重试）时每 3 秒轮询一次，到终态停
+- **agent 写的草稿**：列表行和撰写器标题旁是 agent 的圆点和名字，撰写器顶部是 agent 署名的框（写于何时、`cites` 指向哪封信哪一段），
+  正文左边一道 agent 色的竖线——这段文字是 agent 写的。人按的按钮叫「Confirm and send」，预览行写「Send confirms arisu's draft」：
+  人确认代替档位（§8.9 规则 2），所以这里不显示人自己的档位预览，From 也不让改。身份属于另一个人时，预览直接写只有 owner 能确认
+- **错误按 `code` 说**（§5.1）：每个 `code` 一句固定的话，`detail` 只在 `invalid_body` / `no_identity` / `submission_rejected` 这类
+  指名了具体字段或地址的 code 后面跟着显示；`code` 本身以等宽小字附在后面，方便对照日志
+- **发出的信在列表里**：消息摘要、搜索命中和线程条上的 `outgoing` 显示成一个小标记（发出图标加「queued」「sent」「may have been sent」「not sent」），
+  颜色按意思：已送达用系统色，需要看一眼的用警告色，没发出用错误色，正在走的用灰。阅读区里只发出、没收回来过的信，
+  事实框不再说「unverified」：认证一行写「none: sent by this system, never received」，另有一行「Sent: by this system as me@example.com · queued」，
+  时间标成「Submitted」。状态不需要人（排队、发送、已发出）时事实框照样收成一行；`unknown`、失败、部分送达时整框展开，带「Open in outbox」
+- **outbox**：列表行第一行是 From、状态、时间，第二行是每个收件人和它自己的状态——部分送达一眼就看得出来。
+  outbox 行没有主题（主题在 Sent 副本里），详情页从 Sent 副本取。`unknown` 的详情下面是三个选项，每个旁边写清代价：
+  「It was sent」（记成收下）、「Send it again」（可能让对方收到两封，选中时按钮变成错误色并重复这句话）、「Give up」（记成没发出）。
+  选一个、再按一次才提交。只有 human 主体且带 `submission:send` 的会话看得到这三个选项，其余只看到一句「只有人能决定」
+- **编辑器仍是 textarea**（§12.1 定的是 CodeMirror）：除了 Ctrl+Enter 发送，没有任何粘贴和按键逻辑长在它上面，换编辑器时不必重写。
+  不做 Markdown 预览：预览要一个 Markdown 渲染器，渲染结果又要进 DOM；在有理由加依赖之前，发出去的样子以 Sent 副本为准

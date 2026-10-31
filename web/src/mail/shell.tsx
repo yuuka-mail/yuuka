@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { LogOutIcon, PanelLeftIcon, SearchIcon, XIcon } from "lucide-react";
+import { LogOutIcon, PanelLeftIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import type { SessionInfo } from "@/api/types";
@@ -12,12 +12,17 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { count } from "@/lib/format";
 import { navigate, useLocation } from "@/lib/router";
 import { cn } from "@/lib/utils";
+import { Composer } from "@/send/compose";
+import { DraftsList, parseDraftFilter } from "@/send/drafts-list";
+import { OutboxList, parseOutboxFilter } from "@/send/outbox-list";
+import { OutboxPane } from "@/send/outbox-pane";
+import { abilities, outboxFilters, type OutboxFilter } from "@/send/outgoing";
 
 import { MessageList } from "./message-list";
 import { PrefixPane } from "./prefix-pane";
 import { ReadingPane } from "./reading-pane";
 import { UnclaimedList } from "./unclaimed-list";
-import { knownTotal, parseView, viewHref, type Area, type View } from "./view";
+import { closeComposer, composing, knownTotal, mainOpen, parseView, viewHref, type Area, type View } from "./view";
 
 /**
  * The three columns: prefixes · message list · reading pane. Below lg the
@@ -29,6 +34,14 @@ export function MailShell({ session }: { session: SessionInfo }) {
   const view = parseView(searchParams);
   const [showPrefixes, setShowPrefixes] = useState(false);
   const searchBox = useRef<HTMLInputElement>(null);
+  const can = abilities(session);
+  // The composer stays mounted when its first save puts the new draft's
+  // id in the URL: the fields are already in it, mid-typing.
+  const [adopted, setAdopted] = useState<{ key: string; id: string }>();
+  // Every Compose is a new composer, even over one that is still "new".
+  const [fresh, setFresh] = useState(0);
+  const openKey = view.d ? `d:${view.d}` : view.reply ? `reply:${view.reply}` : `new:${fresh}`;
+  const composerKey = adopted && view.d === adopted.id ? adopted.key : openKey;
 
   // Opening a message replaces the history entry; changing what the list
   // shows pushes one, so Back returns to the previous list.
@@ -41,16 +54,24 @@ export function MailShell({ session }: { session: SessionInfo }) {
   // so Back from it lands where it was picked.
   const pick = (next: Partial<View>) => {
     setShowPrefixes(false);
-    go({ q: undefined, m: undefined, prefix: undefined, dg: false, ...next });
+    go({ q: undefined, m: undefined, prefix: undefined, dg: false, o: undefined, st: undefined, ...closeComposer, ...next });
+  };
+  const compose = (next: Partial<View>) => go({ ...closeComposer, o: undefined, ...next });
+  const startNew = () => {
+    setFresh((n) => n + 1);
+    compose({ compose: true });
   };
 
   const searching = !!view.q;
-  const unclaimed = !searching && !view.prefix && view.area === "unclaimed";
+  const browsing = !searching && !view.prefix;
+  const unclaimed = browsing && view.area === "unclaimed";
+  const drafts = browsing && view.area === "drafts";
+  const outbox = browsing && view.area === "outbox";
   const messages = useMessageList(view, !searching);
   const hits = useSearchList(view.q ?? "", view.dg, searching);
   const list = searching ? hits : messages;
 
-  useKeys(list, view, go, searchBox);
+  useKeys(drafts || outbox || unclaimed ? noList : list, view, go, searchBox, can.compose ? startNew : undefined);
 
   return (
     <div className="flex h-full flex-col">
@@ -60,33 +81,67 @@ export function MailShell({ session }: { session: SessionInfo }) {
         </Button>
         <Logo className="hidden w-[12.25rem] sm:inline-flex" />
         <SearchBox ref={searchBox} value={view.q ?? ""} onSearch={(q) => go({ q: q || undefined, m: undefined }, !!view.q === !!q)} />
+        {can.compose && (
+          <Button variant="outline" size="sm" aria-label="Compose" title="New message (c)" onClick={startNew}>
+            <SquarePenIcon data-icon="inline-start" />
+            <span className="max-sm:sr-only">Compose</span>
+          </Button>
+        )}
         <span className="ml-auto hidden truncate text-meta text-muted-foreground sm:inline">{session.principal}</span>
         <Logout />
       </header>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[22rem_1fr] lg:grid-cols-[13.5rem_24rem_1fr]">
         <aside className="hidden min-h-0 flex-col border-r bg-sidebar lg:flex">
-          <PrefixPane view={view} onPick={pick} />
+          <PrefixPane view={view} can={can} onPick={pick} />
         </aside>
 
-        <section className={cn("min-h-0 flex-col border-r", view.m ? "hidden md:flex" : "flex")}>
+        <section className={cn("min-h-0 flex-col border-r", mainOpen(view) ? "hidden md:flex" : "flex")}>
           {showPrefixes && (
             <div className="flex min-h-0 flex-1 flex-col bg-sidebar lg:hidden">
-              <PrefixPane view={view} onPick={pick} />
+              <PrefixPane view={view} can={can} onPick={pick} />
             </div>
           )}
           <div className={cn("min-h-0 flex-1 flex-col", showPrefixes ? "hidden lg:flex" : "flex")}>
             <ListHeader view={view} list={list} go={go} pick={pick} />
             {unclaimed ? (
               <UnclaimedList onPick={(prefix) => go({ prefix, m: undefined })} />
+            ) : drafts ? (
+              <DraftsList session={session} states={parseDraftFilter(view.st)} selected={view.d} onSelect={(d) => compose({ d, m: undefined })} />
+            ) : outbox ? (
+              <OutboxList filter={parseOutboxFilter(view.st)} selected={view.o} onSelect={(o) => go({ ...closeComposer, o, m: undefined }, true)} />
             ) : (
               <MessageList list={list} selected={view.m} markNotifications={searching} onSelect={(m) => go({ m }, true)} />
             )}
           </div>
         </section>
 
-        <main className={cn("min-h-0 min-w-0 flex-col", view.m ? "flex" : "hidden md:flex")}>
-          {view.m ? (
+        <main className={cn("min-h-0 min-w-0 flex-col", mainOpen(view) ? "flex" : "hidden md:flex")}>
+          {composing(view) ? (
+            <Composer
+              key={composerKey}
+              session={session}
+              draftId={view.d}
+              replyTo={view.reply}
+              onCreated={(id) => {
+                setAdopted({ key: composerKey, id });
+                go({ ...closeComposer, d: id }, true);
+              }}
+              onClose={() => go(closeComposer, true)}
+              onDeleted={() => go(closeComposer, true)}
+              onOpenMessage={(m, a) => go({ ...closeComposer, m, a })}
+              onOpenOutbox={(o) => go({ ...closeComposer, area: "outbox", prefix: undefined, q: undefined, m: undefined, st: undefined, o })}
+            />
+          ) : view.o ? (
+            <OutboxPane
+              key={view.o}
+              id={view.o}
+              can={can}
+              onBack={() => go({ o: undefined }, true)}
+              onOpenMessage={(m) => go({ o: undefined, m })}
+              onOpenDraft={(d) => go({ o: undefined, area: "drafts", st: "outbox", d })}
+            />
+          ) : view.m ? (
             <ReadingPane
               key={view.m}
               id={view.m}
@@ -94,16 +149,22 @@ export function MailShell({ session }: { session: SessionInfo }) {
               onAnchor={(a) => go({ a }, true)}
               onBack={() => go({ m: undefined }, true)}
               onOpen={(m) => go({ m }, true)}
+              onReply={can.compose ? () => compose({ reply: view.m }) : undefined}
+              onOpenOutbox={can.outbox ? (o) => go({ area: "outbox", prefix: undefined, q: undefined, m: undefined, st: undefined, o }) : undefined}
             />
           ) : (
             <div className="m-auto text-center text-small text-muted-foreground">
               {unclaimed ? (
                 <p>Pick a prefix to list its mail.</p>
+              ) : drafts ? (
+                <p>No draft open.</p>
+              ) : outbox ? (
+                <p>Pick a row to see each recipient and the attempts.</p>
               ) : (
                 <>
                   <p>No message selected.</p>
                   <p className="mt-1">
-                    <Kbd>j</Kbd> <Kbd>k</Kbd> move · <Kbd>/</Kbd> search · <Kbd>Esc</Kbd> close
+                    <Kbd>j</Kbd> <Kbd>k</Kbd> move · <Kbd>/</Kbd> search · <Kbd>r</Kbd> reply · <Kbd>c</Kbd> compose · <Kbd>Esc</Kbd> close
                   </p>
                 </>
               )}
@@ -123,6 +184,8 @@ const areaTitles: Record<Area, string> = {
   conversations: "Conversations",
   notifications: "Notifications",
   all: "All mail",
+  drafts: "Drafts",
+  outbox: "Outbox",
   downgraded: "Downgraded",
   unclaimed: "Unclaimed prefixes",
 };
@@ -161,6 +224,8 @@ function ListHeader({
   // Without the sidebar the two zones are a switch over the list, standing
   // in for the title it would repeat.
   const zone = browsing && (view.area === "conversations" || view.area === "notifications");
+  // Drafts and the outbox are not mail lists: their own lists, own filters.
+  const sending = browsing && (view.area === "drafts" || view.area === "outbox");
   return (
     <div className="flex shrink-0 flex-col gap-1.5 border-b px-3 py-2">
       <div className="flex items-baseline gap-2">
@@ -185,7 +250,7 @@ function ListHeader({
           </ToggleGroup>
         )}
         <h1 className={cn("min-w-0 truncate font-semibold", view.prefix && "font-mono", zone && "max-lg:sr-only")}>{title}</h1>
-        {!list.isLoading && (
+        {!list.isLoading && !sending && (
           <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
             {count(n)}
             {more && "+"}
@@ -199,7 +264,59 @@ function ListHeader({
         )}
       </div>
       {hint && <p className="text-small text-muted-foreground">{hint}</p>}
+      {browsing && view.area === "drafts" && <DraftFilter st={view.st} onChange={(st) => go({ st, d: undefined })} />}
+      {browsing && view.area === "outbox" && <OutboxFilterBar st={view.st} onChange={(st) => go({ st, o: undefined })} />}
     </div>
+  );
+}
+
+const draftFilterLabels = { draft: "Drafts", held: "Held", outbox: "In outbox" } as const;
+
+/** Which drafts to list: any of draft, held, in the outbox (§12.10). */
+function DraftFilter({ st, onChange }: { st?: string; onChange: (st: string | undefined) => void }) {
+  const value = parseDraftFilter(st);
+  return (
+    <ToggleGroup
+      multiple
+      size="sm"
+      variant="outline"
+      spacing={0}
+      aria-label="Show drafts"
+      value={value}
+      onValueChange={(v: string[]) => {
+        const next = parseDraftFilter(v.join(","));
+        // Draft and held is the default; it stays out of the URL.
+        onChange(v.length === 0 || next.join(",") === "draft,held" ? undefined : next.join(","));
+      }}
+    >
+      {(Object.keys(draftFilterLabels) as (keyof typeof draftFilterLabels)[]).map((k) => (
+        <ToggleGroupItem key={k} value={k} className="h-6 px-2 text-small">
+          {draftFilterLabels[k]}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
+  );
+}
+
+function OutboxFilterBar({ st, onChange }: { st?: string; onChange: (st: string | undefined) => void }) {
+  return (
+    <ToggleGroup
+      size="sm"
+      variant="outline"
+      spacing={0}
+      aria-label="Show outbox rows"
+      value={[parseOutboxFilter(st)]}
+      onValueChange={(v: string[]) => {
+        const f = v[0] as OutboxFilter | undefined;
+        if (f) onChange(f === "all" ? undefined : f);
+      }}
+    >
+      {(Object.keys(outboxFilters) as OutboxFilter[]).map((k) => (
+        <ToggleGroupItem key={k} value={k} className="h-6 px-2 text-small">
+          {outboxFilters[k].label}
+        </ToggleGroupItem>
+      ))}
+    </ToggleGroup>
   );
 }
 
@@ -265,11 +382,22 @@ function Logout() {
   );
 }
 
-/** j/k move through the list, / focuses search, Esc closes the message. */
-function useKeys(list: MailList, view: View, go: (next: Partial<View>, replace?: boolean) => void, search: React.RefObject<HTMLInputElement | null>) {
-  const state = useRef({ list, view, go });
+const noList: MailList = { items: [], hasMore: false, loadMore: () => undefined, isLoading: false, isFetchingMore: false, error: undefined };
+
+/**
+ * j/k move through the list, / focuses search, Esc closes what the main
+ * column shows, r replies to the open message, c starts a new one.
+ */
+function useKeys(
+  list: MailList,
+  view: View,
+  go: (next: Partial<View>, replace?: boolean) => void,
+  search: React.RefObject<HTMLInputElement | null>,
+  startNew: (() => void) | undefined,
+) {
+  const state = useRef({ list, view, go, startNew });
   useEffect(() => {
-    state.current = { list, view, go };
+    state.current = { list, view, go, startNew };
   });
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -279,8 +407,16 @@ function useKeys(list: MailList, view: View, go: (next: Partial<View>, replace?:
       if (e.key === "/") {
         e.preventDefault();
         search.current?.focus();
+      } else if (e.key === "Escape" && composing(cur.view)) {
+        cur.go(closeComposer, true);
+      } else if (e.key === "Escape" && cur.view.o) {
+        cur.go({ o: undefined }, true);
       } else if (e.key === "Escape" && cur.view.m) {
         cur.go({ m: undefined }, true);
+      } else if (e.key === "c" && cur.startNew && !composing(cur.view)) {
+        cur.startNew();
+      } else if (e.key === "r" && cur.startNew && cur.view.m && !composing(cur.view)) {
+        cur.go({ o: undefined, reply: cur.view.m });
       } else if (e.key === "j" || e.key === "k") {
         const i = cur.list.items.findIndex((m) => m.id === cur.view.m);
         const next = cur.list.items[e.key === "j" ? i + 1 : Math.max(i - 1, 0)];

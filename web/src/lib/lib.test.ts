@@ -13,6 +13,14 @@ describe("cn", () => {
   });
 });
 
+describe("composer in the URL", () => {
+  it("keeps one composer, a saved draft by its id", () => {
+    expect(viewHref({ ...parseView(new URLSearchParams("m=x&reply=x")) })).toBe("/?m=x&reply=x");
+    expect(viewHref({ ...parseView(new URLSearchParams("compose=1")), d: "d1" })).toBe("/?d=d1");
+    expect(listParams(parseView(new URLSearchParams("area=outbox")))).toBeUndefined();
+  });
+});
+
 describe("base64url", () => {
   it("round-trips every length", () => {
     for (let n = 0; n < 40; n++) {

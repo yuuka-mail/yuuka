@@ -76,10 +76,11 @@ if (enrollURL) {
   const state = await p.context().storageState();
 
   // The first hit for text, or the one with this subject: generated
-  // variants reuse corpus bodies under other subjects.
+  // variants reuse corpus bodies under other subjects. Received mail
+  // only: a reply sent from here can carry the same subject.
   const find = async (text, subject) => {
     const r = await p.evaluate(async (t) => (await fetch(`/api/v1/search?downgraded=include&q=${encodeURIComponent(t)}`)).json(), text);
-    return r.hits.find((h) => !subject || h.subject === subject)?.id;
+    return r.hits.find((h) => !h.outgoing && (!subject || h.subject === subject))?.id;
   };
   const lunch = await find("usual place", "Re: Lunch on Friday?");
   const otp = await find("482913");
@@ -96,6 +97,19 @@ if (enrollURL) {
   const invoice = await find("Invoice attached", "Invoice and logo");
   const prefixes = await p.evaluate(async () => (await fetch("/api/v1/prefixes")).json());
   const discovered = prefixes.prefixes.find((x) => !x.claimed)?.address;
+  // Sending (§12.10), from whatever the database has: none of it is
+  // required. The held shot presses Send only as an identity that holds
+  // every submission (sends=false), so nothing ever reaches the outbox.
+  const get = (path) => p.evaluate(async (u) => {
+    const r = await fetch(u);
+    return r.ok ? r.json() : undefined;
+  }, path);
+  const heldFrom = (await get("/api/v1/identities"))?.identities.find((i) => !i.sends && !i.address.startsWith("*@"))?.address;
+  const agentDraft = (await get("/api/v1/drafts"))?.drafts.find((d) => d.author.kind !== "human")?.id;
+  // The outbox needs delivery:read; without it the view is not offered.
+  const outbox = await get("/api/v1/outbox?limit=1");
+  const unknown = (await get("/api/v1/outbox?state=unknown&limit=1"))?.entries[0]?.id;
+  const sent = (await get("/api/v1/messages?limit=200"))?.messages.find((m) => m.outgoing)?.id;
   await p.close();
 
   for (const scheme of ["light", "dark"]) {
@@ -147,6 +161,49 @@ if (enrollURL) {
         await s.goto(base + `/?prefix=${encodeURIComponent(discovered)}&m=${forged}`);
         await s.getByRole("heading").first().waitFor();
         await shot(s, `prefix-${tag}`);
+      }
+      // Sending: the composer, a reply, a held submission, drafts, the outbox.
+      await s.goto(base + "/?compose=1");
+      await s.getByRole("textbox", { name: "Body" }).waitFor();
+      await shot(s, `compose-${tag}`);
+      if (lunch) {
+        await s.goto(base + `/?m=${lunch}&reply=${lunch}`);
+        await s.getByRole("textbox", { name: "Body" }).waitFor();
+        await shot(s, `compose-reply-${tag}`);
+      }
+      if (heldFrom) {
+        await s.goto(base + "/?compose=1");
+        await s.getByLabel("From", { exact: true }).selectOption(heldFrom);
+        await s.getByLabel("To", { exact: true }).fill("someone@example.org");
+        await s.getByLabel("Subject", { exact: true }).fill("Screenshot of a held submission");
+        await s.getByRole("textbox", { name: "Body" }).fill("Held by the grant; never queued.");
+        await s.getByText(/^Saved /).waitFor();
+        await s.getByRole("button", { name: "Send", exact: true }).click();
+        // The result box, not the preview line above From.
+        await s.getByText("held as a draft", { exact: true }).waitFor();
+        await shot(s, `compose-held-${tag}`);
+        await s.getByRole("button", { name: "Delete draft" }).click();
+        await s.getByRole("button", { name: "Delete draft" }).click();
+        await s.getByRole("button", { name: "Delete draft" }).waitFor({ state: "detached" });
+      }
+      await s.goto(base + "/?area=drafts" + (agentDraft ? `&d=${agentDraft}` : ""));
+      // A draft that an agent wrote opens in the composer, over the list on a phone.
+      await (agentDraft ? s.getByRole("textbox", { name: "Body" }) : s.getByRole("heading", { name: "Drafts" })).waitFor();
+      await shot(s, `drafts-${tag}`);
+      if (outbox) {
+        await s.goto(base + "/?area=outbox");
+        await s.getByRole("heading", { name: "Outbox" }).waitFor();
+        await shot(s, `outbox-${tag}`);
+        if (unknown) {
+          await s.goto(base + `/?area=outbox&o=${unknown}`);
+          await s.getByRole("region", { name: "Delivery unknown" }).waitFor();
+          await shot(s, `outbox-unknown-${tag}`);
+        }
+      }
+      if (sent) {
+        await s.goto(base + `/?m=${sent}`);
+        await s.getByText(/sent as |by this system as /).first().waitFor();
+        await shot(s, `reading-sent-${tag}`);
       }
       if (size === "narrow") {
         await s.goto(base + "/");

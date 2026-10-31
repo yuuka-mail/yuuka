@@ -1,6 +1,7 @@
-import type { Auth, Facts, Message, Stripped } from "@/api/types";
+import type { Auth, Facts, Message, Sent, Stripped } from "@/api/types";
 
 import { fullTime } from "@/lib/format";
+import { outboxState } from "@/send/outgoing";
 
 // What the system knows about a message, as opposed to what the message
 // says about itself. These render in the system voice: they come from the
@@ -21,6 +22,9 @@ const resultTone = (r: string): Tone => (r === "pass" ? "ok" : r === "fail" || r
 
 function authParts(a: Auth): Part[] {
   if (a.withheld) return [{ text: "withheld: this session lacks delivery:read", tone: "plain" }];
+  // Our own bytes never passed a receiver: no verdict, and nothing
+  // suspect about that either (§4.6).
+  if (a.not_received) return [{ text: "none: sent by this system, never received", tone: "plain" }];
   if (!a.verified) return [{ text: `unverified${a.reason ? ` (${a.reason})` : ""}`, tone: "warn" }];
   const parts: Part[] = [];
   for (const [name, r] of [
@@ -50,8 +54,9 @@ export function strippedText(s: Stripped): string {
 export function systemFacts(m: Message, f: Facts | undefined): Fact[] {
   const facts: Fact[] = [];
   if (m.parse_error) facts.push({ label: "Parse error", parts: [{ text: m.parse_error, tone: "bad" }] });
+  if (f?.sent) facts.push({ label: "Sent", parts: sentParts(f.sent) });
   if (f) facts.push({ label: "Auth", parts: authParts(f.auth) });
-  facts.push({ label: "Received", parts: [{ text: fullTime(m.received_at), tone: "plain" }] });
+  facts.push({ label: f?.auth.not_received ? "Submitted" : "Received", parts: [{ text: fullTime(m.received_at), tone: "plain" }] });
   facts.push({ label: "Class", parts: [{ text: m.class, tone: "plain" }] });
   const stripped = f && strippedText(f.stripped);
   if (stripped) facts.push({ label: "Left out", parts: [{ text: stripped, tone: "plain" }] });
@@ -85,6 +90,22 @@ export function warnings(f: Facts | undefined): Warning[] {
  * gets read when it does appear.
  */
 export function isQuiet(m: Message, f: Facts | undefined): boolean {
-  if (!f || m.parse_error || m.quarantined || m.downgraded || f.downgraded) return false;
-  return !f.auth.withheld && f.auth.verified && f.auth.dmarc === "pass" && warnings(f).length === 0;
+  if (!f || m.parse_error || m.quarantined || m.downgraded || f.downgraded || warnings(f).length > 0) return false;
+  // Mail we sent and nobody delivered back: quiet while its outbox state
+  // asks nothing of anyone; unknown, failed and the like open the box.
+  if (f.auth.not_received) return !!f.sent && sentQuiet(f.sent.state);
+  return !f.auth.withheld && f.auth.verified && f.auth.dmarc === "pass";
+}
+
+const sentQuiet = (s: string) => ["held", "queued", "sending", "sent", "withdrawn"].includes(s);
+
+const sentTone = (s: string): Tone => (s === "sent" ? "ok" : s === "dead" ? "bad" : sentQuiet(s) ? "plain" : "warn");
+
+/** The outbox state of mail we sent, in words: "queued", "may have been sent". */
+export function sentState(s: Sent): Part {
+  return { text: outboxState(s.state).label, tone: sentTone(s.state) };
+}
+
+function sentParts(s: Sent): Part[] {
+  return [{ text: `by this system as ${s.from}`, tone: "plain" }, sentState(s)];
 }

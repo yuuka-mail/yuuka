@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, ChevronDownIcon, ChevronUpIcon, OctagonAlertIcon, PaperclipIcon, TriangleAlertIcon } from "lucide-react";
+import { ArrowLeftIcon, ChevronDownIcon, ChevronUpIcon, OctagonAlertIcon, PaperclipIcon, ReplyIcon, TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useThread } from "@/api/queries";
@@ -10,7 +10,9 @@ import { Signature, system, Voice } from "@/components/voice";
 import { fullTime, listTime, sender } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-import { isQuiet, systemFacts, warnings, type Tone } from "./facts";
+import { OutgoingMark } from "@/send/marks";
+
+import { isQuiet, sentState, systemFacts, warnings, type Tone } from "./facts";
 import { ReadingBody } from "./reading-body";
 import { useMessage, useReading } from "./reading-data";
 
@@ -21,6 +23,10 @@ interface Props {
   onAnchor: (anchor: string) => void;
   onBack: () => void;
   onOpen: (id: string) => void;
+  /** Starts a reply; absent when the session may not write drafts. */
+  onReply?: () => void;
+  /** Opens an outbox row; absent when the session may not read the outbox. */
+  onOpenOutbox?: (id: string) => void;
 }
 
 export function ReadingPane({ id, onBack, ...rest }: Props) {
@@ -57,19 +63,28 @@ const toneClass: Record<Tone, string> = {
   plain: "text-foreground",
 };
 
-function Reading({ message: m, anchor, onAnchor, onOpen }: { message: Message } & Omit<Props, "id" | "onBack">) {
+function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox }: { message: Message } & Omit<Props, "id" | "onBack">) {
   const body = useReading(m.id);
   const facts = body.reading?.facts;
   return (
     <div className="flex max-w-[56rem] flex-col gap-4 px-4 py-4 md:px-6">
       <header className="flex flex-col gap-1.5">
-        <h1 className="text-title font-semibold break-words">{m.subject || <span className="text-muted-foreground">(no subject)</span>}</h1>
+        <div className="flex items-start gap-2">
+          <h1 className="min-w-0 flex-1 text-title font-semibold break-words">{m.subject || <span className="text-muted-foreground">(no subject)</span>}</h1>
+          {onReply && (
+            <Button variant="outline" size="sm" className="shrink-0" onClick={onReply}>
+              <ReplyIcon data-icon="inline-start" />
+              Reply
+            </Button>
+          )}
+        </div>
         <div className="flex flex-wrap items-baseline gap-x-2 text-body">
           <span className="font-medium">{sender(m.from_name, m.from_addr)}</span>
           {m.from_name && <span className="text-muted-foreground">&lt;{m.from_addr}&gt;</span>}
         </div>
         <div className="flex flex-wrap items-center gap-1.5 text-small text-muted-foreground">
-          <span>to</span>
+          {/* Mail we only sent has no delivery here, so no prefix it came to. */}
+          {m.recipients.length > 0 && <span>to</span>}
           {m.recipients.map((r) => (
             <Badge key={r} variant="outline" className="font-mono font-normal">
               {r}
@@ -85,7 +100,7 @@ function Reading({ message: m, anchor, onAnchor, onOpen }: { message: Message } 
         </div>
       </header>
 
-      <SystemFacts message={m} facts={facts} />
+      <SystemFacts message={m} facts={facts} onOpenOutbox={onOpenOutbox} />
 
       <ThreadStrip message={m} onOpen={onOpen} />
 
@@ -120,8 +135,9 @@ function Reading({ message: m, anchor, onAnchor, onOpen }: { message: Message } 
  * Until the view loads the line shows only what is already known, so
  * quiet mail, the common case, opens without the box flashing up.
  */
-function SystemFacts({ message: m, facts }: { message: Message; facts?: Facts }) {
+function SystemFacts({ message: m, facts, onOpenOutbox }: { message: Message; facts?: Facts; onOpenOutbox?: (id: string) => void }) {
   const [open, setOpen] = useState(false);
+  const sent = facts?.sent;
   if (!open && (!facts || isQuiet(m, facts))) {
     return (
       <button
@@ -132,19 +148,27 @@ function SystemFacts({ message: m, facts }: { message: Message; facts?: Facts })
         className="flex max-w-full items-center gap-2 self-start rounded-md border border-system-border bg-system-surface px-2 py-0.5 text-small hover:border-system disabled:cursor-default"
       >
         <Signature speaker={system} />
-        {facts && (
+        {sent ? (
           <span className="truncate">
-            <span className="text-system-foreground">dmarc=pass</span> {facts.auth.from_domain}
+            sent as {sent.from} · <span className={toneClass[sentState(sent).tone]}>{sentState(sent).text}</span>
           </span>
+        ) : (
+          facts && (
+            <span className="truncate">
+              <span className="text-system-foreground">dmarc=pass</span> {facts.auth.from_domain}
+            </span>
+          )
         )}
-        <span className="shrink-0 text-muted-foreground">received {listTime(m.received_at)}</span>
+        <span className="shrink-0 text-muted-foreground">
+          {facts?.auth.not_received ? "submitted" : "received"} {listTime(m.received_at)}
+        </span>
         {facts && <ChevronDownIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />}
       </button>
     );
   }
   const warns = warnings(facts);
   // Quiet facts opened by hand can fold back into their line.
-  const fold = isQuiet(m, facts) && (
+  const fold = isQuiet(m, facts) ? (
     <button
       type="button"
       aria-expanded
@@ -154,6 +178,13 @@ function SystemFacts({ message: m, facts }: { message: Message; facts?: Facts })
     >
       <ChevronUpIcon aria-hidden className="size-3" />
     </button>
+  ) : (
+    sent &&
+    onOpenOutbox && (
+      <button type="button" className="text-small underline underline-offset-2" onClick={() => onOpenOutbox(sent.outbox_id)}>
+        Open in outbox
+      </button>
+    )
   );
   return (
     <Voice speaker={system} action={fold} className={cn(warns.some((w) => w.tone === "bad") && "border-destructive/60")}>
@@ -223,6 +254,7 @@ function ThreadStrip({ message, onOpen }: { message: Message; onOpen: (id: strin
             >
               <span className="w-28 shrink-0 truncate font-medium">{sender(s.from_name, s.from_addr)}</span>
               <span className="min-w-0 flex-1 truncate text-muted-foreground">{s.snippet || s.subject}</span>
+              {s.outgoing && <OutgoingMark state={s.outgoing.state} />}
               <span className="shrink-0 text-muted-foreground tabular-nums">{listTime(s.received_at)}</span>
             </button>
           </li>

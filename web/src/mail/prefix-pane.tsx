@@ -1,11 +1,12 @@
 import { useState } from "react";
 
-import { usePrefixes, useUnclaimedPrefixes } from "@/api/queries";
+import { useDrafts, useOutbox, usePrefixes, useUnclaimedPrefixes } from "@/api/queries";
 import type { Prefix } from "@/api/types";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { count } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import type { Abilities } from "@/send/outgoing";
 
 import type { View } from "./view";
 
@@ -21,9 +22,13 @@ const filterFrom = 20;
  * a count here and a paged list of their own: a catch-all collects
  * thousands of them.
  */
-export function PrefixPane({ view, onPick }: { view: View; onPick: (next: Partial<View>) => void }) {
+export function PrefixPane({ view, can, onPick }: { view: View; can: Abilities; onPick: (next: Partial<View>) => void }) {
   const q = usePrefixes();
   const unclaimed = useUnclaimedPrefixes();
+  // Counts only for what asks for action (§12.9): open drafts, and outbox
+  // rows only a person can settle.
+  const drafts = useDrafts(["draft", "held"]);
+  const unknown = useOutbox(["unknown"], can.outbox);
   const browsing = !view.prefix && !view.q;
   const at = (area: View["area"]) => browsing && view.area === area;
 
@@ -33,6 +38,24 @@ export function PrefixPane({ view, onPick }: { view: View; onPick: (next: Partia
         <Item active={at("conversations")} label="Conversations" onClick={() => onPick({ area: "conversations" })} />
         <Item active={at("notifications")} label="Notifications" onClick={() => onPick({ area: "notifications" })} />
         <Item active={at("all")} label="All mail" onClick={() => onPick({ area: "all" })} />
+        <Item
+          active={at("drafts")}
+          label="Drafts"
+          n={drafts.items.length || undefined}
+          more={drafts.hasMore}
+          onClick={() => onPick({ area: "drafts" })}
+        />
+        {can.outbox && (
+          <Item
+            active={at("outbox")}
+            label="Outbox"
+            n={unknown.items.length || undefined}
+            more={unknown.hasMore}
+            warn
+            title={unknown.items.length ? "may have been sent: waiting for a decision" : undefined}
+            onClick={() => onPick({ area: "outbox" })}
+          />
+        )}
       </div>
       <Claimed ps={q.data?.prefixes} active={view.prefix} onPick={onPick} />
       <div className="flex shrink-0 flex-col border-t py-2">
@@ -90,10 +113,11 @@ function Heading({ children }: { children: string }) {
   return <h2 className="mt-2 mb-1 px-3 text-meta font-medium tracking-wide text-muted-foreground uppercase">{children}</h2>;
 }
 
-function Item(props: { active: boolean; label: string; hint?: string; n?: number; mono?: boolean; onClick: () => void }) {
+function Item(props: { active: boolean; label: string; hint?: string; n?: number; more?: boolean; warn?: boolean; title?: string; mono?: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
+      title={props.title}
       onClick={props.onClick}
       aria-current={props.active || undefined}
       className={cn(
@@ -103,7 +127,12 @@ function Item(props: { active: boolean; label: string; hint?: string; n?: number
     >
       <span className={cn("min-w-0 truncate", props.mono && "font-mono text-small")}>{props.label}</span>
       {props.hint && <span className="min-w-0 truncate text-meta text-muted-foreground">{props.hint}</span>}
-      {props.n !== undefined && <span className="ml-auto shrink-0 text-meta text-muted-foreground tabular-nums">{count(props.n)}</span>}
+      {props.n !== undefined && (
+        <span className={cn("ml-auto shrink-0 text-meta tabular-nums", props.warn ? "font-medium text-warning" : "text-muted-foreground")}>
+          {count(props.n)}
+          {props.more && "+"}
+        </span>
+      )}
     </button>
   );
 }
