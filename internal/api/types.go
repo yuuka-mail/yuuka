@@ -249,6 +249,9 @@ type Message struct {
 	To      []agentview.Address `json:"to"`
 	Cc      []agentview.Address `json:"cc"`
 	ReplyTo []agentview.Address `json:"reply_to"`
+	// Reply is whom a reply goes to by default, worked out here so that
+	// no client judges authentication itself.
+	Reply ReplyAddressing `json:"reply"`
 	// Deliveries are envelope and authentication facts. They need
 	// delivery:read and are absent without it.
 	Deliveries []Delivery `json:"deliveries,omitempty"`
@@ -262,6 +265,25 @@ type Message struct {
 	// acts on it. Absent when no scorer is configured or it has not
 	// scored this message.
 	TriageScore *TriageScore `json:"triage_score,omitempty"`
+}
+
+// ReplyAddressing is whom a reply to a message goes to by default
+// (§12.10): bare addresses as the message wrote them, each once by
+// store.FoldAddr.
+type ReplyAddressing struct {
+	// To is the Reply-To when it counts by the rule of the thread
+	// correspondents (§8.9: a delivery escaping the downgrade passed
+	// DMARC), else the From. For mail we sent, whom it went to.
+	To []string `json:"to"`
+	// Cc is what a reply to all adds: the message's To and Cc, without
+	// To and without our own addresses (those it reached us at, the From
+	// we sent it as).
+	Cc []string `json:"cc"`
+	// UnverifiedReplyTo is a Reply-To that does not count, where it
+	// names someone other than the From. On a forged sender it is the
+	// forger's own mailbox: a client shows it, so that a person can pick
+	// it knowingly, and never uses it unasked.
+	UnverifiedReplyTo []string `json:"unverified_reply_to"`
 }
 
 // Thread is GET /api/v1/threads/{id}, aggregated over what the viewer

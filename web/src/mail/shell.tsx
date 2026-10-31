@@ -67,7 +67,11 @@ export function MailShell({ session }: { session: SessionInfo }) {
   const [adopted, setAdopted] = useState<{ key: string; id: string }>();
   // Every Compose is a new composer, even over one that is still "new".
   const [fresh, setFresh] = useState(0);
-  const openKey = view.d ? `d:${view.d}` : view.reply ? `reply:${view.reply}` : `new:${fresh}`;
+  const openKey = view.d
+    ? `d:${view.d}`
+    : view.reply
+      ? `reply:${view.reply}${view.all ? ":all" : ""}`
+      : `new:${fresh}`;
   const composerKey = adopted && view.d === adopted.id ? adopted.key : openKey;
 
   // Opening a message replaces the history entry; changing what the list
@@ -248,6 +252,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
                 session={session}
                 draftId={view.d}
                 replyTo={view.reply}
+                replyAll={view.all}
                 onCreated={(id) => {
                   setAdopted({ key: composerKey, id });
                   go({ ...closeComposer, d: id }, true);
@@ -285,7 +290,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
                 onAnchor={(a) => go({ a }, true)}
                 onBack={() => go({ m: undefined }, true)}
                 onOpen={(m, a) => go({ m, a }, true)}
-                onReply={can.compose ? () => compose({ reply: view.m }) : undefined}
+                onReply={can.compose ? (all) => compose({ reply: view.m, all }) : undefined}
                 onOpenOutbox={
                   can.outbox
                     ? (o) =>
@@ -624,7 +629,8 @@ const noList: MailList = {
 
 /**
  * j/k move through the list, / focuses search, Esc closes what the main
- * column shows, r replies to the open message, c starts a new one.
+ * column shows, r replies to the open message and a to all its
+ * recipients, c starts a new one.
  */
 function useKeys(
   list: MailList,
@@ -654,8 +660,13 @@ function useKeys(
         cur.go({ m: undefined }, true);
       } else if (e.key === "c" && cur.startNew && !composing(cur.view)) {
         cur.startNew();
-      } else if (e.key === "r" && cur.startNew && cur.view.m && !composing(cur.view)) {
-        cur.go({ o: undefined, reply: cur.view.m });
+      } else if (
+        (e.key === "r" || e.key === "a") &&
+        cur.startNew &&
+        cur.view.m &&
+        !composing(cur.view)
+      ) {
+        cur.go({ o: undefined, reply: cur.view.m, all: e.key === "a" || undefined });
       } else if (e.key === "j" || e.key === "k") {
         const i = cur.list.items.findIndex((m) => m.id === cur.view.m);
         const next = cur.list.items[e.key === "j" ? i + 1 : Math.max(i - 1, 0)];

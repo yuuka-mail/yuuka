@@ -105,9 +105,7 @@ func (db *DB) replyFacts(ctx context.Context, q dbtx, v *auth.Viewer, id string)
 			EXISTS (SELECT 1 FROM deliveries d WHERE d.message_id = m.id AND `+db.visibleDelivery(v, "d")+`) AS arrived,
 			EXISTS (SELECT 1 FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
 			        WHERE d.message_id = m.id AND `+db.visibleDelivery(v, "d")+` AND `+notDowngraded+`) AS trusted,
-			EXISTS (SELECT 1 FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
-			        WHERE d.message_id = m.id AND `+db.visibleDelivery(v, "d")+` AND `+notDowngraded+`
-			          AND d.auth->>'dmarc' = 'pass') AS verified) w
+			`+db.replyToCounts(v, "m")+` AS verified) w
 		CROSS JOIN LATERAL unnest(
 			CASE WHEN w.sent OR w.arrived THEN ARRAY[m.from_addr] END
 			|| CASE WHEN w.sent OR w.trusted THEN m.to_addrs || m.cc_addrs END
@@ -138,6 +136,17 @@ func (db *DB) replyFacts(ctx context.Context, q dbtx, v *auth.Viewer, id string)
 		f.Correspondents[i] = FoldAddr(p)
 	}
 	return f, nil
+}
+
+// replyToCounts is whether the Reply-To of message alias m counts for v,
+// by the rule on ReplyFacts.Correspondents: a visible delivery of it
+// escapes the downgrade and passed DMARC. Our own sent copies have no
+// delivery, so their Reply-To never counts. The reply a person writes
+// is addressed by the same rule (MessageDetail.ReplyToCounts).
+func (db *DB) replyToCounts(v *auth.Viewer, m string) string {
+	return `EXISTS (SELECT 1 FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
+		WHERE d.message_id = ` + m + `.id AND ` + db.visibleDelivery(v, "d") + ` AND ` + notDowngraded + `
+		  AND d.auth->>'dmarc' = 'pass')`
 }
 
 // SendCounters returns sendpolicy.Counters for a submission by principal

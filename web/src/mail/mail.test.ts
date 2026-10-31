@@ -6,6 +6,7 @@ import { openable, shownExtraction, timeLeft } from "./extracted";
 import { isQuiet, leakParts, strippedText, warnings } from "./facts";
 import { claimedHost, linkTarget } from "./links";
 import { attachmentHref, merge } from "./reading-data";
+import { closeComposer, parseView, viewHref } from "./view";
 
 describe("link targets", () => {
   it("shows the real host and flags text naming another", () => {
@@ -159,5 +160,15 @@ describe("extracted values", () => {
     const m = { class: "machine", extracted: x } as unknown as MessageSummary;
     expect(shownExtraction(m)).toBe(x);
     expect(shownExtraction({ ...m, class: "human" })).toBeUndefined();
+  });
+});
+
+describe("reply to all in the URL", () => {
+  it("rides along with a reply and goes when the composer closes", () => {
+    const v = parseView(new URLSearchParams("m=M1&reply=M1&all=1"));
+    expect(v.all).toBe(true);
+    expect(viewHref(v)).toBe("/?m=M1&reply=M1&all=1");
+    expect(parseView(new URLSearchParams("m=M1&all=1")).all).toBeUndefined();
+    expect(viewHref({ ...v, ...closeComposer })).toBe("/?m=M1");
   });
 });

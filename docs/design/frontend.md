@@ -366,13 +366,23 @@ handler 在 [`internal/api/sending.go`](../../internal/api/sending.go)；界面�
   外发要 `delivery:read`（里面有 Bcc），会话没有这个 scope 就不显示这一项。
   这些数和提案的待决数由 `GET /api/v1/counts` 一次给出，和各自的列表同一个可见性条件（§13.8）。
   早先侧栏取各列表的第一页来数，超过一页只能写「100+」，而且一个计数要拉一整页；现在每 30 秒轮询一次，
-  草稿、外发、提案有变动时立即失效重取撰写器占阅读区那一栏，
-  和打开一封信是同一个位置；顶栏有「Compose」，阅读区有「Reply」，键盘是 `c` / `r`。
-  视图状态仍在 query string 里：`compose=1` 是新信、`reply=<id>` 是回复、`d=<id>` 是草稿、`o=<id>` 是 outbox 行、
+  草稿、外发、提案有变动时立即失效重取。撰写器占阅读区那一栏，
+  和打开一封信是同一个位置；顶栏有「Compose」，阅读区有「Reply」和「Reply all」，键盘是 `c` / `r` / `a`。
+  视图状态仍在 query string 里：`compose=1` 是新信、`reply=<id>` 是回复（回复全部再加 `all=1`）、`d=<id>` 是草稿、`o=<id>` 是 outbox 行、
   `st` 是草稿或 outbox 列表的筛选（[`view.ts`](../../web/src/mail/view.ts)）
 - **自动保存**：第一次有改动时 `POST` 建草稿，之后防抖 `PUT` 整份；保存排成一条链，建草稿之前不会有 `PUT` 抢跑。
   建好以后地址栏换成 `d=<id>`，撰写器不重新挂载（字段已经在里面，正在打字）。只打开一个回复、什么都没改，
   不建草稿——草稿列表里不该出现没人写过一个字的东西。按发送时没有草稿就先建
+- **回信发给谁由服务端算**：消息详情的 `reply` 给出 `to`、回复全部要加进 Cc 的 `cc`，和没算数的 `unverified_reply_to`，
+  前端只照着填，不自己判断认证。Reply-To 算不算数和线程通信方（§8.9）是同一条规则、同一段 SQL：
+  有一条投递没被降级而且 DMARC 是 pass。算数就回给 Reply-To，否则回给 From——邮件列表、工单系统靠 Reply-To 收回信，
+  伪造发件人的钓鱼信（BEC）也靠它把回信截到自己的信箱，两边都说得通的只有「From 验证过」这一条线。
+  没算数、又和 From 不同的 Reply-To 不静默丢掉：To 下面一行 yuuka 署名、警告色写出这些地址，人确认可信可以手动填进去，
+  填进去了这一行就不再说。我们自己发出的信，回信默认发给它当时的 To，不回给自己。
+  回复全部是原信的 To 和 Cc，去掉已在 To 里的、去掉自己，按 `store.FoldAddr` 去重。「自己」只是这封信进来的地址
+  （查看者看得见的投递）和我们发它时的 From，不是整个 zone：同一个 zone 下别的地址可能是另一个人的（§13），
+  把他从抄送里拿掉比多抄送自己一份更糟。回复全部的按钮只在会多出人时出现，否则它就是 Reply。
+  撰写器只在开始一封回复时拿到这些；重新打开已存的回复草稿，收件人已经是人定下的，不再提示
 - **身份选择器**：新信从 `GET /api/v1/identities`，回复从 `reply-identities`（第一项是默认，取自原信进来的地址，§9.3）。
   选项文字里带「sends (auto)」或「held: owner cap」，选中项下面一行是 yuuka 署名的预览：「Send queues it · auto · to any recipient · 10/hour」
   或「Held as a draft: drafts only」加服务端的 `hold_detail` 原文。原因的短语按 `hold_reason` 定，不按 `hold_detail` 的文字分支——

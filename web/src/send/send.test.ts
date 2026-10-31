@@ -20,12 +20,14 @@ import {
   problem,
   recallable,
   replyBody,
+  replyRecipients,
   replySubject,
   resumeCommand,
   reviewText,
   shellWord,
   standing,
   strangerStanding,
+  unusedReplyTo,
 } from "./outgoing";
 import { untilSent } from "./review";
 
@@ -290,6 +292,34 @@ describe("composing", () => {
     const body = replyBody(m);
     expect(body.startsWith("\n\nOn ")).toBe(true);
     expect(body.endsWith("Bob wrote:\n> Friday?\n>\n> > earlier\n")).toBe(true);
+  });
+  it("addresses a reply as the server says, the others in Cc only for all", () => {
+    // A Reply-To that counts (§8.9): the server put it in reply.to.
+    const verified = {
+      from_addr: "dave@example.org",
+      reply: {
+        to: ["trips@lists.example.org"],
+        cc: ["bob@example.net", "carol@example.net"],
+        unverified_reply_to: [],
+      },
+    } as unknown as Message;
+    expect(replyRecipients(verified, false)).toEqual({ to: "trips@lists.example.org", cc: "" });
+    // To all: our own addresses are already out of reply.cc.
+    expect(replyRecipients(verified, true)).toEqual({
+      to: "trips@lists.example.org",
+      cc: "bob@example.net, carol@example.net",
+    });
+  });
+  it("keeps saying an unverified Reply-To until a person types it in", () => {
+    const unverified = ["trips@lists.example.org"];
+    expect(unusedReplyTo(unverified, "dave@example.org", "", "")).toEqual(unverified);
+    expect(unusedReplyTo(unverified, "dave@example.org, Trips@Lists.example.org", "", "")).toEqual(
+      [],
+    );
+    expect(unusedReplyTo(unverified, "", "", "trips@lists.example.org")).toEqual([]);
+    expect(msg.send_reply_to_unverified({ list: "x@example.org" })).toBe(
+      "Not replying to the Reply-To x@example.org: it is not verified.",
+    );
   });
   it("saves the fields as a draft body", () => {
     expect(

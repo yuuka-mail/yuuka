@@ -1499,6 +1499,9 @@
               "$ref": "#/components/schemas/Address"
             }
           },
+          "reply": {
+            "$ref": "#/components/schemas/ReplyAddressing"
+          },
           "deliveries": {
             "type": "array",
             "items": {
@@ -1538,6 +1541,7 @@
           "to",
           "cc",
           "reply_to",
+          "reply",
           "notes"
         ],
         "additionalProperties": false
@@ -2553,6 +2557,35 @@
         },
         "required": [
           "passkey_id"
+        ],
+        "additionalProperties": false
+      },
+      "ReplyAddressing": {
+        "type": "object",
+        "properties": {
+          "to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "unverified_reply_to": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "to",
+          "cc",
+          "unverified_reply_to"
         ],
         "additionalProperties": false
       },

@@ -32,6 +32,8 @@ export interface View {
   compose?: boolean;
   /** A reply to this message in the composer, before it is saved. */
   reply?: string;
+  /** The reply is to all: the message's other recipients go in Cc. */
+  all?: boolean;
   /** The outbox row open in the main column. */
   o?: string;
   /** The filter of the drafts or outbox list, in that list's terms. */
@@ -121,6 +123,7 @@ export function parseView(search: URLSearchParams): View {
     d: search.get("d") || undefined,
     compose: search.get("compose") === "1" || undefined,
     reply: search.get("reply") || undefined,
+    all: (!!search.get("reply") && search.get("all") === "1") || undefined,
     o: search.get("o") || undefined,
     st: search.get("st") || undefined,
     p: search.get("p") || undefined,
@@ -141,8 +144,10 @@ export function viewHref(v: View): string {
   if (v.m && v.a) p.set("a", v.a);
   // One composer at a time: a saved draft is its id from then on.
   if (v.d) p.set("d", v.d);
-  else if (v.reply) p.set("reply", v.reply);
-  else if (v.compose) p.set("compose", "1");
+  else if (v.reply) {
+    p.set("reply", v.reply);
+    if (v.all) p.set("all", "1");
+  } else if (v.compose) p.set("compose", "1");
   if (v.o) p.set("o", v.o);
   if (v.st) p.set("st", v.st);
   if (v.p) p.set("p", v.p);
@@ -212,7 +217,12 @@ export function mainOpen(v: View): boolean {
 }
 
 /** What closing the composer changes: back to whatever it opened over. */
-export const closeComposer: Partial<View> = { d: undefined, reply: undefined, compose: undefined };
+export const closeComposer: Partial<View> = {
+  d: undefined,
+  reply: undefined,
+  all: undefined,
+  compose: undefined,
+};
 
 /**
  * How many messages v lists in all, when the prefix aggregation already

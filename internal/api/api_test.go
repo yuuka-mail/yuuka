@@ -374,7 +374,9 @@ type harness struct {
 	// suspended are the grants recalls suspended, as the serve app's
 	// cards would be told.
 	suspended *suspendedSpy
-	h         http.Handler
+	// local holds the raw messages, as the serve app's local copy does.
+	local localraw.Dir
+	h     http.Handler
 }
 
 type suspendedSpy struct {
@@ -444,7 +446,7 @@ func newHarness(t *testing.T) *harness {
 	sp := &spy{DB: db, calls: map[string][]*auth.Viewer{}}
 	sus := &suspendedSpy{}
 	return &harness{
-		t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, human: human, sub: sub, suspended: sus,
+		t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, human: human, sub: sub, suspended: sus, local: local,
 		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).WithSuspendNotifier(sus).WithTriage(laya).Handler(svc),
 	}
 }
@@ -1139,6 +1141,71 @@ func TestMessageRecipients(t *testing.T) {
 	if !slices.Equal(out.To, addrs{{Addr: "bob@example.net"}}) || !slices.Equal(out.Cc, addrs{{Addr: "carol@example.net"}}) ||
 		len(out.ReplyTo) != 0 || len(out.Deliveries) != 0 {
 		t.Errorf("sent: to %+v, cc %+v, reply-to %+v", out.To, out.Cc, out.ReplyTo)
+	}
+	// A follow-up to our own mail goes where it went, not back to us.
+	if r := out.Reply; !slices.Equal(r.To, []string{"bob@example.net"}) || !slices.Equal(r.Cc, []string{"carol@example.net"}) {
+		t.Errorf("reply to sent: %+v", r)
+	}
+}
+
+// A reply goes to the Reply-To only when it counts as it does for the
+// thread correspondents (§8.9): a delivery that escapes the downgrade and
+// passed DMARC. Otherwise it goes to the From, and a Reply-To naming
+// someone else is passed on for the composer to show. A reply to all
+// adds To and Cc without our own addresses, folded.
+func TestReplyAddressing(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	read := h.token(auth.MessageRead)
+	h.claim("alice")
+	// The letter passed DMARC for example.org; its lines end in CRLF.
+	letter := func(subject, dmarc string) *strings.Replacer {
+		return strings.NewReplacer(
+			"Subject: Re: Trip plan", "Subject: "+subject,
+			"dmarc=pass", "dmarc="+dmarc,
+			"To: alice@example.com\r\n", "To: alice@example.com, Bob <bob@example.net>\r\n"+
+				"Cc: ALICE@example.com, carol@example.net, BOB@example.net\r\n"+
+				"Reply-To: Trips <trips@lists.example.org>, dave@example.org\r\n")
+	}
+	reply := func(id string) ReplyAddressing {
+		t.Helper()
+		return decode[Message](t, h.get("/api/v1/messages/"+id, read)).Reply
+	}
+	others := []string{"bob@example.net", "carol@example.net"}
+
+	verified := reply(h.deliver("plain-quoted-list.eml", letter("Verified", "pass"), "alice"))
+	if want := []string{"trips@lists.example.org", "dave@example.org"}; !slices.Equal(verified.To, want) ||
+		!slices.Equal(verified.Cc, others) || len(verified.UnverifiedReplyTo) != 0 {
+		t.Errorf("verified Reply-To: %+v", verified)
+	}
+
+	for _, c := range []struct{ name, dmarc, prefix string }{
+		{"No DMARC result", "none", "alice"},
+		{"DMARC failed", "fail", "alice"},
+		{"Unclaimed prefix", "pass", "alice-unclaimed"},
+	} {
+		r := reply(h.deliver("plain-quoted-list.eml", letter(c.name, c.dmarc), c.prefix))
+		// The From is dropped from the notice: the reply goes there anyway.
+		if !slices.Equal(r.To, []string{"dave@example.org"}) || !slices.Equal(r.UnverifiedReplyTo, []string{"trips@lists.example.org"}) {
+			t.Errorf("%s: %+v", c.name, r)
+		}
+		// Ours is the address it reached us at: alice on a claimed prefix,
+		// alice-unclaimed on the other, where alice stays a recipient.
+		want := others
+		if c.prefix != "alice" {
+			want = []string{"alice@example.com", "bob@example.net", "carol@example.net"}
+		}
+		if !slices.Equal(r.Cc, want) {
+			t.Errorf("%s: reply to all %v, want %v", c.name, r.Cc, want)
+		}
+	}
+
+	// A Reply-To that only repeats the From is nothing to warn about.
+	same := reply(h.deliver("plain-quoted-list.eml", strings.NewReplacer(
+		"Subject: Re: Trip plan", "Subject: Same", "dmarc=pass", "dmarc=none",
+		"To: alice@example.com\r\n", "To: alice@example.com\r\nReply-To: DAVE@example.org\r\n"), "alice"))
+	if !slices.Equal(same.To, []string{"dave@example.org"}) || len(same.UnverifiedReplyTo) != 0 || len(same.Cc) != 0 {
+		t.Errorf("Reply-To is the From: %+v", same)
 	}
 }
 

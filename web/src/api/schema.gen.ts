@@ -3272,6 +3272,7 @@ export interface components {
             to: components["schemas"]["Address"][];
             cc: components["schemas"]["Address"][];
             reply_to: components["schemas"]["Address"][];
+            reply: components["schemas"]["ReplyAddressing"];
             deliveries?: components["schemas"]["Delivery"][];
             notes: components["schemas"]["Note"][];
             triage_score?: components["schemas"]["TriageScore"];
@@ -3555,6 +3556,11 @@ export interface components {
         };
         RegisterResult: {
             passkey_id: string;
+        };
+        ReplyAddressing: {
+            to: string[];
+            cc: string[];
+            unverified_reply_to: string[];
         };
         ReplyIdentities: {
             candidates: components["schemas"]["ReplyIdentity"][];

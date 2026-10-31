@@ -22,7 +22,8 @@ import (
 )
 
 // deliver ingests a corpus letter, edited, to prefix@example.com as
-// mail arriving now: rules run on it. It returns the message id.
+// mail arriving now: rules run on it, and its raw is there to read. It
+// returns the message id.
 func (h *harness) deliver(file string, edit *strings.Replacer, prefix string) string {
 	h.t.Helper()
 	ctx := h.t.Context()
@@ -42,6 +43,9 @@ func (h *harness) deliver(file string, edit *strings.Replacer, prefix string) st
 		RawID: id, R2Key: key, LocalPath: key, Size: int64(len(raw)), SHA256: sha256.Sum256(raw),
 		ContentHash: contenthash.V1(raw), ReceivedAt: at, DeliveryID: id, AccountID: account,
 		Zone: "example.com", Prefix: prefix, EnvelopeTo: prefix + "@example.com",
+	}
+	if err := h.local.Put(key, raw); err != nil {
+		h.t.Fatal(err)
 	}
 	if _, err := h.db.CommitIngest(ctx, in); err != nil {
 		h.t.Fatal(err)

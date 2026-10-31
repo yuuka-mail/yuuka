@@ -25,6 +25,11 @@ WebUI 用的是浏览器会话，程序不要模仿它。
 - **用某个身份发会怎样**：`GET /api/v1/identities` 每项的 `outcome` 直接说：`sends`（不经人发出）、
   `held_after_review`（先审核，过了扣在 `hold_seconds` 的撤回窗口里再发，拦下的停在草稿）、`draft_only`、`none`。
   `review` 档的 `sends` 是假、`hold_reason` 是 `review`，和被审核拦下的草稿一样，所以按 `outcome` 分支，不要从 `hold_seconds` 推
+- **回信发给谁**：消息详情 `GET /api/v1/messages/{id}` 的 `reply` 是默认收件人，都是裸地址：
+  `to` 在 Reply-To 经过验证（有一条没被降级的投递，而且 DMARC 是 pass）时是 Reply-To，否则是 From，我们自己发出的信是它当时的 To；
+  `cc` 是回复全部要加的，即原信的 To 和 Cc 去掉 `to` 里的和这封信进来的地址；
+  `unverified_reply_to` 是没验证、又和 From 不同的 Reply-To，伪造发件人时它就是对方的信箱，不要不经人确认就发过去。
+  Reply-To 算不算数和外发授权 `thread` 范围用的是同一条规则（[为什么](../design/agents.md#89-外发授权身份决定档位)）
 - **撤回**扣在窗口里的信：`POST /api/v1/outbox/{id}/withdraw`，要 `submission:send`。人能撤回看得见的任何一封，
   agent 和 service 只能撤回自己提交的（别人的回 `403 forbidden`）。信回到草稿（`hold_reason = withdrawn`），可以改了再提交。
   已经放行（`queued` 及之后）或已撤回的回 `409 conflict`。人撤回触发了熔断时，响应带 `suspended`：

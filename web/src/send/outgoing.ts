@@ -366,6 +366,24 @@ export function badAddrs(s: string): string[] {
   return parseAddrs(s).filter((a) => !/^[^@\s<>"]+@[^@\s<>"]+$/.test(a));
 }
 
+/**
+ * The recipients a reply to m starts with. The server says whom
+ * (m.reply): whether a Reply-To counts is an authentication judgement
+ * (§8.9), never made here. A reply to all adds the others in Cc.
+ */
+export function replyRecipients(m: Message, all: boolean): { to: string; cc: string } {
+  return { to: m.reply.to.join(", "), cc: all ? m.reply.cc.join(", ") : "" };
+}
+
+/**
+ * The unverified Reply-To addresses not yet among the typed recipients,
+ * compared as store.FoldAddr does: a person who typed one in has decided.
+ */
+export function unusedReplyTo(unverified: string[], ...typed: string[]): string[] {
+  const have = new Set(typed.flatMap(parseAddrs).map((a) => a.toLowerCase()));
+  return unverified.filter((a) => !have.has(a.toLowerCase()));
+}
+
 export function replySubject(s: string): string {
   return /^re:/i.test(s.trim()) ? s.trim() : `Re: ${s.trim()}`;
 }

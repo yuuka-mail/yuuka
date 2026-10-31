@@ -354,6 +354,10 @@ type MessageDetail struct {
 	// summary's Extracted is the best of each kind.
 	Extractions []Extraction
 	Deliveries  []DeliveryFact
+	// ReplyToCounts: its Reply-To counts as v sees it, as it does for
+	// the thread correspondents of §8.9 (replyToCounts). A reply goes to
+	// the Reply-To only then.
+	ReplyToCounts bool
 	// Raw is the raw to render the message from: that of the earliest
 	// visible delivery, or for mail we only sent, the earliest visible
 	// sent copy (DeliveryID empty). The content is the same in all of
@@ -373,7 +377,8 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 	var d MessageDetail
 	err := pgx.BeginTxFunc(ctx, db.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT `+summaryCols+`,
-				coalesce(m.message_id, ''), coalesce(m.in_reply_to, ''), m.refs, m.date_header, m.body_text, coalesce(m.parse_error, '')
+				coalesce(m.message_id, ''), coalesce(m.in_reply_to, ''), m.refs, m.date_header, m.body_text, coalesce(m.parse_error, ''),
+				`+db.replyToCounts(v, "m")+`
 			`+db.summaryFrom(v)+`
 			AND m.id = coalesce((SELECT new_id FROM message_aliases WHERE old_id = $1), $1)`, id)
 		if err != nil {
@@ -386,7 +391,7 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 			var auths []*authres.Auth
 			err := r.Scan(&m.ID, &m.ThreadID, &m.ReceivedAt, &m.Subject, &m.FromAddr, &m.FromName, &m.Snippet,
 				&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState, &obFrom,
-				&m.Extracted, &auths, &m.Labels, &m.Archived, &d.MessageID, &d.InReplyTo, &d.References, &d.Date, &d.BodyText, &d.ParseError)
+				&m.Extracted, &auths, &m.Labels, &m.Archived, &d.MessageID, &d.InReplyTo, &d.References, &d.Date, &d.BodyText, &d.ParseError, &d.ReplyToCounts)
 			m.Outgoing = outgoing(obID, obState, obFrom)
 			m.SenderVerified = senderVerified(auths, m.FromAddr)
 			return d, err

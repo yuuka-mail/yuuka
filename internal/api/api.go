@@ -16,6 +16,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 
@@ -533,7 +534,7 @@ func (a *API) message(ctx context.Context, v *auth.Viewer, p IDParams) (Message,
 		Extractions:    make([]agentview.Extraction, len(d.Extractions)),
 		MessageID:      d.MessageID, InReplyTo: d.InReplyTo, References: nonNil(d.References),
 		Date: d.Date, BodyText: d.BodyText, ParseError: d.ParseError,
-		To: addressesOf(rc.To), Cc: addressesOf(rc.Cc), ReplyTo: addressesOf(rc.ReplyTo),
+		To: addressesOf(rc.To), Cc: addressesOf(rc.Cc), ReplyTo: addressesOf(rc.ReplyTo), Reply: replyAddressing(d, rc),
 		Notes: notesOut(notes), TriageScore: triageOut(v, sc),
 	}
 	out.Triage = topsOf(sc)
@@ -582,6 +583,61 @@ func (a *API) messageView(ctx context.Context, v *auth.Viewer, p ViewParams) (ag
 		return view, openapi.Errorf(http.StatusNotFound, openapi.CodeNotFound, "anchor %s is not in this message", p.Anchor)
 	}
 	return view, err
+}
+
+// replyAddressing addresses a reply to d, whose header recipients are
+// rc. Ours are the addresses d reached us at and, for mail we sent, its
+// From: a reply to all leaves them out, as it leaves out the
+// recipients already in To. Ours is no wider than that: another address
+// at one of our zones may be another person's (§13).
+func replyAddressing(d store.MessageDetail, rc mimeparse.Recipients) ReplyAddressing {
+	ours := map[string]bool{}
+	for _, a := range d.Recipients {
+		ours[store.FoldAddr(a)] = true
+	}
+	if d.Outgoing != nil {
+		ours[store.FoldAddr(d.Outgoing.From)] = true
+	}
+	out := ReplyAddressing{To: []string{}, Cc: []string{}, UnverifiedReplyTo: []string{}}
+	seen := map[string]bool{}
+	add := func(to *[]string, a string) {
+		if f := store.FoldAddr(a); a != "" && !seen[f] {
+			seen[f] = true
+			*to = append(*to, a)
+		}
+	}
+	switch {
+	case d.Outgoing != nil:
+		// Our own mail: a follow-up goes where it went, and its Reply-To
+		// never counts.
+		for _, m := range rc.To {
+			if !ours[store.FoldAddr(m.Addr)] {
+				add(&out.To, m.Addr)
+			}
+		}
+		if len(out.To) == 0 {
+			add(&out.To, d.FromAddr)
+		}
+	case d.ReplyToCounts && len(rc.ReplyTo) > 0:
+		for _, m := range rc.ReplyTo {
+			add(&out.To, m.Addr)
+		}
+	default:
+		add(&out.To, d.FromAddr)
+		named := map[string]bool{store.FoldAddr(d.FromAddr): true}
+		for _, m := range rc.ReplyTo {
+			if f := store.FoldAddr(m.Addr); !named[f] {
+				named[f] = true
+				out.UnverifiedReplyTo = append(out.UnverifiedReplyTo, m.Addr)
+			}
+		}
+	}
+	for _, m := range slices.Concat(rc.To, rc.Cc) {
+		if !ours[store.FoldAddr(m.Addr)] {
+			add(&out.Cc, m.Addr)
+		}
+	}
+	return out
 }
 
 func addressesOf(ms []mimeparse.Mailbox) []agentview.Address {

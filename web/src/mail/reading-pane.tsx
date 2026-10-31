@@ -4,6 +4,7 @@ import {
   ChevronUpIcon,
   OctagonAlertIcon,
   PaperclipIcon,
+  ReplyAllIcon,
   ReplyIcon,
   TriangleAlertIcon,
 } from "lucide-react";
@@ -40,8 +41,11 @@ interface Props {
   onBack: () => void;
   /** Opens another message, at an anchor when given (a cite). */
   onOpen: (id: string, anchor?: string) => void;
-  /** Starts a reply; absent when the session may not write drafts. */
-  onReply?: () => void;
+  /**
+   * Starts a reply, to all the message's recipients when all is set;
+   * absent when the session may not write drafts.
+   */
+  onReply?: (all: boolean) => void;
   /** Opens an outbox row; absent when the session may not read the outbox. */
   onOpenOutbox?: (id: string) => void;
   session: SessionInfo;
@@ -113,9 +117,29 @@ function Reading({
             )}
           </h1>
           {onReply && (
-            <Button variant="outline" size="sm" className="shrink-0" onClick={onReply}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              title={msg.reading_reply_title()}
+              onClick={() => onReply(false)}
+            >
               <ReplyIcon data-icon="inline-start" />
               {msg.reading_reply()}
+            </Button>
+          )}
+          {/* Only when it would add someone: otherwise it is Reply. */}
+          {onReply && m.reply.cc.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              aria-label={msg.reading_reply_all()}
+              title={msg.reading_reply_all_title()}
+              onClick={() => onReply(true)}
+            >
+              <ReplyAllIcon data-icon="inline-start" />
+              <span className="max-sm:sr-only">{msg.reading_reply_all()}</span>
             </Button>
           )}
         </div>

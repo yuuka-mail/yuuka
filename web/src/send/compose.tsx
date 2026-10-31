@@ -39,9 +39,11 @@ import {
   onlyConfirmer,
   problem,
   replyBody,
+  replyRecipients,
   replySubject,
   standing,
   strangerStanding,
+  unusedReplyTo,
 } from "./outgoing";
 import { HoldUntil, Recall, Recalled, ReviewVerdict } from "./review";
 
@@ -60,6 +62,8 @@ interface Props {
   draftId?: string;
   /** The message a new reply answers. */
   replyTo?: string;
+  /** The new reply is to all the message's recipients. */
+  replyAll?: boolean;
   onCreated: (id: string) => void;
   onClose: () => void;
   onDeleted: () => void;
@@ -87,7 +91,11 @@ export function Composer(props: Props) {
   // The first load decides the fields; refetches do not reset them, and
   // neither does the URL naming the draft once the first save created it
   // (the shell keeps this composer mounted across that change).
-  const [start, setStart] = useState<{ fields: Fields; draft?: Draft }>();
+  const [start, setStart] = useState<{
+    fields: Fields;
+    draft?: Draft;
+    unverifiedReplyTo?: string[];
+  }>();
 
   const ready =
     ids.data && (opened ? draft.data : props.replyTo ? replied.data && cands.data : true);
@@ -95,7 +103,15 @@ export function Composer(props: Props) {
     const identities = ids.data?.identities ?? [];
     if (opened && draft.data) setStart({ fields: fieldsOf(draft.data), draft: draft.data });
     else if (props.replyTo && replied.data)
-      setStart({ fields: replyFields(replied.data, cands.data?.candidates ?? [], identities) });
+      setStart({
+        fields: replyFields(
+          replied.data,
+          !!props.replyAll,
+          cands.data?.candidates ?? [],
+          identities,
+        ),
+        unverifiedReplyTo: replied.data.reply.unverified_reply_to,
+      });
     else
       setStart({
         fields: { from: defaultFrom(identities), to: "", cc: "", bcc: "", subject: "", body: "" },
@@ -110,6 +126,7 @@ export function Composer(props: Props) {
           {...props}
           initial={start.fields}
           initialDraft={start.draft}
+          unverifiedReplyTo={start.unverifiedReplyTo ?? []}
           identities={ids.data?.identities ?? []}
           candidates={cands.data?.candidates ?? []}
         />
@@ -161,15 +178,20 @@ function defaultFrom(ids: SendingIdentity[]): string {
 }
 
 /**
- * A reply: to the sender, Re: the subject, the text quoted below room to
- * write, from the address the message came in through (§9.3) when an
- * identity covers it.
+ * A reply: to whom the server says (the sender, or a Reply-To that
+ * counts), the others in Cc for a reply to all, Re: the subject, the text
+ * quoted below room to write, from the address the message came in
+ * through (§9.3) when an identity covers it.
  */
-function replyFields(m: Message, cands: ReplyIdentity[], ids: SendingIdentity[]): Fields {
+function replyFields(
+  m: Message,
+  all: boolean,
+  cands: ReplyIdentity[],
+  ids: SendingIdentity[],
+): Fields {
   return {
     from: cands[0]?.from ?? defaultFrom(ids),
-    to: m.from_addr,
-    cc: "",
+    ...replyRecipients(m, all),
     bcc: "",
     subject: replySubject(m.subject),
     body: replyBody(m),
@@ -202,6 +224,7 @@ function Editor({
   session,
   initial,
   initialDraft,
+  unverifiedReplyTo,
   identities,
   candidates,
   onCreated,
@@ -212,6 +235,8 @@ function Editor({
 }: Props & {
   initial: Fields;
   initialDraft?: Draft;
+  /** A Reply-To of the replied message that does not count (§8.9). */
+  unverifiedReplyTo: string[];
   identities: SendingIdentity[];
   candidates: ReplyIdentity[];
 }) {
@@ -328,6 +353,7 @@ function Editor({
       : undefined;
   const bad = [...badAddrs(f.to), ...badAddrs(f.cc), ...badAddrs(f.bcc)];
   const noRecipients = !f.to.trim() && !f.cc.trim() && !f.bcc.trim();
+  const unused = readOnly ? [] : unusedReplyTo(unverifiedReplyTo, f.to, f.cc, f.bcc);
   const canSend =
     can.compose &&
     !inOutbox &&
@@ -534,6 +560,7 @@ function Editor({
               </button>
             )}
           </Row>
+          {unused.length > 0 && <ReplyToNote addrs={unused} />}
           {showCc && (
             <>
               <Row label={msg.send_field_cc()}>
@@ -631,6 +658,23 @@ function Editor({
         </footer>
       )}
     </>
+  );
+}
+
+/**
+ * A Reply-To the reply does not go to because it is unverified (§8.9).
+ * Forged mail uses one to catch the answer (BEC), so it is said where
+ * the recipients are, in yuuka's voice, and left for a person to type in.
+ */
+function ReplyToNote({ addrs }: { addrs: string[] }) {
+  return (
+    <div className="flex min-h-7 flex-wrap items-center gap-x-2 border-b py-1 text-small">
+      <Signature speaker={system} />
+      <span className="font-medium text-warning">
+        {msg.send_reply_to_unverified({ list: addrs.join(", ") })}
+      </span>
+      <span className="min-w-0 text-muted-foreground">{msg.send_reply_to_unverified_hint()}</span>
+    </div>
   );
 }
 
