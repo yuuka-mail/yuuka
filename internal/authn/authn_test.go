@@ -614,6 +614,20 @@ func TestParseOrigin(t *testing.T) {
 	}
 }
 
+// wrongSecret is pw with its secret changed. Overwriting the end with a
+// fixed "AA" left the right password once in 1024 runs: the last two
+// characters of a 32-byte secret are "AA" with odds 1/64 · 1/16.
+func wrongSecret(pw string) string {
+	b := []byte(pw)
+	i := len(b) - 2 // a full six bits; the last character carries four
+	if b[i] == 'A' {
+		b[i] = 'B'
+	} else {
+		b[i] = 'A'
+	}
+	return string(b)
+}
+
 // An SMTP password authenticates the submission port only: user name =
 // its credential id, scope exactly submission:send; it is no bearer
 // token, and a token is no SMTP password.
@@ -661,7 +675,7 @@ func TestSMTPPassword(t *testing.T) {
 		"other user name": {tokID, pw},
 		"empty user name": {"", pw},
 		"a token":         {tokID, tok},
-		"wrong secret":    {user, pw[:len(pw)-2] + "AA"},
+		"wrong secret":    {user, wrongSecret(pw)},
 	} {
 		if _, err := b.AuthenticateSMTP(t.Context(), c[0], c[1], "smtp"); !errors.Is(err, ErrUnauthenticated) {
 			t.Errorf("%s: %v", name, err)

@@ -249,11 +249,30 @@ func send(c *smtp.Client, from string, rcpts []string, body string) (int, string
 	return n, msg
 }
 
+// code is the reply of a failed command; a command that succeeded where
+// a test wanted it to fail is 0, not a panic.
 func code(err error) (int, string) {
+	if err == nil {
+		return 0, "succeeded"
+	}
 	if te, ok := errors.AsType[*textproto.Error](err); ok {
 		return te.Code, te.Msg
 	}
 	return -1, err.Error()
+}
+
+// wrongSecret is pw with its secret changed. Overwriting the end with a
+// fixed "AA" left the right password once in 1024 runs: the last two
+// characters of a 32-byte secret are "AA" with odds 1/64 · 1/16.
+func wrongSecret(pw string) string {
+	b := []byte(pw)
+	i := len(b) - 2 // a full six bits; the last character carries four
+	if b[i] == 'A' {
+		b[i] = 'B'
+	} else {
+		b[i] = 'A'
+	}
+	return string(b)
 }
 
 func (h *harness) count(q string, args ...any) int {
@@ -361,7 +380,7 @@ func TestAuth(t *testing.T) {
 	}
 	tokID, _, _ := auth.ParseSecret(auth.PrefixToken, tok)
 	for name, a := range map[string]smtp.Auth{
-		"wrong secret":   smtp.PlainAuth("", h.user, h.pw[:len(h.pw)-2]+"AA", host),
+		"wrong secret":   smtp.PlainAuth("", h.user, wrongSecret(h.pw), host),
 		"other user":     smtp.PlainAuth("", tokID, h.pw, host),
 		"bearer token":   smtp.PlainAuth("", tokID, tok, host),
 		"authz identity": smtp.PlainAuth("service:other", h.user, h.pw, host),
@@ -416,7 +435,7 @@ func TestAuth(t *testing.T) {
 func TestAuthThrottle(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, withLimits(limits{authFailures: 2, authFailureEvery: time.Hour}))
-	bad := smtp.PlainAuth("", h.user, h.pw[:len(h.pw)-2]+"AA", host)
+	bad := smtp.PlainAuth("", h.user, wrongSecret(h.pw), host)
 	for i := range 2 {
 		if n, msg := code(h.dial("").Auth(bad)); n != 535 {
 			t.Fatalf("failure %d: %d %s", i, n, msg)
