@@ -29,6 +29,7 @@ type config struct {
 	Web               webConfig
 	Proxies           clientip.Proxies
 	Outbox            outboxConfig
+	Submission        submissionConfig
 }
 
 // webConfig is the WebUI login, shared by serve and admin. An empty
@@ -138,6 +139,9 @@ func loadConfig(getenv func(string) string, needSecrets bool) (config, error) {
 		errs = append(errs, fmt.Errorf("YUUKA_TRUSTED_PROXIES: %w", err))
 	}
 	if c.Outbox, err = loadOutboxConfig(getenv); err != nil {
+		errs = append(errs, err)
+	}
+	if c.Submission, err = loadSubmissionConfig(getenv); err != nil {
 		errs = append(errs, err)
 	}
 

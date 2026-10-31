@@ -100,6 +100,90 @@ docker compose run --rm yuuka outbox resolve <id> --sent    # 或 --resend / --a
 
 停止或重启 `yuuka` 时，已经越过提交点的发送会等服务器的最终回复，所以 `compose.yaml` 给了 1 分钟的停止宽限期。
 
+## SMTP 提交口
+
+让同一部署环境里的服务（监控、告警、定时任务）不改代码、用 SMTP 直接发信（§13.6）。默认关闭，
+`YUUKA_SUBMISSION_LISTEN` 打开它。只做隐式 TLS（465 的形式），不做 STARTTLS。
+端口自己认证（§13.7），但通常只应从内网或 tailnet 可达：用它的只有这几台服务，没有理由放在公网上。
+
+每个服务一把 SMTP 密码，用户名是命令单独打印的凭据 id；用哪个发件地址、发到哪一步由 `yuuka identity` 和 `yuuka grant` 决定（§13.5）：
+
+```bash
+docker compose run --rm yuuka identity add alerts@example.com --owner service:monitoring --transport cloudflare
+docker compose run --rm yuuka grant set --identity alerts@example.com --principal service:monitoring \
+  --policy auto --recipients allowlist --allow ops@example.com
+docker compose run --rm yuuka token issue --kind smtp --principal service:monitoring --label alertmanager
+```
+
+客户端配置：主机名是证书上的名字（如 `mail.example.com`），端口 465，「SSL/TLS」或「implicit TLS」（不是 STARTTLS），
+AUTH PLAIN。停在草稿或待审核的信同样回 `250`，回复里带 outbox / 草稿 id；被策略拒绝回 `550 5.7.1` 和原因。
+
+容器里 yuuka 以非 root 运行、没有任何 capability，所以在容器里监听 31465，由 Compose 或代理映射到 465。
+两种方式二选一。
+
+**yuuka 自己终结 TLS**：给它证书和私钥的 PEM 文件。来源随意（certbot、宿主机 Caddy 的证书目录……）；
+文件变了 yuuka 一分钟内换上新证书，续期不用重启。挂载**目录**而不是单个文件：续期多半是换文件或改符号链接，
+单文件的 bind mount 会一直指着旧的那个。私钥要让容器里的用户（distroless 的 `nonroot`，uid 65532）读得到。
+
+```bash
+# yuuka.env
+YUUKA_SUBMISSION_LISTEN=0.0.0.0:31465
+YUUKA_SUBMISSION_TLS_CERT_FILE=/certs/mail.example.com/fullchain.pem
+YUUKA_SUBMISSION_TLS_KEY_FILE=/certs/mail.example.com/privkey.pem
+```
+
+```yaml
+# compose.override.yaml
+services:
+  yuuka:
+    ports:
+      # 只发布在内网 / tailnet 网卡的地址上（或 127.0.0.1），不要省略地址：那等于 0.0.0.0
+      - "127.0.0.1:465:31465"
+    volumes:
+      - /etc/letsencrypt:/certs-src:ro   # 示意；路径按证书的实际位置改
+```
+
+（certbot 的 `live/` 是指向 `archive/` 的符号链接，挂整个 `/etc/letsencrypt`，变量写 `/certs-src/live/<名字>/fullchain.pem`。）
+
+**代理终结 TLS**：代理在 465 上解开 TLS，以明文转给 yuuka 的 31465，并且**必须**带 PROXY protocol 头（v1 或 v2），
+否则限速和审计里的客户端全是代理自己。`YUUKA_SUBMISSION_PROXIES` 列出代理的地址，只有它们能发明文、必须发 PROXY 头；
+这和 HTTP 的 `YUUKA_TRUSTED_PROXIES` 是两份名单（§13.6）。没有证书文件又没有这份名单时 yuuka 拒绝启动。
+
+```bash
+# yuuka.env；宿主机上的代理经回环端口进来时来自 edge 网络的网关
+YUUKA_SUBMISSION_LISTEN=0.0.0.0:31465
+YUUKA_SUBMISSION_PROXIES=10.213.77.0/24
+```
+
+```yaml
+# compose.override.yaml：只发布给宿主机上的代理
+services:
+  yuuka:
+    ports:
+      - "127.0.0.1:31465:31465"
+```
+
+HAProxy：
+
+```
+frontend submission
+    mode tcp
+    bind 127.0.0.1:465 ssl crt /etc/haproxy/certs/mail.example.com.pem   # 内网 / tailnet 地址
+    default_backend yuuka_submission
+
+backend yuuka_submission
+    mode tcp
+    server yuuka 127.0.0.1:31465 send-proxy-v2
+```
+
+Caddy 要带 [caddy-l4](https://github.com/mholt/caddy-l4) 模块的构建（官方镜像没有），在 `layer4` 里用 `tls` 终结、
+`proxy` 的 `proxy_protocol v2` 转给 `127.0.0.1:31465`；Traefik 的 TCP router 加 `tls` 和服务上的 `proxyProtocol`。
+无论哪种，代理健康检查用 PROXY v2 的 `LOCAL` 或 v1 的 `UNKNOWN`。代价：从代理那个地址直连 31465 的其他进程
+（比如同一台宿主机上的服务）不带 PROXY 头会被断开，它们也要经过代理。
+
+在 `actions` 里看提交口：`smtp.auth`、`smtp.auth.reject`（带原因）、`smtp.submit`（回复码与 outbox / 草稿 id），
+都带客户端地址和经过的代理。撤销一把密码（`yuuka token revoke <凭据 id>`）对开着的会话也立即生效。
+
 ## 数据库角色
 
 yuuka 不以超级用户连库。[`postgres-roles.sh`](postgres-roles.sh) 在 Postgres 第一次初始化空数据目录时建三个角色，
@@ -268,9 +352,8 @@ Caddy、Postgres 的镜像 digest 写在 `compose.yaml` 里，随仓库更新。
 | 出站 | 53 | DNS |
 | 出站 | 123/udp | NTP：webhook 签名带时间窗口（§2.2），时钟必须准 |
 | 出站（M2 起） | 465/tcp | 经 Cloudflare Email Sending 发信 |
+| 入站（可选，仅内网） | 465/tcp | SMTP 提交口（见上文），只发布在内网 / tailnet 地址上 |
 | 无 | 25 | 收信由 Cloudflare Email Routing 完成，MX 不指向这台机器 |
-
-M2 的 SMTP submission 口（§13.6）只给同一部署环境里的服务用，不对公网开放。
 
 ## 本地试跑
 

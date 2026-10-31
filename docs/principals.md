@@ -176,7 +176,7 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 ### 13.6 SMTP submission：让其他服务直接发信
 
 这是多主体带来的最大实用价值。yuuka 自己监听一个 **SMTP submission 口**
-（`go-smtp` 的 server 侧，和 §5 选型里的 `go-imap` 同生态，不新增依赖），
+（`go-smtp` 的 server 侧，§5），
 用 SASL 校验 `credentials`，然后：
 
 1. **按信头 `From` 确定 identity**，不按 `MAIL FROM`。收件人看到的、DMARC 对齐校验的都是信头 `From`；
@@ -194,6 +194,48 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 `Sender` 同样解析且必须是同一主体能用的身份；`store.PolicyInput` + `sendpolicy.Decide` 得出去向：
 `Decision.Tier` 为 `none` 时拒收（550），否则一律 `250`——`Queue` 入 outbox，否则规范化后的字节写进 `sent/`、
 以 `drafts.raw_id` 停在草稿，`hold_reason` 记原因。`Decision.AutoSubmitted` 非空时规范化要补上 `Auto-Submitted` 头。
+
+**协议层**在 [`internal/smtpd`](../internal/smtpd/smtpd.go)，只管协议；上面那些关于信的规则全在提交核心里，
+协议层一条也不重复。它和核心之间是一个在消费方定义的小接口（`smtpd.Submitter`）。实现时定下的几处：
+
+- **只有 AUTH PLAIN**。LOGIN 从没走出草案，`go-sasl` 也不再带它的 server 侧；会说 SMTP 的服务端软件都会 PLAIN。
+  真遇到只会 LOGIN 的客户端再加。用户名是凭据 id（§13.3），授权身份（authzid）只能为空或等于用户名，不做代理授权
+- **AUTH 之前不收 `MAIL`**（`530 5.7.0`）。`submission:send` 在提交口再查一遍，不只靠签发时「SMTP 密码恰好这一个 scope」的约束
+- **吊销对已经开着的会话也立即生效**：每个 `MAIL` 重新认证一次，为此会话结束前密码留在内存里。
+  失效时回 `421`：客户端挂断、信留在它手里，重连时在 AUTH 得到 `535`——凭据坏了就该在那里暴露，而不是让信被逐封退回
+- **上限取 Cloudflare 出口的实测值**（§10.3、§10.4 的实测表）：`SIZE` 25 MiB，每个事务 50 个收件人
+  （第 51 个回 `452 4.5.3`，客户端把剩下的放进下一个事务）。比出口宽只会把拒绝推迟到回过 `250` 之后。
+  规范化补的头可能让一封贴着上限的信超过出口的 `SIZE`，那会在 transport 的本地检查里成为 rejected，不会无声消失
+- **不宣告 `SMTPUTF8`**：出口没有，需要它的信发不出去；非 ASCII 的信封地址回 `553 5.6.7`（RFC 6531）。
+  `8BITMIME` 和 `CHUNKING` 是 `go-smtp` 固定宣告的；出口收 8-bit 正文，transport 发送前按出口能力检查
+- **回复只由核心的结论决定**。停在 review 或草稿也是 `250`：留住它是 §13.5 的策略在起作用，
+  回错误的话客户端会重试，草稿越堆越多。回复文本带上 id，运维者据此找到那封信
+
+  | 结论 | 回复 |
+  |---|---|
+  | 入 outbox 待发 | `250 2.0.0 Queued as <outbox id>` |
+  | 停在 `held` 等审核 | `250 2.0.0 Held for review as <outbox id>: <原因>` |
+  | 停在草稿 | `250 2.0.0 Kept as draft <draft id>: <原因>` |
+  | 核心拒收：没有身份覆盖信头 `From`、档位 `none`、违反上面的规则 | `550 5.7.1 <原因>` |
+  | 其他错误（库、R2……） | `451 4.3.0`，原因只进日志；客户端留着信重试，宁可重复也不丢 |
+  | 超过 `SIZE` / 收件人上限 | `552 5.3.4` / `452 4.5.3`，到不了核心 |
+  | AUTH 失败 / 被限速 / 认证本身出错 | `535 5.7.8` / `454 4.7.0` / `454 4.7.0` |
+
+- **防滥用**：连接数有总上限和每个客户端的上限（IPv4 按地址，IPv6 按 /64：一台主机通常拿到一整个 /64，
+  按地址算它每次都能换个新桶），超了回 `421` 断开；AUTH 失败每个客户端先放几次、之后按固定间隔放一次，
+  超了不查库直接 `454`。密码是 256 位随机串，限速保护的不是密码，而是一个客户端能引起的查库次数和审计条目数。
+  每条命令最多等 5 分钟（RFC 5321 的下限；`go-smtp` 按命令行设读超时，所以它也是整个 `DATA` 的上限），
+  一行最长 2000 字节。数字按「同一部署环境里几台服务」定，见 [`limit.go`](../internal/smtpd/limit.go)。
+  连接计数挂在原始 TCP 连接上：`go-smtp` 只对 `*tls.Conn` 开放 AUTH，交给它的连接不能再包一层
+- **审计**：AUTH 成功（`smtp.auth`）、失败（`smtp.auth.reject`，带原因）、每次提交（`smtp.submit`：
+  信封发件人、收件人数、字节数、回复码、outbox / 草稿 id）都进 `actions`，带 `via: "smtp"`、
+  客户端地址和经过的代理，从不记密码和正文。失败时用户名只在形如凭据 id 时才记，填反了字段的客户端不会把密码写进日志；
+  被限速的尝试每个客户端十分钟只记一条
+- **停机**时等进行中的会话做完，和 HTTP 共用 30 秒宽限，超时才断。在 `DATA` 中途被断的会话没拿到 `250`，信仍在客户端手里
+- **配置**：`YUUKA_SUBMISSION_LISTEN` 不设就不监听；`YUUKA_SUBMISSION_TLS_CERT_FILE` / `_KEY_FILE` 让 yuuka 自己终结 TLS，
+  不给就必须有 `YUUKA_SUBMISSION_PROXIES`。证书文件变化后一分钟内换上新证书（[`mailnet.CertFiles`](../internal/mailnet/certfile.go)），
+  续期不用重启；新文件读不出来时继续用旧的，下一次检查再试。清单见 [`cmd/yuuka/main.go`](../cmd/yuuka/main.go) 的头注释，
+  部署方式见 [`deploy/README.md`](../deploy/README.md)
 
 **监听方式**（对 yuuka 所有的邮件协议监听器都成立，包括 M5 可能加的 IMAP 网关）。
 实现在 [`internal/mailnet`](../internal/mailnet/mailnet.go)：它包住一个 TCP listener，
@@ -214,7 +256,7 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 - **代理名单单独配置**，不复用 HTTP 的 `YUUKA_TRUSTED_PROXIES`，语法相同（同一个解析器）。
   两者语义不同：`X-Forwarded-For` 是可选的、逐跳往回走，PROXY 头是强制的。共用一份名单，
   HTTP 反代的地址就再也不能直连提交口，只做 TCP 转发的代理又会被 HTTP 那边平白信任——两个方向都扩大了信任。
-  常见的「一个 Caddy 同时做两件事」只是把同一个地址写两遍。配置项随提交服务一起加
+  常见的「一个 Caddy 同时做两件事」只是把同一个地址写两遍。提交口的名单是 `YUUKA_SUBMISSION_PROXIES`
 - **头和 TLS 握手在 `Accept` 之前做完**，每个连接一个 goroutine，共用一个超时（默认 10 秒）。
   不在第一次 `Read` 时才懒解析：SMTP 是服务端先说话，懒解析意味着问候语在检查之前就发给了对方，
   `RemoteAddr` 也得变成会阻塞的调用。现在一个只发半个头就不动的对端只占自己的 goroutine 到超时，

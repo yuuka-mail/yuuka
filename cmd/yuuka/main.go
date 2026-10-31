@@ -90,6 +90,15 @@
 //	                                    message-id, return-path, dkim, status-query (§10.2)
 //	YUUKA_OUTBOX_WORKERS                concurrent send attempts in serve (default 2)
 //	YUUKA_OUTBOX_POLL_INTERVAL          how often serve looks for due mail (default 30s)
+//	YUUKA_SUBMISSION_LISTEN             SMTP submission port of serve, implicit TLS only, e.g. :465
+//	                                    (default: off). See internal/smtpd and §13.6
+//	YUUKA_SUBMISSION_TLS_CERT_FILE      PEM certificate chain and key for the port; yuuka then
+//	YUUKA_SUBMISSION_TLS_KEY_FILE       terminates TLS, and reloads the files when they change.
+//	                                    Without them a proxy terminates TLS
+//	YUUKA_SUBMISSION_PROXIES            comma-separated CIDRs of the proxies in front of the port.
+//	                                    They must send the PROXY protocol (v1 or v2), and only they
+//	                                    may; required without the TLS files. A separate list from
+//	                                    YUUKA_TRUSTED_PROXIES (§13.6)
 //
 // `yuuka migrate`, `yuuka prefix`, `yuuka token`, `yuuka outbox`,
 // `yuuka identity` and `yuuka grant` only need the database URLs;
@@ -133,6 +142,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/outbox"
 	"github.com/yuuka-mail/yuuka/internal/r2"
+	"github.com/yuuka-mail/yuuka/internal/smtpd"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/web"
 )
@@ -275,6 +285,9 @@ type app struct {
 	in      *ingest.Ingester
 	alerter authn.Alerter   // nil without Telegram
 	outbox  *outbox.Service // serve only; see openOutbox
+	// submitter takes messages from the SMTP submission port (§13.6).
+	// serve refuses YUUKA_SUBMISSION_LISTEN while it is nil.
+	submitter smtpd.Submitter
 }
 
 // openOutbox builds the outbox from the configured transports, reading
@@ -453,6 +466,21 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		IdleTimeout:       2 * time.Minute,
 	}
 
+	// The submission port opens before anything runs in the background,
+	// so a port that cannot open stops serve before it does anything.
+	// A nil channel never delivers: without the port there is nothing to
+	// wait for.
+	var subErrc <-chan error
+	stopSub := func(context.Context) error { return nil }
+	if a.cfg.Submission.Listen != "" {
+		if a.submitter == nil {
+			return errors.New("YUUKA_SUBMISSION_LISTEN is set, but this build has no submission core to take the mail")
+		}
+		if stopSub, subErrc, err = startSubmission(a.cfg.Submission, a.submitter, a.db, a.domain(), log); err != nil {
+			return err
+		}
+	}
+
 	loopDone := make(chan struct{})
 	go func() {
 		defer close(loopDone)
@@ -472,20 +500,34 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		log.Info("listening", "addr", a.cfg.Listen, "version", version)
 		errc <- srv.ListenAndServe()
 	}()
+	var failed error
 	select {
 	case err := <-errc:
-		cancel()
-		<-loopDone
-		<-outboxDone
-		return fmt.Errorf("http: %w", err)
+		failed = fmt.Errorf("http: %w", err)
+	case err := <-subErrc:
+		failed = fmt.Errorf("submission: %w", err)
 	case <-ctx.Done():
 	}
+	cancel()
+	// Both servers drain at once, sharing the grace period: a session in
+	// DATA gets to finish and see its 250.
 	shutdownCtx, cancelShutdown := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancelShutdown()
-	err = srv.Shutdown(shutdownCtx)
+	subDone := make(chan error, 1)
+	go func() { subDone <- stopSub(shutdownCtx) }()
+	err = errors.Join(failed, srv.Shutdown(shutdownCtx), <-subDone)
 	<-loopDone
 	<-outboxDone
 	return err
+}
+
+// domain is the name the submission port greets with: the WebUI's host
+// when there is one, which is usually what the services connect to.
+func (a *app) domain() string {
+	if _, host, err := authn.ParseOrigin(a.cfg.Web.Origin); err == nil {
+		return host
+	}
+	return ""
 }
 
 // route is one top-level endpoint of serve and how it authenticates
