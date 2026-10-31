@@ -21,7 +21,7 @@ transports(id, kind, config_ref)   -- cf_smtp | gmail_smtp | m365 | ...
 zones(zone pk, account_id, catchall bool, sending_onboarded bool)
 
 -- 原始件（不可变）
-raw_objects(id ulid pk, r2_key unique, local_path, size, sha256, received_at, ingest_state,
+raw_objects(id ulid pk, r2_key unique, local_path, size, sha256, received_at,
             completeness smallint,  -- full | header_only（§4.4）；原件不可变，补全正文是另一份 raw
             content_hash bytea,     -- 去掉传输头后的字节哈希：折叠与重投去重的键（§4.1）。
                                     --   和 sha256 一样是原件的字节属性，ingest 时算一次；header_only 时为空
@@ -40,9 +40,11 @@ messages(
   subject text, snippet text,
   from_addr text, from_name text,
   class smallint,                   -- 分类器 + 规则算出的 machine / human / unknown；人工改判不写这里
-  spam_score real,                  -- 来源见 §4.3
+  spam_score real,                  -- 来源见 §4.3；M1 恒为空，降级现算
   has_attach bool, body_text text, body_html_key text,
-  parser_version int                -- 哪个版本的解析器产出的这一行；段落锚点随它漂移（§4.2）
+  parser_version int,               -- 哪个版本的解析器产出的这一行；段落锚点随它漂移（§4.2）
+  parse_error text                  -- 隔离（quarantine，§3 原则 5）：为空 = 解析干净；
+                                    --   否则记下出了什么错，其余列仍是能读出的部分
 )
 
 -- 人对一封信做的决定：不可重建，reparse 不碰
@@ -57,9 +59,11 @@ message_state(
 message_aliases(old_id ulid pk, new_id → messages)
 
 threads(id ulid pk, subject_norm, participants text[], first_at, last_at, n, class)
+  -- 派生。reparse 整体重建，能沿用的旧 id 尽量沿用，但不像 message id 那样承诺稳定
 
 prefixes(
-  zone text, prefix text, primary key(zone, prefix), first_seen, last_seen, label, note,
+  zone text, prefix text, primary key(zone, prefix), label, note,
+  first_seen, last_seen,            -- 观测值：ingest 与 reparse 只会把区间放宽，不算决定
   expected_domains text[],          -- 我把它给了谁
   observed_domains text[],          -- 实际谁在发
   state smallint,                   -- claimed(我认领/给出去过) | discovered(只是有人往这投过)，§3.3
@@ -84,7 +88,9 @@ deliveries(
                                      --   依赖当时的 DNS，是事实不是派生，reparse 不重算（§3.3）
   -- 以下两列是派生列，reparse 只重写这两列（§4.2）
   message_id → messages,             -- 可空：notify 策略只留幂等桩，不建 message（§10.1）
-  auth jsonb,                        -- 只来自可信接收方（§10.1.1）
+  auth jsonb,                        -- 只来自可信接收方（§10.1.1）：
+                                     --   {trusted, authserv_id, dmarc, results[{method, result, props}],
+                                     --    remote_ip, cf_spamh_score}；不可信时只有 {trusted:false, reason}
   unique(account_id, source_key)
 )
 
@@ -135,6 +141,10 @@ changes(seq bigserial pk, kind(message|delivery|thread|flag|prefix|proposal), ta
 
 全文检索：Postgres 原生 FTS 对中文很弱。先用 `pg_trgm` 够个人用量，
 中文体验不行再上 PGroonga 或外置 bleve 索引（这是可替换的一层，不影响模型）。
+M1 的实现是对 `subject || from_name || from_addr || body_text` 这一个表达式建 trigram GIN 索引，
+查询按空白切词、每个词做 `ILIKE '%词%'` 且全部命中。子串匹配不需要分词，中文天然可用；
+少于三个字符的词用不上 trigram 索引，退化为顺序扫描，结果仍然正确，个人量级可以接受。
+`body_text` 截断在 1 MiB：它只服务检索和摘要，原件才是正文的来源。
 
 ### 4.1 折叠键：内容哈希，不是 Message-ID
 
@@ -173,7 +183,14 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
   pull 来源不这样做：远端的两份是两个对象（比如同一封信在两个文件夹里），
   各自要有自己的定位才能回写和卸载，所以各是一条 delivery，只在 `messages` 层折叠
 - §1 沿用的 `subject + sender` 兜底线程匹配**只对 `class=human` 启用**：
-  机器邮件里同一发件人的所有「Your verification code」会被它归成一条巨型线程
+  机器邮件里同一发件人的所有「Your verification code」会被它归成一条巨型线程。
+  M1 的具体规则：新信是 human、自己没有 `In-Reply-To` / `References`，
+  才去找 30 天内同一 `from_addr`、去掉 Re:/Fwd:/回复： 等前缀后主题相同、且不是 machine 的上一封。
+  「sender」目前只是发件人本人：入库的只有收信，线程参与者只有发件人。
+  M2 发出的信进 `messages` 后，要把它放宽成「线程的通信对方」，§10.4.1 断开的第一封才接得上
+- 线程是消息图的连通分量：Message-ID / In-Reply-To / References 互相指到的、Message-ID 相同的
+  （内容没折叠的同一封信），加上面的兜底边。ingest 逐封并入（一封信连通两条线程时合并成较早的那条），
+  reparse 整体重算，两者规则相同，所以内容不变时 reparse 不移动任何线程
 
 ### 4.2 重建边界：reparse 重建什么、不碰什么
 
@@ -206,6 +223,12 @@ metadata 恢复（§2.1），但外部账户的远端定位和卸载状态只在
   所以 `cites` 同时存锚点和一小段原文摘录，锚点对不上时按摘录重新定位
 - 生效的分类是 `coalesce(message_state.class_override, messages.class)`：
   人的改判永远压过重算结果，规则重跑也不会把它改回去
+- `yuuka reparse [--since T]` 先补跑没有 message 的投递（M0 入库的、或解析步骤失败的），
+  再按 id 原地重写 `received_at ≥ T` 的消息和它们每条投递的 `auth`，最后全库重建线程——
+  改了 Message-ID 或 References 的信可能挪到任何一条线程里，只重建局部会留下错的连通分量。
+  它不写 `message_state`、`message_aliases`、前缀的认领与标注；`prefixes` 只会补上缺的行、放宽观测区间。
+  隔离状态（`parse_error`）是派生的：换了更好的解析器，reparse 会把它清掉。
+  所以它放在 `messages` 上，而不是 `raw_objects.ingest_state`——`raw_objects` 是 reparse 不碰的事实
 
 ### 4.3 垃圾判定要有来源
 
@@ -214,7 +237,12 @@ metadata 恢复（§2.1），但外部账户的远端定位和卸载状态只在
 Cloudflare Email Routing 基本不做内容过滤，`spam_score` 字段必须有人填：
 
 - M1 最低实现：`dmarc=fail`、或 `prefixes.state=discovered`（§3.3）→ 直接降级，
-  不推送、不进聚合视图、不参与泄漏基线，只静默入库
+  不推送、不进聚合视图、不参与泄漏基线，只静默入库。
+  降级按投递判断，一封信只要有一条投递不降级（前缀已认领、可信接收方没报 `dmarc=fail`）就不降级。
+  它**不存储**，查询时由 `deliveries.auth` 和 `prefixes.state` 现算：认领一个前缀立刻生效，
+  不必 reparse；`spam_score` 因此在 M1 恒为空。未验证（取不到可信认证头）不算 `dmarc=fail`，不降级。
+  推送只在 ingest 当场判断：这条投递不降级、且同一封信没有更早的不降级投递时推一次；
+  解析步骤失败、或由补跑（backlog）处理的投递一律不推——前者判断不了降级，后者已经不是新信
 - Cloudflare 入站会加 `X-CF-SpamH-Score: <n>`（§10.1.1 实测）。刻度没有文档，
   先原样记进 `deliveries.auth`、作为一个信号，积累样本后再决定阈值
 - 需要更强判定时旁路 rspamd（标准协议，ingest 多一步调用），不影响模型
