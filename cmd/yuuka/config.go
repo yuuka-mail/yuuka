@@ -14,7 +14,7 @@ import (
 const minSecretLen = 32
 
 type config struct {
-	DatabaseURL       string
+	DB                dbConfig
 	Raw               r2.Config
 	Pending           r2.Config
 	WebhookSecrets    [][]byte
@@ -51,15 +51,16 @@ func loadWebConfig(getenv func(string) string) (webConfig, error) {
 
 // adminConfig is what `yuuka admin` needs: no R2, no webhook secrets.
 type adminConfig struct {
-	DatabaseURL string
-	Web         webConfig
+	DB  dbConfig
+	Web webConfig
 }
 
 func loadAdminConfig(getenv func(string) string) (adminConfig, error) {
 	var errs []error
-	c := adminConfig{DatabaseURL: getenv("YUUKA_DATABASE_URL")}
-	if c.DatabaseURL == "" {
-		errs = append(errs, errors.New("YUUKA_DATABASE_URL is required"))
+	var c adminConfig
+	var err error
+	if c.DB, err = loadDBConfig(getenv); err != nil {
+		errs = append(errs, err)
 	}
 	w, err := loadWebConfig(getenv)
 	c.Web = w
@@ -90,8 +91,12 @@ func loadConfig(getenv func(string) string, needSecrets bool) (config, error) {
 	}
 
 	endpoint := req("YUUKA_R2_ENDPOINT")
+	db, err := loadDBConfig(getenv)
+	if err != nil {
+		errs = append(errs, err)
+	}
 	c := config{
-		DatabaseURL: req("YUUKA_DATABASE_URL"),
+		DB: db,
 		Raw: r2.Config{
 			Endpoint:        endpoint,
 			Bucket:          req("YUUKA_R2_RAW_BUCKET"),

@@ -2,15 +2,12 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/user"
 	"strconv"
 	"time"
-
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/store"
@@ -34,22 +31,17 @@ type host struct {
 	user string
 }
 
-// withHost opens the database named by YUUKA_DATABASE_URL, applies
-// migrations and runs f.
+// withHost opens the database (openDB) and runs f.
 func withHost(ctx context.Context, f func(*host) error) error {
-	url := os.Getenv("YUUKA_DATABASE_URL")
-	if url == "" {
-		return errors.New("YUUKA_DATABASE_URL is required")
-	}
-	pool, err := pgxpool.New(ctx, url)
+	d, err := loadDBConfig(os.Getenv)
 	if err != nil {
-		return fmt.Errorf("database: %w", err)
-	}
-	defer pool.Close()
-	db := store.New(pool)
-	if err := db.Migrate(ctx); err != nil {
 		return err
 	}
+	pool, db, err := openDB(ctx, d)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
 	return f(&host{db: db, out: os.Stdout, msg: os.Stderr, now: time.Now, user: osUser()})
 }
 

@@ -23,7 +23,11 @@
 //
 // Configuration comes from the environment:
 //
-//	YUUKA_DATABASE_URL                  Postgres connection URL (required)
+//	YUUKA_DATABASE_URL                  Postgres connection URL (required); everything but
+//	                                    migrations runs as its role
+//	YUUKA_DATABASE_OWNER_URL            Postgres URL of the role that owns the schema, used only
+//	                                    to apply migrations on start (optional; unset, the role of
+//	                                    YUUKA_DATABASE_URL migrates too). See db.go
 //	YUUKA_R2_ENDPOINT                   R2 S3 endpoint, https://<account id>.r2.cloudflarestorage.com (required)
 //	YUUKA_R2_RAW_BUCKET                 raw bucket name (required)
 //	YUUKA_R2_RAW_ACCESS_KEY_ID          read-only token for the raw bucket (required)
@@ -45,8 +49,8 @@
 //	YUUKA_WEBAUTHN_RP_ID                WebAuthn relying party id (default: the origin's host)
 //	YUUKA_MCP_TOKEN                     bearer token `yuuka mcp --stdio` acts as (required there)
 //
-// `yuuka admin` only needs YUUKA_DATABASE_URL and YUUKA_WEB_ORIGIN;
-// `yuuka prefix` and `yuuka token` only YUUKA_DATABASE_URL. They run on the host
+// `yuuka admin` only needs the database URLs and YUUKA_WEB_ORIGIN;
+// `yuuka prefix` and `yuuka token` only the database URLs. They run on the host
 // without a login; host.go says how their actions are recorded.
 //
 // The webhook is served at POST /ingest/cloudflare (HMAC, §2.2); the login
@@ -173,15 +177,11 @@ func enroll(ctx context.Context, log *slog.Logger, name string, ttl time.Duratio
 	if err != nil {
 		return err
 	}
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pool, db, err := openDB(ctx, cfg.DB)
 	if err != nil {
-		return fmt.Errorf("database: %w", err)
-	}
-	defer pool.Close()
-	db := store.New(pool)
-	if err := db.Migrate(ctx); err != nil {
 		return err
 	}
+	defer pool.Close()
 	svc, err := authn.New(authn.Config{DB: db, Origin: cfg.Web.Origin, RPID: cfg.Web.RPID, Log: log})
 	if err != nil {
 		return err
@@ -215,13 +215,8 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 	if err != nil {
 		return nil, err
 	}
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	pool, db, err := openDB(ctx, cfg.DB)
 	if err != nil {
-		return nil, fmt.Errorf("database: %w", err)
-	}
-	db := store.New(pool)
-	if err := db.Migrate(ctx); err != nil {
-		pool.Close()
 		return nil, err
 	}
 	var notifier ingest.Notifier
