@@ -8,8 +8,10 @@
 
 ## 现状
 
-设计阶段，M0 尚未开工。完整设计在 [`docs/`](docs/)（中文，节号 §1–§13 全局唯一，
-索引见 [`docs/README.md`](docs/README.md)），路线见 [`docs/roadmap.md`](docs/roadmap.md)。
+M0、M1 已完成：Cloudflare 收信、入库与重投去重，MIME 解析、线程与搜索，passkey 登录，
+WebUI，agent 结构化视图与只读 MCP。下一步是部署和 M2（发信）。完整设计在 [`docs/`](docs/)
+（中文，节号 §1–§13 全局唯一，索引见 [`docs/README.md`](docs/README.md)），路线见 [`docs/roadmap.md`](docs/roadmap.md)。
+已实现的部分以代码为准，文档只讲为什么（见下文「文档」）。
 动手前按任务读对应章节，不必通读：
 
 | 在做 | 先读 |
