@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"unicode"
 )
 
 // Tier is identity_grants.send_policy.
@@ -71,6 +72,24 @@ func ParseRecipientScope(s string) (RecipientScope, error) {
 		return r, nil
 	}
 	return "", fmt.Errorf("recipient scope %q: want thread, allowlist or any", s)
+}
+
+// ParseAllowlist checks the entries of an allowlist as `yuuka grant set
+// --allow` and the settings take them: addresses (a@example.net) and
+// domains (example.net), returned lowercased and trimmed, never nil.
+func ParseAllowlist(entries []string) ([]string, error) {
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		e = strings.ToLower(strings.TrimSpace(e))
+		local, domain, isAddr := strings.Cut(e, "@")
+		bad := e == "" || strings.IndexFunc(e, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 ||
+			strings.Count(e, "@") > 1 || isAddr && (local == "" || domain == "") || !isAddr && !strings.Contains(e, ".")
+		if bad {
+			return nil, fmt.Errorf("allowlist entry %q: want an address (a@example.net) or a domain (example.net)", e)
+		}
+		out = append(out, e)
+	}
+	return out, nil
 }
 
 // HoldReason is drafts.hold_reason. The list is closed by the column's

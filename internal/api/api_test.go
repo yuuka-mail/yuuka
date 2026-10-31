@@ -353,6 +353,51 @@ func (s *spy) RemoveGrantIfTighter(ctx context.Context, identityID, principalID 
 	return s.DB.RemoveGrantIfTighter(ctx, identityID, principalID, a)
 }
 
+func (s *spy) Principal(ctx context.Context, id string) (store.Principal, error) {
+	s.saw("Principal", configRead)
+	return s.DB.Principal(ctx, id)
+}
+
+func (s *spy) Grantee(ctx context.Context, kind, name string, a store.Action) (store.Principal, bool, error) {
+	s.saw("Grantee", actor(a))
+	return s.DB.Grantee(ctx, kind, name, a)
+}
+
+func (s *spy) CreateCredential(ctx context.Context, c store.Credential, a store.Action) error {
+	s.saw("CreateCredential", actor(a))
+	return s.DB.CreateCredential(ctx, c, a)
+}
+
+func (s *spy) Accounts(ctx context.Context) ([]store.Account, error) {
+	s.saw("Accounts", configRead)
+	return s.DB.Accounts(ctx)
+}
+
+func (s *spy) AddIdentity(ctx context.Context, i store.Identity, a store.Action) error {
+	s.saw("AddIdentity", actor(a))
+	return s.DB.AddIdentity(ctx, i, a)
+}
+
+func (s *spy) DisableIdentity(ctx context.Context, id string, a store.Action) error {
+	s.saw("DisableIdentity", actor(a))
+	return s.DB.DisableIdentity(ctx, id, a)
+}
+
+func (s *spy) GrantFor(ctx context.Context, identityID, principalID string) (store.Grant, error) {
+	s.saw("GrantFor", configRead)
+	return s.DB.GrantFor(ctx, identityID, principalID)
+}
+
+func (s *spy) SetGrant(ctx context.Context, g store.Grant, a store.Action) error {
+	s.saw("SetGrant", actor(a))
+	return s.DB.SetGrant(ctx, g, a)
+}
+
+func (s *spy) RemoveGrant(ctx context.Context, identityID, principalID string, a store.Action) error {
+	s.saw("RemoveGrant", actor(a))
+	return s.DB.RemoveGrant(ctx, identityID, principalID, a)
+}
+
 // localRaw reads raw messages the way ingest does without R2.
 type localRaw struct{ localraw.Dir }
 
@@ -376,7 +421,30 @@ type harness struct {
 	suspended *suspendedSpy
 	// local holds the raw messages, as the serve app's local copy does.
 	local localraw.Dir
-	h     http.Handler
+	// alerts are what the operator was told of widenings (§13.10).
+	alerts *alertSpy
+	h      http.Handler
+}
+
+type alertSpy struct {
+	mu   sync.Mutex
+	sent []string
+}
+
+func (s *alertSpy) Notify(_ context.Context, text string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sent = append(s.sent, text)
+	return nil
+}
+
+// take returns and forgets the alerts sent so far.
+func (s *alertSpy) take() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.sent
+	s.sent = nil
+	return out
 }
 
 type suspendedSpy struct {
@@ -444,10 +512,21 @@ func newHarness(t *testing.T) *harness {
 	})
 	sub := submit.New(submit.Config{DB: db, Outbox: out, Log: quiet})
 	sp := &spy{DB: db, calls: map[string][]*auth.Viewer{}}
-	sus := &suspendedSpy{}
+	sus, alerts := &suspendedSpy{}, &alertSpy{}
 	return &harness{
-		t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, human: human, sub: sub, suspended: sus, local: local,
-		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).WithSuspendNotifier(sus).WithTriage(laya).Handler(svc),
+		t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, human: human, sub: sub, suspended: sus, local: local, alerts: alerts,
+		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).WithSuspendNotifier(sus).WithTriage(laya).
+			WithAlerter(alerts).WithTransports([]string{"cf"}).Handler(svc),
+	}
+}
+
+// elevate lets session widen for the next few minutes, as a fresh
+// passkey assertion does (authn's tests run that ceremony itself).
+func (h *harness) elevate(session string) {
+	h.t.Helper()
+	id, _, _ := auth.ParseSecret(auth.PrefixSession, session)
+	if _, err := h.pool.Exec(h.t.Context(), `UPDATE credentials SET elevated_until = now() + interval '5 minutes' WHERE id = $1`, id); err != nil {
+		h.t.Fatal(err)
 	}
 }
 
@@ -678,6 +757,9 @@ func TestACL(t *testing.T) {
 		// a person's session, so on top of people a token holding every
 		// scope is refused even for a human, and a session for an agent.
 		authority bool
+		// widening: on top of authority, only a session elevated by a
+		// fresh passkey assertion.
+		widening bool
 	}
 	calls := map[string]call{
 		// Lists read what the scores lean to for the page (§15).
@@ -814,12 +896,27 @@ func TestACL(t *testing.T) {
 			method: http.MethodPost, path: "/api/v1/admin/credentials/" + revocable + "/revoke",
 			as: h.human, reads: []string{"CredentialForAuth", "RevokeCredential"}, people: true, authority: true,
 		},
-		"GET /api/v1/admin/identities": {path: "/api/v1/admin/identities", as: h.human, reads: []string{"Identities"}, people: true, authority: true},
+		"POST /api/v1/admin/credentials": {
+			method: http.MethodPost, path: "/api/v1/admin/credentials", body: `{"kind":"token","principal":"agent:acl","scopes":["message:read"]}`,
+			as: h.human, reads: []string{"Grantee", "Principal", "CreateCredential", "CredentialForAuth"}, people: true, authority: true, widening: true,
+		},
+		"GET /api/v1/admin/identities": {
+			path: "/api/v1/admin/identities", as: h.human, reads: []string{"Identities", "Accounts"}, people: true, authority: true,
+		},
+		"POST /api/v1/admin/identities": {
+			method: http.MethodPost, path: "/api/v1/admin/identities", body: `{"address":"acl@example.org","owner":"agent:arisu","transport":"cf"}`,
+			as: h.human, reads: []string{"Accounts", "Grantee", "AddIdentity", "Identities"}, people: true, authority: true, widening: true,
+		},
 		"POST /api/v1/admin/identities/{id}/disable": {
 			method: http.MethodPost, path: "/api/v1/admin/identities/" + disable + "/disable",
 			as: h.human, reads: []string{"DisableIdentityIfTighter"}, people: true, authority: true,
 		},
 		"GET /api/v1/admin/grants": {path: "/api/v1/admin/grants", as: h.human, reads: []string{"Grants"}, people: true, authority: true},
+		"PUT /api/v1/admin/grants": {
+			method: http.MethodPut, path: "/api/v1/admin/grants",
+			body: `{"identity":"` + arisuID + `","principal":"agent:arisu","send_policy":"review","recipient_scope":"thread"}`,
+			as:   h.human, reads: []string{"IdentityByID", "Grantee", "GrantFor", "SetGrant"}, people: true, authority: true, widening: true,
+		},
 		"POST /api/v1/admin/grants/{identity}/{principal}/tighten": {
 			method: http.MethodPost, path: "/api/v1/admin/grants/" + arisuID + "/" + h.agent.ID + "/tighten", body: `{"suspended":true}`,
 			as: h.human, reads: []string{"TightenGrant"}, people: true, authority: true,
@@ -843,7 +940,10 @@ func TestACL(t *testing.T) {
 			continue
 		}
 		access := openapi.Authenticated
-		if row.authority {
+		switch {
+		case row.widening:
+			access = openapi.ElevatedSession
+		case row.authority:
 			access = openapi.HumanSession
 		}
 		if rt.Access != access || len(rt.Scopes) == 0 {
@@ -910,8 +1010,20 @@ func TestACL(t *testing.T) {
 				t.Errorf("%s: a refused request reached the store: %v", pattern, calls)
 			}
 		}
+		cred := h.tokenFor(row.as, rt.Scopes...)
+		if row.widening {
+			// A person's session alone, every scope or not, is not enough.
+			if w := send(h.credential(h.human, auth.KindSession, auth.AllScopes...)); w.Code != http.StatusForbidden ||
+				problemOf(t, w).Code != openapi.CodeElevationRequired {
+				t.Errorf("%s from an unelevated session: %d %s", pattern, w.Code, w.Body.String())
+			}
+			if calls := h.spy.take(); len(calls) != 0 {
+				t.Errorf("%s: an unelevated request reached the store: %v", pattern, calls)
+			}
+			h.elevate(cred)
+		}
 
-		w := send(h.tokenFor(row.as, rt.Scopes...))
+		w := send(cred)
 		if w.Code != openapi.StatusOf(rt.Op) {
 			t.Errorf("%s: %d %s", pattern, w.Code, w.Body.String())
 		}

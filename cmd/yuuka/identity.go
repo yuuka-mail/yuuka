@@ -80,32 +80,18 @@ func parseInterspersed(fs *flag.FlagSet, args []string) error {
 }
 
 // grantee returns the principal named kind:name for an identity owner or
-// a grant: an agent or service is created on first use, as `token issue`
-// does; a human must exist (`admin enroll` makes one), so a typo cannot
-// mint a new human owner.
+// a grant (store.Grantee): an agent or service is created on first use,
+// as `token issue` does; a human must exist.
 func (h *host) grantee(ctx context.Context, s string) (store.Principal, error) {
 	kind, name, err := parsePrincipal(s)
 	if err != nil {
 		return store.Principal{}, err
 	}
-	switch kind {
-	case "agent", "service":
-		p, created, err := h.principal(ctx, kind, name)
-		if created {
-			h.note("created principal %s:%s", kind, name)
-		}
-		return p, err
-	case "human":
-		p, err := h.db.PrincipalByName(ctx, kind, name)
-		if errors.Is(err, store.ErrNotFound) {
-			return p, fmt.Errorf("%s does not exist; humans are created by `yuuka admin enroll`", s)
-		}
-		if err == nil && p.DisabledAt != nil {
-			return p, fmt.Errorf("%s is disabled", s)
-		}
-		return p, err
+	p, created, err := h.principal(ctx, kind, name)
+	if created {
+		h.note("created principal %s:%s", kind, name)
 	}
-	return store.Principal{}, fmt.Errorf("%s: want a human, agent or service principal", s)
+	return p, err
 }
 
 func (h *host) identityAdd(ctx context.Context, addr string, i store.Identity, owner, account string) error {
@@ -113,7 +99,7 @@ func (h *host) identityAdd(ctx context.Context, addr string, i store.Identity, o
 	if err != nil {
 		return err
 	}
-	if !principalName.MatchString(i.Transport) {
+	if !store.ValidName(i.Transport) {
 		return fmt.Errorf("--transport %q: want a name like the ones in the configuration ([A-Za-z0-9][A-Za-z0-9._-]*)", i.Transport)
 	}
 	accts, err := h.db.Accounts(ctx)

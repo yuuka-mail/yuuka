@@ -84,6 +84,16 @@ var endpoints = []struct {
 		Body:    webauthnJSON, Response: reflect.TypeFor[LoginResult](),
 	}, (*Service).loginFinish},
 	{openapi.Op{
+		Method: http.MethodPost, Path: "/auth/passkey/elevate/begin", Scopes: []auth.Scope{auth.Admin},
+		Summary: "Begin asserting a passkey of this session's person again, to widen who may do what for a few minutes; a person's session only",
+		Body:    reflect.TypeFor[struct{}](), Response: webauthnJSON,
+	}, (*Service).elevateBegin},
+	{openapi.Op{
+		Method: http.MethodPost, Path: "/auth/passkey/elevate/finish", Scopes: []auth.Scope{auth.Admin},
+		Summary: "Finish with the WebAuthn assertion; the session may widen until elevated_until",
+		Body:    webauthnJSON, Response: reflect.TypeFor[ElevateResult](),
+	}, (*Service).elevateFinish},
+	{openapi.Op{
 		Method: http.MethodPost, Path: "/auth/recovery", Access: openapi.Public,
 		Summary: "Exchange a recovery code for an enrollment token, never a session",
 		Body:    reflect.TypeFor[RecoveryRequest](), Response: reflect.TypeFor[RecoveryGrant](),
@@ -227,7 +237,7 @@ func (s *Service) startCeremony(w http.ResponseWriter, cer ceremony) bool {
 	return true
 }
 
-func (s *Service) takeCeremony(w http.ResponseWriter, r *http.Request, register bool) (ceremony, bool) {
+func (s *Service) takeCeremony(w http.ResponseWriter, r *http.Request, kind ceremonyKind) (ceremony, bool) {
 	clearCookie(w, ceremonyCookie)
 	c, err := r.Cookie(ceremonyCookie)
 	if err != nil {
@@ -235,7 +245,7 @@ func (s *Service) takeCeremony(w http.ResponseWriter, r *http.Request, register 
 		return ceremony{}, false
 	}
 	cer, ok := s.ceremonies.take(c.Value, s.now())
-	if !ok || cer.register != register {
+	if !ok || cer.kind != kind {
 		problem(w, http.StatusBadRequest, openapi.CodeCeremonyExpired, "ceremony expired or unknown; start again")
 		return ceremony{}, false
 	}
@@ -251,7 +261,7 @@ func (s *Service) registerBegin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "label too long")
 		return
 	}
-	cer := ceremony{register: true, label: req.Label}
+	cer := ceremony{kind: registerCeremony, label: req.Label}
 	if req.EnrollmentToken != "" {
 		if !s.enrollLimit.allow(s.remote(r)) {
 			writeError(w, http.StatusTooManyRequests, "too many attempts")
@@ -271,6 +281,13 @@ func (s *Service) registerBegin(w http.ResponseWriter, r *http.Request) {
 			return
 		case !v.HumanSession() || !v.Has(auth.Admin):
 			writeError(w, http.StatusForbidden, "only a human session with admin can add a passkey")
+			return
+		case !v.Elevated(s.now()):
+			// A new passkey outlives the session that adds it: the
+			// widest backdoor of all, so a session cookie alone is not
+			// enough (§13.10).
+			problem(w, http.StatusForbidden, openapi.CodeElevationRequired,
+				"adding a passkey needs one of yours first; assert it (/auth/passkey/elevate) and try again")
 			return
 		}
 		cer.principalID, cer.credentialID = v.PrincipalID, v.CredentialID
@@ -327,7 +344,7 @@ func (s *Service) checkEnrollmentToken(r *http.Request, text string) (store.Enro
 }
 
 func (s *Service) registerFinish(w http.ResponseWriter, r *http.Request) {
-	cer, ok := s.takeCeremony(w, r, true)
+	cer, ok := s.takeCeremony(w, r, registerCeremony)
 	if !ok {
 		return
 	}
@@ -417,7 +434,7 @@ func (s *Service) loginBegin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	if s.startCeremony(w, ceremony{data: *data}) {
+	if s.startCeremony(w, ceremony{kind: loginCeremony, data: *data}) {
 		writeJSON(w, http.StatusOK, assertion)
 	}
 }
@@ -427,7 +444,7 @@ func (s *Service) loginFinish(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, "too many attempts")
 		return
 	}
-	cer, ok := s.takeCeremony(w, r, false)
+	cer, ok := s.takeCeremony(w, r, loginCeremony)
 	if !ok {
 		return
 	}
@@ -489,6 +506,113 @@ func (s *Service) loginFinish(w http.ResponseWriter, r *http.Request) {
 	}
 	setCookie(w, SessionCookie, sec.Text, int(SessionTTL/time.Second))
 	writeJSON(w, http.StatusOK, LoginResult{Principal: "human:" + u.p.Name, ExpiresAt: expires})
+}
+
+// elevateBegin starts asserting a passkey of the session's person again
+// (§13.10). Only that person's passkeys are offered: this proves the one
+// signed in still holds one, not that someone does.
+func (s *Service) elevateBegin(w http.ResponseWriter, r *http.Request) {
+	v, _ := auth.ViewerFrom(r.Context())
+	if !v.HumanSession() {
+		writeError(w, http.StatusForbidden, "only a person signed in to the WebUI asserts a passkey; a token cannot")
+		return
+	}
+	if !s.loginLimit.allow(s.remote(r)) {
+		writeError(w, http.StatusTooManyRequests, "too many attempts")
+		return
+	}
+	if _, ok := readJSON(w, r); !ok {
+		return
+	}
+	u, err := s.loadUser(r, v.PrincipalID)
+	if err != nil {
+		s.log.Error("auth: elevate begin", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	assertion, data, err := s.wa.BeginLogin(u, webauthn.WithUserVerification(protocol.VerificationRequired))
+	if err != nil {
+		s.log.Error("auth: elevate begin", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if s.startCeremony(w, ceremony{kind: elevateCeremony, data: *data, principalID: v.PrincipalID, credentialID: v.CredentialID}) {
+		writeJSON(w, http.StatusOK, assertion)
+	}
+}
+
+func (s *Service) elevateFinish(w http.ResponseWriter, r *http.Request) {
+	if !s.loginLimit.allow(s.remote(r)) {
+		writeError(w, http.StatusTooManyRequests, "too many attempts")
+		return
+	}
+	cer, ok := s.takeCeremony(w, r, elevateCeremony)
+	if !ok {
+		return
+	}
+	v, _ := auth.ViewerFrom(r.Context())
+	if v.CredentialID != cer.credentialID {
+		writeError(w, http.StatusUnauthorized, "the session that began this has ended")
+		return
+	}
+	raw, ok := readJSON(w, r)
+	if !ok {
+		return
+	}
+	u, err := s.loadUser(r, cer.principalID)
+	if err != nil {
+		s.log.Error("auth: elevate finish", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	parsed, err := protocol.ParseCredentialRequestResponseBytes(raw)
+	var cred *webauthn.Credential
+	if err == nil {
+		cred, err = s.wa.ValidateLogin(u, cer.data, parsed)
+	}
+	if err == nil && !cred.Flags.UserVerified {
+		err = errors.New("the authenticator did not verify the user")
+	}
+	if err == nil && cred.Authenticator.CloneWarning {
+		err = errors.New("signature counter went backwards: possible cloned authenticator")
+		s.alertf(r.Context(), "a passkey of human:%s presented a stale signature counter; elevation refused. Consider revoking it.", u.p.Name)
+	}
+	var pk store.Passkey
+	if err == nil {
+		pk, err = s.db.PasskeyByCredentialID(r.Context(), cred.ID)
+		if err == nil && pk.PrincipalID != cer.principalID {
+			err = errors.New("the passkey belongs to someone else")
+		}
+	}
+	if err != nil {
+		s.record(r.Context(), store.Action{
+			Actor: cer.principalID, CredentialID: cer.credentialID, Tool: "auth.elevate.reject",
+			Args: map[string]any{"reason": protocolReason(err), "remote": s.remote(r)},
+		})
+		problem(w, http.StatusUnauthorized, openapi.CodeNotVerified, "passkey not verified")
+		return
+	}
+	now := s.now()
+	until := now.Add(ElevationTTL)
+	err = s.db.Elevate(r.Context(), store.Elevation{
+		PasskeyID: pk.ID, SignCount: cred.Authenticator.SignCount,
+		BackupState: cred.Flags.BackupState, UserVerified: cred.Flags.UserVerified,
+		SessionID: cer.credentialID, Until: until,
+		Action: store.Action{
+			ID: ulid.New(now), Actor: cer.principalID, CredentialID: cer.credentialID, Tool: "auth.elevate", At: now,
+			Args: map[string]any{"passkey_id": pk.ID, "until": until.UTC(), "remote": s.remote(r)},
+		},
+	})
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusUnauthorized, "the session that began this has ended")
+		return
+	}
+	if err != nil {
+		s.log.Error("auth: elevate", "err", err)
+		writeError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	writeJSON(w, http.StatusOK, ElevateResult{ElevatedUntil: until})
 }
 
 // protocolReason keeps the audit log readable: the library's details say
@@ -567,8 +691,12 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) session(w http.ResponseWriter, r *http.Request) {
 	v, _ := auth.ViewerFrom(r.Context())
-	writeJSON(w, http.StatusOK, SessionInfo{
+	info := SessionInfo{
 		Principal: v.String(), CredentialID: v.CredentialID, CredentialKind: v.CredentialKind,
 		Scopes: v.Scopes,
-	})
+	}
+	if v.Elevated(s.now()) {
+		info.ElevatedUntil = &v.ElevatedUntil
+	}
+	writeJSON(w, http.StatusOK, info)
 }

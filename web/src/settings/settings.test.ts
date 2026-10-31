@@ -1,16 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import type { AppliedGrant, ManagedGrant } from "@/api/types";
+import type { AppliedGrant } from "@/api/types";
 
 import {
+  grantBody,
+  grantForm,
   grantSummary,
   lowerLimit,
   lowerTiers,
   narrowerScopes,
-  removeCommand,
   subsetOf,
   tightenBody,
   tightenings,
+  validCount,
 } from "./authority";
 
 const applied = (over: Partial<AppliedGrant> = {}): AppliedGrant => ({
@@ -73,16 +75,48 @@ describe("tightening a grant", () => {
     expect(tightenBody({ kind: "hold" }, { holdMinutes: 30 })).toEqual({ hold_seconds: 1800 });
     expect(tightenBody({ kind: "suspend" }, {})).toEqual({ suspended: true });
   });
-  it("says a grant in one line, and how to remove it on the host", () => {
+  it("says a grant in one line", () => {
     expect(grantSummary(applied({ limits: {} }))).toBe(
       "review — held 10 min after the checks · to any recipient · no hourly limit · no daily limit · no limit on new recipients",
     );
     expect(grantSummary(applied({ send_policy: "draft" }))).toBe("drafts only");
-    const g = {
-      host: "yuuka grant set --identity '*@example.com' --principal agent:arisu",
-    } as ManagedGrant;
-    expect(removeCommand(g)).toBe(
-      "yuuka grant rm --identity '*@example.com' --principal agent:arisu",
-    );
+  });
+});
+
+describe("the whole-row grant form", () => {
+  it("starts a new grant at the column defaults", () => {
+    expect(grantBody(grantForm("01ID", "agent:arisu"))).toEqual({
+      identity: "01ID",
+      principal: "agent:arisu",
+      send_policy: "none",
+      recipient_scope: "thread",
+      allowlist: [],
+      suspended: false,
+    });
+  });
+  it("keeps what is stored, an empty number being the default", () => {
+    const f = grantForm("01ID", "service:monitoring", {
+      send_policy: "auto",
+      recipient_scope: "allowlist",
+      allowlist: ["ops@example.net", "example.org"],
+      limits: { max_per_hour: 100 },
+      hold_seconds: 1200,
+      suspended_at: "2026-11-01T00:00:00Z",
+    });
+    expect(f.max_per_day).toBe("");
+    expect(grantBody({ ...f, allowlist: "ops@example.net,\nexample.org  a@example.com" })).toEqual({
+      identity: "01ID",
+      principal: "service:monitoring",
+      send_policy: "auto",
+      recipient_scope: "allowlist",
+      allowlist: ["ops@example.net", "example.org", "a@example.com"],
+      max_per_hour: 100,
+      hold_seconds: 1200,
+      suspended: true,
+    });
+    expect(validCount("")).toBe(true);
+    expect(validCount("12")).toBe(true);
+    expect(validCount("-1")).toBe(false);
+    expect(validCount("1.5")).toBe(false);
   });
 });

@@ -8,8 +8,8 @@ import (
 )
 
 // M3 management actions (§13.10): decisions prompted by mail, and the
-// settings that say who may do what, which the WebUI can read and
-// tighten but not widen.
+// settings that say who may do what, which a person's session can read
+// and tighten, and widen once elevated by a fresh passkey assertion.
 
 // PrefixAddress is a prefix@zone named for a decision, read as `yuuka
 // prefix` reads it (ingest.ParsePrefixAddress), so a claim keys the mail
@@ -96,10 +96,40 @@ type ManagedCredential struct {
 }
 
 // CredentialList is GET /api/v1/admin/credentials: every principal's,
-// oldest first, revoked and expired ones included. Issuing one is done
-// on the host (`yuuka token issue`).
+// oldest first, revoked and expired ones included.
 type CredentialList struct {
 	Credentials []ManagedCredential `json:"credentials"`
+}
+
+// IssueBody is a token or SMTP password to issue, checked as `yuuka token
+// issue` checks it.
+type IssueBody struct {
+	Kind CredentialKind `json:"kind"`
+	// Principal is agent:<name> or service:<name>, created on first use;
+	// a person signs in with a passkey and holds no token.
+	Principal string `json:"principal"`
+	// Label says what it is for, e.g. the machine it lives on.
+	Label string `json:"label,omitempty"`
+	// Scopes are what a token may do, every one named: there is no
+	// default. An SMTP password holds submission:send and nothing else,
+	// so for one this is that or absent.
+	Scopes []auth.Scope `json:"scopes,omitempty"`
+	// TTLSeconds is its lifetime; absent or 0 lasts until revoked.
+	TTLSeconds int `json:"ttl_seconds,omitempty" minimum:"0"`
+}
+
+// IssueParams are the parameters of POST /api/v1/admin/credentials.
+type IssueParams struct {
+	Body IssueBody `body:"json"`
+}
+
+// IssuedCredential answers an issue. Secret is shown this once and never
+// stored; only its hash is.
+type IssuedCredential struct {
+	Credential ManagedCredential `json:"credential"`
+	Secret     string            `json:"secret"`
+	// SMTPUsername is an SMTP password's user name: the credential id.
+	SMTPUsername string `json:"smtp_username,omitempty"`
 }
 
 // ManagedIdentity is an identity as the settings list it.
@@ -114,17 +144,47 @@ type ManagedIdentity struct {
 	DisabledAt  *time.Time `json:"disabled_at,omitempty"`
 	// TakenOverBy is the enabled *@zone identity that would send this
 	// address once it is disabled, with its own owner and grants.
-	// Disabling it may then let more through, so it is done on the host
-	// (Host names the command).
+	// Disabling it may then let more through, so it takes an elevated
+	// session, or the host (Host names the command).
 	TakenOverBy string `json:"taken_over_by,omitempty"`
 	// Host is the host command that disables it.
 	Host string `json:"host"`
 }
 
 // IdentityAdminList is GET /api/v1/admin/identities, disabled ones
-// included. Adding one is done on the host (`yuuka identity add`).
+// included, with what a new one can name.
 type IdentityAdminList struct {
 	Identities []ManagedIdentity `json:"identities"`
+	// Transports are the names this process can send through, from its
+	// configuration; empty when it sends nothing.
+	Transports []string `json:"transports"`
+	// Accounts are the account names an identity can belong to.
+	Accounts []string `json:"accounts"`
+}
+
+// IdentityBody is an identity to add, checked as `yuuka identity add`
+// checks it.
+type IdentityBody struct {
+	// Address is local@zone, or *@zone for every address of the zone
+	// without an identity of its own.
+	Address string `json:"address"`
+	// Owner is human:<name> (who must exist), agent:<name> or
+	// service:<name>. Only a human owner sends as a human-owned identity;
+	// everyone else stops at a draft (§8.9).
+	Owner string `json:"owner"`
+	// Transport is one of IdentityAdminList.Transports.
+	Transport   string `json:"transport"`
+	DisplayName string `json:"display_name,omitempty"`
+	// Signature is Markdown appended to composed mail.
+	Signature        string `json:"signature,omitempty"`
+	PlainStripMarkup bool   `json:"plain_strip_markup,omitempty"`
+	// Account may be absent while there is one.
+	Account string `json:"account,omitempty"`
+}
+
+// IdentityParams are the parameters of POST /api/v1/admin/identities.
+type IdentityParams struct {
+	Body IdentityBody `body:"json"`
 }
 
 // GrantIdentity is the identity a grant is on.
@@ -171,19 +231,18 @@ type ManagedGrant struct {
 	// Default is what applies once the row is removed.
 	Default AppliedGrant `json:"default"`
 	// RemovalWidens names what Default lets through that the row does
-	// not; removing the row is then done on the host.
+	// not; removing the row then takes an elevated session.
 	RemovalWidens []string  `json:"removal_widens"`
 	CreatedAt     time.Time `json:"created_at"`
-	// Host is the host command that changes this grant; widening is
-	// done there, with flags as `yuuka grant set` takes them: --policy,
-	// --recipients, --allow, --max-per-hour, --max-per-day,
-	// --max-new-recipients-per-day, --hold-seconds, --resume.
+	// Host is the host command that changes this grant, with flags as
+	// `yuuka grant set` takes them: --policy, --recipients, --allow,
+	// --max-per-hour, --max-per-day, --max-new-recipients-per-day,
+	// --hold-seconds, --resume.
 	Host string `json:"host"`
 }
 
 // GrantAdminList is GET /api/v1/admin/grants, by identity, then
-// principal. A pair without a row is at its default (§13.5), which only
-// the host changes.
+// principal. A pair without a row is at its default (§13.5).
 type GrantAdminList struct {
 	Grants []ManagedGrant `json:"grants"`
 }
@@ -216,8 +275,36 @@ type TightenBody struct {
 	// held mail).
 	HoldSeconds *int `json:"hold_seconds,omitempty" minimum:"0"`
 	// Suspended true suspends the grant: everything under it is held
-	// as a draft. Lifting a suspension is done on the host.
+	// as a draft. Lifting a suspension widens (GrantBody).
 	Suspended *bool `json:"suspended,omitempty"`
+}
+
+// GrantBody is a whole grant row, as `yuuka grant set` writes one: what
+// is given replaces what is stored. A grant above draft on a human's
+// identity for anyone but that human is refused (409): it would never
+// act (§8.9).
+type GrantBody struct {
+	// Identity is the identity's id; Principal is human:<name>,
+	// agent:<name> or service:<name>, an agent or service created on
+	// first use.
+	Identity       string         `json:"identity"`
+	Principal      string         `json:"principal"`
+	SendPolicy     Tier           `json:"send_policy"`
+	RecipientScope RecipientScope `json:"recipient_scope"`
+	// Allowlist holds addresses and domains, for recipient_scope
+	// allowlist.
+	Allowlist []string `json:"allowlist,omitempty"`
+	// An absent limit or window is the default (sendpolicy).
+	MaxPerHour             *int `json:"max_per_hour,omitempty" minimum:"0"`
+	MaxPerDay              *int `json:"max_per_day,omitempty" minimum:"0"`
+	MaxNewRecipientsPerDay *int `json:"max_new_recipients_per_day,omitempty" minimum:"0"`
+	HoldSeconds            *int `json:"hold_seconds,omitempty" minimum:"0"`
+	Suspended              bool `json:"suspended,omitempty"`
+}
+
+// GrantSetParams are the parameters of PUT /api/v1/admin/grants.
+type GrantSetParams struct {
+	Body GrantBody `body:"json"`
 }
 
 // TightenParams are the parameters of POST .../tighten.

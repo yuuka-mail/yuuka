@@ -5,10 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
 // SystemPrincipalID is the id 0002 seeds for the system principal.
@@ -22,6 +26,12 @@ var (
 	ErrSpent = errors.New("spent or expired")
 	// ErrDuplicate: a unique key collided (e.g. a passkey registered twice).
 	ErrDuplicate = errors.New("duplicate")
+	// ErrInvalidPrincipal: not kind:name of a principal that can own an
+	// identity, hold a grant or a credential.
+	ErrInvalidPrincipal = errors.New("invalid principal")
+	// ErrPrincipalDisabled: a disabled principal was named for a new
+	// identity, grant or credential.
+	ErrPrincipalDisabled = errors.New("principal is disabled")
 )
 
 // Principal is a row of principals (§13.2).
@@ -47,6 +57,10 @@ type Credential struct {
 	ExpiresAt   *time.Time
 	LastUsedAt  *time.Time
 	RevokedAt   *time.Time
+	// ElevatedUntil is when a session's fresh passkey assertion stops
+	// letting it widen who may do what (§13.10); nil for none, always
+	// nil for anything but a session.
+	ElevatedUntil *time.Time
 }
 
 // Passkey is a row of passkeys.
@@ -204,6 +218,70 @@ func (db *DB) CreatePrincipal(ctx context.Context, p Principal, a Action) error 
 	})
 }
 
+// validName is the CHECK on principals.name, checked here for a readable
+// error.
+var validName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// ValidName reports whether s fits principals.name; transport names in
+// the configuration follow the same form.
+func ValidName(s string) bool { return validName.MatchString(s) }
+
+// ParsePrincipal reads kind:name, e.g. agent:arisu, as the CLI and the
+// settings name a principal. The error wraps ErrInvalidPrincipal.
+func ParsePrincipal(s string) (kind, name string, err error) {
+	kind, name, ok := strings.Cut(s, ":")
+	if !ok || !ValidName(name) {
+		return "", "", fmt.Errorf("principal %q: want <kind>:<name>, e.g. agent:arisu: %w", s, ErrInvalidPrincipal)
+	}
+	return kind, name, nil
+}
+
+// Grantee returns the principal kind:name for an identity's owner, a
+// grant or a credential: what `yuuka identity add`, `grant set` and
+// `token issue` take and the settings too, so both name principals alike.
+// An agent or service is created on first use, recording a (Tool and the
+// principal are set here, other Args kept); created says so. A human
+// must exist (ErrNotFound): only `yuuka admin enroll` makes one, so a
+// typo cannot mint a new human owner. Other kinds wrap
+// ErrInvalidPrincipal; a disabled principal is ErrPrincipalDisabled.
+func (db *DB) Grantee(ctx context.Context, kind, name string, a Action) (p Principal, created bool, err error) {
+	switch kind {
+	case "agent", "service", "human":
+	default:
+		return p, false, fmt.Errorf("%s:%s: want a human, agent or service principal: %w", kind, name, ErrInvalidPrincipal)
+	}
+	if !ValidName(name) {
+		return p, false, fmt.Errorf("%s:%s: %w", kind, name, ErrInvalidPrincipal)
+	}
+	p, err = db.PrincipalByName(ctx, kind, name)
+	switch {
+	case err == nil && p.DisabledAt != nil:
+		return p, false, fmt.Errorf("%s:%s: %w", kind, name, ErrPrincipalDisabled)
+	case err == nil:
+		return p, false, nil
+	case !errors.Is(err, ErrNotFound):
+		return p, false, err
+	case kind == "human":
+		return p, false, fmt.Errorf("%s:%s does not exist; humans are created by `yuuka admin enroll`: %w", kind, name, ErrNotFound)
+	}
+	p = Principal{ID: ulid.New(a.At), Kind: kind, Name: name, DisplayName: name, CreatedAt: a.At}
+	args := map[string]any{}
+	if extra, ok := a.Args.(map[string]any); ok {
+		for k, v := range extra {
+			args[k] = v
+		}
+	}
+	args["principal_id"], args["principal"] = p.ID, kind+":"+name
+	a.Tool, a.Args = "principal.create", args
+	err = db.CreatePrincipal(ctx, p, a)
+	if errors.Is(err, ErrDuplicate) {
+		// Created concurrently; use that one.
+		p, err = db.PrincipalByName(ctx, kind, name)
+		return p, false, err
+	}
+	return p, err == nil, err
+}
+
 // EnsurePrincipal returns the principal (kind, name), creating it from p
 // if it does not exist.
 func (db *DB) EnsurePrincipal(ctx context.Context, p Principal) (Principal, error) {
@@ -237,12 +315,12 @@ func (db *DB) CredentialForAuth(ctx context.Context, id string) (CredentialPrinc
 	var c CredentialPrincipal
 	err := db.pool.QueryRow(ctx, `
 		SELECT c.id, c.principal_id, c.kind, c.label, c.secret_hash, c.scopes,
-		       c.created_at, c.expires_at, c.last_used_at, c.revoked_at,
+		       c.created_at, c.expires_at, c.last_used_at, c.revoked_at, c.elevated_until,
 		       p.kind, p.name, p.disabled_at IS NOT NULL
 		FROM credentials c JOIN principals p ON p.id = c.principal_id
 		WHERE c.id = $1`, id).Scan(
 		&c.ID, &c.PrincipalID, &c.Kind, &c.Label, &c.SecretHash, &c.Scopes,
-		&c.CreatedAt, &c.ExpiresAt, &c.LastUsedAt, &c.RevokedAt,
+		&c.CreatedAt, &c.ExpiresAt, &c.LastUsedAt, &c.RevokedAt, &c.ElevatedUntil,
 		&c.PrincipalKind, &c.PrincipalName, &c.PrincipalDisabled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return c, ErrNotFound
@@ -331,6 +409,50 @@ func (db *DB) RevokeCredential(ctx context.Context, id string, a Action) error {
 			return ErrNotFound
 		}
 		return insertAction(ctx, tx, a)
+	})
+}
+
+// Elevation is what a fresh passkey assertion within a session writes
+// (§13.10).
+type Elevation struct {
+	PasskeyID    string
+	SignCount    uint32
+	BackupState  bool
+	UserVerified bool
+	// SessionID is the session credential it elevates, Until when that
+	// ends.
+	SessionID string
+	Until     time.Time
+	Action    Action
+}
+
+// Elevate updates the passkey's counters, lets the session widen until
+// e.Until and records it, all or nothing. ErrNotFound if the passkey is
+// revoked or the session is not a live one of the passkey's principal.
+func (db *DB) Elevate(ctx context.Context, e Elevation) error {
+	return pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
+		var principal string
+		err := tx.QueryRow(ctx, `
+			UPDATE passkeys SET sign_count = $2, backup_state = $3, user_verified = $4, last_used_at = $5
+			WHERE id = $1 AND revoked_at IS NULL RETURNING principal_id`,
+			e.PasskeyID, int64(e.SignCount), e.BackupState, e.UserVerified, e.Action.At).Scan(&principal)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("update passkey: %w", err)
+		}
+		tag, err := tx.Exec(ctx, `
+			UPDATE credentials SET elevated_until = $3
+			WHERE id = $1 AND principal_id = $2 AND kind = 'session' AND revoked_at IS NULL AND expires_at > $4`,
+			e.SessionID, principal, e.Until, e.Action.At)
+		if err != nil {
+			return fmt.Errorf("elevate session: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return insertAction(ctx, tx, e.Action)
 	})
 }
 

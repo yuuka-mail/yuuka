@@ -6,7 +6,8 @@
 
 ## 准备：地址、授权、密码
 
-每个服务一个自己的发信地址、一条授权和一把密码。由运维者在服务器上做：
+每个服务一个自己的发信地址、一条授权和一把密码。由运维者在 WebUI 设置页的身份、授权、凭据三节里做，
+或者在服务器上：
 
 ```bash
 yuuka identity add alerts@example.com --owner service:monitoring --transport cloudflare

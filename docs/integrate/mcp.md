@@ -30,7 +30,7 @@ stdio 形态没有发件队列，不提供 `submit_draft`：只能起草，提�
 
 ## 权限
 
-向运维者要一把 token（`yuuka token issue`），scope 只要用得到的：
+向运维者要一把 token（WebUI 设置页的「凭据」，或主机上的 `yuuka token issue`），scope 只要用得到的：
 
 | scope | 能做什么 |
 |---|---|

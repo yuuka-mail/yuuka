@@ -173,15 +173,24 @@ func TestSettings(t *testing.T) {
 	session := h.tokenFor(h.human, auth.AllScopes...)
 	sessionID, _, _ := auth.ParseSecret(auth.PrefixSession, session)
 	send := func(method, path, body string) *httptest.ResponseRecorder { return h.do(method, path, body, session) }
-	refused := func(w *httptest.ResponseRecorder, cmd string) {
+	refusedAs := func(code openapi.Code, w *httptest.ResponseRecorder, cmd string) {
 		t.Helper()
 		if w.Code != http.StatusForbidden {
 			t.Errorf("%d %s, want 403", w.Code, w.Body.String())
 			return
 		}
-		if p := problemOf(t, w); p.Code != openapi.CodeWideningRequiresCLI || !strings.Contains(p.Detail, cmd) {
-			t.Errorf("%s: %q, want the command %q", p.Code, p.Detail, cmd)
+		if p := problemOf(t, w); p.Code != code || !strings.Contains(p.Detail, "on the host: "+cmd) {
+			t.Errorf("%s: %q, want %s and the command %q", p.Code, p.Detail, code, cmd)
 		}
+	}
+	refused := func(w *httptest.ResponseRecorder, cmd string) {
+		t.Helper()
+		refusedAs(openapi.CodeWideningRequiresCLI, w, cmd)
+	}
+	// Removals and disablings that widen take an elevated session.
+	unelevated := func(w *httptest.ResponseRecorder, cmd string) {
+		t.Helper()
+		refusedAs(openapi.CodeElevationRequired, w, cmd)
 	}
 	arisuID, star := h.identityAt("arisu@example.com"), h.identityAt("*@example.com")
 	n := 20
@@ -258,8 +267,8 @@ func TestSettings(t *testing.T) {
 		t.Errorf("the capped grant became %s", g.Policy)
 	}
 
-	// Removing: allowed where the default is no wider.
-	refused(send(http.MethodDelete, grantPath, ""), "yuuka grant rm --identity arisu@example.com --principal agent:arisu")
+	// Removing: in one step where the default is no wider.
+	unelevated(send(http.MethodDelete, grantPath, ""), "yuuka grant rm --identity arisu@example.com --principal agent:arisu")
 	if w := send(http.MethodDelete, "/api/v1/admin/grants/"+star.ID+"/"+h.agent.ID, ""); w.Code != http.StatusNoContent {
 		t.Errorf("remove: %d %s", w.Code, w.Body.String())
 	}
@@ -301,8 +310,8 @@ func TestSettings(t *testing.T) {
 		}
 	}
 
-	// Identities: an address the zone's pattern would take over is the
-	// host's to disable.
+	// Identities: an address the zone's pattern would take over takes an
+	// elevated session to disable.
 	ops := h.identity("ops@example.com", h.human)
 	bot := h.identity("bot@example.org", h.agent)
 	ids := decode[IdentityAdminList](t, send(http.MethodGet, "/api/v1/admin/identities", "")).Identities
@@ -314,7 +323,7 @@ func TestSettings(t *testing.T) {
 		byAddr["*@example.com"].TakenOverBy != "" || byAddr["*@example.com"].Host != "yuuka identity rm '*@example.com'" {
 		t.Errorf("identities: %+v", byAddr)
 	}
-	refused(send(http.MethodPost, "/api/v1/admin/identities/"+ops.ID+"/disable", ""), "yuuka identity rm ops@example.com")
+	unelevated(send(http.MethodPost, "/api/v1/admin/identities/"+ops.ID+"/disable", ""), "yuuka identity rm ops@example.com")
 	if w := send(http.MethodPost, "/api/v1/admin/identities/"+bot.ID+"/disable", ""); w.Code != http.StatusNoContent {
 		t.Errorf("disable: %d %s", w.Code, w.Body.String())
 	}
@@ -323,5 +332,151 @@ func TestSettings(t *testing.T) {
 	}
 	if w := send(http.MethodPost, "/api/v1/admin/identities/"+bot.ID+"/disable", ""); w.Code != http.StatusNotFound {
 		t.Errorf("disable twice: %d", w.Code)
+	}
+	if a := h.alerts.take(); len(a) != 0 {
+		t.Errorf("tightening alerted: %q", a)
+	}
+}
+
+// TestWidening: an elevated session issues, adds and raises through the
+// functions the host CLI calls, recorded as the person and told to the
+// operator; the same session unelevated, or past its window, cannot.
+func TestWidening(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	session := h.tokenFor(h.human, auth.AllScopes...)
+	sessionID, _, _ := auth.ParseSecret(auth.PrefixSession, session)
+	send := func(method, path, body string) *httptest.ResponseRecorder { return h.do(method, path, body, session) }
+	status := func(w *httptest.ResponseRecorder, want int, what string) {
+		t.Helper()
+		if w.Code != want {
+			t.Errorf("%s: %d %s, want %d", what, w.Code, w.Body.String(), want)
+		}
+	}
+	alerted := func(what string) {
+		t.Helper()
+		a := h.alerts.take()
+		if len(a) != 1 || !strings.Contains(a[0], "human:operator "+what) || !strings.Contains(a[0], sessionID) {
+			t.Errorf("alerts %q, want one saying %q", a, what)
+		}
+	}
+	issue := `{"kind":"token","principal":"agent:momoi","label":"laptop","scopes":["message:read","draft:create","message:read"],"ttl_seconds":3600}`
+	if w := send(http.MethodPost, "/api/v1/admin/credentials", issue); w.Code != http.StatusForbidden || problemOf(t, w).Code != openapi.CodeElevationRequired {
+		t.Fatalf("unelevated issue: %d %s", w.Code, w.Body.String())
+	}
+
+	h.elevate(session)
+	w := send(http.MethodPost, "/api/v1/admin/credentials", issue)
+	status(w, http.StatusCreated, "issue")
+	got := decode[IssuedCredential](t, w)
+	if c := got.Credential; c.Kind != "token" || c.Principal.Kind != "agent" || c.Principal.Name != "momoi" || c.Label != "laptop" ||
+		!slices.Equal(c.Scopes, []auth.Scope{auth.MessageRead, auth.DraftCreate}) || c.ExpiresAt == nil || got.SMTPUsername != "" {
+		t.Errorf("issued %+v", got)
+	}
+	if w := h.get("/api/v1/labels", got.Secret); w.Code != http.StatusOK {
+		t.Errorf("the issued token: %d", w.Code)
+	}
+	if actor, cred, via := h.audit("auth.token.issue"); actor != h.human.ID || cred != sessionID || via != "api" {
+		t.Errorf("issuing recorded as %s with %s via %s", actor, cred, via)
+	}
+	if actor, _, _ := h.audit("principal.create"); actor != h.human.ID {
+		t.Errorf("momoi created by %s", actor)
+	}
+	alerted("issued a token for agent:momoi with message:read,draft:create")
+	w = send(http.MethodPost, "/api/v1/admin/credentials", `{"kind":"smtp_password","principal":"service:monitoring"}`)
+	status(w, http.StatusCreated, "issue an SMTP password")
+	smtp := decode[IssuedCredential](t, w)
+	if smtp.Credential.Kind != "smtp_password" || smtp.SMTPUsername != smtp.Credential.ID ||
+		!slices.Equal(smtp.Credential.Scopes, []auth.Scope{auth.SubmissionSend}) || !strings.HasPrefix(smtp.Secret, auth.PrefixSMTP+"_") {
+		t.Errorf("SMTP password %+v", smtp)
+	}
+	alerted("issued an SMTP password for service:monitoring")
+	for _, body := range []string{
+		`{"kind":"token","principal":"human:operator","scopes":["message:read"]}`,
+		`{"kind":"token","principal":"agent:momoi"}`,
+		`{"kind":"smtp_password","principal":"service:monitoring","scopes":["message:read"]}`,
+		`{"kind":"token","principal":"momoi","scopes":["message:read"]}`,
+		`{"kind":"token","principal":"agent:momoi","scopes":["everything"]}`,
+		`{"kind":"token","principal":"agent:momoi","scopes":["message:read"],"ttl_seconds":-1}`,
+	} {
+		status(send(http.MethodPost, "/api/v1/admin/credentials", body), http.StatusBadRequest, body)
+	}
+
+	// Identities name a transport of this process and an owner who
+	// exists, or an agent or service made on first use.
+	list := decode[IdentityAdminList](t, send(http.MethodGet, "/api/v1/admin/identities", ""))
+	if !slices.Equal(list.Transports, []string{"cf"}) || !slices.Equal(list.Accounts, []string{"devseed"}) {
+		t.Errorf("what a new identity can name: %v %v", list.Transports, list.Accounts)
+	}
+	w = send(http.MethodPost, "/api/v1/admin/identities", `{"address":"Ops@Example.org","owner":"service:monitoring","transport":"cf","display_name":"Ops"}`)
+	status(w, http.StatusCreated, "add an identity")
+	ops := decode[ManagedIdentity](t, w)
+	if ops.Address != "ops@example.org" || ops.Owner.Name != "monitoring" || ops.DisplayName != "Ops" || ops.Transport != "cf" {
+		t.Errorf("added %+v", ops)
+	}
+	if actor, cred, _ := h.audit("identity.add"); actor != h.human.ID || cred != sessionID {
+		t.Errorf("adding recorded as %s with %s", actor, cred)
+	}
+	alerted("added the identity ops@example.org, owned by service:monitoring")
+	status(send(http.MethodPost, "/api/v1/admin/identities", `{"address":"ops@example.org","owner":"service:monitoring","transport":"cf"}`),
+		http.StatusConflict, "add it twice")
+	for _, body := range []string{
+		`{"address":"a@example.org","owner":"agent:arisu","transport":"elsewhere"}`,
+		`{"address":"a@example.org","owner":"human:nobody","transport":"cf"}`,
+		`{"address":"a@example.org","owner":"rule:x","transport":"cf"}`,
+		`{"address":"no at","owner":"agent:arisu","transport":"cf"}`,
+		`{"address":"a@example.org","owner":"agent:arisu","transport":"cf","account":"other"}`,
+	} {
+		status(send(http.MethodPost, "/api/v1/admin/identities", body), http.StatusBadRequest, body)
+	}
+
+	// Grants: a whole row, wider or not; the owner cap holds.
+	arisu, star := h.identityAt("arisu@example.com"), h.identityAt("*@example.com")
+	set := func(body string) *httptest.ResponseRecorder {
+		return send(http.MethodPut, "/api/v1/admin/grants", body)
+	}
+	w = set(`{"identity":"` + ops.ID + `","principal":"service:monitoring","send_policy":"auto","recipient_scope":"allowlist",` +
+		`"allowlist":["Oncall@Example.net","example.org"],"max_per_hour":100}`)
+	status(w, http.StatusOK, "grant monitoring auto")
+	g := decode[ManagedGrant](t, w)
+	if g.Applied.SendPolicy != "auto" || !slices.Equal(g.Applied.Allowlist, []string{"oncall@example.net", "example.org"}) ||
+		*g.Applied.Limits.MaxPerHour != 100 || *g.Applied.Limits.MaxPerDay != 200 {
+		t.Errorf("granted %+v", g.Applied)
+	}
+	if actor, cred, _ := h.audit("grant.set"); actor != h.human.ID || cred != sessionID {
+		t.Errorf("granting recorded as %s with %s", actor, cred)
+	}
+	alerted("widened the grant of service:monitoring on ops@example.org in send_policy")
+	w = set(`{"identity":"` + ops.ID + `","principal":"service:monitoring","send_policy":"draft","recipient_scope":"allowlist",` +
+		`"allowlist":["example.org"],"suspended":true}`)
+	status(w, http.StatusOK, "lower and suspend")
+	if g := decode[ManagedGrant](t, w); g.Applied.SendPolicy != "draft" || !g.Applied.Suspended || g.Stored.Limits.MaxPerHour != nil {
+		t.Errorf("lowered %+v", g)
+	}
+	if a := h.alerts.take(); len(a) != 0 {
+		t.Errorf("a tighter grant alerted: %q", a)
+	}
+	status(set(`{"identity":"`+star.ID+`","principal":"agent:arisu","send_policy":"review","recipient_scope":"thread"}`),
+		http.StatusConflict, "review on the operator's identity")
+	status(set(`{"identity":"`+arisu.ID+`","principal":"agent:arisu","send_policy":"auto","recipient_scope":"allowlist","allowlist":["not an address"]}`),
+		http.StatusBadRequest, "a bad allowlist")
+	status(set(`{"identity":"`+arisu.ID+`","principal":"agent:arisu","send_policy":"sometimes","recipient_scope":"thread"}`),
+		http.StatusBadRequest, "a bad tier")
+
+	// Removing a grant whose default is wider, and disabling an address
+	// the pattern takes over, go through once elevated.
+	h.grant(store.Grant{IdentityID: arisu.ID, PrincipalID: h.agent.ID, Policy: sendpolicy.Draft, RecipientScope: sendpolicy.ScopeThread})
+	status(send(http.MethodDelete, "/api/v1/admin/grants/"+arisu.ID+"/"+h.agent.ID, ""), http.StatusNoContent, "remove a wider-by-default grant")
+	alerted("removed the grant of agent:arisu on arisu@example.com")
+	taken := h.identity("bob@example.com", h.agent)
+	status(send(http.MethodPost, "/api/v1/admin/identities/"+taken.ID+"/disable", ""), http.StatusNoContent, "disable a taken-over address")
+	alerted("disabled bob@example.com")
+
+	// The window ends.
+	if _, err := h.pool.Exec(t.Context(), `UPDATE credentials SET elevated_until = now() - interval '1 second' WHERE id = $1`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	if w := send(http.MethodPost, "/api/v1/admin/credentials", issue); w.Code != http.StatusForbidden || problemOf(t, w).Code != openapi.CodeElevationRequired {
+		t.Errorf("issue after the window: %d %s", w.Code, w.Body.String())
 	}
 }

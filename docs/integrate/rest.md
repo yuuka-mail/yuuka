@@ -62,8 +62,11 @@ WebUI 用的是浏览器会话，程序不要模仿它。
   或者没配评分器时回 `400 invalid_param`。`GET /api/v1/triage/report` 是 `yuuka triage report` 的同一份计数，只给人。
   这些都是模型的估计，展示时和系统事实分开
 - `/api/v1/admin/` 下的端点（凭据、身份、授权）只认人在 WebUI 里的会话：bearer token 即使带着 `admin` 和其他全部 scope
-  也回 `403 forbidden`，程序用不了它们。它们只能查看和收紧；会让某个主体能做更多的改动回 `403 widening_requires_cli`，
-  `detail` 写出在主机上做这件事的 `yuuka` 命令（[为什么](../design/principals.md#1310-管理面收紧在界面放宽在主机)）
+  也回 `403 forbidden`，程序用不了它们（[为什么](../design/principals.md#1310-管理面收紧一步完成放宽先再验-passkey)）。
+  查看和收紧只要这种会话。会让某个主体能做更多的改动（签发凭据、加身份、`PUT /api/v1/admin/grants` 整行写授权，
+  以及会放宽的删授权、停用身份）还要求会话在 5 分钟内用 passkey 再验过一次，否则回 `403 elevation_required`；
+  WebUI 收到它就弹 passkey（`/auth/passkey/elevate/begin`、`finish`）再重试。收紧端点遇到放宽回 `403 widening_requires_cli`，
+  `detail` 写出在主机上做这件事的 `yuuka` 命令。每次放宽都推送告警
 - 认领、取消认领前缀和改期望域只看 scope（`prefix:manage` 加 `prefix:read`），回答里带前缀现在的统计：
   认领与否、期望域都在读时现算，已收的信立刻按新决定显示
 - 创建回 `201` 和新对象，删除回 `204`。修改是 `PUT` 整体替换，没有 `PATCH`；只改一部分、且有方向限制的改动是一个动作，

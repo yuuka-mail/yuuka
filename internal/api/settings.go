@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/authn"
@@ -14,15 +16,19 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/sendpolicy"
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
 // Management actions (§13.10). Decisions prompted by mail (claiming a
 // prefix, its expected domains) are checked by scope like any write.
 // Settings that change who may do what are served only to a person's
-// session holding admin (route.authority), and only to read them and to
-// tighten them: every write here can only make the system more
-// conservative, which the store checks against what applies now. Nothing
-// here issues, raises or adds; that stays on the host.
+// session holding admin (route.authority). Such a session may read them
+// and tighten them in one step, which the store checks against what
+// applies now. Issuing, adding and raising — anything that lets someone
+// do more — also takes a fresh passkey assertion (route.widening, or
+// Viewer.Elevated where a write may go either way), and tells the
+// operator. Every write goes through the store functions the host CLI
+// calls, so the checks are written once.
 
 func (a *API) claimPrefix(ctx context.Context, v *auth.Viewer, p PrefixDecisionParams) (PrefixDecision, error) {
 	return a.decidePrefix(ctx, v, p.Address, store.PrefixClaimed, "prefix.claim")
@@ -89,11 +95,57 @@ func authorityDenied(v *auth.Viewer) error {
 		"only a person signed in to the WebUI can change who may do what; a token cannot, whatever its scopes")
 }
 
-// widening refuses a change that would let more through, saying why and
-// naming the host command that makes it.
+// widening refuses a tightening that would let more through, saying why
+// and naming the host command that makes it.
 func widening(cmd, format string, args ...any) error {
 	return openapi.Errorf(http.StatusForbidden, openapi.CodeWideningRequiresCLI,
-		"%s The WebUI only tightens; on the host: %s", fmt.Sprintf(format, args...), cmd)
+		"%s This only tightens; widen with PUT /api/v1/admin/grants from an elevated session, or on the host: %s",
+		fmt.Sprintf(format, args...), cmd)
+}
+
+// elevationRequired refuses a widening from a session that has not
+// asserted its passkey in the last few minutes. With a host command, the
+// detail ends with it as widening's does.
+func elevationRequired(why string, cmd ...string) error {
+	detail := why + " It takes asserting your passkey again (/auth/passkey/elevate), then retrying"
+	if len(cmd) > 0 {
+		return openapi.Errorf(http.StatusForbidden, openapi.CodeElevationRequired, "%s; or on the host: %s", detail, cmd[0])
+	}
+	return openapi.Errorf(http.StatusForbidden, openapi.CodeElevationRequired, "%s.", detail)
+}
+
+// invalid is a 400 naming what in the body was wrong.
+func invalid(format string, args ...any) error {
+	return openapi.Errorf(http.StatusBadRequest, openapi.CodeInvalidBody, format, args...)
+}
+
+// grantee is the principal named kind:name in a body (store.Grantee): an
+// agent or service is created on first use.
+func (a *API) grantee(ctx context.Context, v *auth.Viewer, s string) (store.Principal, error) {
+	kind, name, err := store.ParsePrincipal(s)
+	if err != nil {
+		return store.Principal{}, invalid("%v", err)
+	}
+	p, _, err := a.db.Grantee(ctx, kind, name, action(v, "principal.create", nil))
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrInvalidPrincipal) || errors.Is(err, store.ErrPrincipalDisabled) {
+		return p, invalid("%v", err)
+	}
+	return p, err
+}
+
+// widened tells the operator that v let someone do more (§13.10), as a
+// new passkey is told: the alert is what makes a stolen elevated session
+// visible. Failing to tell is logged and changes nothing.
+func (a *API) widened(ctx context.Context, v *auth.Viewer, what string) {
+	if a.alert == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancel()
+	text := fmt.Sprintf("yuuka: %s %s in the WebUI (session %s). If this was not you, someone holds that session and one of your passkeys: undo it in the settings.", v, what, v.CredentialID)
+	if err := a.alert.Notify(ctx, text); err != nil {
+		a.log.Error("api: alert failed", "err", err)
+	}
 }
 
 func (a *API) credentials(ctx context.Context, _ *auth.Viewer, _ struct{}) (CredentialList, error) {
@@ -103,14 +155,75 @@ func (a *API) credentials(ctx context.Context, _ *auth.Viewer, _ struct{}) (Cred
 	}
 	out := CredentialList{Credentials: make([]ManagedCredential, len(cs))}
 	for i, c := range cs {
-		scopes, _ := auth.ParseScopes(c.Scopes) // the column's CHECK lists the same
-		out.Credentials[i] = ManagedCredential{
-			ID: c.ID, Kind: CredentialKind(c.Kind), Label: c.Label, Scopes: nonNilScopes(scopes),
-			Principal:         Actor{ID: c.PrincipalID, Kind: c.PrincipalKind, Name: c.PrincipalName},
-			PrincipalDisabled: c.PrincipalDisabled,
-			CreatedAt:         c.CreatedAt, ExpiresAt: c.ExpiresAt, LastUsedAt: c.LastUsedAt, RevokedAt: c.RevokedAt,
+		out.Credentials[i] = managedCredential(c)
+	}
+	return out, nil
+}
+
+func managedCredential(c store.CredentialPrincipal) ManagedCredential {
+	scopes, _ := auth.ParseScopes(c.Scopes) // the column's CHECK lists the same
+	return ManagedCredential{
+		ID: c.ID, Kind: CredentialKind(c.Kind), Label: c.Label, Scopes: nonNilScopes(scopes),
+		Principal:         Actor{ID: c.PrincipalID, Kind: c.PrincipalKind, Name: c.PrincipalName},
+		PrincipalDisabled: c.PrincipalDisabled,
+		CreatedAt:         c.CreatedAt, ExpiresAt: c.ExpiresAt, LastUsedAt: c.LastUsedAt, RevokedAt: c.RevokedAt,
+	}
+}
+
+// issueCredential issues as `yuuka token issue` does (authn.IssueToken),
+// in the person's name rather than the system's.
+func (a *API) issueCredential(ctx context.Context, v *auth.Viewer, p IssueParams) (IssuedCredential, error) {
+	b := p.Body
+	kind, _, err := store.ParsePrincipal(b.Principal)
+	if err != nil {
+		return IssuedCredential{}, invalid("%v", err)
+	}
+	if kind != "agent" && kind != "service" {
+		return IssuedCredential{}, invalid("%s: tokens and SMTP passwords are for agents and services; a person signs in with a passkey", b.Principal)
+	}
+	credKind, prefix, scopes := auth.KindToken, auth.PrefixToken, b.Scopes
+	if b.Kind == "smtp_password" {
+		credKind, prefix = auth.KindSMTPPassword, auth.PrefixSMTP
+		if len(scopes) == 0 {
+			scopes = []auth.Scope{auth.SubmissionSend}
+		}
+		if len(scopes) != 1 || scopes[0] != auth.SubmissionSend {
+			return IssuedCredential{}, invalid("an SMTP password holds %s and nothing else", auth.SubmissionSend)
 		}
 	}
+	if len(scopes) == 0 {
+		return IssuedCredential{}, invalid("name every scope the token holds; there is no default")
+	}
+	// In the order of §13.4, without repeats, as the CLI stores them.
+	var ordered []auth.Scope
+	for _, sc := range auth.AllScopes {
+		if slices.Contains(scopes, sc) {
+			ordered = append(ordered, sc)
+		}
+	}
+	pr, err := a.grantee(ctx, v, b.Principal)
+	if err != nil {
+		return IssuedCredential{}, err
+	}
+	tok, err := authn.IssueToken(ctx, a.db, time.Now(), authn.TokenRequest{
+		Kind: credKind, PrincipalID: pr.ID, Label: b.Label, Scopes: ordered, TTL: time.Duration(b.TTLSeconds) * time.Second,
+		IssuedBy: v.PrincipalID, IssuedWith: v.CredentialID, AuditArgs: map[string]any{"via": "api"},
+	})
+	if err != nil {
+		return IssuedCredential{}, err
+	}
+	id, _, _ := auth.ParseSecret(prefix, tok)
+	c, err := a.db.CredentialForAuth(ctx, id)
+	if err != nil {
+		return IssuedCredential{}, err
+	}
+	out := IssuedCredential{Credential: managedCredential(c), Secret: tok}
+	what := "issued a token for " + b.Principal + " with " + strings.Join(auth.Strings(ordered), ",")
+	if credKind == auth.KindSMTPPassword {
+		out.SMTPUsername = id
+		what = "issued an SMTP password for " + b.Principal
+	}
+	a.widened(ctx, v, what)
 	return out, nil
 }
 
@@ -134,13 +247,22 @@ func (a *API) adminIdentities(ctx context.Context, _ *auth.Viewer, _ struct{}) (
 	if err != nil {
 		return IdentityAdminList{}, err
 	}
+	accts, err := a.db.Accounts(ctx)
+	if err != nil {
+		return IdentityAdminList{}, err
+	}
 	var enabled []store.Identity
 	for _, i := range all {
 		if i.DisabledAt == nil {
 			enabled = append(enabled, i)
 		}
 	}
-	out := IdentityAdminList{Identities: make([]ManagedIdentity, len(all))}
+	out := IdentityAdminList{
+		Identities: make([]ManagedIdentity, len(all)), Transports: nonNil(a.transports), Accounts: make([]string, len(accts)),
+	}
+	for k, acct := range accts {
+		out.Accounts[k] = acct.Name
+	}
 	for k, i := range all {
 		m := ManagedIdentity{
 			ID: i.ID, Address: i.Address(), DisplayName: i.DisplayName, Transport: i.Transport,
@@ -157,17 +279,95 @@ func (a *API) adminIdentities(ctx context.Context, _ *auth.Viewer, _ struct{}) (
 	return out, nil
 }
 
-func (a *API) disableIdentity(ctx context.Context, v *auth.Viewer, p IDParams) (struct{}, error) {
-	err := a.db.DisableIdentityIfTighter(ctx, p.ID, action(v, "identity.disable", map[string]any{"identity_id": p.ID}))
-	if errors.Is(err, store.ErrPatternTakesOver) {
-		i, ierr := a.db.IdentityByID(ctx, p.ID)
-		if ierr != nil {
-			return struct{}{}, ierr
-		}
-		return struct{}{}, widening("yuuka identity rm "+shellWord(i.Address()),
-			"Disabling %s hands its address to *@%s and its grants, which may let more through.", i.Address(), i.Zone)
+// addIdentity adds as `yuuka identity add` does, naming one of this
+// process's transports.
+func (a *API) addIdentity(ctx context.Context, v *auth.Viewer, p IdentityParams) (ManagedIdentity, error) {
+	b := p.Body
+	zone, prefix, err := store.SplitIdentityAddress(b.Address)
+	if err != nil {
+		return ManagedIdentity{}, invalid("%v", err)
 	}
-	return struct{}{}, err
+	if len(a.transports) == 0 {
+		return ManagedIdentity{}, openapi.Errorf(http.StatusConflict, openapi.CodeConflict,
+			"this process sends through no transport (YUUKA_TRANSPORTS), so an identity would have nothing to send with")
+	}
+	if !slices.Contains(a.transports, b.Transport) {
+		return ManagedIdentity{}, invalid("transport %q: want one of %s", b.Transport, strings.Join(a.transports, ", "))
+	}
+	accts, err := a.db.Accounts(ctx)
+	if err != nil {
+		return ManagedIdentity{}, err
+	}
+	var acct store.Account
+	for _, x := range accts {
+		if x.Name == b.Account || b.Account == "" && len(accts) == 1 {
+			acct = x
+		}
+	}
+	switch {
+	case acct.ID != "":
+	case len(accts) == 0:
+		return ManagedIdentity{}, openapi.Errorf(http.StatusConflict, openapi.CodeConflict,
+			"no account exists yet; it is created when yuuka serve first ingests mail")
+	case b.Account == "":
+		return ManagedIdentity{}, invalid("%d accounts exist; name one", len(accts))
+	default:
+		return ManagedIdentity{}, invalid("account %q: no such account", b.Account)
+	}
+	owner, err := a.grantee(ctx, v, b.Owner)
+	if err != nil {
+		return ManagedIdentity{}, err
+	}
+	now := time.Now()
+	i := store.Identity{
+		ID: ulid.New(now), AccountID: acct.ID, Zone: zone, Prefix: prefix, DisplayName: b.DisplayName,
+		Signature: b.Signature, PlainStripMarkup: b.PlainStripMarkup, Transport: b.Transport, OwnerID: owner.ID, CreatedAt: now,
+	}
+	err = a.db.AddIdentity(ctx, i, action(v, "identity.add", map[string]any{
+		"identity_id": i.ID, "address": i.Address(), "account": acct.Name, "owner": owner.Kind + ":" + owner.Name, "transport": i.Transport,
+	}))
+	if errors.Is(err, store.ErrDuplicate) {
+		return ManagedIdentity{}, openapi.Errorf(http.StatusConflict, openapi.CodeConflict, "%s is already an identity", i.Address())
+	}
+	if err != nil {
+		return ManagedIdentity{}, err
+	}
+	a.widened(ctx, v, "added the identity "+i.Address()+", owned by "+owner.Kind+":"+owner.Name)
+	list, err := a.adminIdentities(ctx, v, struct{}{})
+	if err != nil {
+		return ManagedIdentity{}, err
+	}
+	for _, m := range list.Identities {
+		if m.ID == i.ID {
+			return m, nil
+		}
+	}
+	return ManagedIdentity{}, fmt.Errorf("identity %s vanished after it was added", i.ID)
+}
+
+// disableIdentity disables in one step when that only tightens. Where
+// the zone's pattern would take the address over, it takes an elevated
+// session, as `yuuka identity rm` on the host.
+func (a *API) disableIdentity(ctx context.Context, v *auth.Viewer, p IDParams) (struct{}, error) {
+	act := action(v, "identity.disable", map[string]any{"identity_id": p.ID})
+	err := a.db.DisableIdentityIfTighter(ctx, p.ID, act)
+	if !errors.Is(err, store.ErrPatternTakesOver) {
+		return struct{}{}, err
+	}
+	i, err := a.db.IdentityByID(ctx, p.ID)
+	if err != nil {
+		return struct{}{}, err
+	}
+	if !v.Elevated(time.Now()) {
+		return struct{}{}, elevationRequired(fmt.Sprintf(
+			"Disabling %s hands its address to *@%s and its grants, which may let more through.", i.Address(), i.Zone),
+			"yuuka identity rm "+shellWord(i.Address()))
+	}
+	if err := a.db.DisableIdentity(ctx, p.ID, act); err != nil {
+		return struct{}{}, err
+	}
+	a.widened(ctx, v, "disabled "+i.Address()+", whose mail *@"+i.Zone+" now sends with its own owner and grants")
+	return struct{}{}, nil
 }
 
 func (a *API) adminGrants(ctx context.Context, _ *auth.Viewer, _ struct{}) (GrantAdminList, error) {
@@ -241,16 +441,94 @@ func (a *API) tightenGrant(ctx context.Context, v *auth.Viewer, p TightenParams)
 	return managedGrant(g), nil
 }
 
-// removeGrant answers 204 like every deletion; what applies afterwards is
-// the default the list showed (ManagedGrant.Default).
-func (a *API) removeGrant(ctx context.Context, v *auth.Viewer, p GrantParams) (struct{}, error) {
-	_, err := a.db.RemoveGrantIfTighter(ctx, p.Identity, p.Principal, action(v, "grant.remove", nil))
-	if w, ok := errors.AsType[*store.WideningError](err); ok {
-		return struct{}{}, widening(grantCommand("rm", w.Current),
-			"Without the grant %s:%s gets the default, which lets more through in %s.",
-			w.Current.PrincipalKind, w.Current.PrincipalName, strings.Join(w.Fields, ", "))
+// setGrant writes a whole grant row as `yuuka grant set` does
+// (store.SetGrant), whether it widens or not: the route takes an elevated
+// session either way.
+func (a *API) setGrant(ctx context.Context, v *auth.Viewer, p GrantSetParams) (ManagedGrant, error) {
+	b := p.Body
+	ident, err := a.db.IdentityByID(ctx, b.Identity)
+	if err != nil {
+		return ManagedGrant{}, err
 	}
-	return struct{}{}, err
+	if ident.DisabledAt != nil {
+		return ManagedGrant{}, openapi.Errorf(http.StatusConflict, openapi.CodeConflict, "%s is disabled; nothing sends as it", ident.Address())
+	}
+	// Checked before the principal: a bad body creates no agent.
+	allow, err := sendpolicy.ParseAllowlist(b.Allowlist)
+	if err != nil {
+		return ManagedGrant{}, invalid("%v", err)
+	}
+	pr, err := a.grantee(ctx, v, b.Principal)
+	if err != nil {
+		return ManagedGrant{}, err
+	}
+	before, err := a.db.GrantFor(ctx, ident.ID, pr.ID)
+	existed := err == nil
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return ManagedGrant{}, err
+	}
+	g := store.Grant{
+		IdentityID: ident.ID, PrincipalID: pr.ID, Policy: sendpolicy.Tier(b.SendPolicy), RecipientScope: sendpolicy.RecipientScope(b.RecipientScope),
+		Allowlist: allow, MaxPerHour: b.MaxPerHour, MaxPerDay: b.MaxPerDay, MaxNewRecipientsPerDay: b.MaxNewRecipientsPerDay,
+		HoldSeconds: b.HoldSeconds,
+	}
+	if b.Suspended {
+		// A suspension keeps the moment it began.
+		g.SuspendedAt = before.SuspendedAt
+		if g.SuspendedAt == nil {
+			now := time.Now()
+			g.SuspendedAt = &now
+		}
+	}
+	err = a.db.SetGrant(ctx, g, action(v, "grant.set", map[string]any{
+		"identity_id": ident.ID, "identity": ident.Address(), "principal_id": pr.ID, "principal": pr.Kind + ":" + pr.Name,
+		"policy": g.Policy, "recipient_scope": g.RecipientScope, "allowlist": g.Allowlist,
+		"max_per_hour": g.MaxPerHour, "max_per_day": g.MaxPerDay, "max_new_recipients_per_day": g.MaxNewRecipientsPerDay,
+		"hold_seconds": g.HoldSeconds, "suspended": g.SuspendedAt != nil,
+	}))
+	if errors.Is(err, store.ErrOwnerCap) {
+		return ManagedGrant{}, openapi.Errorf(http.StatusConflict, openapi.CodeConflict,
+			"%s belongs to %s:%s; %s:%s can be granted draft at most, here and on the host (§8.9)",
+			ident.Address(), ident.OwnerKind, ident.OwnerName, pr.Kind, pr.Name)
+	}
+	if err != nil {
+		return ManagedGrant{}, err
+	}
+	after, err := a.db.GrantFor(ctx, ident.ID, pr.ID)
+	if err != nil {
+		return ManagedGrant{}, err
+	}
+	from := after.Default()
+	if existed {
+		from = before.Applied()
+	}
+	if fields := sendpolicy.Widenings(from, after.Applied()); len(fields) > 0 {
+		a.widened(ctx, v, fmt.Sprintf("widened the grant of %s:%s on %s in %s", pr.Kind, pr.Name, ident.Address(), strings.Join(fields, ", ")))
+	}
+	return managedGrant(after), nil
+}
+
+// removeGrant answers 204 like every deletion; what applies afterwards is
+// the default the list showed (ManagedGrant.Default). Where that default
+// lets more through, it takes an elevated session.
+func (a *API) removeGrant(ctx context.Context, v *auth.Viewer, p GrantParams) (struct{}, error) {
+	act := action(v, "grant.remove", nil)
+	_, err := a.db.RemoveGrantIfTighter(ctx, p.Identity, p.Principal, act)
+	w, ok := errors.AsType[*store.WideningError](err)
+	if !ok {
+		return struct{}{}, err
+	}
+	why := fmt.Sprintf("Without the grant %s:%s gets the default, which lets more through in %s.",
+		w.Current.PrincipalKind, w.Current.PrincipalName, strings.Join(w.Fields, ", "))
+	if !v.Elevated(time.Now()) {
+		return struct{}{}, elevationRequired(why, grantCommand("rm", w.Current))
+	}
+	if err := a.db.RemoveGrant(ctx, p.Identity, p.Principal, act); err != nil {
+		return struct{}{}, err
+	}
+	a.widened(ctx, v, fmt.Sprintf("removed the grant of %s:%s on %s, whose default lets more through in %s",
+		w.Current.PrincipalKind, w.Current.PrincipalName, w.Current.IdentityAddress, strings.Join(w.Fields, ", ")))
+	return struct{}{}, nil
 }
 
 // grantCommand is `yuuka grant <verb>` naming g's row.

@@ -44,13 +44,19 @@ const (
 	// CodeCursorExpired: a change cursor this log did not issue, or no
 	// longer can continue from (§8.6); start again without one.
 	CodeCursorExpired Code = "cursor_expired"
-	// CodeWideningRequiresCLI: a settings change would let someone do
-	// more than now; that is done on the host, which the detail names
-	// (§13.10).
+	// CodeWideningRequiresCLI: a tightening would let someone do more
+	// than now, so nothing changed. The detail names the host command;
+	// a person's session can also make the change through the widening
+	// endpoints once elevated (§13.10). The name predates those.
 	CodeWideningRequiresCLI Code = "widening_requires_cli"
 	// CodeUnsupportedFilter: a search query names a condition JMAP
 	// defines that yuuka reserves but does not support yet (§16.2).
 	CodeUnsupportedFilter Code = "unsupported_filter"
+	// CodeElevationRequired: the change widens who may do what, which
+	// takes a person's session that asserted its passkey again in the
+	// last few minutes (/auth/passkey/elevate/begin and finish); then
+	// retry (§13.10).
+	CodeElevationRequired Code = "elevation_required"
 	CodeInternal          Code = "internal"
 )
 
@@ -60,7 +66,7 @@ func (Code) Enum() []string {
 		"invalid_param", "invalid_body", "unsupported_type", "body_too_large", "not_found",
 		"unauthenticated", "scope_required", "forbidden", "conflict", "not_verified", "ceremony_expired", "rate_limited",
 		"undecodable", "unavailable", "no_identity", "submission_rejected", "invalid_rule", "cursor_expired",
-		"widening_requires_cli", "unsupported_filter", "internal",
+		"widening_requires_cli", "unsupported_filter", "elevation_required", "internal",
 	}
 }
 

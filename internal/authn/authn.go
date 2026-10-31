@@ -39,6 +39,11 @@ const (
 	RecoveryCodeCount = 8
 	// ceremonyTTL bounds a WebAuthn ceremony from begin to finish.
 	ceremonyTTL = 5 * time.Minute
+	// ElevationTTL is how long a fresh passkey assertion lets a session
+	// widen who may do what (§13.10): long enough to add an identity,
+	// grant it and issue the agent's token in one sitting, short enough
+	// that a session stolen later finds it over.
+	ElevationTTL = 5 * time.Minute
 )
 
 // ErrUnauthenticated: the request carries no valid credential.
@@ -227,14 +232,18 @@ func authenticate(ctx context.Context, db *store.DB, log *slog.Logger, now time.
 	if err := db.TouchCredential(ctx, c.ID, now); err != nil {
 		log.Warn("auth: cannot record credential use", "credential", c.ID, "err", err)
 	}
-	return &auth.Viewer{
+	v := &auth.Viewer{
 		PrincipalID:    c.PrincipalID,
 		PrincipalKind:  c.PrincipalKind,
 		PrincipalName:  c.PrincipalName,
 		CredentialID:   c.ID,
 		CredentialKind: c.Kind,
 		Scopes:         scopes,
-	}, nil
+	}
+	if c.ElevatedUntil != nil {
+		v.ElevatedUntil = *c.ElevatedUntil
+	}
+	return v, nil
 }
 
 // secretPrefix is the prefix of a credential kind's secrets.
@@ -262,8 +271,10 @@ type TokenRequest struct {
 	Scopes []auth.Scope
 	// TTL zero means no expiry; tokens are revoked explicitly.
 	TTL time.Duration
-	// IssuedBy is the principal recorded as the actor.
-	IssuedBy string
+	// IssuedBy is the principal recorded as the actor, IssuedWith the
+	// credential it acted through ("" for the host).
+	IssuedBy   string
+	IssuedWith string
 	// AuditArgs are added to the recorded action, e.g. how the CLI was
 	// run. Never a secret.
 	AuditArgs map[string]any
@@ -275,16 +286,22 @@ func (s *Service) IssueToken(ctx context.Context, req TokenRequest) (string, err
 	return IssueToken(ctx, s.db, s.now(), req)
 }
 
-// IssueToken is Service.IssueToken for callers without the WebUI login,
-// such as `yuuka token issue`: bearer tokens work where no WebUI origin is
-// configured. Only agent and service principals get tokens; a human signs
+// TokenIssuer is what IssueToken reads and writes (store.DB).
+type TokenIssuer interface {
+	Principal(ctx context.Context, id string) (store.Principal, error)
+	CreateCredential(ctx context.Context, c store.Credential, a store.Action) error
+}
+
+// IssueToken is Service.IssueToken for `yuuka token issue`, where no
+// WebUI origin need be configured, and for the settings (§13.10), which
+// issue through the same checks. Only agent and service principals get tokens; a human signs
 // in with a passkey and gets a session (§13.7).
 //
 // For an SMTP password the result is the password; the SMTP user name is
 // the credential id inside it (`yuuka token issue --kind smtp` prints
 // both), so the submission port finds the row by id and compares the hash
 // in constant time, exactly like a token.
-func IssueToken(ctx context.Context, db *store.DB, now time.Time, req TokenRequest) (string, error) {
+func IssueToken(ctx context.Context, db TokenIssuer, now time.Time, req TokenRequest) (string, error) {
 	kind, tool := req.Kind, "auth.token.issue"
 	switch kind {
 	case "", auth.KindToken:
@@ -332,7 +349,7 @@ func IssueToken(ctx context.Context, db *store.DB, now time.Time, req TokenReque
 	err = db.CreateCredential(ctx, store.Credential{
 		ID: sec.ID, PrincipalID: req.PrincipalID, Kind: kind, Label: req.Label,
 		SecretHash: sec.Hash[:], Scopes: auth.Strings(req.Scopes), CreatedAt: now, ExpiresAt: expires,
-	}, store.Action{ID: ulid.New(now), Actor: req.IssuedBy, Tool: tool, At: now, Args: args})
+	}, store.Action{ID: ulid.New(now), Actor: req.IssuedBy, CredentialID: req.IssuedWith, Tool: tool, At: now, Args: args})
 	if err != nil {
 		return "", fmt.Errorf("issue token: %w", err)
 	}

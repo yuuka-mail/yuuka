@@ -5,7 +5,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"regexp"
 	"slices"
 	"strings"
 	"text/tabwriter"
@@ -78,17 +77,8 @@ func (h *host) tokenCmd(ctx context.Context, args []string) error {
 	return errors.New(tokenUsage)
 }
 
-// principalName is the CHECK on principals.name, checked here for a
-// readable error.
-var principalName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
-
-func parsePrincipal(s string) (kind, name string, err error) {
-	kind, name, ok := strings.Cut(s, ":")
-	if !ok || !principalName.MatchString(name) {
-		return "", "", fmt.Errorf("principal %q: want <kind>:<name>, e.g. agent:arisu", s)
-	}
-	return kind, name, nil
-}
+// parsePrincipal reads kind:name (store.ParsePrincipal).
+func parsePrincipal(s string) (kind, name string, err error) { return store.ParsePrincipal(s) }
 
 // parseScopes reads --scope. Every scope is named; there is no default
 // and no shorthand, so a token never holds more than was typed. The
@@ -169,28 +159,10 @@ func (h *host) tokenIssue(ctx context.Context, credKind, principal, scopeList, l
 	return h.say("%s", tok)
 }
 
-// principal returns kind:name, creating it (and recording that) if it
-// does not exist.
+// principal returns kind:name, creating an agent or service (and
+// recording that) if it does not exist (store.Grantee).
 func (h *host) principal(ctx context.Context, kind, name string) (store.Principal, bool, error) {
-	p, err := h.db.PrincipalByName(ctx, kind, name)
-	if err == nil {
-		if p.DisabledAt != nil {
-			return p, false, fmt.Errorf("principal %s:%s is disabled", kind, name)
-		}
-		return p, false, nil
-	}
-	if !errors.Is(err, store.ErrNotFound) {
-		return p, false, err
-	}
-	now := h.now()
-	p = store.Principal{ID: ulid.New(now), Kind: kind, Name: name, DisplayName: name, CreatedAt: now}
-	err = h.db.CreatePrincipal(ctx, p, h.action("principal.create", map[string]any{"principal_id": p.ID, "principal": kind + ":" + name}))
-	if errors.Is(err, store.ErrDuplicate) {
-		// Created concurrently; use that one.
-		p, err = h.db.PrincipalByName(ctx, kind, name)
-		return p, false, err
-	}
-	return p, err == nil, err
+	return h.db.Grantee(ctx, kind, name, h.action("principal.create", nil))
 }
 
 func (h *host) tokenList(ctx context.Context, principal string) error {

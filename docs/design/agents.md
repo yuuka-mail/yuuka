@@ -370,7 +370,7 @@ M1 的落法（`internal/mcp`）：
     它保证的是 agent 走 API 时的 scope 和审计。不可信的 agent 应该用 HTTP 形态，拿不到数据库凭据
 - MCP 库用官方 Go SDK（`github.com/modelcontextprotocol/go-sdk`）：MCP 组织与 Go 团队共同维护，
   跟着协议版本走；自己实现要长期追协议协商、streamable HTTP 和 SSE 的变化，不值得
-- **agent 怎么拿到 token**：运维者在主机上签发（§13.3），scope 只给用得到的：
+- **agent 怎么拿到 token**：运维者在设置页或主机上签发（§13.3），scope 只给用得到的：
   只读的三件工具用不到别的 scope，多给的也不会让它多做什么，只会扩大泄漏面。
   要它起草再加 `draft:create`，要它的提交有机会真正发出再加 `submission:send`（见下）。
   命令和客户端怎么配见[接入 MCP](../integrate/mcp.md)

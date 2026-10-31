@@ -426,6 +426,18 @@ func (a *app) rest(log *slog.Logger) *api.API {
 	if a.cards != nil {
 		r.WithSuspendNotifier(suspendCards{cards: a.cards, log: log})
 	}
+	if a.alerter != nil {
+		r.WithAlerter(a.alerter)
+	}
+	// A new identity in the settings names one of the exits this
+	// process has; without an outbox there are none.
+	if a.submit != nil {
+		names := make([]string, len(a.cfg.Outbox.Transports))
+		for i, t := range a.cfg.Outbox.Transports {
+			names[i] = t.Name
+		}
+		r.WithTransports(names)
+	}
 	// The scores shown are the configured scorer's; without one, none.
 	if a.cfg.Triage.On() {
 		r.WithTriage(a.cfg.Triage.Profile())

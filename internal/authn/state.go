@@ -12,21 +12,32 @@ import (
 // errBusy: too many ceremonies in flight.
 var errBusy = errors.New("too many pending ceremonies")
 
+// ceremonyKind is what a ceremony is for; finish accepts only its own.
+type ceremonyKind int
+
+const (
+	loginCeremony ceremonyKind = iota
+	registerCeremony
+	// elevateCeremony: a session asserts its passkey again (§13.10).
+	elevateCeremony
+)
+
 // ceremony is the server side of one WebAuthn exchange between begin and
 // finish: above all the challenge, which must be the one we issued and
 // must be usable once.
 type ceremony struct {
-	register bool
-	data     webauthn.SessionData
-	expires  time.Time
+	kind    ceremonyKind
+	data    webauthn.SessionData
+	expires time.Time
 
-	// Registration only: whose passkey, and what authorized it — an
-	// enrollment token or an existing session.
+	// Registration and elevation: whose passkey, and the session that
+	// asked (registration may instead come with an enrollment token).
 	principalID  string
-	tokenID      string
-	tokenReason  string
 	credentialID string
-	label        string
+	// Registration only.
+	tokenID     string
+	tokenReason string
+	label       string
 }
 
 // ceremonies keeps pending ceremonies in memory, keyed by the value of an

@@ -62,6 +62,10 @@ DMARC 证实过的发件域和各自的信数（OBSERVED，不在期望里的前
 发一封信要三样东西都齐：一个**出口**（[配置](config.md#发信出口)），一个绑在出口上的**发信地址**（identity），
 以及一条**授权**说明谁能用这个地址发、能发到哪一步。
 
+地址和授权也可以在 WebUI 的设置页里添加和修改，效果和下面的命令一样。签发、添加、调高这类放宽权限的操作，
+提交前会再验一次 passkey，验过之后 5 分钟内不再询问，每次都推送告警
+（[为什么](../design/principals.md#1310-管理面收紧一步完成放宽先再验-passkey)）。命令留给脚本和没有浏览器的时候。
+
 ```bash
 yuuka identity add alerts@example.com --owner service:monitoring --transport cloudflare \
   [--display-name "Monitoring"] [--signature "..."] [--plain-strip-markup] [--account A]
@@ -156,6 +160,7 @@ yuuka rule revert <id> [--since 2026-01-01]
 ## 凭据
 
 agent 和其他服务用凭据访问 yuuka。人没有长期凭据，只用 passkey 登录。
+WebUI 设置页的「凭据」一节也能签发（先再验一次 passkey），规则和下面相同，秘密同样只显示一次。
 
 ```bash
 yuuka token issue --principal agent:arisu --scope message:read,delivery:read,prefix:read [--label laptop] [--ttl 720h]

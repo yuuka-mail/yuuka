@@ -28,6 +28,14 @@ type SessionInfo struct {
 	CredentialID   string       `json:"credential_id"`
 	CredentialKind string       `json:"credential_kind"` // session | token
 	Scopes         []auth.Scope `json:"scopes"`
+	// ElevatedUntil is present while a person's session may widen who
+	// may do what (§13.10): until then no passkey prompt is needed.
+	ElevatedUntil *time.Time `json:"elevated_until,omitempty"`
+}
+
+// ElevateResult is POST /auth/passkey/elevate/finish.
+type ElevateResult struct {
+	ElevatedUntil time.Time `json:"elevated_until"`
 }
 
 // LoginResult is POST /auth/passkey/login/finish; the session itself is

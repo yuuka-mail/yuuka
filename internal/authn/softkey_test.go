@@ -23,6 +23,9 @@ type softKey struct {
 	id      []byte
 	user    []byte // user handle learned at registration
 	counter uint32
+	// presenceOnly asserts without user verification: a key touched, no
+	// PIN or biometric.
+	presenceOnly bool
 }
 
 func newSoftKey(t *testing.T, origin string) *softKey {
@@ -119,7 +122,11 @@ func (k *softKey) get(options []byte) []byte {
 		k.t.Fatalf("assertion options: %v: %s", err, options)
 	}
 	const up, uv = 0x01, 0x04
-	authData := k.authData(opts.PublicKey.RPID, up|uv, nil)
+	flags := byte(up | uv)
+	if k.presenceOnly {
+		flags = up
+	}
+	authData := k.authData(opts.PublicKey.RPID, flags, nil)
 	cd := k.clientData("webauthn.get", opts.PublicKey.Challenge)
 	cdHash := sha256.Sum256(cd)
 	digest := sha256.Sum256(append(append([]byte{}, authData...), cdHash[:]...))

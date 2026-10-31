@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"time"
 )
 
 // Scope is one flat permission (§13.4). There are no roles and no
@@ -81,6 +82,9 @@ type Viewer struct {
 	CredentialID   string
 	CredentialKind string // session | token | smtp_password
 	Scopes         []Scope
+	// ElevatedUntil is when the session's latest fresh passkey
+	// assertion stops counting (Elevated); zero for none.
+	ElevatedUntil time.Time
 }
 
 // String is kind:name, the form used in logs and the audit trail.
@@ -96,6 +100,14 @@ func (v *Viewer) Has(s Scope) bool { return v != nil && slices.Contains(v.Scopes
 // way to change its own authority.
 func (v *Viewer) HumanSession() bool {
 	return v != nil && v.CredentialKind == KindSession && v.PrincipalKind == "human"
+}
+
+// Elevated reports whether, at now, the viewer is a person's session
+// that asserted its passkey again within the last few minutes. Such a
+// session may also widen who may do what (§13.10): issue a token, add an
+// identity, raise a grant. A stolen session cookie alone cannot.
+func (v *Viewer) Elevated(now time.Time) bool {
+	return v.HumanSession() && now.Before(v.ElevatedUntil)
 }
 
 // Missing returns the scopes of required that the viewer lacks.

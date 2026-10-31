@@ -85,6 +85,13 @@ export type ManagedIdentity = S["ManagedIdentity"];
 export type ManagedGrant = S["ManagedGrant"];
 export type AppliedGrant = S["AppliedGrant"];
 export type TightenBody = S["TightenBody"];
+export type IssueBody = S["IssueBody"];
+export type IssuedCredential = S["IssuedCredential"];
+export type IdentityBody = S["IdentityBody"];
+export type IdentityAdminList = S["IdentityAdminList"];
+export type GrantBody = S["GrantBody"];
+export type StoredGrant = S["StoredGrant"];
+export type Scope = S["Scope"];
 
 // Annotations, rules and proposals (M3, §8.5). A rule's match is typed by
 // hand in rules/match.ts: the contract says only "object" because the
@@ -124,4 +131,5 @@ export type SessionInfo = S["SessionInfo"];
 export type RegisterBegin = S["RegisterBegin"];
 export type LoginResult = S["LoginResult"];
 export type RegisterResult = S["RegisterResult"];
+export type ElevateResult = S["ElevateResult"];
 export type RecoveryGrant = S["RecoveryGrant"];

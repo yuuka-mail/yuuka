@@ -18,6 +18,7 @@ import type {
   Tier,
 } from "@/api/types";
 import { fullTime, sender } from "@/lib/format";
+import { CeremonyError } from "@/lib/webauthn";
 import { m as msg } from "@/paraglide/messages.js";
 
 // What yuuka says about outgoing mail, as words and tones. Everything
@@ -519,6 +520,7 @@ const problems: Partial<Record<Code, () => string>> = {
   body_too_large: () => msg.send_problem_body_too_large(),
   invalid_rule: () => msg.problem_invalid_rule(),
   widening_requires_cli: () => msg.problem_widening(),
+  elevation_required: () => msg.problem_elevation(),
 };
 
 // The codes whose detail names what is wrong (a field, an address), or
@@ -553,5 +555,7 @@ export function problem(
       code: err.code,
     };
   }
+  // The passkey prompt before a widening (withElevation).
+  if (err instanceof CeremonyError) return { text: err.failure.text, detail: err.failure.detail };
   return { text: msg.send_problem_unreachable() };
 }

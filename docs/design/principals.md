@@ -75,14 +75,16 @@ passkey 不是 `credentials` 的一行：它是产生 `session` 凭据的登录�
 私钥也从不离开验证器。它单独一张 `passkeys` 表，列按 WebAuthn 的 credential record 展开
 （公钥、签名计数、AAGUID、BE/BS 标志），不把任何库的序列化格式冻结进库里。
 
-**`token` 的签发（M1）**：只有主机上的 CLI 能签发（`yuuka token issue` / `ls` / `revoke`，
-参数见 [`cmd/yuuka/token.go`](../../cmd/yuuka/token.go)）；WebUI 只列出和吊销，签发留在 CLI（§13.10）。
+**`token` 的签发（M1）**：主机上的 CLI（`yuuka token issue` / `ls` / `revoke`，
+参数见 [`cmd/yuuka/token.go`](../../cmd/yuuka/token.go)），或 WebUI 设置页里先再验一次 passkey 的人（§13.10）；
+两者走同一个 `authn.IssueToken`，下面的规则对两边都成立。
 
 - 只发给 `agent` 和 `service`。`human` 的凭据只有 passkey 登录产生的 `session`，
   `issue` 遇到 human 直接拒绝并指向 `admin enroll`：给人发一把长期 token，等于在 passkey 旁边开一扇不防钓鱼的后门。
   这条在 `authn.IssueToken` 里也查一遍，不只靠 CLI
 - 指名的主体不存在就建（`display_name` 先等于 name），建主体本身记一条 `principal.create`
-- token 明文只打印一次，单独一行写到 stdout（说明写 stderr），便于直接重定向进密钥文件；库里只有哈希，丢了只能吊销重发。
+- token 明文只给一次：CLI 单独一行写到 stdout（说明写 stderr），便于直接重定向进密钥文件；
+  界面只在签发的回答里显示一次。库里只有哈希，丢了只能吊销重发。
   `--ttl` 缺省为不过期：token 靠显式吊销收回，`ls` 的 `last_used_at` 让闲置的那把看得见
 - `ls` 连已吊销的也列出，永远不显示秘密
 - `revoke` 只收 `token` 和 `smtp_password` 类凭据（会话由登出撤销），记 `auth.credential.revoke`。
@@ -368,7 +370,8 @@ agent 不是浏览器，拿不到那个 cookie。
 
 - 单一运维者，首选 **passkey（WebAuthn）**：没有密码可泄露，也不需要邮件找回——
   邮件系统自己的登录不该依赖收邮件
-- 第一个 passkey 由 CLI 签发一次性注册链接（`yuuka admin enroll`），之后在 WebUI 里添加更多设备；
+- 第一个 passkey 由 CLI 签发一次性注册链接（`yuuka admin enroll`），之后在 WebUI 里添加更多设备
+  （先用已有的 passkey 再验一次，§13.10）；
   所有 passkey 都丢了，同样用 CLI 恢复。能在机器上跑 CLI 本身就是最高权限
 - **不提供密码 + TOTP 作为备用登录**。备用方式就是整条链上最弱的一环：
   攻击者只需要走它，钓鱼页实时转发密码和 TOTP 就能绕过 passkey 的防钓鱼能力
@@ -526,7 +529,7 @@ human 看全部，其他主体只看自己写的。草稿是没发出去的字�
 |---|---|
 | M1 | **`principals` / `credentials` / `identity_grants` / `account_access` / `actions` 建表**，WebUI 内置 passkey 登录、走 session 凭据（M1 只有 JSON 端点，页面在第二阶段）；只读 MCP 与 REST 的 bearer token，由 `yuuka token` 签发 |
 | M2 | SMTP submission 口（跟发信能力一起做）；`accounts` / `identities` 建表（§9.5），`identity_grants`、`account_access` 补外键（已落地：[0005](../../internal/store/migrations/0005_sending.sql)） |
-| M3 | 管理动作进 WebUI（§13.10）：跟着信走的决定、权限类配置的查看与收紧；放宽权限仍只在 CLI |
+| M3 | 管理动作进 WebUI（§13.10）：跟着信走的决定、权限类配置的查看与收紧；放宽权限当场再验 passkey |
 | M3.5 | `account_access` 生效：读路径按 §13.8 过滤（跟多账户一起做） |
 
 `identity_grants` 和 `account_access` 在 M1 只建表、不读：外键指向的 `identities`、`accounts`
@@ -537,7 +540,7 @@ human 看全部，其他主体只看自己写的。草稿是没发出去的字�
 主体与凭据的表从 M1 就建，因为主体模型是改起来最贵的部分。
 M0 不需要这一层——那时只有一个人和一个脚本。
 
-### 13.10 管理面：收紧在界面，放宽在主机
+### 13.10 管理面：收紧一步完成，放宽先再验 passkey
 
 M2 结束时，几乎所有管理动作都只能在主机上敲 CLI。这不全对，但也不该反过来做一个和读信分开的「管理后台」。
 管理动作按性质分三类，各有各的位置：
@@ -546,7 +549,7 @@ M2 结束时，几乎所有管理动作都只能在主机上敲 CLI。这不全�
 |---|---|---|---|
 | 信任根与主机运维 | `admin enroll`、恢复码轮换、`migrate`、`reconcile`、`reparse` | 只在主机 CLI | 能登上主机的人 |
 | 跟着信走的决定 | 认领前缀、写期望域、规则、改判、`unknown` 外发的裁决 | WebUI，放在引出它的信或前缀旁边（§12.12）；CLI 保留 | 按 scope（`prefix:manage`、`rule:manage`……），和其他写端点一样 |
-| 改变谁能做什么 | 凭据、身份、授权 | WebUI 能看、能收紧；放宽只在 CLI | 只认 human 的 `session`，且带 `admin` |
+| 改变谁能做什么 | 凭据、身份、授权 | WebUI：看和收紧一步完成；签发、添加、调高要先再验一次 passkey。CLI 保留 | 只认 human 的 `session`，且带 `admin`；放宽另要会话在 5 分钟内验过 passkey |
 
 **信任根留在主机。** §13.7 的恢复链建立在「能跑 CLI 就是最高权限」上：WebUI 起不来、passkey 全丢、
 登录入口被刷爆时，恢复不能依赖 Web。迁移和重建是主机上的运维动作，不做成 HTTP 端点：
@@ -560,18 +563,36 @@ M2 结束时，几乎所有管理动作都只能在主机上敲 CLI。这不全�
 **改变权限的配置不对称。** 吊销凭据、调低 `send_policy` 或限额、删授权、停用身份，只会让系统更保守，
 误操作的代价是某个 agent 报一次缺权限，所以在界面上一步完成。签发 token、调高档位或限额、加身份，
 会扩大某个主体能做的事：会话一旦被劫持，攻击者靠它就能留一个比会话活得长的后门，
-比如一把 `submission:send` 的 token 加一条 `auto` 授权。所以这类操作暂时只在 CLI。
-以后要在 WebUI 放开，条件是当场再做一次 passkey 断言（要求用户验证），只对这一次操作有效，
-和吊销一样记 `actions` 并推送告警。做到这一步之前，放宽权限的操作不出现在 REST 上。
+比如一把 `submission:send` 的 token 加一条 `auto` 授权。
+
+M3 起初把这类操作只留在 CLI。代价落在每个运维者身上：没有身份就发不了信，第一次配置要在浏览器和 shell 之间来回切，
+而要防的只是「偷到会话 cookie」这一种情形。挡住它不需要主机，只需要证明此刻坐在浏览器前的人还握着 passkey。
+
+**放宽：当场再验一次 passkey，之后 5 分钟有效。** 放宽权限的端点要求会话在 5 分钟内做过一次 passkey 断言
+（要求用户验证，只接受这个人自己的 passkey），否则回 `403 elevation_required`，界面弹出 passkey 后重试。
+单靠偷来的 cookie 过不了这一步；要放宽，攻击者还得同时握着验证器、通过它的 PIN 或生物识别。取舍：
+
+- **窗口而不是一次一验**。第一次配置通常是「加身份、写授权、签 token」连着三步，一次一验要碰三次验证器，
+  而三次断言防不住的东西一次也防不住：能在窗口里用会话的人，多半也能在下一次弹窗时诱导点一下。
+  5 分钟够一次配置做完，又短到之后偷到的会话发现窗口已经关了
+- **窗口记在会话那一行上**（`credentials.elevated_until`，[0015](../../internal/store/migrations/0015_elevation.sql)），
+  不放内存：重启和多进程看到同一个答案；登出撤销这一行，窗口随之结束，不需要单独的生命周期。
+  只有 `session` 能有这一列，token 不论 scope 都不是坐在浏览器前的人
+- **每次放宽都推送告警**，和注册新 passkey 一样。被盗的提权会话靠它被发现：告警写清谁、在哪个会话、放宽了什么。
+  收紧不告警，免得告警多到没人看
+- **添加 passkey 也要先验一次**。新 passkey 比会话活得更久，是最大的后门；原先只要求会话，
+  意味着偷到 cookie 就能给自己注册一把 passkey。现在它和其他放宽走同一道门
+- **防不住的**：同时拿到会话和验证器（比如设备本身被控制），以及窗口内页面里跑起来的脚本。
+  后者靠邮件正文永远在不带 `allow-scripts` 的 sandbox iframe 里（§12.2）来挡，不靠这道门
 
 **权限类端点只认人的会话。** scope 挂在凭据上，`admin` 也能被 `yuuka token issue` 写进一把 token。
 如果这类端点只查 `admin`，拿到这把 token 的 agent 就能给自己调档，§8.9 的授权就成了 agent 自己能改的约定。
 所以这类端点除了查 scope，还要求凭据是 `session`、主体是 `human`。这和 WebUI 添加 passkey 用的是同一个条件
 （[`internal/authn/handler.go`](../../internal/authn/handler.go) 的注册入口）。这条进 [`TestACL`](../../internal/api/api_test.go)：
-对这类路由，持有全部 scope 的 token 也必须拿到 403。收紧也走这条：允许 agent 吊销别人的凭据没有用处，
-多一种例外只会多一条要测的路径。
+对这类路由，持有全部 scope 的 token 也必须拿到 403；放宽类路由，没提权的人的会话也必须拿到 403。
+收紧也走这条：允许 agent 吊销别人的凭据没有用处，多一种例外只会多一条要测的路径。
 
-这一节不新增任何绕过授权的路径。界面只是 `identity_grants` 的又一个写入方：
+这一节不新增任何绕过授权的路径。界面只是 `identity_grants` 的又一个写入方，经的是 CLI 同一组函数：
 硬上限照样在写授权行的 [`setGrant`](../../internal/store/grants.go) 和 `Decide` 两处成立（§13.5），提交时的判定一处不变。
 
 **审计也因此更准。** 从 WebUI 来的管理动作记成 `human:<operator>`，带具体的 `credential_id`；
@@ -582,11 +603,19 @@ CLI 只能记 `system` 加 `host_user`（§13.7）。信任根之外的动作值
 
 - **「只认人的会话」写在路由表里**：权限类路由标 `authority()`，OpenAPI 里只列 `session` 一种认证；
   处理函数之前统一查 [`Viewer.HumanSession`](../../internal/auth/auth.go)，添加 passkey 用的是同一个函数。
+  总是放宽的路由（签发凭据、加身份、整行写授权）标 `widening()`，处理函数之前再查 `Viewer.Elevated`；
+  可能放宽也可能收紧的（删授权、停用身份）先按收紧试，放宽时才看 `Viewer.Elevated`。
+  提权本身是 `/auth/passkey/elevate/begin` 和 `finish`，只接受这个会话的人自己的 passkey、要求用户验证
+- **放宽经 CLI 同一组函数**：签发走 [`authn.IssueToken`](../../internal/authn/authn.go)，记成人和会话而不是 `system`；
+  主体「agent / service 首次用到时创建，人必须已存在」在 [`store.Grantee`](../../internal/store/identity.go)；
+  白名单的格式在 [`sendpolicy.ParseAllowlist`](../../internal/sendpolicy/sendpolicy.go)。界面加身份时，出口只能选本进程配置了的
+  （`YUUKA_TRANSPORTS`）：CLI 可能在另一台机器上跑，不知道服务进程有哪些出口，所以不查
   跟着信走的决定（认领、取消认领、期望域）只看 scope：`prefix:manage` 加 `prefix:read`，
   因为回答里带着前缀现在的统计，也就是 `yuuka prefix expect` 打印的那份「对已收的信意味着什么」
 - **收紧按生效值逐列比较**。两边都是生效值（[`sendpolicy.Applied`](../../internal/sendpolicy/tighten.go)：空限额换成按主体类型的默认数，
-  档位过了 owner cap），每一列都不能比现在宽，否则整条拒绝、什么都不改，回 `403 widening_requires_cli`，
-  `detail` 写出在主机上做这件事的 `yuuka grant set …` 命令。从窄到宽：
+  档位过了 owner cap），每一列都不能比现在宽，否则整条拒绝、什么都不改，回 `403 widening_requires_cli`
+  （名字早于提权；收紧端点仍然只收紧），`detail` 写出在主机上做这件事的 `yuuka grant set …` 命令。
+  要放宽就整行写（`PUT /api/v1/admin/grants`），那条路由要求提权。从窄到宽：
 
   | 列 | 顺序 |
   |---|---|
@@ -598,24 +627,24 @@ CLI 只能记 `system` 加 `host_user`（§13.7）。信任根之外的动作值
   | 暂停 | 暂停 < 不暂停 |
 
   取舍：
-  - 降到 `draft` 时其余各列暂不起作用，仍然逐列比较：此刻存下的 `any`，会在以后有人在主机上把档位调回 `auto` 时
+  - 降到 `draft` 时其余各列暂不起作用，仍然逐列比较：此刻存下的 `any`，会在以后有人把档位调回 `auto` 时
     一起生效，而那个人读到的是那时的授权，不知道这一列是什么时候变宽的。名单不论范围是不是 `allowlist` 都只能删条目，理由相同
   - 范围是偏序，不是一条线：`thread` 能回给一个对话里的任何通信方，包括以后才加进来的人；名单能写给还不在任何对话里的人。
-    两者互不包含，所以 `thread ↔ allowlist` 两个方向都算放宽，只在主机上做（`yuuka grant set … --recipients`）。
-    代价是界面上没法从名单「退回」默认的 `thread`，只能先降档位或暂停
-  - 撤回窗口（§8.9）在界面上只能加长：窗口变短就是留给人撤回的时间变少，和调高限额一样是放宽。
-    加长的代价只是 review 放行的信晚一点发出，误操作的后果和其他收紧同级，所以不必去主机
+    两者互不包含，所以 `thread ↔ allowlist` 两个方向都算放宽，要整行写、先提权
+  - 撤回窗口（§8.9）在收紧里只能加长：窗口变短就是留给人撤回的时间变少，和调高限额一样是放宽。
+    加长的代价只是 review 放行的信晚一点发出，误操作的后果和其他收紧同级，所以不必提权
 - **删授权不一定是收紧**：删掉之后适用 §13.5 的默认，可能比这一行宽（agent 自己身份上写的 `draft`，删掉就成了默认的 `review`）。
   所以删除也要比较（[`Grant.RemovalWidenings`](../../internal/store/tighten.go)）：默认不发信（`none` / `draft`）时只比档位——
   默认没有存下任何一列，其余各列不会日后生效；默认会发信时逐列比，撤回窗口比的是真正起作用的那个：`review` 档是它的 `hold_seconds`，`auto` 档没有窗口（算 0）。
-  已停用身份上的授权总能删：有没有这一行都发不出去。列表里每条授权带 `removal_widens`，界面据此决定给删除按钮还是给命令
+  已停用身份上的授权总能删：有没有这一行都发不出去。列表里每条授权带 `removal_widens`，界面据此在确认时说明会放宽哪几列，
+  放宽的删除先提权
 - **硬上限仍在写入的那一处**：CLI 和界面都经同一个 `setGrant` 写行。人的身份上给别人 `review` / `auto`，
   按生效值并不更宽（照样压成 `draft`），由 `setGrant` 以 `ErrOwnerCap` 拒绝，REST 回 `409 conflict`
 - **停用身份也可能是放宽**：地址身份停用后，这个地址落到同 zone 的 `*@zone` 身份（§9.3），换了 owner、也换了一整套授权。
-  所以 zone 里有启用的 pattern 时界面不能停用地址身份（列表的 `taken_over_by` 指出是哪个），要在主机上 `yuuka identity rm`；
+  所以 zone 里有启用的 pattern 时，停用地址身份要先提权（列表的 `taken_over_by` 指出是哪个），或在主机上 `yuuka identity rm`；
   停用 pattern 本身总是收紧
 - **凭据只列 `token` 和 `smtp_password`**，和 `yuuka token ls` 是同一个查询，从不带秘密；会话不列，由登出结束。
   吊销和 CLI 走同一个 [`authn.RevokeToken`](../../internal/authn/authn.go)
-- 界面在设置页的凭据、身份、授权三节，怎么只给出更紧的值见 §12.12
-- 授权的每次写入（界面的收紧、删除，CLI 的 `grant set` / `rm`）都先取提交判定用的那把授权锁（`lockGrant`）再锁行：
+- 界面在设置页的凭据、身份、授权三节，收紧怎么只给出更紧的值、放宽怎么接上提权见 §12.12
+- 授权的每次写入（界面的收紧、整行写、删除，CLI 的 `grant set` / `rm`）都先取提交判定用的那把授权锁（`lockGrant`）再锁行：
   返回时，已经没有基于旧授权的判定还在进行，暂停在按下的那一刻之后就成立

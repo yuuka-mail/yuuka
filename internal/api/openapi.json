@@ -485,6 +485,7 @@
           "cursor_expired",
           "widening_requires_cli",
           "unsupported_filter",
+          "elevation_required",
           "internal"
         ]
       },
@@ -887,6 +888,19 @@
           "outbox"
         ]
       },
+      "ElevateResult": {
+        "type": "object",
+        "properties": {
+          "elevated_until": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "elevated_until"
+        ],
+        "additionalProperties": false
+      },
       "ExpectBody": {
         "type": "object",
         "properties": {
@@ -1072,6 +1086,55 @@
         ],
         "additionalProperties": false
       },
+      "GrantBody": {
+        "type": "object",
+        "properties": {
+          "identity": {
+            "type": "string"
+          },
+          "principal": {
+            "type": "string"
+          },
+          "send_policy": {
+            "$ref": "#/components/schemas/Tier"
+          },
+          "recipient_scope": {
+            "$ref": "#/components/schemas/RecipientScope"
+          },
+          "allowlist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "max_per_hour": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_per_day": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "max_new_recipients_per_day": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "hold_seconds": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "suspended": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "identity",
+          "principal",
+          "send_policy",
+          "recipient_scope"
+        ],
+        "additionalProperties": false
+      },
       "GrantIdentity": {
         "type": "object",
         "properties": {
@@ -1117,10 +1180,56 @@
             "items": {
               "$ref": "#/components/schemas/ManagedIdentity"
             }
+          },
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
-          "identities"
+          "identities",
+          "transports",
+          "accounts"
+        ],
+        "additionalProperties": false
+      },
+      "IdentityBody": {
+        "type": "object",
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "transport": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "signature": {
+            "type": "string"
+          },
+          "plain_strip_markup": {
+            "type": "boolean"
+          },
+          "account": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "address",
+          "owner",
+          "transport"
         ],
         "additionalProperties": false
       },
@@ -1136,6 +1245,54 @@
         },
         "required": [
           "identities"
+        ],
+        "additionalProperties": false
+      },
+      "IssueBody": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/CredentialKind"
+          },
+          "principal": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Scope"
+            }
+          },
+          "ttl_seconds": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "kind",
+          "principal"
+        ],
+        "additionalProperties": false
+      },
+      "IssuedCredential": {
+        "type": "object",
+        "properties": {
+          "credential": {
+            "$ref": "#/components/schemas/ManagedCredential"
+          },
+          "secret": {
+            "type": "string"
+          },
+          "smtp_username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "credential",
+          "secret"
         ],
         "additionalProperties": false
       },
@@ -3450,6 +3607,10 @@
             "items": {
               "$ref": "#/components/schemas/Scope"
             }
+          },
+          "elevated_until": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -4129,6 +4290,48 @@
             }
           }
         }
+      },
+      "post": {
+        "summary": "Issue a token or SMTP password, shown once; an elevated session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IssueBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IssuedCredential"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/admin/credentials/{id}/revoke": {
@@ -4200,11 +4403,53 @@
             }
           }
         }
+      },
+      "put": {
+        "summary": "Create or replace a grant, wider or not; an elevated session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GrantBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedGrant"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/admin/grants/{identity}/{principal}": {
       "delete": {
-        "summary": "Remove a grant, unless its default lets more through; a person's session only",
+        "summary": "Remove a grant; where its default lets more through, an elevated session only",
         "security": [
           {
             "session": [
@@ -4345,11 +4590,53 @@
             }
           }
         }
+      },
+      "post": {
+        "summary": "Add an identity; an elevated session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IdentityBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedIdentity"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/admin/identities/{id}/disable": {
       "post": {
-        "summary": "Disable an identity, unless the zone's pattern would take its address over; a person's session only",
+        "summary": "Disable an identity; where the zone's pattern would take its address over, an elevated session only",
         "security": [
           {
             "session": [
@@ -6995,6 +7282,107 @@
         "responses": {
           "204": {
             "description": "No Content"
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/passkey/elevate/begin": {
+      "post": {
+        "summary": "Begin asserting a passkey of this session's person again, to widen who may do what for a few minutes; a person's session only",
+        "security": [
+          {
+            "bearer": [
+              "admin"
+            ]
+          },
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/passkey/elevate/finish": {
+      "post": {
+        "summary": "Finish with the WebAuthn assertion; the session may widen until elevated_until",
+        "security": [
+          {
+            "bearer": [
+              "admin"
+            ]
+          },
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ElevateResult"
+                }
+              }
+            }
           },
           "default": {
             "description": "A problem",

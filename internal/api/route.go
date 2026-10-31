@@ -82,6 +82,16 @@ func (rt route) authority() route {
 	return rt
 }
 
+// widening marks an authority route that always lets someone do more
+// (§13.10): issuing, adding, raising. On top of authority it is served
+// only to a session elevated by a fresh passkey assertion, checked before
+// the handler runs, so a stolen session cookie alone cannot leave a
+// backdoor that outlives it.
+func (rt route) widening() route {
+	rt.Access = openapi.ElevatedSession
+	return rt
+}
+
 // submitting marks a route that hands mail to the submission core.
 func (rt route) submitting() route {
 	rt.needsSubmitter = true

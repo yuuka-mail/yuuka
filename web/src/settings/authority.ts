@@ -1,12 +1,21 @@
-import type { AppliedGrant, ManagedGrant, RecipientScope, Tier, TightenBody } from "@/api/types";
+import type {
+  AppliedGrant,
+  GrantBody,
+  ManagedGrant,
+  RecipientScope,
+  Scope,
+  StoredGrant,
+  Tier,
+  TightenBody,
+} from "@/api/types";
 import { m } from "@/paraglide/messages.js";
 import { duration, principal, reviewText, scopeText, tierLabel } from "@/send/outgoing";
 
-// What the settings page offers on a grant (§13.10): only what is tighter
-// than what applies now, column by column, in the order the server
-// compares them (store/tighten.go). The server checks it all again and
-// refuses anything wider with the host command; offering only tighter
-// values here means a person rarely sees that refusal. Pure, so tested.
+// What the settings page offers on a grant (§13.10). Tightening offers
+// only what is tighter than what applies now, column by column, in the
+// order the server compares them (store/tighten.go), and takes one step;
+// the server checks it all again. Anything else is the whole-row form,
+// which asks for the passkey first. Pure, so tested.
 
 const tierOrder: Tier[] = ["none", "draft", "review", "auto"];
 
@@ -146,7 +155,81 @@ export function tighteningCost(
   }
 }
 
-/** The host command that removes grant g (§13.10), from the one that sets it. */
-export function removeCommand(g: ManagedGrant): string {
-  return g.host.replace(/^yuuka grant set /, "yuuka grant rm ");
+/** Every scope, in the order of §13.4 (internal/auth). */
+export const allScopes: Scope[] = [
+  "message:read",
+  "delivery:read",
+  "prefix:read",
+  "message:annotate",
+  "draft:create",
+  "submission:send",
+  "prefix:manage",
+  "account:manage",
+  "rule:manage",
+  "admin",
+];
+
+export const tiers: Tier[] = tierOrder;
+export const recipientScopes: RecipientScope[] = ["thread", "allowlist", "any"];
+
+/**
+ * A grant as its form holds it: numbers as typed, "" for the default
+ * (sendpolicy's, by the principal's kind), the allowlist as text.
+ */
+export interface GrantForm {
+  identity: string;
+  principal: string;
+  send_policy: Tier;
+  recipient_scope: RecipientScope;
+  allowlist: string;
+  max_per_hour: string;
+  max_per_day: string;
+  max_new_recipients_per_day: string;
+  hold_minutes: string;
+  suspended: boolean;
+}
+
+const num = (n: number | undefined) => (n === undefined ? "" : String(n));
+
+/** The form of a stored grant, or of a new one from the column defaults (none, thread). */
+export function grantForm(identity: string, who: string, s?: StoredGrant): GrantForm {
+  return {
+    identity,
+    principal: who,
+    send_policy: s?.send_policy ?? "none",
+    recipient_scope: s?.recipient_scope ?? "thread",
+    allowlist: (s?.allowlist ?? []).join(", "),
+    max_per_hour: num(s?.limits.max_per_hour),
+    max_per_day: num(s?.limits.max_per_day),
+    max_new_recipients_per_day: num(s?.limits.max_new_recipients_per_day),
+    hold_minutes: s?.hold_seconds === undefined ? "" : String(s.hold_seconds / 60),
+    suspended: !!s?.suspended_at,
+  };
+}
+
+/** A number field: "" is the default, anything else a whole number at least 0. */
+export function validCount(s: string): boolean {
+  return s === "" || /^\d+$/.test(s.trim());
+}
+
+const count = (s: string) => (s.trim() === "" ? undefined : Number(s));
+
+/** The PUT body of a grant form: the whole row, as `yuuka grant set` writes it. */
+export function grantBody(f: GrantForm): GrantBody {
+  const hold = count(f.hold_minutes);
+  return {
+    identity: f.identity,
+    principal: f.principal,
+    send_policy: f.send_policy,
+    recipient_scope: f.recipient_scope,
+    allowlist: f.allowlist
+      .split(/[,\s]+/)
+      .map((x) => x.trim())
+      .filter(Boolean),
+    max_per_hour: count(f.max_per_hour),
+    max_per_day: count(f.max_per_day),
+    max_new_recipients_per_day: count(f.max_new_recipients_per_day),
+    hold_seconds: hold === undefined ? undefined : hold * 60,
+    suspended: f.suspended,
+  };
 }

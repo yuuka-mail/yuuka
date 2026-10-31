@@ -89,7 +89,40 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /** Issue a token or SMTP password, shown once; an elevated session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["IssueBody"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["IssuedCredential"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -178,7 +211,40 @@ export interface paths {
                 };
             };
         };
-        put?: never;
+        /** Create or replace a grant, wider or not; an elevated session only */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["GrantBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ManagedGrant"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
         post?: never;
         delete?: never;
         options?: never;
@@ -196,7 +262,7 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Remove a grant, unless its default lets more through; a person's session only */
+        /** Remove a grant; where its default lets more through, an elevated session only */
         delete: {
             parameters: {
                 query?: never;
@@ -326,7 +392,40 @@ export interface paths {
             };
         };
         put?: never;
-        post?: never;
+        /** Add an identity; an elevated session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["IdentityBody"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ManagedIdentity"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -342,7 +441,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Disable an identity, unless the zone's pattern would take its address over; a person's session only */
+        /** Disable an identity; where the zone's pattern would take its address over, an elevated session only */
         post: {
             parameters: {
                 query?: never;
@@ -2578,6 +2677,108 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/passkey/elevate/begin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Begin asserting a passkey of this session's person again, to widen who may do what for a few minutes; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            [key: string]: unknown;
+                        };
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/passkey/elevate/finish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Finish with the WebAuthn assertion; the session may widen until elevated_until */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ElevateResult"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/passkey/login/begin": {
         parameters: {
             query?: never;
@@ -3001,7 +3202,7 @@ export interface components {
         /** @enum {string} */
         Class: "unknown" | "machine" | "human";
         /** @enum {string} */
-        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "invalid_rule" | "cursor_expired" | "widening_requires_cli" | "unsupported_filter" | "internal";
+        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "invalid_rule" | "cursor_expired" | "widening_requires_cli" | "unsupported_filter" | "elevation_required" | "internal";
         Content: {
             notice: string;
             from: components["schemas"]["Address"];
@@ -3108,6 +3309,10 @@ export interface components {
         };
         /** @enum {string} */
         DraftState: "draft" | "held" | "outbox";
+        ElevateResult: {
+            /** Format: date-time */
+            elevated_until: string;
+        };
         ExpectBody: {
             domains: string[];
         };
@@ -3153,6 +3358,18 @@ export interface components {
         GrantAdminList: {
             grants: components["schemas"]["ManagedGrant"][];
         };
+        GrantBody: {
+            identity: string;
+            principal: string;
+            send_policy: components["schemas"]["Tier"];
+            recipient_scope: components["schemas"]["RecipientScope"];
+            allowlist?: string[];
+            max_per_hour?: number;
+            max_per_day?: number;
+            max_new_recipients_per_day?: number;
+            hold_seconds?: number;
+            suspended?: boolean;
+        };
         GrantIdentity: {
             id: string;
             address: string;
@@ -3163,9 +3380,32 @@ export interface components {
         HoldReason: "policy" | "owner" | "limit" | "recipients" | "suspended" | "loop" | "review" | "withdrawn";
         IdentityAdminList: {
             identities: components["schemas"]["ManagedIdentity"][];
+            transports: string[];
+            accounts: string[];
+        };
+        IdentityBody: {
+            address: string;
+            owner: string;
+            transport: string;
+            display_name?: string;
+            signature?: string;
+            plain_strip_markup?: boolean;
+            account?: string;
         };
         IdentityList: {
             identities: components["schemas"]["SendingIdentity"][];
+        };
+        IssueBody: {
+            kind: components["schemas"]["CredentialKind"];
+            principal: string;
+            label?: string;
+            scopes?: components["schemas"]["Scope"][];
+            ttl_seconds?: number;
+        };
+        IssuedCredential: {
+            credential: components["schemas"]["ManagedCredential"];
+            secret: string;
+            smtp_username?: string;
         };
         /** @enum {string} */
         Kind: "heading" | "para" | "item" | "pre" | "quote";
@@ -3791,6 +4031,8 @@ export interface components {
             credential_id: string;
             credential_kind: string;
             scopes: components["schemas"]["Scope"][];
+            /** Format: date-time */
+            elevated_until?: string;
         };
         Span: {
             text: string;

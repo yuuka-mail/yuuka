@@ -566,10 +566,27 @@ func TestBearer(t *testing.T) {
 	}
 }
 
+// elevate asserts key again within session.
+func (h *harness) elevate(key *softKey, session *http.Cookie) resp {
+	h.t.Helper()
+	r := h.do(http.MethodPost, "/auth/passkey/elevate/begin", nil, withCookie(session))
+	h.want(r, http.StatusOK)
+	key.counter++
+	return h.do(http.MethodPost, "/auth/passkey/elevate/finish", key.get(r.body), withCookie(session), withCookie(r.cookies[ceremonyCookie]))
+}
+
+// A session adds a passkey only after asserting one of its own: the new
+// one would outlive the session (§13.10).
 func TestSessionAddsPasskey(t *testing.T) {
 	t.Parallel()
-	h, _, session := enrolled(t)
+	h, key, session := enrolled(t)
 	r := h.do(http.MethodPost, "/auth/passkey/register/begin", map[string]string{"label": "laptop"}, withCookie(session))
+	h.want(r, http.StatusForbidden)
+	if !strings.Contains(string(r.body), `"elevation_required"`) {
+		t.Errorf("unelevated: %s", r.body)
+	}
+	h.want(h.elevate(key, session), http.StatusOK)
+	r = h.do(http.MethodPost, "/auth/passkey/register/begin", map[string]string{"label": "laptop"}, withCookie(session))
 	h.want(r, http.StatusOK)
 	second := newSoftKey(t, origin)
 	fin := h.do(http.MethodPost, "/auth/passkey/register/finish", second.create(r.body),
@@ -579,6 +596,81 @@ func TestSessionAddsPasskey(t *testing.T) {
 	if h.count(`SELECT count(*) FROM passkeys WHERE label = 'laptop'`) != 1 {
 		t.Error("label not stored")
 	}
+}
+
+// Elevation: the session's own passkey, verified, for ElevationTTL;
+// nothing else elevates.
+func TestElevate(t *testing.T) {
+	t.Parallel()
+	h, key, session := enrolled(t)
+	elevatedUntil := func() *time.Time {
+		t.Helper()
+		r := h.do(http.MethodGet, "/auth/session", nil, withCookie(session))
+		h.want(r, http.StatusOK)
+		var info SessionInfo
+		if err := json.Unmarshal(r.body, &info); err != nil {
+			t.Fatal(err)
+		}
+		return info.ElevatedUntil
+	}
+	if u := elevatedUntil(); u != nil {
+		t.Fatalf("elevated at login until %v", u)
+	}
+
+	// Someone else's key, or the right one without user verification,
+	// does not do.
+	stranger := newSoftKey(t, origin)
+	h.want(h.elevate(stranger, session), http.StatusUnauthorized)
+	key.presenceOnly = true
+	h.want(h.elevate(key, session), http.StatusUnauthorized)
+	key.presenceOnly = false
+	if n := h.count(`SELECT count(*) FROM actions WHERE tool = 'auth.elevate.reject'`); n != 2 {
+		t.Errorf("%d rejections recorded", n)
+	}
+	if u := elevatedUntil(); u != nil {
+		t.Fatalf("elevated by a failed assertion until %v", u)
+	}
+
+	r := h.elevate(key, session)
+	h.want(r, http.StatusOK)
+	var res ElevateResult
+	if err := json.Unmarshal(r.body, &res); err != nil {
+		t.Fatal(err)
+	}
+	if want := h.now.Add(ElevationTTL); !res.ElevatedUntil.Equal(want) {
+		t.Errorf("elevated until %v, want %v", res.ElevatedUntil, want)
+	}
+	// The column keeps microseconds.
+	if u := elevatedUntil(); u == nil || u.Sub(res.ElevatedUntil).Abs() >= time.Microsecond {
+		t.Errorf("session elevated until %v", u)
+	}
+	if n := h.count(`SELECT count(*) FROM actions WHERE tool = 'auth.elevate'`); n != 1 {
+		t.Errorf("%d elevations recorded", n)
+	}
+	h.now = h.now.Add(ElevationTTL)
+	if u := elevatedUntil(); u != nil {
+		t.Errorf("still elevated after the window: %v", u)
+	}
+
+	// A token is not a person at a browser, whatever its scopes.
+	agent, err := h.db.EnsurePrincipal(t.Context(), store.Principal{ID: ulid.New(h.now), Kind: "agent", Name: "arisu", DisplayName: "arisu", CreatedAt: h.now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tok, err := h.svc.IssueToken(t.Context(), TokenRequest{PrincipalID: agent.ID, Scopes: auth.AllScopes, IssuedBy: store.SystemPrincipalID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.want(h.do(http.MethodPost, "/auth/passkey/elevate/begin", nil, withHeader("Authorization", "Bearer "+tok)), http.StatusForbidden)
+
+	// A ceremony begun by one session does not elevate another.
+	other := h.login(key)
+	h.want(other, http.StatusOK)
+	b := h.do(http.MethodPost, "/auth/passkey/elevate/begin", nil, withCookie(session))
+	h.want(b, http.StatusOK)
+	key.counter++
+	h.want(h.do(http.MethodPost, "/auth/passkey/elevate/finish", key.get(b.body),
+		withCookie(other.cookies[SessionCookie]), withCookie(b.cookies[ceremonyCookie])), http.StatusUnauthorized)
 }
 
 func TestPostNeedsJSON(t *testing.T) {

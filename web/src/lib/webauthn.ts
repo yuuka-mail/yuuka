@@ -1,5 +1,5 @@
 import { ApiError, api, data } from "@/api/client";
-import type { LoginResult, RegisterBegin, RegisterResult } from "@/api/types";
+import type { ElevateResult, LoginResult, RegisterBegin, RegisterResult } from "@/api/types";
 import { m } from "@/paraglide/messages.js";
 
 // The WebAuthn ceremonies against internal/authn. The server speaks the
@@ -130,6 +130,49 @@ export async function register(token: string, label: string): Promise<RegisterRe
   })) as PublicKeyCredential | null;
   if (!cred) throw new Error(m.auth_no_passkey_created());
   return data(api.POST("/auth/passkey/register/finish", { body: credentialJSON(cred) }));
+}
+
+/**
+ * Asserts a passkey of the signed-in person again: for a few minutes the
+ * session may widen who may do what (§13.10). It never logs in.
+ */
+export async function elevate(): Promise<ElevateResult> {
+  const opts = (await data(
+    api.POST("/auth/passkey/elevate/begin", { body: {} }),
+  )) as unknown as JSONRequest;
+  const cred = (await navigator.credentials.get({
+    publicKey: requestOptions(opts),
+  })) as PublicKeyCredential | null;
+  if (!cred) throw new Error(m.auth_no_passkey_chosen());
+  return data(api.POST("/auth/passkey/elevate/finish", { body: credentialJSON(cred) }));
+}
+
+/** A passkey prompt that did not go through, said as ceremonyError says it. */
+export class CeremonyError extends Error {
+  readonly failure: Failure;
+  constructor(failure: Failure) {
+    super(failure.text);
+    this.failure = failure;
+  }
+}
+
+/**
+ * Runs call, which widens who may do what. If the server answers that it
+ * takes a fresh passkey assertion (elevation_required), asks for one and
+ * runs call once more. The server decides; nothing here tracks the window.
+ */
+export async function withElevation<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.code !== "elevation_required") throw err;
+  }
+  try {
+    await elevate();
+  } catch (err) {
+    throw new CeremonyError(ceremonyError(err));
+  }
+  return call();
 }
 
 /**

@@ -1,47 +1,79 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { PlusIcon } from "lucide-react";
 import { useId, useState } from "react";
 
 import { $api, api, ApiError, data } from "@/api/client";
-import type { ManagedGrant } from "@/api/types";
+import type { ManagedGrant, RecipientScope, Tier } from "@/api/types";
 import { CommandLine, HostCommand, hostCommandOf } from "@/components/cli";
 import { ConfirmButton } from "@/components/confirm";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Signature, system } from "@/components/voice";
 import { cn } from "@/lib/utils";
+import { withElevation } from "@/lib/webauthn";
 import { m } from "@/paraglide/messages.js";
 import { ProblemLine } from "@/send/marks";
-import { duration, principal, problem, resumeCommand, scopeText, tierLabel } from "@/send/outgoing";
+import { duration, principal, problem, scopeText, tierLabel } from "@/send/outgoing";
 
 import {
+  grantBody,
+  grantForm,
   grantParts,
   grantSummary,
   lowerLimit,
-  removeCommand,
+  recipientScopes,
   subsetOf,
   tightenBody,
   tightenings,
   tighteningCost,
+  tiers,
+  validCount,
+  type GrantForm,
   type Tightening,
 } from "./authority";
-import { SectionHeader } from "./section";
+import {
+  Field,
+  inputClass,
+  PrincipalInput,
+  SectionHeader,
+  selectClass,
+  validPrincipal,
+  WideningForm,
+} from "./section";
 
 // Grants (§13.5, §13.10): who may send as which identity, and how far.
-// The page shows what applies now (after defaults and the owner cap) and
-// offers only what is tighter; raising and adding are done on the host,
-// and the page names the command instead of a greyed-out button.
+// The page shows what applies now (after defaults and the owner cap).
+// Tightening offers only what is tighter and takes one step; adding,
+// changing the whole row, resuming and a removal that widens ask for the
+// passkey first.
 
 const grantsKey = ["get", "/api/v1/admin/grants"];
 
 export function GrantsSection() {
   const q = $api.useQuery("get", "/api/v1/admin/grants", {});
+  const [adding, setAdding] = useState(false);
+  const qc = useQueryClient();
   return (
     <div className="flex max-w-[64rem] flex-col gap-3 px-4 py-4 md:px-6">
-      <SectionHeader title={m.settings_grants()} />
-      <HostCommand
-        why={m.grants_on_host()}
-        command="yuuka grant set --identity ADDRESS --principal KIND:NAME --policy TIER"
-      />
+      <SectionHeader title={m.settings_grants()}>
+        <Button
+          size="sm"
+          variant="outline"
+          aria-expanded={adding}
+          onClick={() => setAdding((v) => !v)}
+        >
+          <PlusIcon data-icon="inline-start" />
+          {m.grants_add()}
+        </Button>
+      </SectionHeader>
+      {adding && (
+        <GrantEditor
+          onDone={() => {
+            setAdding(false);
+            void qc.invalidateQueries({ queryKey: grantsKey });
+          }}
+        />
+      )}
       {q.error ? (
         <ProblemLine p={problem(q.error)} />
       ) : !q.data ? (
@@ -55,7 +87,179 @@ export function GrantsSection() {
           ))}
         </ul>
       )}
+      <details className="text-small">
+        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+          {m.settings_on_host()}
+        </summary>
+        <HostCommand
+          className="mt-1"
+          why={m.grants_on_host()}
+          command="yuuka grant set --identity ADDRESS --principal KIND:NAME --policy TIER"
+        />
+      </details>
     </div>
+  );
+}
+
+const put = (f: GrantForm) =>
+  withElevation(() => data(api.PUT("/api/v1/admin/grants", { body: grantBody(f) })));
+
+const ownerCapWords = { conflict: () => m.grants_owner_cap_refused() };
+
+/**
+ * A whole grant row: a new one (identity and principal chosen here), or
+ * g's, prefilled from what is stored. Wider or not, it asks for the
+ * passkey first; the owner cap is the server's to refuse.
+ */
+function GrantEditor({ g, onDone }: { g?: ManagedGrant; onDone: () => void }) {
+  const ids = $api.useQuery("get", "/api/v1/admin/identities", {}, { enabled: !g });
+  const enabled = (ids.data?.identities ?? []).filter((i) => !i.disabled_at);
+  const [f, setF] = useState<GrantForm>(() =>
+    g ? grantForm(g.identity.id, principal(g.principal), g.stored) : grantForm("", "agent:"),
+  );
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>();
+  const set = (patch: Partial<GrantForm>) => setF((x) => ({ ...x, ...patch }));
+  const identity = g ? g.identity.address : enabled.find((i) => i.id === f.identity)?.address;
+  const counts = [f.max_per_hour, f.max_per_day, f.max_new_recipients_per_day, f.hold_minutes];
+  const ready = !!f.identity && validPrincipal(f.principal) && counts.every(validCount);
+  const submit = async () => {
+    setBusy(true);
+    setErr(undefined);
+    try {
+      await put(f);
+      onDone();
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const count = (
+    key: "max_per_hour" | "max_per_day" | "max_new_recipients_per_day",
+    label: string,
+  ) => (
+    <Field label={label} className="w-40">
+      <input
+        inputMode="numeric"
+        className={inputClass}
+        value={f[key]}
+        placeholder={m.grants_default_value()}
+        aria-invalid={!validCount(f[key]) || undefined}
+        onChange={(e) => set({ [key]: e.target.value })}
+      />
+    </Field>
+  );
+  return (
+    <WideningForm
+      legend={
+        g
+          ? m.grants_edit_legend({ who: principal(g.principal), as: g.identity.address })
+          : m.grants_add_legend()
+      }
+      onSubmit={() => void submit()}
+    >
+      {!g && (
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+          <Field label={m.grants_identity()}>
+            <select
+              className={selectClass}
+              value={f.identity}
+              onChange={(e) => set({ identity: e.target.value })}
+            >
+              <option value="" disabled>
+                {ids.data ? "—" : "…"}
+              </option>
+              {enabled.map((i) => (
+                <option key={i.id} value={i.id}>
+                  {i.address}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <PrincipalInput
+            label={m.grants_principal()}
+            value={f.principal}
+            onChange={(who) => set({ principal: who })}
+          />
+        </div>
+      )}
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+        <Field label={m.grants_policy()}>
+          <select
+            className={selectClass}
+            value={f.send_policy}
+            onChange={(e) => set({ send_policy: e.target.value as Tier })}
+          >
+            {tiers.map((t) => (
+              <option key={t} value={t}>
+                {tierLabel(t)}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label={m.grants_recipients()}>
+          <select
+            className={selectClass}
+            value={f.recipient_scope}
+            onChange={(e) => set({ recipient_scope: e.target.value as RecipientScope })}
+          >
+            {recipientScopes.map((s) => (
+              <option key={s} value={s}>
+                {scopeText(s, [])}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {f.recipient_scope === "allowlist" && (
+          <Field
+            label={m.grants_allowlist()}
+            className="min-w-64 flex-1"
+            hint={m.grants_allowlist_hint()}
+          >
+            <input
+              className={inputClass}
+              value={f.allowlist}
+              placeholder="ops@example.net, example.org"
+              onChange={(e) => set({ allowlist: e.target.value })}
+            />
+          </Field>
+        )}
+      </div>
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+        {count("max_per_hour", m.grants_opt_hour())}
+        {count("max_per_day", m.grants_opt_day())}
+        {count("max_new_recipients_per_day", m.grants_opt_new())}
+        {f.send_policy === "review" && (
+          <Field label={m.grants_opt_hold()} className="w-40">
+            <input
+              inputMode="numeric"
+              className={inputClass}
+              value={f.hold_minutes}
+              placeholder={m.grants_default_value()}
+              aria-invalid={!validCount(f.hold_minutes) || undefined}
+              onChange={(e) => set({ hold_minutes: e.target.value })}
+            />
+          </Field>
+        )}
+        <label className="flex h-7 items-center gap-1.5">
+          <input
+            type="checkbox"
+            className="accent-current"
+            checked={f.suspended}
+            onChange={(e) => set({ suspended: e.target.checked })}
+          />
+          {m.grants_opt_suspend()}
+        </label>
+      </div>
+      <p className="text-muted-foreground">{m.grants_defaults_hint()}</p>
+      <span className="flex flex-wrap items-center gap-2">
+        <Button type="submit" size="xs" disabled={!ready || busy}>
+          {g ? m.grants_edit_submit() : m.grants_add_submit({ as: identity ?? "…" })}
+        </Button>
+        {err !== undefined && <ProblemLine p={problem(err, ownerCapWords)} />}
+      </span>
+    </WideningForm>
   );
 }
 
@@ -64,6 +268,7 @@ const key = (g: ManagedGrant) => ({ identity: g.identity.id, principal: g.princi
 function GrantRow({ g }: { g: ManagedGrant }) {
   const qc = useQueryClient();
   const [tightening, setTightening] = useState(false);
+  const [editing, setEditing] = useState(false);
   const a = g.applied;
   const parts = grantParts(a);
   const off = g.identity.disabled;
@@ -95,13 +300,23 @@ function GrantRow({ g }: { g: ManagedGrant }) {
           })}
         </p>
       )}
-      {a.suspended && (
-        // Resuming lets mail through again: the host's to do (§13.10).
-        <HostCommand
-          className="border-warning/60"
-          why={m.grants_suspended_why()}
-          command={resumeCommand(g.identity.address, principal(g.principal))}
-        />
+      {a.suspended && !off && (
+        // Resuming lets mail through again: a widening (§13.10).
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-warning/60 px-2 py-1.5 text-small">
+          <span>{m.grants_suspended_why()}</span>
+          <ConfirmButton
+            label={m.grants_resume()}
+            confirmLabel={m.grants_resume_confirm()}
+            cost={m.grants_resume_cost({ summary: grantSummary({ ...a, suspended: false }) })}
+            onConfirm={async () => {
+              await put({
+                ...grantForm(g.identity.id, principal(g.principal), g.stored),
+                suspended: false,
+              });
+              void qc.invalidateQueries({ queryKey: grantsKey });
+            }}
+          />
+        </div>
       )}
       <p className="text-small text-muted-foreground">
         {m.grants_default({ summary: grantSummary(g.default) })}
@@ -112,14 +327,37 @@ function GrantRow({ g }: { g: ManagedGrant }) {
             size="xs"
             variant="outline"
             aria-expanded={tightening}
-            onClick={() => setTightening((t) => !t)}
+            onClick={() => {
+              setTightening((t) => !t);
+              setEditing(false);
+            }}
           >
             {m.grants_tighten()}
+          </Button>
+          <Button
+            size="xs"
+            variant="outline"
+            aria-expanded={editing}
+            onClick={() => {
+              setEditing((t) => !t);
+              setTightening(false);
+            }}
+          >
+            {m.grants_edit()}
           </Button>
           <Remove g={g} />
         </div>
       )}
       {off && <Remove g={g} />}
+      {editing && (
+        <GrantEditor
+          g={g}
+          onDone={() => {
+            setEditing(false);
+            void qc.invalidateQueries({ queryKey: grantsKey });
+          }}
+        />
+      )}
       {tightening && (
         <Tighten
           g={g}
@@ -134,47 +372,34 @@ function GrantRow({ g }: { g: ManagedGrant }) {
 }
 
 /**
- * Remove a grant: offered only when the default that applies afterwards
- * lets nothing more through (removal_widens empty); otherwise the host
- * command, with what would widen.
+ * Remove a grant: one step when the default that applies afterwards lets
+ * nothing more through (removal_widens empty); otherwise it says what
+ * would widen and asks for the passkey first.
  */
 function Remove({ g }: { g: ManagedGrant }) {
   const qc = useQueryClient();
-  const [host, setHost] = useState<{ why: string; command: string }>();
-  if (g.removal_widens.length > 0) {
-    return (
-      <details className="text-small">
-        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-          {m.grants_remove_on_host()}
-        </summary>
-        <HostCommand
-          className="mt-1"
-          why={m.grants_remove_widens({ fields: g.removal_widens.join(", ") })}
-          command={removeCommand(g)}
-        />
-      </details>
-    );
-  }
+  const widens = g.removal_widens.length > 0;
   return (
-    <span className="flex flex-col gap-1">
-      <ConfirmButton
-        label={m.grants_remove()}
-        confirmLabel={m.grants_remove_confirm()}
-        cost={m.grants_remove_cost({ summary: grantSummary(g.default) })}
-        onConfirm={async () => {
-          await api.DELETE("/api/v1/admin/grants/{identity}/{principal}", {
-            params: { path: key(g) },
-          });
-          void qc.invalidateQueries({ queryKey: grantsKey });
-        }}
-        onError={(e) => {
-          const h = widening(e);
-          if (h) setHost(h);
-          return !!h;
-        }}
-      />
-      {host && <WideningHint host={host} />}
-    </span>
+    <ConfirmButton
+      label={m.grants_remove()}
+      confirmLabel={m.grants_remove_confirm()}
+      cost={
+        widens
+          ? m.grants_remove_widens({
+              fields: g.removal_widens.join(", "),
+              summary: grantSummary(g.default),
+            })
+          : m.grants_remove_cost({ summary: grantSummary(g.default) })
+      }
+      onConfirm={async () => {
+        await withElevation(() =>
+          data(
+            api.DELETE("/api/v1/admin/grants/{identity}/{principal}", { params: { path: key(g) } }),
+          ),
+        );
+        void qc.invalidateQueries({ queryKey: grantsKey });
+      }}
+    />
   );
 }
 

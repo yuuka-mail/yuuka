@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
-	"unicode"
 
 	"github.com/yuuka-mail/yuuka/internal/sendpolicy"
 	"github.com/yuuka-mail/yuuka/internal/store"
@@ -93,21 +92,15 @@ func (f limitFlag) Set(s string) error {
 	return nil
 }
 
-// parseAllowlist reads --allow: addresses and domains, lowercased.
+// parseAllowlist reads --allow: comma-separated entries
+// (sendpolicy.ParseAllowlist), empty for none.
 func parseAllowlist(s string) ([]string, error) {
-	out := []string{}
 	if strings.TrimSpace(s) == "" {
-		return out, nil
+		return []string{}, nil
 	}
-	for e := range strings.SplitSeq(s, ",") {
-		e = strings.ToLower(strings.TrimSpace(e))
-		local, domain, isAddr := strings.Cut(e, "@")
-		bad := e == "" || strings.IndexFunc(e, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 ||
-			strings.Count(e, "@") > 1 || isAddr && (local == "" || domain == "") || !isAddr && !strings.Contains(e, ".")
-		if bad {
-			return nil, fmt.Errorf("--allow %q: want addresses (a@example.net) and domains (example.net), comma-separated", e)
-		}
-		out = append(out, e)
+	out, err := sendpolicy.ParseAllowlist(strings.Split(s, ","))
+	if err != nil {
+		return nil, fmt.Errorf("--allow: %w", err)
 	}
 	return out, nil
 }

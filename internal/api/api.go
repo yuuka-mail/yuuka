@@ -118,10 +118,19 @@ type Store interface {
 	SetPrefixState(ctx context.Context, zone, prefix string, state int, a store.Action) (store.PrefixChange, error)
 	SetPrefixExpected(ctx context.Context, zone, prefix string, domains []string, a store.Action) ([]string, bool, error)
 
-	// Who may do what (§13.10): configuration, read without a viewer
-	// and written only to tighten; the routes let only a person's
-	// session through.
+	// Who may do what (§13.10): configuration, read without a viewer;
+	// the routes let only a person's session through, and only an
+	// elevated one widen. The same functions the host CLI calls.
 	Tokens(ctx context.Context, principalID string) ([]store.CredentialPrincipal, error)
+	Principal(ctx context.Context, id string) (store.Principal, error)
+	Grantee(ctx context.Context, kind, name string, a store.Action) (store.Principal, bool, error)
+	CreateCredential(ctx context.Context, c store.Credential, a store.Action) error
+	Accounts(ctx context.Context) ([]store.Account, error)
+	AddIdentity(ctx context.Context, i store.Identity, a store.Action) error
+	DisableIdentity(ctx context.Context, id string, a store.Action) error
+	GrantFor(ctx context.Context, identityID, principalID string) (store.Grant, error)
+	SetGrant(ctx context.Context, g store.Grant, a store.Action) error
+	RemoveGrant(ctx context.Context, identityID, principalID string, a store.Action) error
 	CredentialForAuth(ctx context.Context, id string) (store.CredentialPrincipal, error)
 	RevokeCredential(ctx context.Context, id string, a store.Action) error
 	Identities(ctx context.Context, all bool) ([]store.Identity, error)
@@ -156,6 +165,10 @@ type API struct {
 	raw       RawReader
 	submit    Submitter
 	suspended SuspendNotifier
+	alert     authn.Alerter
+	// transports are the names this process sends through, what a new
+	// identity may name.
+	transports []string
 	// triage is the active scorer profile (§15), nil when no scorer is
 	// configured: then no score is shown, filtered by or reported.
 	triage *score.Profile
@@ -182,6 +195,20 @@ func (a *API) WithSubmitter(s Submitter) *API {
 // of the configured scorer, whose scores are the current ones.
 func (a *API) WithTriage(p score.Profile) *API {
 	a.triage = &p
+	return a
+}
+
+// WithAlerter makes a tell the operator through n whenever a session
+// widens who may do what (§13.10), as a new passkey is told.
+func (a *API) WithAlerter(n authn.Alerter) *API {
+	a.alert = n
+	return a
+}
+
+// WithTransports names the transports this process sends through: the
+// ones a new identity may name in the settings.
+func (a *API) WithTransports(names []string) *API {
+	a.transports = names
 	return a
 }
 
@@ -314,20 +341,26 @@ var routes = []route{
 
 	jsonRoute(http.MethodGet, "/api/v1/admin/credentials", "List tokens and SMTP passwords, never their secrets; a person's session only",
 		admin, (*API).credentials).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/credentials", "Issue a token or SMTP password, shown once; an elevated session only",
+		admin, (*API).issueCredential).widening().withStatus(http.StatusCreated),
 	jsonRoute(http.MethodPost, "/api/v1/admin/credentials/{id}/revoke", "Revoke a token or SMTP password; a person's session only",
 		admin, (*API).revokeCredential).authority(),
 	jsonRoute(http.MethodGet, "/api/v1/admin/identities", "List identities, disabled ones included; a person's session only",
 		admin, (*API).adminIdentities).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/identities", "Add an identity; an elevated session only",
+		admin, (*API).addIdentity).widening().withStatus(http.StatusCreated),
 	jsonRoute(http.MethodPost, "/api/v1/admin/identities/{id}/disable",
-		"Disable an identity, unless the zone's pattern would take its address over; a person's session only",
+		"Disable an identity; where the zone's pattern would take its address over, an elevated session only",
 		admin, (*API).disableIdentity).authority(),
 	jsonRoute(http.MethodGet, "/api/v1/admin/grants", "List grants, stored and applied; a person's session only",
 		admin, (*API).adminGrants).authority(),
+	jsonRoute(http.MethodPut, "/api/v1/admin/grants", "Create or replace a grant, wider or not; an elevated session only",
+		admin, (*API).setGrant).widening(),
 	jsonRoute(http.MethodPost, "/api/v1/admin/grants/{identity}/{principal}/tighten",
 		"Tighten a grant; anything that would let more through is refused; a person's session only",
 		admin, (*API).tightenGrant).authority(),
 	jsonRoute(http.MethodDelete, "/api/v1/admin/grants/{identity}/{principal}",
-		"Remove a grant, unless its default lets more through; a person's session only",
+		"Remove a grant; where its default lets more through, an elevated session only",
 		admin, (*API).removeGrant).authority(),
 	{Op: openapi.Op{
 		Method: http.MethodGet, Path: "/api/v1/openapi.json", Summary: "This document",
@@ -374,11 +407,15 @@ func (a *API) Handler(g Guard) http.Handler {
 				a.fail(w, r, errors.New("api: no viewer after guard"))
 				return
 			}
-			if rt.Access == openapi.HumanSession {
+			if rt.Access == openapi.HumanSession || rt.Access == openapi.ElevatedSession {
 				if err := authorityDenied(v); err != nil {
 					a.fail(w, r, err)
 					return
 				}
+			}
+			if rt.Access == openapi.ElevatedSession && !v.Elevated(time.Now()) {
+				a.fail(w, r, elevationRequired("This lets someone do more than now."))
+				return
 			}
 			res, err := rt.serve(a, w, r, v)
 			switch {

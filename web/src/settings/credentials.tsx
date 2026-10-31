@@ -1,35 +1,81 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
-import { $api, api } from "@/api/client";
-import type { ManagedCredential } from "@/api/types";
+import { $api, api, data } from "@/api/client";
+import type { IssuedCredential, ManagedCredential, Scope } from "@/api/types";
 import { HostCommand } from "@/components/cli";
 import { ConfirmButton } from "@/components/confirm";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { listTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { withElevation } from "@/lib/webauthn";
 import { m } from "@/paraglide/messages.js";
 import { ProblemLine } from "@/send/marks";
 import { principal, problem } from "@/send/outgoing";
 
-import { Dates, SectionHeader } from "./section";
+import { allScopes } from "./authority";
+import {
+  Dates,
+  Field,
+  inputClass,
+  PrincipalInput,
+  SecretOnce,
+  SectionHeader,
+  selectClass,
+  validPrincipal,
+  WideningForm,
+} from "./section";
 
 // Credentials (§13.3, §13.10): the tokens and SMTP passwords of agents
 // and services, never their secrets. Sessions are not listed; signing
-// out ends one. Revoking is here; issuing is on the host.
+// out ends one. Revoking takes one step; issuing asks for the passkey
+// first, and shows the secret this once.
+
+const credentialsKey = ["get", "/api/v1/admin/credentials"];
 
 export function CredentialsSection() {
   const q = $api.useQuery("get", "/api/v1/admin/credentials", {});
   const [revoked, setRevoked] = useState(false);
+  const [issuing, setIssuing] = useState(false);
+  const [issued, setIssued] = useState<IssuedCredential>();
   const all = q.data?.credentials ?? [];
   const shown = revoked ? all : all.filter((c) => !c.revoked_at);
   return (
     <div className="flex max-w-[64rem] flex-col gap-3 px-4 py-4 md:px-6">
-      <SectionHeader title={m.settings_credentials()} />
-      <HostCommand
-        why={m.credentials_on_host()}
-        command="yuuka token issue --principal KIND:NAME --scope SCOPE,SCOPE"
-      />
+      <SectionHeader title={m.settings_credentials()}>
+        <Button
+          size="sm"
+          variant="outline"
+          aria-expanded={issuing}
+          onClick={() => setIssuing((v) => !v)}
+        >
+          <PlusIcon data-icon="inline-start" />
+          {m.credentials_issue()}
+        </Button>
+      </SectionHeader>
+      {issued && (
+        <SecretOnce
+          lines={
+            issued.smtp_username
+              ? [
+                  { label: m.credentials_smtp_username(), value: issued.smtp_username },
+                  { label: m.credentials_smtp_password(), value: issued.secret },
+                ]
+              : [{ label: m.credentials_token(), value: issued.secret }]
+          }
+          onDone={() => setIssued(undefined)}
+        />
+      )}
+      {issuing && (
+        <IssueForm
+          onIssued={(c) => {
+            setIssuing(false);
+            setIssued(c);
+          }}
+        />
+      )}
       <label className="flex items-center gap-1.5 self-start text-small text-muted-foreground">
         <input
           type="checkbox"
@@ -52,7 +98,141 @@ export function CredentialsSection() {
           ))}
         </ul>
       )}
+      <details className="text-small">
+        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+          {m.settings_on_host()}
+        </summary>
+        <HostCommand
+          className="mt-1"
+          why={m.credentials_on_host()}
+          command="yuuka token issue --principal KIND:NAME --scope SCOPE,SCOPE"
+        />
+      </details>
     </div>
+  );
+}
+
+const lifetimes: { days: number; label: () => string }[] = [
+  { days: 0, label: m.credentials_ttl_never },
+  { days: 30, label: () => m.credentials_ttl_days({ n: 30 }) },
+  { days: 90, label: () => m.credentials_ttl_days({ n: 90 }) },
+  { days: 365, label: () => m.credentials_ttl_days({ n: 365 }) },
+];
+
+/** Issue a token or an SMTP password: every scope named, no defaults (§13.3). */
+function IssueForm({ onIssued }: { onIssued: (c: IssuedCredential) => void }) {
+  const qc = useQueryClient();
+  const [kind, setKind] = useState<"token" | "smtp_password">("token");
+  const [who, setWho] = useState("agent:");
+  const [label, setLabel] = useState("");
+  const [scopes, setScopes] = useState<Scope[]>([]);
+  const [days, setDays] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>();
+  const smtp = kind === "smtp_password";
+  const ready = validPrincipal(who) && !who.startsWith("human:") && (smtp || scopes.length > 0);
+  const submit = async () => {
+    setBusy(true);
+    setErr(undefined);
+    try {
+      const c = await withElevation(() =>
+        data(
+          api.POST("/api/v1/admin/credentials", {
+            body: {
+              kind,
+              principal: who,
+              label: label.trim() || undefined,
+              scopes: smtp ? undefined : allScopes.filter((s) => scopes.includes(s)),
+              ttl_seconds: days ? days * 86400 : undefined,
+            },
+          }),
+        ),
+      );
+      void qc.invalidateQueries({ queryKey: credentialsKey });
+      onIssued(c);
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <WideningForm legend={m.credentials_issue_legend()} onSubmit={() => void submit()}>
+      <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+        <fieldset className="flex flex-col gap-0.5">
+          <legend className="text-muted-foreground">{m.credentials_kind()}</legend>
+          <span className="flex h-7 items-center gap-3">
+            {(["token", "smtp_password"] as const).map((k) => (
+              <label key={k} className="flex items-center gap-1">
+                <input
+                  type="radio"
+                  className="accent-current"
+                  checked={kind === k}
+                  onChange={() => setKind(k)}
+                />
+                {k === "token" ? m.credentials_kind_token() : m.credentials_kind_smtp()}
+              </label>
+            ))}
+          </span>
+        </fieldset>
+        <PrincipalInput
+          label={m.credentials_for()}
+          kinds={["agent", "service"]}
+          value={who}
+          onChange={setWho}
+        />
+        <Field label={m.credentials_label()} className="w-56">
+          <input
+            className={cn(inputClass, "font-sans")}
+            value={label}
+            placeholder={m.credentials_label_hint()}
+            onChange={(e) => setLabel(e.target.value)}
+          />
+        </Field>
+        <Field label={m.credentials_lifetime()}>
+          <select
+            className={selectClass}
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+          >
+            {lifetimes.map((l) => (
+              <option key={l.days} value={l.days}>
+                {l.label()}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      {smtp ? (
+        <p className="text-muted-foreground">{m.credentials_smtp_scope()}</p>
+      ) : (
+        <fieldset className="flex flex-col gap-1">
+          <legend className="text-muted-foreground">{m.credentials_scopes()}</legend>
+          <span className="flex flex-wrap gap-x-3 gap-y-1">
+            {allScopes.map((s) => (
+              <label key={s} className="inline-flex items-center gap-1 font-mono">
+                <input
+                  type="checkbox"
+                  className="accent-current"
+                  checked={scopes.includes(s)}
+                  onChange={(e) =>
+                    setScopes(e.target.checked ? [...scopes, s] : scopes.filter((x) => x !== s))
+                  }
+                />
+                {s}
+              </label>
+            ))}
+          </span>
+          <span className="text-meta text-muted-foreground">{m.credentials_scopes_hint()}</span>
+        </fieldset>
+      )}
+      <span className="flex flex-wrap items-center gap-2">
+        <Button type="submit" size="xs" disabled={!ready || busy}>
+          {m.credentials_issue_submit()}
+        </Button>
+        {err !== undefined && <ProblemLine p={problem(err)} />}
+      </span>
+    </WideningForm>
   );
 }
 
@@ -103,7 +283,7 @@ function CredentialRow({ c }: { c: ManagedCredential }) {
               await api.POST("/api/v1/admin/credentials/{id}/revoke", {
                 params: { path: { id: c.id } },
               });
-              void qc.invalidateQueries({ queryKey: ["get", "/api/v1/admin/credentials"] });
+              void qc.invalidateQueries({ queryKey: credentialsKey });
             }}
           />
         </div>
