@@ -157,5 +157,5 @@ M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里�
 - **开发**：`mise run web:dev` 在 `localhost:31473` 起 Vite，把 `/api`、`/auth` 代理到
   `YUUKA_DEV_API`（默认 `127.0.0.1:31480`）；那个 `yuuka serve` 的 `YUUKA_WEB_ORIGIN` 要设成
   `http://localhost:31473`，WebAuthn 和跨源检查才认。`go run ./internal/devseed/cmd` 把合成语料
-  和生成的变体灌进开发库，原件写进 `YUUKA_DATA_DIR`（或 `-data-dir`），结构化视图从那里读；`npm run screenshots`（`web/scripts/screenshots.mjs`）用 Chrome 的虚拟
+  和生成的变体灌进开发库，原件写进 `YUUKA_DATA_DIR`（或 `-data-dir`），结构化视图从那里读；`pnpm run screenshots`（`web/scripts/screenshots.mjs`）用 Chrome 的虚拟
   认证器走完注册和登录，截亮、暗、窄屏三套图

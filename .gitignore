@@ -31,3 +31,4 @@ mise.local.toml
 
 # Claude Code agent worktrees
 /.claude/worktrees/
+/node_modules/

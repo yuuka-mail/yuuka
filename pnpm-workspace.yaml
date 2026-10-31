@@ -1,0 +1,18 @@
+# The Node side of yuuka: the WebUI and the Cloudflare Email Worker.
+packages:
+  - web
+  - worker
+
+# Refuse versions published less than 14 days ago (minutes). Setting it
+# explicitly also makes it strict: a too-new version fails resolution
+# instead of being skipped silently. AGENTS.md has the same rule for humans.
+minimumReleaseAge: 20160
+
+# Install scripts run only for packages reviewed here; anything else fails
+# the install (strictDepBuilds is on by default).
+allowBuilds:
+  esbuild: true
+  workerd: true
+
+# A Node outside engines.node fails the install instead of warning.
+engineStrict: true

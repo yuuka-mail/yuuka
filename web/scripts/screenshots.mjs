@@ -5,7 +5,7 @@
 //
 //   YUUKA_URL=http://localhost:31483 \
 //   ENROLL_URL='http://localhost:31483/enroll#yke_...' \  # from `yuuka admin enroll`
-//   OUT=/tmp/shots CHROME=/usr/bin/google-chrome npm run screenshots
+//   OUT=/tmp/shots CHROME=/usr/bin/google-chrome pnpm run screenshots
 //
 // Without ENROLL_URL only the signed-out pages are captured. Nothing here
 // is committed output; the PNGs are for looking at.

@@ -59,6 +59,7 @@ require (
 tool github.com/gzuidhof/tygo
 
 ignore (
+	./node_modules
 	./web/node_modules
 	./worker/node_modules
 )

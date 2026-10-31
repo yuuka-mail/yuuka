@@ -17,7 +17,7 @@ compatibility_date = "2026-10-12"
 # yuuka's webhook endpoint; must be reachable from Cloudflare.
 INGEST_URL = "https://yuuka.example.com/ingest/cloudflare"
 # WEBHOOK_SECRET is a secret, not a var: set it with
-#   npx wrangler secret put WEBHOOK_SECRET
+#   pnpm exec wrangler secret put WEBHOOK_SECRET
 # using a random string of at least 32 bytes, shared with yuuka.
 
 [[r2_buckets]]

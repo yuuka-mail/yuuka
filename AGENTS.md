@@ -112,11 +112,18 @@
 工具链由 [`mise.toml`](mise.toml) 固定版本，任务也定义在那里：
 
 ```bash
-mise install        # 首次：装好固定版本的 Go、golangci-lint、Node
-mise run check      # lint（含 vet 与格式检查）+ go test -race + Worker 检查
+mise install        # 首次：装好固定版本的 Go、golangci-lint、Node、pnpm
+mise run check      # lint（含 vet 与格式检查）+ go test -race + WebUI 与 Worker 检查
 mise run fmt        # 就地格式化
 mise run db:down    # 用完后删掉测试用的 Postgres 容器（test 会自动拉起）
 ```
+
+- **Node 的版本只写在 [`.node-version`](.node-version)**（Node 生态通用的文件，fnm、编辑器、CI 都认），
+  mise 也从它读；其余工具的版本写在 `mise.toml`
+- **JS 一律用 pnpm**，`web/` 与 `worker/` 是同一个 workspace、一份 `pnpm-lock.yaml`。
+  pnpm 的版本写在根 `package.json` 的 `packageManager`，与 `mise.toml` 不一致时 pnpm 会直接报错。
+  [`pnpm-workspace.yaml`](pnpm-workspace.yaml) 强制两条规则：**发布不满 14 天的版本装不上**，
+  **安装脚本只对 `allowBuilds` 里审过的包放行**——新增需要安装脚本的依赖时，在那里显式加一行并说明理由
 
 - **非标准端口一律在 31400–31499 之间**：测试 Postgres 是 `127.0.0.1:31432`，
   其他需要固定端口的东西（开发服务、本地依赖）也在这个段里挑，不占别的项目常用的端口
