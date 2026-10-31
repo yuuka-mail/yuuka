@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -522,6 +523,35 @@ func TestVisibility(t *testing.T) {
 			}
 			if sum.Messages != wantDelivered {
 				t.Errorf("PrefixStats counts %d messages, want %d", sum.Messages, wantDelivered)
+			}
+
+			// The outbox: the rows sent as an identity of a readable
+			// account, each with its sent copy as a visible message.
+			rows, err := db.OutboxList(ctx, v, store.OutboxQuery{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ids = ids[:0]
+			for _, r := range rows {
+				ids = append(ids, r.MessageID)
+				if _, err := db.OutboxByID(ctx, v, r.ID); err != nil {
+					t.Errorf("OutboxByID %s: %v", r.ID, err)
+				}
+			}
+			wantSent := slices.DeleteFunc(slices.Clone(want), func(n string) bool { return !strings.HasPrefix(n, "sent-") && n != "both" })
+			if got := names(ids); !slices.Equal(got, wantSent) {
+				t.Errorf("OutboxList %q, want %q", got, wantSent)
+			}
+			var all []string
+			if err := pool.QueryRow(ctx, `SELECT array_agg(id) FROM outbox`).Scan(&all); err != nil {
+				t.Fatal(err)
+			}
+			for _, id := range all {
+				_, err := db.OutboxByID(ctx, v, id)
+				if seen := slices.ContainsFunc(rows, func(r store.OutboxEntry) bool { return r.ID == id }); seen != (err == nil) ||
+					err != nil && !errors.Is(err, store.ErrNotFound) {
+					t.Errorf("OutboxByID %s: %v", id, err)
+				}
 			}
 		})
 	}

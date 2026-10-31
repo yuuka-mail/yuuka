@@ -315,3 +315,74 @@ func (db *DB) MessageByHeaderID(ctx context.Context, v *auth.Viewer, headerID st
 	}
 	return id, nil
 }
+
+// Standing is where submissions by a viewer as one identity stand before
+// any particular message: the grant that applies, the tier after the
+// owner cap, and the hold that every submission meets whatever its
+// recipients. It is what a composer shows next to the From choice ("will
+// be sent" or "will be held"); the decision itself stays Decide's, on the
+// submission, with its recipients, counters and thread.
+type Standing struct {
+	Identity Identity
+	// Grant is the one that applies (sendpolicy.Effective): the row, or
+	// the default when Granted is false, with NULL limits filled in.
+	Grant   sendpolicy.Grant
+	Granted bool
+	// Tier is the effective tier: Grant.Policy lowered by the owner cap.
+	Tier   sendpolicy.Tier
+	Capped bool
+	// Hold is the reason every submission as this identity stops at a
+	// draft, "" when one can go out within the grant's recipient scope
+	// and limits. HoldDetail says the rest for people.
+	Hold       sendpolicy.HoldReason
+	HoldDetail string
+}
+
+// Standings returns every enabled identity, by address, with where v's
+// submissions as it stand; those v may not use have Tier none. v's
+// credential counts: without submission:send everything is held (§8.9).
+func (db *DB) Standings(ctx context.Context, v *auth.Viewer) ([]Standing, error) {
+	if err := needViewer(v, "standings"); err != nil {
+		return nil, err
+	}
+	ids, err := db.Identities(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+	grants, err := db.Grants(ctx, "", v.PrincipalID)
+	if err != nil {
+		return nil, err
+	}
+	byIdentity := map[string]sendpolicy.Grant{}
+	for _, g := range grants {
+		byIdentity[g.IdentityID] = g.ForPolicy()
+	}
+	out := []Standing{}
+	for _, i := range ids {
+		in := sendpolicy.Input{
+			Submitter: sendpolicy.Principal{ID: v.PrincipalID, Kind: v.PrincipalKind},
+			CanSubmit: v.Has(auth.SubmissionSend),
+			Identity:  sendpolicy.Identity{ID: i.ID, OwnerID: i.OwnerID, OwnerKind: i.OwnerKind},
+		}
+		s := Standing{Identity: i}
+		if g, ok := byIdentity[i.ID]; ok {
+			in.Grant, s.Granted = &g, true
+		}
+		s.Grant = sendpolicy.Effective(in)
+		// Without recipients Decide runs its rules about who submits as
+		// what (1–6) and stops at the recipients rule (7) if none of them
+		// held it. Of the rules after that, only the review tier holds
+		// every submission alike.
+		d := sendpolicy.Decide(in)
+		s.Tier, s.Capped = d.Tier, sendpolicy.OwnerCapped(v.PrincipalID, in.Identity)
+		switch {
+		case d.HoldReason != sendpolicy.HoldRecipients:
+			s.Hold, s.HoldDetail = d.HoldReason, d.Detail
+		case s.Tier == sendpolicy.Review:
+			s.Hold, s.HoldDetail = sendpolicy.HoldReview,
+				"the grant's tier is review, and the automatic review is not available yet; a human confirms instead"
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}

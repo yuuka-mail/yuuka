@@ -16,15 +16,26 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
-// ErrInFlight: the draft has gone to the outbox (or has outbox history),
-// so it can no longer be edited or deleted.
-var ErrInFlight = errors.New("the draft is in the outbox")
+var (
+	// ErrInFlight: the draft has gone to the outbox (or has outbox
+	// history), so it can no longer be edited or deleted.
+	ErrInFlight = errors.New("the draft is in the outbox")
+	// ErrInvalidDraft: the content of a draft write cannot be stored: a
+	// malformed address or cites, a reply to a message the writer cannot
+	// see. The caller sent it, so it is theirs to fix.
+	ErrInvalidDraft = errors.New("invalid draft")
+	// ErrRawDraft: an SMTP submission held as a draft is MIME a service
+	// sent, not Markdown; it is confirmed or deleted, never edited.
+	ErrRawDraft = errors.New("an SMTP submission held as a draft cannot be edited")
+)
 
 // Draft is a row of drafts (§4, §8.9).
 type Draft struct {
 	ID string
 	// PrincipalID wrote it; its grant applies when it is submitted.
 	PrincipalID string
+	// AuthorKind and AuthorName are the writer's; read only.
+	AuthorKind, AuthorName string
 	// IdentityID always follows from FromAddr (ResolveIdentity): the
 	// writes resolve it, so a draft cannot pair an address with an
 	// identity that does not cover it.
@@ -63,13 +74,14 @@ func visibleDraft(v *auth.Viewer) string {
 	return "dr.principal_id = $1"
 }
 
-const draftCols = `dr.id, dr.principal_id, dr.identity_id, dr.from_addr, coalesce(dr.in_reply_to_id, ''),
+const draftCols = `dr.id, dr.principal_id, ap.kind, ap.name, dr.identity_id, dr.from_addr, coalesce(dr.in_reply_to_id, ''),
 	dr.to_addrs, dr.cc_addrs, dr.bcc_addrs, dr.subject, coalesce(dr.body_md, ''), coalesce(dr.raw_id, ''),
 	dr.cites, coalesce(dr.hold_reason, ''), coalesce(dr.hold_detail, ''), dr.created_at, dr.updated_at,
 	coalesce(o.id, ''), coalesce(o.state, '')`
 
 // draftFrom joins the newest outbox row that was not withdrawn.
 const draftFrom = ` FROM drafts dr
+	JOIN principals ap ON ap.id = dr.principal_id
 	LEFT JOIN LATERAL (
 		SELECT id, state FROM outbox WHERE draft_id = dr.id AND state <> 'withdrawn'
 		ORDER BY created_at DESC, id DESC LIMIT 1) o ON true`
@@ -77,7 +89,7 @@ const draftFrom = ` FROM drafts dr
 func scanDraft(row pgx.Row) (Draft, error) {
 	var d Draft
 	var reason string
-	err := row.Scan(&d.ID, &d.PrincipalID, &d.IdentityID, &d.FromAddr, &d.InReplyToID,
+	err := row.Scan(&d.ID, &d.PrincipalID, &d.AuthorKind, &d.AuthorName, &d.IdentityID, &d.FromAddr, &d.InReplyToID,
 		&d.To, &d.Cc, &d.Bcc, &d.Subject, &d.BodyMD, &d.RawID,
 		&d.Cites, &reason, &d.HoldDetail, &d.CreatedAt, &d.UpdatedAt, &d.OutboxID, &d.OutboxState)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -107,11 +119,27 @@ func draftByID(ctx context.Context, q querier, v *auth.Viewer, id string, forUpd
 	return d, nil
 }
 
-// DraftQuery selects drafts.
+// DraftQuery selects drafts. Open, Held and InFlight pick drafts by
+// where they stand; with none set it is Open and Held, the drafts still
+// to be worked on.
 type DraftQuery struct {
-	// InFlight also returns drafts that went to the outbox.
+	// Open: never submitted, or edited since the last submission.
+	Open bool
+	// Held: the last submission stopped at the draft (HoldReason).
+	Held bool
+	// InFlight: went to the outbox (OutboxID).
 	InFlight bool
-	Limit    int // default 100, at most 500
+	// Before returns drafts strictly after this position in the order
+	// (updated_at, id), both descending; nil starts at the most recent.
+	// An edit moves a draft to the top, past a cursor taken before it.
+	Before *DraftCursor
+	Limit  int // default 100, at most 500
+}
+
+// DraftCursor is a position in the draft list.
+type DraftCursor struct {
+	UpdatedAt time.Time
+	ID        string
 }
 
 // Drafts lists the drafts v may see, most recently changed first.
@@ -124,9 +152,21 @@ func (db *DB) Drafts(ctx context.Context, v *auth.Viewer, q DraftQuery) ([]Draft
 		limit = 100
 	}
 	limit = min(limit, 500)
+	if !q.Open && !q.Held && !q.InFlight {
+		q.Open, q.Held = true, true
+	}
+	args := []any{v.PrincipalID, q.Open, q.Held, q.InFlight, limit}
+	page := ""
+	if q.Before != nil {
+		args = append(args, q.Before.UpdatedAt, q.Before.ID)
+		page = ` AND (dr.updated_at, dr.id) < ($6, $7)`
+	}
 	rows, err := db.pool.Query(ctx, `SELECT `+draftCols+draftFrom+`
-		WHERE `+visibleDraft(v)+` AND ($2 OR o.id IS NULL)
-		ORDER BY dr.updated_at DESC, dr.id DESC LIMIT $3`, v.PrincipalID, q.InFlight, limit)
+		WHERE `+visibleDraft(v)+page+` AND CASE
+			WHEN o.id IS NOT NULL THEN $4::bool
+			WHEN dr.hold_reason IS NOT NULL THEN $3::bool
+			ELSE $2::bool END
+		ORDER BY dr.updated_at DESC, dr.id DESC LIMIT $5`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list drafts: %w", err)
 	}
@@ -160,7 +200,7 @@ func (db *DB) prepareDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, d *Dr
 			*l.addrs = []string{}
 		}
 		if err := checkAddrs(l.role, *l.addrs); err != nil {
-			return err
+			return fmt.Errorf("%w: %w", ErrInvalidDraft, err)
 		}
 	}
 	if d.Cites == nil {
@@ -168,14 +208,17 @@ func (db *DB) prepareDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, d *Dr
 	}
 	var cites []json.RawMessage
 	if err := json.Unmarshal(d.Cites, &cites); err != nil {
-		return fmt.Errorf("cites: want a JSON array: %w", err)
+		return fmt.Errorf("%w: cites: want a JSON array: %w", ErrInvalidDraft, err)
+	}
+	if _, _, err := splitSendAddress(d.FromAddr); err != nil {
+		return fmt.Errorf("%w: from: %w", ErrInvalidDraft, err)
 	}
 	ident, from, err := resolveIdentity(ctx, tx, d.FromAddr)
 	if err != nil {
 		return err
 	}
 	if d.IdentityID != "" && d.IdentityID != ident.ID {
-		return fmt.Errorf("from %s goes out as identity %s (%s), not %s", from, ident.ID, ident.Address(), d.IdentityID)
+		return fmt.Errorf("%w: from %s goes out as identity %s (%s), not %s", ErrInvalidDraft, from, ident.ID, ident.Address(), d.IdentityID)
 	}
 	d.IdentityID, d.FromAddr = ident.ID, from
 	if d.InReplyToID != "" {
@@ -183,7 +226,7 @@ func (db *DB) prepareDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, d *Dr
 			WHERE m.id = coalesce((SELECT new_id FROM message_aliases WHERE old_id = $1), $1)
 			  AND `+db.visibleMessage(v, "m"), d.InReplyToID).Scan(&d.InReplyToID)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("in reply to %s: %w", d.InReplyToID, ErrNotFound)
+			return fmt.Errorf("%w: in reply to %s: no such message", ErrInvalidDraft, d.InReplyToID)
 		}
 		if err != nil {
 			return err
@@ -231,7 +274,7 @@ func (db *DB) CreateDraft(ctx context.Context, v *auth.Viewer, d Draft, at time.
 		return Draft{}, err
 	}
 	if d.RawID != "" || d.HoldReason != "" || d.HoldDetail != "" {
-		return Draft{}, errors.New("create draft: a raw body and a hold reason come from a submission's decision")
+		return Draft{}, fmt.Errorf("create draft: %w: a raw body and a hold reason come from a submission's decision", ErrInvalidDraft)
 	}
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
 		var err error
@@ -249,6 +292,7 @@ func (db *DB) createDraft(ctx context.Context, tx pgx.Tx, v *auth.Viewer, d Draf
 		return Draft{}, errors.New("a body or a raw, not both")
 	}
 	d.ID, d.PrincipalID, d.CreatedAt, d.UpdatedAt = ulid.New(at), v.PrincipalID, at, at
+	d.AuthorKind, d.AuthorName = v.PrincipalKind, v.PrincipalName
 	if err := db.prepareDraft(ctx, tx, v, &d); err != nil {
 		return Draft{}, err
 	}
@@ -289,7 +333,7 @@ func (db *DB) UpdateDraft(ctx context.Context, v *auth.Viewer, d Draft, at time.
 			return err
 		}
 		if cur.RawID != "" {
-			return errors.New("an SMTP submission held as a draft cannot be edited")
+			return ErrRawDraft
 		}
 		if err := notInFlight(ctx, tx, d.ID); err != nil {
 			return err

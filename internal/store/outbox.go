@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -809,7 +810,12 @@ func (db *DB) ResolveOutbox(ctx context.Context, id, resolution string, a Action
 // OutboxQuery selects rows for OutboxList.
 type OutboxQuery struct {
 	State string // "" for any
-	Limit int    // <= 0 means 50
+	// States, when not empty, also selects these states (with State).
+	States []string
+	// Before returns rows strictly older than this outbox id, which is a
+	// ULID of the enqueue time: the cursor of the list.
+	Before string
+	Limit  int // <= 0 means 50; at most 500
 }
 
 // OutboxEntry is one row of OutboxList.
@@ -817,11 +823,21 @@ type OutboxEntry struct {
 	ID string
 	// Identity is the identity's address, *@zone for a pattern.
 	Identity    string
+	IdentityID  string
 	State       string
 	FromAddr    string
 	CreatedAt   time.Time
 	NextRetryAt *time.Time
 	Error       string
+	// DraftID is the draft it came from, "" for an SMTP submission sent
+	// directly. MessageID is its sent copy as a message, "" until that is
+	// indexed (§4.6).
+	DraftID   string
+	MessageID string
+	// SubmittedBy started it; ApprovedBy let it go (Principal.ID "" while
+	// nobody has).
+	SubmittedBy Principal
+	ApprovedBy  Principal
 	// Recipients in RCPT order with their states.
 	Recipients []OutboxRecipientState
 	Attempts   int
@@ -837,43 +853,42 @@ type OutboxRecipientState struct {
 	State string
 }
 
-// OutboxList returns outbox rows, newest first. Like every read it needs
-// a viewer (§13.8). M2 shows every row to everyone: which outbox rows a
-// principal may see is decided with account_access in M3.5 (§4.6).
-func (db *DB) OutboxList(ctx context.Context, v *auth.Viewer, q OutboxQuery) ([]OutboxEntry, error) {
-	if err := needViewer(v, "outbox list"); err != nil {
-		return nil, err
-	}
-	if q.Limit <= 0 {
-		q.Limit = 50
-	}
-	rows, err := db.pool.Query(ctx, `
-		SELECT o.id, coalesce(i.prefix, '*') || '@' || i.zone, o.state, o.from_addr, o.created_at, o.next_retry_at,
-			coalesce(o.error, ''),
-			(SELECT count(*) FROM send_attempts a WHERE a.outbox_id = o.id),
-			coalesce((SELECT a.outcome FROM send_attempts a WHERE a.outbox_id = o.id
-				ORDER BY a.started_at DESC, a.id DESC LIMIT 1), ''),
-			r.addrs, r.kinds, r.states
+const outboxEntryCols = `o.id, coalesce(i.prefix, '*') || '@' || i.zone, i.id, o.state, o.from_addr, o.created_at,
+	o.next_retry_at, coalesce(o.error, ''), coalesce(o.draft_id, ''),
+	coalesce((SELECT m.id FROM raw_objects sr JOIN messages m ON m.content_hash = sr.content_hash
+		WHERE sr.id = o.raw_id ORDER BY m.id LIMIT 1), ''),
+	sp.id, sp.kind, sp.name, coalesce(ap.id, ''), coalesce(ap.kind, ''), coalesce(ap.name, ''),
+	(SELECT count(*) FROM send_attempts a WHERE a.outbox_id = o.id),
+	coalesce((SELECT a.outcome FROM send_attempts a WHERE a.outbox_id = o.id
+		ORDER BY a.started_at DESC, a.id DESC LIMIT 1), ''),
+	r.addrs, r.kinds, r.states`
+
+// outboxEntryFrom selects the outbox rows v may see: those whose
+// identity's account v may read (§13.8, the rule of visibleOutbox).
+func (db *DB) outboxEntryFrom(v *auth.Viewer) string {
+	return `
 		FROM outbox o
 		JOIN identities i ON i.id = o.identity_id
+		JOIN principals sp ON sp.id = o.submitted_by
+		LEFT JOIN principals ap ON ap.id = o.approved_by
 		CROSS JOIN LATERAL (
 			SELECT array_agg(addr ORDER BY array_position(ARRAY['to', 'cc', 'bcc'], kind), addr_fold) AS addrs,
 			       array_agg(kind ORDER BY array_position(ARRAY['to', 'cc', 'bcc'], kind), addr_fold) AS kinds,
 			       array_agg(state ORDER BY array_position(ARRAY['to', 'cc', 'bcc'], kind), addr_fold) AS states
 			FROM outbox_recipients WHERE outbox_id = o.id
 		) r
-		WHERE $1 = '' OR o.state = $1
-		ORDER BY o.id DESC
-		LIMIT $2`, q.State, q.Limit)
-	if err != nil {
-		return nil, fmt.Errorf("outbox list: %w", err)
-	}
-	var out []OutboxEntry
+		WHERE ` + db.readableAccount(v, "i.account_id")
+}
+
+func scanOutboxEntries(rows pgx.Rows) ([]OutboxEntry, error) {
+	out := []OutboxEntry{}
 	var e OutboxEntry
 	var addrs, kinds, states []string
-	_, err = pgx.ForEachRow(rows, []any{
-		&e.ID, &e.Identity, &e.State, &e.FromAddr, &e.CreatedAt, &e.NextRetryAt,
-		&e.Error, &e.Attempts, &e.LastOutcome, &addrs, &kinds, &states,
+	s, a := &e.SubmittedBy, &e.ApprovedBy
+	_, err := pgx.ForEachRow(rows, []any{
+		&e.ID, &e.Identity, &e.IdentityID, &e.State, &e.FromAddr, &e.CreatedAt, &e.NextRetryAt, &e.Error,
+		&e.DraftID, &e.MessageID, &s.ID, &s.Kind, &s.Name, &a.ID, &a.Kind, &a.Name,
+		&e.Attempts, &e.LastOutcome, &addrs, &kinds, &states,
 	}, func() error {
 		e.Recipients = make([]OutboxRecipientState, len(addrs))
 		for i := range addrs {
@@ -882,8 +897,54 @@ func (db *DB) OutboxList(ctx context.Context, v *auth.Viewer, q OutboxQuery) ([]
 		out = append(out, e)
 		return nil
 	})
+	return out, err
+}
+
+// OutboxList returns the outbox rows v may see, newest first. Like every
+// read it needs a viewer (§13.8).
+func (db *DB) OutboxList(ctx context.Context, v *auth.Viewer, q OutboxQuery) ([]OutboxEntry, error) {
+	if err := needViewer(v, "outbox list"); err != nil {
+		return nil, err
+	}
+	if q.Limit <= 0 {
+		q.Limit = 50
+	}
+	q.Limit = min(q.Limit, 500)
+	states := q.States
+	if q.State != "" {
+		states = append(slices.Clone(states), q.State)
+	}
+	rows, err := db.pool.Query(ctx, `SELECT `+outboxEntryCols+db.outboxEntryFrom(v)+`
+		AND (coalesce(cardinality($1::text[]), 0) = 0 OR o.state = ANY($1))
+		AND ($2 = '' OR o.id < $2)
+		ORDER BY o.id DESC
+		LIMIT $3`, states, q.Before, q.Limit)
+	if err != nil {
+		return nil, fmt.Errorf("outbox list: %w", err)
+	}
+	out, err := scanOutboxEntries(rows)
 	if err != nil {
 		return nil, fmt.Errorf("outbox list: %w", err)
 	}
 	return out, nil
+}
+
+// OutboxByID returns outbox row id if v may see it, ErrNotFound
+// otherwise.
+func (db *DB) OutboxByID(ctx context.Context, v *auth.Viewer, id string) (OutboxEntry, error) {
+	if err := needViewer(v, "outbox"); err != nil {
+		return OutboxEntry{}, err
+	}
+	rows, err := db.pool.Query(ctx, `SELECT `+outboxEntryCols+db.outboxEntryFrom(v)+` AND o.id = $1`, id)
+	if err != nil {
+		return OutboxEntry{}, fmt.Errorf("outbox %s: %w", id, err)
+	}
+	out, err := scanOutboxEntries(rows)
+	if err != nil {
+		return OutboxEntry{}, fmt.Errorf("outbox %s: %w", id, err)
+	}
+	if len(out) == 0 {
+		return OutboxEntry{}, fmt.Errorf("outbox %s: %w", id, ErrNotFound)
+	}
+	return out[0], nil
 }

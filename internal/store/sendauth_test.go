@@ -410,6 +410,80 @@ func TestGrants(t *testing.T) {
 	}
 }
 
+// Standings preview what Decide says about every submission as an
+// identity, before its recipients are known.
+func TestStandings(t *testing.T) {
+	t.Parallel()
+	e := newSendEnv(t)
+	ctx := t.Context()
+	type row struct {
+		tier    sendpolicy.Tier
+		hold    sendpolicy.HoldReason
+		granted bool
+	}
+	got := func(v *auth.Viewer) map[string]row {
+		t.Helper()
+		ss, err := e.db.Standings(ctx, v)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]row{}
+		if len(ss) != 3 {
+			t.Errorf("%s: %d standings, want every identity", v, len(ss))
+		}
+		for _, s := range ss {
+			if s.Tier == sendpolicy.None { // not usable: only the rest are compared
+				if s.Hold != sendpolicy.HoldPolicy && s.Hold != sendpolicy.HoldOwner {
+					t.Errorf("%s as %s: tier none, hold %q", v, s.Identity.Address(), s.Hold)
+				}
+				continue
+			}
+			out[s.Identity.Address()] = row{s.Tier, s.Hold, s.Granted}
+			if s.Capped != (s.Identity.OwnerKind == "human" && s.Identity.OwnerID != v.PrincipalID) {
+				t.Errorf("%s as %s: capped %v", v, s.Identity.Address(), s.Capped)
+			}
+		}
+		return out
+	}
+	check := func(v *auth.Viewer, want map[string]row) {
+		t.Helper()
+		if g := got(v); fmt.Sprint(g) != fmt.Sprint(want) {
+			t.Errorf("%s: %v, want %v", v, g, want)
+		}
+	}
+	// The defaults of §13.5: the operator sends as their own; arisu is
+	// reviewed as itself and drafts as the operator; the service has
+	// nothing it may use.
+	check(e.op, map[string]row{
+		"*@example.com": {sendpolicy.Auto, "", false}, "alerts@example.com": {sendpolicy.Auto, "", false},
+	})
+	check(e.arisu, map[string]row{
+		"*@example.com":      {sendpolicy.Draft, sendpolicy.HoldOwner, false},
+		"alerts@example.com": {sendpolicy.Draft, sendpolicy.HoldOwner, false},
+		"arisu@example.com":  {sendpolicy.Review, sendpolicy.HoldReview, false},
+	})
+	check(e.monitor, map[string]row{})
+
+	at := e.at()
+	if err := e.db.SetGrant(ctx, store.Grant{
+		IdentityID: e.arisuID.ID, PrincipalID: e.arisu.PrincipalID, Policy: sendpolicy.Auto, RecipientScope: sendpolicy.ScopeAny,
+	}, store.Action{ID: ulid.New(at), Tool: "grant.set", At: at}); err != nil {
+		t.Fatal(err)
+	}
+	if r := got(e.arisu)["arisu@example.com"]; r != (row{sendpolicy.Auto, "", true}) {
+		t.Errorf("arisu granted auto: %+v", r)
+	}
+	// The credential counts: without submission:send all is held.
+	noSend := *e.arisu
+	noSend.Scopes = []auth.Scope{auth.DraftCreate}
+	if r := got(&noSend)["arisu@example.com"]; r.hold != sendpolicy.HoldPolicy {
+		t.Errorf("without submission:send: %+v", r)
+	}
+	if _, err := e.db.Standings(ctx, nil); err == nil {
+		t.Error("nil viewer")
+	}
+}
+
 func TestDrafts(t *testing.T) {
 	t.Parallel()
 	e := newSendEnv(t)
@@ -434,8 +508,13 @@ func TestDrafts(t *testing.T) {
 		"missing reply":      {FromAddr: "arisu@example.com", InReplyToID: ulid.New(base), BodyMD: "x"},
 		"cites not an array": {FromAddr: "arisu@example.com", Cites: []byte(`{}`), BodyMD: "x"},
 	} {
-		if _, err := e.db.CreateDraft(ctx, e.arisu, bad, e.at()); err == nil {
-			t.Errorf("%s: no error", name)
+		_, err := e.db.CreateDraft(ctx, e.arisu, bad, e.at())
+		want := store.ErrInvalidDraft
+		if name == "unknown From" {
+			want = store.ErrNoIdentity
+		}
+		if !errors.Is(err, want) {
+			t.Errorf("%s: %v, want %v", name, err, want)
 		}
 	}
 	if _, err := e.db.CreateDraft(ctx, nil, store.Draft{FromAddr: "arisu@example.com"}, e.at()); err == nil {
@@ -499,7 +578,7 @@ func TestDrafts(t *testing.T) {
 	if smtp.RawID != raw.ID || smtp.HoldReason != sendpolicy.HoldOwner || smtp.PrincipalID != e.monitor.PrincipalID {
 		t.Errorf("held SMTP submission: %+v", smtp)
 	}
-	if _, err := e.db.UpdateDraft(ctx, e.monitor, store.Draft{ID: smtp.ID, FromAddr: "alerts@example.com", BodyMD: "x"}, e.at()); err == nil {
+	if _, err := e.db.UpdateDraft(ctx, e.monitor, store.Draft{ID: smtp.ID, FromAddr: "alerts@example.com", BodyMD: "x"}, e.at()); !errors.Is(err, store.ErrRawDraft) {
 		t.Error("edited an SMTP draft")
 	}
 	// Raw bodies and hold reasons are a decision's to record.
@@ -527,9 +606,27 @@ func TestDrafts(t *testing.T) {
 		t.Errorf("delete in flight: %v", err)
 	}
 	pending, _ := e.db.Drafts(ctx, e.op, store.DraftQuery{})
-	every, _ := e.db.Drafts(ctx, e.op, store.DraftQuery{InFlight: true})
+	every, _ := e.db.Drafts(ctx, e.op, store.DraftQuery{Open: true, Held: true, InFlight: true})
 	if len(pending) != 1 || pending[0].ID != smtp.ID || len(every) != 2 || every[1].OutboxState != "queued" {
 		t.Errorf("lists: %d pending, %d all", len(pending), len(every))
+	}
+	if sent, _ := e.db.Drafts(ctx, e.op, store.DraftQuery{InFlight: true}); len(sent) != 1 || sent[0].ID != d.ID {
+		t.Errorf("in flight: %+v", sent)
+	}
+	if open, _ := e.db.Drafts(ctx, e.op, store.DraftQuery{Open: true}); len(open) != 0 {
+		t.Errorf("open: %+v", open)
+	}
+	// The cursor continues after the first page.
+	page, _ := e.db.Drafts(ctx, e.op, store.DraftQuery{Open: true, Held: true, InFlight: true, Limit: 1})
+	rest, _ := e.db.Drafts(ctx, e.op, store.DraftQuery{
+		Open: true, Held: true, InFlight: true,
+		Before: &store.DraftCursor{UpdatedAt: page[0].UpdatedAt, ID: page[0].ID},
+	})
+	if len(page) != 1 || len(rest) != 1 || page[0].ID != every[0].ID || rest[0].ID != every[1].ID {
+		t.Errorf("paged: %d then %d", len(page), len(rest))
+	}
+	if every[0].AuthorKind != "service" || every[0].AuthorName != "monitoring" {
+		t.Errorf("author: %+v", every[0])
 	}
 	if err := e.db.DeleteDraft(ctx, e.monitor, smtp.ID, e.at()); err != nil {
 		t.Fatal(err)
