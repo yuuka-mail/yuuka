@@ -264,7 +264,8 @@ func (w *writer) insertMessage(ctx context.Context, id string, ref RawRef, msg m
 }
 
 // updateMessage writes the derived columns of message id from msg and
-// its sources, logging a change only if something differs. It returns
+// its sources, and its extractions, logging a change only if something
+// differs. It returns
 // nothing about threads; callers re-thread as needed.
 //
 // The canonical raw and received_at come from the earliest source: its
@@ -317,7 +318,7 @@ func (w *writer) updateMessage(ctx context.Context, id string, msg mimeparse.Mes
 	if tag.RowsAffected() > 0 {
 		w.change("message", id)
 	}
-	return nil
+	return w.extract(ctx, id, msg)
 }
 
 // foldAddrs is messages.to_addrs, cc_addrs and reply_to_addrs of a

@@ -361,8 +361,10 @@ func TestVisibility(t *testing.T) {
 	tick := func() time.Time { at = at.Add(time.Minute); return at }
 	msgs := map[string]string{}
 	msgs["in-open"] = inbound(t, db, open, "a", letter("x@example.net", "a@example.com", "in-open",
-		"Message-ID: <in-open@example.net>\r\nCc: copied-open@example.net\r\n", "visible inbound"), tick())
-	msgs["in-closed"] = inbound(t, db, closed, "b", letter("x@example.net", "b@example.com", "in-closed", "Message-ID: <in-closed@example.net>\r\n", "hidden inbound"), tick())
+		"Message-ID: <in-open@example.net>\r\nCc: copied-open@example.net\r\n", "visible inbound, verification code: 640214"), tick())
+	// Extracted values are body data: they go wherever the message goes.
+	msgs["in-closed"] = inbound(t, db, closed, "b", letter("x@example.net", "b@example.com", "in-closed",
+		"Message-ID: <in-closed@example.net>\r\n", "hidden inbound, verification code: 640213"), tick())
 	sendAs := func(name, identity, headers string) {
 		raw := letter("me@example.com", "x@example.net", name, headers, name+" body")
 		rawID, _ := enqueue(t, pool, identity, raw, tick())
@@ -458,6 +460,27 @@ func TestVisibility(t *testing.T) {
 				}
 				if err == nil && d.Raw.RawID == "" {
 					t.Errorf("MessageByID %s: no raw", n)
+				}
+			}
+			// The codes: the open one where in-open is visible, the
+			// hidden one only to a viewer that reads in-closed, on
+			// every path that carries extractions.
+			codes := map[string]bool{}
+			for _, m := range list {
+				for _, x := range m.Extracted {
+					codes[x.Value] = true
+				}
+			}
+			for _, id := range msgs {
+				if d, err := db.MessageByID(ctx, v, id); err == nil {
+					for _, x := range append(d.Extractions, d.Extracted...) {
+						codes[x.Value] = true
+					}
+				}
+			}
+			for code, n := range map[string]string{"640214": "in-open", "640213": "in-closed"} {
+				if codes[code] != slices.Contains(want, n) {
+					t.Errorf("code %s of %s seen: %v", code, n, codes[code])
 				}
 			}
 			if v == restricted {

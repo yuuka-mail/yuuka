@@ -414,6 +414,60 @@ func TestRecipientsAfterUpgrade(t *testing.T) {
 	check("reparse")
 }
 
+// Messages stored before migration 0008, or by an older extractor, are
+// re-extracted by the backlog pass from their raw; what it writes is
+// what ingest wrote, and a reparse afterwards finds nothing to change.
+func TestExtractionsAfterUpgrade(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	for i, name := range []string{"plain-otp.eml", "gb2312-otp.eml", "html-only-newsletter.eml"} {
+		e.ingest(t, time.Duration(i)*time.Second, "a@example.com", eml(t, name))
+	}
+	snapshot := func() string {
+		t.Helper()
+		var s string
+		if err := e.pool.QueryRow(t.Context(), `SELECT coalesce(string_agg(
+			concat_ws('|', message_id, ord, kind, value, confidence, source, expires_at), ',' ORDER BY message_id, ord), '')
+			FROM extractions`).Scan(&s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	e.in.Wait()
+	notified := len(e.notes.got())
+	ingested := snapshot()
+	if !strings.Contains(ingested, "|otp|482913|95|subject") || !strings.Contains(ingested, "|otp|739201|95|body") ||
+		strings.Count(ingested, "|expiry|") != 2 {
+		t.Fatalf("extractions after ingest: %s", ingested)
+	}
+
+	// What the M2 binary left behind.
+	if _, err := e.pool.Exec(t.Context(), `DELETE FROM extractions`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(t.Context(), `UPDATE messages SET extract_version = 0`); err != nil {
+		t.Fatal(err)
+	}
+	st, err := e.in.ProcessBacklog(t.Context())
+	if err != nil || st != (BacklogStats{Processed: 3}) {
+		t.Fatalf("backlog %+v %v", st, err)
+	}
+	if got := snapshot(); got != ingested {
+		t.Errorf("backlog wrote\n%s\nwant\n%s", got, ingested)
+	}
+	if st, err := e.in.ProcessBacklog(t.Context()); err != nil || st != (BacklogStats{}) {
+		t.Fatalf("second backlog %+v %v", st, err)
+	}
+	e.in.Wait()
+	if got := e.notes.got(); len(got) != notified {
+		t.Fatalf("backlog notified %q", got[notified:])
+	}
+	rs, err := e.in.Reparse(t.Context(), time.Time{})
+	if err != nil || rs.Messages != 3 || rs.Changed != 0 || rs.Failed != 0 {
+		t.Fatalf("reparse after the backlog: %+v %v", rs, err)
+	}
+}
+
 // Too many addresses in one field: the list is cut short and the cut
 // logged once, but the mail is not quarantined; its content is all there.
 func TestAddressCap(t *testing.T) {

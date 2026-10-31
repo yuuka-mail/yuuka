@@ -167,6 +167,16 @@ type MessageSummary struct {
 	// Outgoing is set for our own mail, from the latest visible outbox
 	// row that sent it.
 	Outgoing *Outgoing
+	// Extracted is the best extraction of each kind (§3 principle 4),
+	// in extractor order: what the notification zone shows instead of
+	// the subject. The values are the sender's (§8.3).
+	Extracted []Extraction
+	// SenderVerified says whether the trusted receiver reported
+	// dmarc=pass on a visible delivery, i.e. whether the From domain is
+	// proven (§10.1.1); nil for mail with no visible delivery, which
+	// nobody judged. It is a delivery fact: callers withhold it from
+	// viewers without delivery:read.
+	SenderVerified *bool
 }
 
 // summaryCols and summaryFrom are shared by the list and the thread; the
@@ -175,7 +185,7 @@ type MessageSummary struct {
 // the §4.3 downgrade judges how mail arrived, and a sent copy did not.
 const summaryCols = `m.id, m.thread_id, m.received_at, m.subject, m.from_addr, m.from_name, m.snippet,
 	coalesce(s.class_override, m.class), g.downgraded, m.parse_error IS NOT NULL, m.has_attach, g.recipients,
-	ob.id, ob.state, ob.from_addr`
+	ob.id, ob.state, ob.from_addr, ex.items, g.sender_verified`
 
 func (db *DB) summaryFrom(v *auth.Viewer) string {
 	return `
@@ -183,9 +193,14 @@ func (db *DB) summaryFrom(v *auth.Viewer) string {
 		LEFT JOIN message_state s ON s.message_id = m.id` + db.outgoingJoin(v) + `
 		CROSS JOIN LATERAL (
 			SELECT ob.id IS NULL AND NOT coalesce(bool_or(` + notDowngraded + `), false) AS downgraded,
-				coalesce(array_agg(DISTINCT d.prefix || '@' || d.zone ORDER BY d.prefix || '@' || d.zone), '{}') AS recipients
+				coalesce(array_agg(DISTINCT d.prefix || '@' || d.zone ORDER BY d.prefix || '@' || d.zone), '{}') AS recipients,
+				bool_or(coalesce(d.auth->>'trusted', '') = 'true' AND coalesce(d.auth->>'dmarc', '') = 'pass') AS sender_verified
 			FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
 			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + `) g
+		CROSS JOIN LATERAL (
+			SELECT coalesce(jsonb_agg(to_jsonb(e) ORDER BY e.ord), '[]') AS items
+			FROM (SELECT DISTINCT ON (kind) ord, ` + extractionCols + ` FROM extractions
+			      WHERE message_id = m.id ORDER BY kind, ord) e) ex
 		WHERE ` + db.visibleMessage(v, "m")
 }
 
@@ -193,7 +208,8 @@ func scanSummary(r pgx.CollectableRow) (MessageSummary, error) {
 	var m MessageSummary
 	var obID, obState, obFrom *string
 	err := r.Scan(&m.ID, &m.ThreadID, &m.ReceivedAt, &m.Subject, &m.FromAddr, &m.FromName, &m.Snippet,
-		&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState, &obFrom)
+		&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState, &obFrom,
+		&m.Extracted, &m.SenderVerified)
 	m.Outgoing = outgoing(obID, obState, obFrom)
 	return m, err
 }
@@ -285,7 +301,10 @@ type MessageDetail struct {
 	Date       *time.Time // Date header; nil if missing or unparseable
 	BodyText   string
 	ParseError string // why it is quarantined; "" if parsed cleanly
-	Deliveries []DeliveryFact
+	// Extractions are all the extractor found, in its order; the
+	// summary's Extracted is the best of each kind.
+	Extractions []Extraction
+	Deliveries  []DeliveryFact
 	// Raw is the raw to render the message from: that of the earliest
 	// visible delivery, or for mail we only sent, the earliest visible
 	// sent copy (DeliveryID empty). The content is the same in all of
@@ -317,7 +336,7 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 			var obID, obState, obFrom *string
 			err := r.Scan(&m.ID, &m.ThreadID, &m.ReceivedAt, &m.Subject, &m.FromAddr, &m.FromName, &m.Snippet,
 				&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState, &obFrom,
-				&d.MessageID, &d.InReplyTo, &d.References, &d.Date, &d.BodyText, &d.ParseError)
+				&m.Extracted, &m.SenderVerified, &d.MessageID, &d.InReplyTo, &d.References, &d.Date, &d.BodyText, &d.ParseError)
 			m.Outgoing = outgoing(obID, obState, obFrom)
 			return d, err
 		})
@@ -351,6 +370,10 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 			return f, err
 		})
 		if err != nil {
+			return err
+		}
+		// The message is visible to v: its derived rows are too.
+		if d.Extractions, err = extractionsOf(ctx, tx, d.ID); err != nil {
 			return err
 		}
 		if len(d.Deliveries) > 0 {

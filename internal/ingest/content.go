@@ -101,8 +101,10 @@ type BacklogStats struct {
 // message: everything M0 committed before parsing existed, and deliveries
 // whose content step failed after the commit point. It then does the same
 // for sent copies that have no message (IndexSent failed or never ran),
-// and rebuilds the messages whose recipients were never read (written
-// before migration 0007), so an upgrade fills them without a reparse.
+// rebuilds the messages whose recipients were never read (written
+// before migration 0007), and re-extracts the messages an older
+// extractor (or none, before migration 0008) went over, so neither an
+// upgrade nor a better extractor needs a reparse.
 // It never notifies: the mail is not new to anyone by now, and an upgrade
 // must not replay the whole M0 history into the IM channel.
 func (in *Ingester) ProcessBacklog(ctx context.Context) (BacklogStats, error) {
@@ -117,10 +119,23 @@ func (in *Ingester) ProcessBacklog(ctx context.Context) (BacklogStats, error) {
 	if err != nil {
 		return st, err
 	}
-	return st, backlogPass(ctx, in, &st, "message", in.cfg.DB.UnreadRecipients,
+	err = backlogPass(ctx, in, &st, "message", in.cfg.DB.UnreadRecipients,
 		func(t store.ReparseTarget) string { return t.MessageID },
 		func(ctx context.Context, t store.ReparseTarget) error {
 			_, err := in.rebuild(ctx, t)
+			return err
+		})
+	if err != nil {
+		return st, err
+	}
+	return st, backlogPass(ctx, in, &st, "message", in.cfg.DB.UnextractedMessages,
+		func(t store.ReparseTarget) string { return t.MessageID },
+		func(ctx context.Context, t store.ReparseTarget) error {
+			raw, err := in.ReadRaw(ctx, t.Canonical())
+			if err != nil {
+				return err
+			}
+			_, err = in.cfg.DB.Reextract(ctx, t.MessageID, mimeparse.Parse(raw))
 			return err
 		})
 }
