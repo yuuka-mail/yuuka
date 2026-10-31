@@ -144,6 +144,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/r2"
 	"github.com/yuuka-mail/yuuka/internal/smtpd"
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/submit"
 	"github.com/yuuka-mail/yuuka/web"
 )
 
@@ -288,10 +289,14 @@ type app struct {
 	// submitter takes messages from the SMTP submission port (§13.6).
 	// serve refuses YUUKA_SUBMISSION_LISTEN while it is nil.
 	submitter smtpd.Submitter
+	// submit is the only way mail enters the outbox (§8.9): the SMTP
+	// submission port, REST and MCP go through it. serve only.
+	submit *submit.Service
 }
 
 // openOutbox builds the outbox from the configured transports, reading
-// their password files. Only serve sends, so only serve needs them.
+// their password files, and the submission service in front of it. Only
+// serve sends, so only serve needs them.
 func (a *app) openOutbox(log *slog.Logger) error {
 	trs, err := openTransports(a.cfg.Outbox.Transports, os.ReadFile)
 	if err != nil {
@@ -310,6 +315,7 @@ func (a *app) openOutbox(log *slog.Logger) error {
 		PollInterval: a.cfg.Outbox.PollInterval,
 		Log:          log,
 	})
+	a.submit = submit.New(submit.Config{DB: a.db, Outbox: a.outbox, Log: log})
 	return nil
 }
 

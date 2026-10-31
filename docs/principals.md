@@ -128,8 +128,9 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 
 执行全在一个纯函数里：[`sendpolicy.Decide`](../internal/sendpolicy/sendpolicy.go)，没有时钟、不碰数据库，
 输入由 store 的 [`PolicyInput`](../internal/store/policyfacts.go) 一次备齐。所有提交路径（REST / MCP 的
-`submit_draft`、WebUI 的发送、SMTP 提交口）都走「`PolicyInput` → `Decide`」，入 outbox 的事务里在授权锁下再做一遍，
-并发提交不会一起越过最后一个名额。没有第二条路径，测试辅助和 CLI 也不例外。
+`submit_draft`、WebUI 的发送、SMTP 提交口）都经 [`internal/submit`](../internal/submit/submit.go) 进入
+[`store.WithDecision`](../internal/store/policytx.go)：在持有授权锁的事务里读事实、调 `Decide`，再经同一个事务写 outbox 行或草稿，
+并发提交不会一起越过最后一个名额。没有第二条路径，测试辅助和 CLI 也不例外——这由结构保证，见 §8.9。
 
 **各项限额的默认值由授权代码决定，不写在库里**：库里的空值只表示「这条授权没有自己的数」，
 值见 [`sendpolicy.DefaultLimits`](../internal/sendpolicy/sendpolicy.go)，改默认值不需要迁移。按提交主体的类型：
@@ -189,11 +190,24 @@ scope 只回答「能不能做这类动作」，**用哪个身份、做到哪一
 2. 规范化 MIME（按出口 caps 去掉不允许的头，§10.2），写 Sent 副本
 3. 入 outbox 状态机，由 §10.2 的 transport 真正投递
 
-落到代码上的顺序（提交口和其他提交路径共用前两步）：信头 `From` 经
-[`store.ResolveIdentity`](../internal/store/identities.go) 找到 identity（精确地址压过 `*@zone`，停用的跳过；找不到就拒收），
-`Sender` 同样解析且必须是同一主体能用的身份；`store.PolicyInput` + `sendpolicy.Decide` 得出去向：
-`Decision.Tier` 为 `none` 时拒收（550），否则一律 `250`——`Queue` 入 outbox，否则规范化后的字节写进 `sent/`、
-以 `drafts.raw_id` 停在草稿，`hold_reason` 记原因。`Decision.AutoSubmitted` 非空时规范化要补上 `Auto-Submitted` 头。
+落到代码上是 [`submit.SubmitRaw`](../internal/submit/submit.go)（规范化在 [`raw.go`](../internal/submit/raw.go)）：
+信头 `From` 经 [`store.ResolveIdentity`](../internal/store/identities.go) 找到 identity（找不到就拒收，`ErrNoIdentity`），
+`Sender` 同样解析，且提交者对它的档位不能是 `none`；然后在 `store.WithDecision` 里决定：
+档位 `none` 拒收（`ErrRejected`，550），否则一律 `250`——`Queue` 入 outbox，否则规范化后的字节写进 `sent/`、
+以 `drafts.raw_id` 停在草稿，`hold_reason` 记原因。每次拒收也记一条 `submission.raw` 审计，只有地址和原因，不含正文。
+`In-Reply-To` 指向一封提交者看得见的信时，按回信来决定（`thread` 范围、邮件循环规则都要用到它）；找不到就当新线程。
+
+规范化定下的几条：
+
+- 换行一律改成 CRLF；裸 CR、NUL、超过 998 字节的行拒收而不是修——修了就不是客户端交来的那封
+- `From`（和 `Sender`）整行重写成 identity 的显示名 + 决定所用的地址；`Bcc` 头删掉，收件人只看信封，
+  按信头 `To` / `Cc` 标记 `outbox_recipients.kind`，其余算 Bcc
+- 缺 `Date` 就补（RFC 6409 §8.2）；缺 `Message-ID` 且出口投递我们的 id 时才补（§8.3），
+  否则 `transport.StripHeaders` 照常剥掉客户端写的
+- 决定要求 `Auto-Submitted` 时补上 `auto-generated`；客户端自己写了别的值（`auto-replied` 等）就保留，写 `no` 则替换
+- 规范化是幂等的。停在草稿的提交被人确认时，按新决定再规范化一遍：字节没变就直接用存下的那份原件
+  （`outbox.raw_id = drafts.raw_id`），变了（比如服务自己重提、这次要加 `Auto-Submitted`）就另存一份新的 Sent 副本。
+  代价：停了很久的信，`Date` 是提交时补的，不是确认时的
 
 **协议层**在 [`internal/smtpd`](../internal/smtpd/smtpd.go)，只管协议；上面那些关于信的规则全在提交核心里，
 协议层一条也不重复。它和核心之间是一个在消费方定义的小接口（`smtpd.Submitter`）。实现时定下的几处：

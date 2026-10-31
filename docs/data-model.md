@@ -284,6 +284,9 @@ stateDiagram-v2
 `withdrawn` 是离开 outbox、回到草稿的那条路的终点。它要有一个状态而不是删掉这一行：
 `review` 的结论、谁提交的、Sent 副本都还挂在这一行上，删了就回答不了「这封为什么没发出去」。
 
+outbox 行只有一个来处：[`store.WithDecision`](../internal/store/policytx.go) 交出的 `PolicyTx`，
+它带着在授权锁下做出的 `sendpolicy.Decide` 决定，只有 `Queue` 才能落成 `queued` 行（§8.9）。
+
 表上能写成约束的不变量都写成了约束（[0005](../internal/store/migrations/0005_sending.sql)），
 不靠执行器的代码自觉：`next_retry_at` 只在等待发送的状态（`queued`、`failed`、还有收件人要重试的 `partial`）
 上非空，领取时必须清掉；同一封信同时最多一条未结束的 `send_attempts`（部分唯一索引），
@@ -372,13 +375,14 @@ stateDiagram-v2
 
 发出的信和收到的信走同一条内容管线：我们交给出口的字节（Sent 副本，§10.2）
 在建 outbox 行之前写进原件存储的 `sent/YYYY/MM/<id>.eml`（R2 和本地副本各一份，
-`ErrExists` 时读回比对；实现见 [`outbox.Enqueue`](../internal/outbox/outbox.go)），同样写一次永不改，
+`ErrExists` 时读回比对；实现见 [`outbox.Enqueue`](../internal/outbox/outbox.go) 和 `StoreSent`），同样写一次永不改，
 在 `raw_objects` 里有自己的一行，`outbox.raw_id` 指向它；然后像收信一样解析进 `messages`，
 所以自己的回复出现在线程、搜索里，`reparse` 也能重建它。字节在建 outbox 行时组装（submission 口收进来的是规范化）一次，
 之后每次尝试都提交这同一份：审核（M3）看到的就是发出去的。
 
 **`sent/` 的含义是「yuuka 为外发组装或规范化的每一份字节」，不是「已经发出的字节」。**
-停在草稿的 SMTP 提交（`drafts.raw_id`，确认后原样发出）、最终撤回、作废或从未发出的信都在这里。
+停在草稿的 SMTP 提交（`drafts.raw_id`，确认后原样发出，outbox 行直接指向这份原件；
+按新决定规范化后字节变了才另存一份，见 §13.6）、最终撤回、作废或从未发出的信都在这里。
 发没发出、发给了谁，看 outbox 的状态和 `outbox_recipients`，不看前缀，也不看原件在不在。
 另一种做法是只在真正发出之后才写 `sent/`，但字节必须在越过提交点之前就落下（§4.5），
 那时还不知道结局；为了让前缀「名副其实」再分出一个前缀或事后搬对象，换来的只是一条不可靠的信号。

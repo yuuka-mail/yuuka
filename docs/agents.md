@@ -254,7 +254,22 @@ agent 的工作不会丢，人也不会被一堆报错淹没。凭据缺 `submis
 不是报错，调用方没有理由换一条路重试。唯一的拒绝在 SMTP 提交口：对 `From` 毫无授权（档位 `none`）时拒收（§13.6）。
 
 **实现**：[`internal/sendpolicy`](../internal/sendpolicy/sendpolicy.go) 的 `Decide`，一个纯函数，表驱动测试覆盖每条规则，
-另有一个穷举测试断言「人的身份 × 任何非本人提交者 × 任何授权 × 任何确认者」都出不了 outbox。
+另有一个穷举测试断言「人的身份 × 任何非本人提交者 × 任何授权 × 任何确认者」都出不了 outbox；
+[`internal/submit`](../internal/submit/submit.go) 在两个入口（SMTP 的 `SubmitRaw`、草稿的 `SubmitDraft`）上把同一件事再穷举一遍。
+
+**没有绕过 `Decide` 的入队路径，这一点由结构保证，不靠约定**（[`store/policytx.go`](../internal/store/policytx.go)）：
+
+- 建 outbox 行的 SQL 只有一条（`enqueueOutbox`，不导出），唯一的调用者是 `(*PolicyTx).Enqueue`
+- `PolicyTx` 只由 `store.WithDecision` 构造：它在持有授权锁的事务里重读事实、**自己**调用 `Decide`，
+  决定存在不导出的字段里。调用方拿不到可以伪造或复用的「批准」，读到的 `Decision()` 只是副本
+- `Enqueue` 只在决定为 `Queue` 时写；身份、From、`submitted_by`、`approved_by` 取自决定，不由调用方传；
+  还核对收件人集合、信头 From、字节与原件描述都是被决定的那一份；一个决定只能落一个结果
+- `TestOneWayToTheOutbox` 解析整个模块的源码，断言上面三条（以及 `PolicyTx` 没有导出字段、
+  决定字段只来自 `sendpolicy.Decide`）；`TestPolicyTx` 是行为上的另一半
+
+取舍：`Decide` 本身是导出的纯函数，谁都能拿手写的输入调用它，但结果只是一个值，进不了 outbox；
+真正的门是 `PolicyTx`。测试也只能经 `WithDecision` 入队，测试辅助不另开路（少数 store 测试为了造历史数据直接写 SQL，
+那是固定装置，不是入口）。`hold_reason` 同理只由决定写：导出的 `CreateDraft` 拒收 `raw_id` 和 `hold_reason`。
 规则按下面的顺序，第一条拦下的决定 `hold_reason`：
 
 1. 身份已停用，或草稿创建后有别的身份接管了它的地址 → `policy`
