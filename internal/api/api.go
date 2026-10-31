@@ -27,6 +27,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/leak"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
 	"github.com/yuuka-mail/yuuka/internal/openapi"
+	"github.com/yuuka-mail/yuuka/internal/rules"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/submit"
 )
@@ -56,6 +57,35 @@ type Store interface {
 	// ResolveOutbox records a person's decision on an unknown row; the
 	// handler reads the row as the viewer first (OutboxByID).
 	ResolveOutbox(ctx context.Context, id, resolution string, a store.Action, p store.RetryPolicy) (string, error)
+
+	// Annotations and proposals (§8.5) take the viewer; precedence and
+	// who may decide are the store's too.
+	Annotate(ctx context.Context, v *auth.Viewer, id string, ins []store.Annotation, a store.Action) ([]store.AnnotationResult, bool, error)
+	AnnotateThread(ctx context.Context, v *auth.Viewer, id string, ins []store.Annotation, a store.Action) (map[string][]store.AnnotationResult, bool, error)
+	Undo(ctx context.Context, v *auth.Viewer, action string, a store.Action) (store.UndoResult, error)
+	MessageAnnotations(ctx context.Context, v *auth.Viewer, id string) ([]store.AnnotationEntry, error)
+	Labels(ctx context.Context, v *auth.Viewer) ([]store.LabelCount, error)
+	CreateProposal(ctx context.Context, v *auth.Viewer, p store.NewProposal, a store.Action) (store.Proposal, []rules.Warning, error)
+	Proposals(ctx context.Context, v *auth.Viewer, q store.ProposalQuery) ([]store.Proposal, error)
+	ProposalByID(ctx context.Context, v *auth.Viewer, id string) (store.Proposal, error)
+	AcceptProposal(ctx context.Context, v *auth.Viewer, id string, rule *store.NewRule, a store.Action) (store.Accepted, error)
+	RejectProposal(ctx context.Context, v *auth.Viewer, id string, a store.Action) error
+	WithdrawProposal(ctx context.Context, v *auth.Viewer, id string, a store.Action) error
+
+	// Rules are the operator's configuration: only a person manages
+	// them, which the handlers check, and their reads take no viewer.
+	// What they run over past mail is all of it; a preview and a draft
+	// read what the viewer can see.
+	Rules(ctx context.Context, all bool) ([]store.Rule, error)
+	RuleByID(ctx context.Context, id string) (store.Rule, error)
+	CreateRule(ctx context.Context, n store.NewRule, a store.Action) (store.Rule, []rules.Warning, error)
+	UpdateRule(ctx context.Context, id string, u store.RuleUpdate, a store.Action) (store.Rule, []rules.Warning, error)
+	DeleteRule(ctx context.Context, id string, a store.Action) error
+	ApplyRule(ctx context.Context, id string, since time.Time, dry bool, a store.Action) (store.RetroStats, error)
+	RevertRule(ctx context.Context, id string, since time.Time, a store.Action) (store.RevertStats, error)
+	PreviewRule(ctx context.Context, v *auth.Viewer, spec []byte, q store.PreviewQuery) (store.Preview, error)
+	FactsFor(ctx context.Context, v *auth.Viewer, id string) ([]rules.Facts, error)
+	CountMatches(ctx context.Context, v *auth.Viewer, ms []rules.Match, since time.Time) ([]int, error)
 }
 
 // RawReader loads the raw message of a delivery (ingest.Ingester).
@@ -104,6 +134,13 @@ var (
 	outboxRead = []auth.Scope{auth.MessageRead, auth.DeliveryRead}
 	// Resolving resends: a sending decision, and a person's (§4.5).
 	outboxResolve = []auth.Scope{auth.SubmissionSend}
+	// Annotating, undoing one's annotations, proposing and deciding
+	// proposals (§8.5). Deciding is a person's, checked by kind.
+	annotate = []auth.Scope{auth.MessageAnnotate}
+	// Rules are a person's, checked by kind; previews and drafts list
+	// mail as well.
+	ruleManage  = []auth.Scope{auth.RuleManage}
+	ruleReading = []auth.Scope{auth.RuleManage, auth.MessageRead}
 )
 
 // routes is every operation under /api/. A new one is one entry here and
@@ -135,6 +172,39 @@ var routes = []route{
 	jsonRoute(http.MethodGet, "/api/v1/outbox/{id}", "Get one outgoing message's state", outboxRead, (*API).outboxEntry),
 	jsonRoute(http.MethodPost, "/api/v1/outbox/{id}/resolve", "Decide on mail whose delivery is unknown (§4.5); people only",
 		outboxResolve, (*API).resolveOutbox),
+
+	jsonRoute(http.MethodGet, "/api/v1/labels", "List the labels in use, with how many messages carry each", read, (*API).labels),
+	jsonRoute(http.MethodPost, "/api/v1/messages/{id}/annotations",
+		"Label, classify or archive a message or its thread; a higher-ranked writer's value is overruled, not an error",
+		annotate, (*API).annotate),
+	jsonRoute(http.MethodGet, "/api/v1/messages/{id}/annotations", "Get where a message's labels, class and archived state came from",
+		read, (*API).annotations),
+	jsonRoute(http.MethodPost, "/api/v1/actions/{id}/undo", "Undo the annotations an action wrote; agents undo only their own",
+		annotate, (*API).undo),
+	jsonRoute(http.MethodGet, "/api/v1/proposals", "List proposals, newest first; agents see only their own", read, (*API).proposals),
+	jsonRoute(http.MethodPost, "/api/v1/proposals", "Propose annotations or a rule for a person to decide",
+		annotate, (*API).createProposal).withStatus(http.StatusCreated),
+	jsonRoute(http.MethodGet, "/api/v1/proposals/{id}", "Get a proposal", read, (*API).proposal),
+	jsonRoute(http.MethodPost, "/api/v1/proposals/{id}/accept",
+		"Accept a proposal, optionally creating a rule from it (rule:manage); people only", annotate, (*API).acceptProposal),
+	jsonRoute(http.MethodPost, "/api/v1/proposals/{id}/reject", "Reject a proposal; people only", annotate, (*API).rejectProposal),
+	jsonRoute(http.MethodPost, "/api/v1/proposals/{id}/withdraw", "Withdraw one's own proposal", annotate, (*API).withdrawProposal),
+	jsonRoute(http.MethodGet, "/api/v1/rules", "List rules in evaluation order; people only", ruleManage, (*API).rules),
+	jsonRoute(http.MethodPost, "/api/v1/rules", "Create a rule; it runs on mail arriving from now on; people only",
+		ruleManage, (*API).createRule).withStatus(http.StatusCreated),
+	jsonRoute(http.MethodPost, "/api/v1/rules/preview", "Try a rule on the mail the caller can see without saving it; people only",
+		ruleReading, (*API).previewRule),
+	jsonRoute(http.MethodPost, "/api/v1/rules/draft",
+		"Draft the conditions of a rule for mail like an example message, with match counts; people only",
+		ruleReading, (*API).draftRule),
+	jsonRoute(http.MethodGet, "/api/v1/rules/{id}", "Get a rule, deleted or not; people only", ruleManage, (*API).rule),
+	jsonRoute(http.MethodPut, "/api/v1/rules/{id}", "Replace a rule; people only", ruleManage, (*API).updateRule),
+	jsonRoute(http.MethodDelete, "/api/v1/rules/{id}", "Delete a rule; what it did stays until reverted; people only",
+		ruleManage, (*API).deleteRule),
+	jsonRoute(http.MethodPost, "/api/v1/rules/{id}/apply", "Run a rule over past mail; it never notifies; people only",
+		ruleManage, (*API).applyRule),
+	jsonRoute(http.MethodPost, "/api/v1/rules/{id}/revert", "Take back what a rule did to mail; people only",
+		ruleManage, (*API).revertRule),
 	{Op: openapi.Op{
 		Method: http.MethodGet, Path: "/api/v1/openapi.json", Summary: "This document",
 		Access: openapi.Public, Media: "application/json",
@@ -214,6 +284,12 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 		openapi.Write(w, p)
 		return
 	}
+	if e, ok := errors.AsType[*rules.InvalidError](err); ok {
+		p := openapi.Errorf(http.StatusBadRequest, openapi.CodeInvalidRule, "%s", e.Reason)
+		p.Path = e.Path
+		openapi.Write(w, p)
+		return
+	}
 	for _, m := range []struct {
 		err    error
 		status int
@@ -228,6 +304,14 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 		{store.ErrNoIdentity, http.StatusUnprocessableEntity, openapi.CodeNoIdentity, ""},
 		{submit.ErrNoIdentity, http.StatusUnprocessableEntity, openapi.CodeNoIdentity, ""},
 		{submit.ErrRejected, http.StatusForbidden, openapi.CodeSubmissionRejected, ""},
+		{rules.ErrInvalid, http.StatusBadRequest, openapi.CodeInvalidRule, ""},
+		{rules.ErrUnsupported, http.StatusConflict, openapi.CodeConflict, ""},
+		{store.ErrInvalidAnnotation, http.StatusBadRequest, openapi.CodeInvalidBody, ""},
+		{store.ErrNotPermitted, http.StatusForbidden, openapi.CodeForbidden, ""},
+		{store.ErrNotPending, http.StatusConflict, openapi.CodeConflict, "the proposal is no longer pending"},
+		{store.ErrDuplicate, http.StatusConflict, openapi.CodeConflict, "the same proposal is pending already"},
+		{store.ErrTooManyProposals, http.StatusTooManyRequests, openapi.CodeRateLimited, "too many pending proposals; withdraw some or wait for a decision"},
+		{store.ErrRuleChanged, http.StatusConflict, openapi.CodeConflict, ""},
 	} {
 		if errors.Is(err, m.err) {
 			detail := m.detail
@@ -256,6 +340,7 @@ var classes = map[agentview.Class]classify.Class{
 func (a *API) listMessages(ctx context.Context, v *auth.Viewer, p MessagesParams) (MessagePage, error) {
 	q := store.MessageQuery{Limit: p.Limit, Before: (*store.MessageCursor)(p.Cursor)}
 	q.Downgraded = downgrades[p.Downgraded]
+	q.Label, q.Archived = p.Label, p.Archived
 	if p.Prefix != nil {
 		q.Prefix, q.Zone = p.Prefix.Prefix, p.Prefix.Zone
 	}
@@ -421,6 +506,7 @@ func prefixOut(p store.PrefixStat) Prefix {
 func (a *API) search(ctx context.Context, v *auth.Viewer, p SearchParams) (SearchResult, error) {
 	res, err := a.db.Search(ctx, v, store.SearchQuery{
 		Text: p.Q, Limit: p.Limit, Before: (*store.MessageCursor)(p.Cursor), IncludeDowngraded: p.Downgraded == "include",
+		Label: p.Label, Archived: p.Archived,
 	})
 	if err != nil {
 		return SearchResult{}, err
@@ -431,7 +517,7 @@ func (a *API) search(ctx context.Context, v *auth.Viewer, p SearchParams) (Searc
 			ID: h.ID, ThreadID: h.ThreadID, ReceivedAt: h.ReceivedAt, Subject: h.Subject,
 			FromAddr: h.FromAddr, FromName: h.FromName, Snippet: h.Snippet, Class: classOf(h.Class),
 			Downgraded: h.Downgraded, Quarantined: h.Quarantined, Recipients: []string{},
-			Outgoing: outgoingOut(h.Outgoing),
+			Outgoing: outgoingOut(h.Outgoing), Labels: nonNil(h.Labels), Archived: h.Archived,
 		}
 		// A hit from the notification zone shows its code there too
 		// (§12.9); other mail is found by its words, not its numbers.
@@ -455,7 +541,7 @@ func summary(v *auth.Viewer, m store.MessageSummary) MessageSummary {
 		FromAddr: m.FromAddr, FromName: m.FromName, Snippet: m.Snippet, Class: classOf(m.Class),
 		Downgraded: m.Downgraded, Quarantined: m.Quarantined, HasAttach: m.HasAttach,
 		Recipients: nonNil(m.Recipients), Outgoing: outgoingOut(m.Outgoing),
-		Extracted: extracted(m.Extracted, time.Now()),
+		Extracted: extracted(m.Extracted, time.Now()), Labels: nonNil(m.Labels), Archived: m.Archived,
 	}
 	if v.Has(auth.DeliveryRead) {
 		out.SenderVerified = m.SenderVerified

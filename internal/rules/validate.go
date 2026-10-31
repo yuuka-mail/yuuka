@@ -76,7 +76,7 @@ func ValidateMatch(m Match) error {
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
-		return fmt.Errorf("%w: match: %w", ErrInvalid, err)
+		return invalid("match", "%v", err)
 	}
 	if len(b) > MaxMatchBytes {
 		return invalid("match", "%d bytes, at most %d", len(b), MaxMatchBytes)
@@ -237,7 +237,7 @@ func CheckRegexBudget(ms ...Match) error {
 		n += RegexCount(m)
 	}
 	if n > MaxRegexTotal {
-		return fmt.Errorf("%w: enabled rules would have %d regex conditions, at most %d", ErrInvalid, n, MaxRegexTotal)
+		return invalid("match", "enabled rules would have %d regex conditions, at most %d", n, MaxRegexTotal)
 	}
 	return nil
 }

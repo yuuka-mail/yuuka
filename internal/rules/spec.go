@@ -52,8 +52,21 @@ type Spec struct {
 	Actions []Action
 }
 
+// InvalidError is a rule that does not decode or validate, and where:
+// Path names the member in the rule's JSON ("match.all[2].value",
+// "actions[0].label"), or "rule" for the whole. It is ErrInvalid.
+type InvalidError struct {
+	Path   string
+	Reason string
+}
+
+func (e *InvalidError) Error() string { return ErrInvalid.Error() + ": " + e.Path + ": " + e.Reason }
+
+// Is makes errors.Is(err, ErrInvalid) hold.
+func (e *InvalidError) Is(target error) bool { return target == ErrInvalid }
+
 func invalid(path, format string, args ...any) error {
-	return fmt.Errorf("%w: %s: %s", ErrInvalid, path, fmt.Sprintf(format, args...))
+	return &InvalidError{Path: path, Reason: fmt.Sprintf(format, args...)}
 }
 
 // ParseSpec decodes {"v":1,"match":…,"actions":…}. Unknown members,
@@ -68,7 +81,7 @@ func ParseSpec(data []byte) (Spec, error) {
 		Actions jsontext.Value `json:"actions"`
 	}
 	if err := json.Unmarshal(data, &w, json.RejectUnknownMembers(true)); err != nil {
-		return Spec{}, fmt.Errorf("%w: %w", ErrInvalid, err)
+		return Spec{}, invalid("rule", "%v", err)
 	}
 	if w.V == nil || *w.V != Version {
 		return Spec{}, invalid("v", "must be %d", Version)
@@ -132,7 +145,7 @@ func parseNode(v jsontext.Value, path string, depth int) (Match, error) {
 	}
 	var obj map[string]jsontext.Value
 	if err := json.Unmarshal(v, &obj); err != nil {
-		return Match{}, fmt.Errorf("%w: %s: %w", ErrInvalid, path, err)
+		return Match{}, invalid(path, "%v", err)
 	}
 	if len(obj) == 1 {
 		for key, sub := range obj {
@@ -169,7 +182,7 @@ func parseNode(v jsontext.Value, path string, depth int) (Match, error) {
 		return Match{}, invalid(path+".op", "%v", err)
 	}
 	if err := json.Unmarshal(value, &m.Value); err != nil {
-		return Match{}, fmt.Errorf("%w: %s.value: %w", ErrInvalid, path, err)
+		return Match{}, invalid(path+".value", "%v", err)
 	}
 	m.Value = tidyValue(m.Value)
 	if fields[m.Field].addr && m.Op != OpRegex {
@@ -184,7 +197,7 @@ func parseList(v jsontext.Value, path string, depth int) ([]Match, error) {
 	}
 	var items []jsontext.Value
 	if err := json.Unmarshal(v, &items); err != nil {
-		return nil, fmt.Errorf("%w: %s: %w", ErrInvalid, path, err)
+		return nil, invalid(path, "%v", err)
 	}
 	kids := make([]Match, 0, len(items))
 	for i, item := range items {
@@ -285,7 +298,7 @@ func ParseActions(data []byte) ([]Action, error) {
 	}
 	var items []jsontext.Value
 	if err := json.Unmarshal(v, &items); err != nil {
-		return nil, fmt.Errorf("%w: actions: %w", ErrInvalid, err)
+		return nil, invalid("actions", "%v", err)
 	}
 	out := make([]Action, 0, len(items))
 	for i, item := range items {
@@ -304,7 +317,7 @@ func parseAction(v jsontext.Value, path string) (Action, error) {
 	}
 	var obj map[string]jsontext.Value
 	if err := json.Unmarshal(v, &obj); err != nil {
-		return Action{}, fmt.Errorf("%w: %s: %w", ErrInvalid, path, err)
+		return Action{}, invalid(path, "%v", err)
 	}
 	var a Action
 	kind, ok := obj["kind"]

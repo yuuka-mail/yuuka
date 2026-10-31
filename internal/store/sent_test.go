@@ -15,6 +15,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/contenthash"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
+	"github.com/yuuka-mail/yuuka/internal/rules"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
@@ -422,6 +423,33 @@ func TestVisibility(t *testing.T) {
 			t.Fatalf("propose %s: %v", n, err)
 		}
 	}
+	// And by the restricted agent on what it sees. An agent sees only
+	// its own history rows and proposals (§13.8), and of those only the
+	// ones about messages it can see: one it made before it lost
+	// access to in-closed stays hidden.
+	for _, n := range []string{"both", "in-open", "sent-open"} {
+		now := time.Now()
+		if _, _, err := db.Annotate(ctx, restricted, msgs[n], []store.Annotation{store.SetLabel("mine", true)},
+			store.Action{ID: ulid.New(now), Actor: agent.ID, Tool: "mcp.annotate", At: now}); err != nil {
+			t.Fatalf("annotate %s as the agent: %v", n, err)
+		}
+		if _, _, err := db.CreateProposal(ctx, restricted, store.NewProposal{
+			Kind: store.ProposalAnnotate, MessageID: msgs[n],
+			Payload: []byte(`{"v":1,"scope":"message","actions":[{"kind":"archive"}]}`),
+		}, store.Action{ID: ulid.New(now), Actor: agent.ID, Tool: "mcp.propose", At: now}); err != nil {
+			t.Fatalf("propose %s as the agent: %v", n, err)
+		}
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO proposals (id, proposed_by, kind, message_id, payload, expires_at)
+		VALUES ($1, $2, 'annotate', $3, '{"v":1,"scope":"message","actions":[{"kind":"archive"}]}', now() + interval '1 day')`,
+		ulid.New(time.Now()), agent.ID, msgs["in-closed"]); err != nil {
+		t.Fatal(err)
+	}
+	ownProposals := map[*auth.Viewer][]string{
+		everyone:   {"both", "both", "in-closed", "in-closed", "in-open", "in-open", "leak-closed", "sent-closed", "sent-open", "sent-open"},
+		restricted: {"both", "in-open", "sent-open"},
+		nobody:     {},
+	}
 
 	visibleTo := map[*auth.Viewer][]string{
 		everyone:   {"both", "in-closed", "in-open", "leak-closed", "sent-closed", "sent-open"},
@@ -470,13 +498,25 @@ func TestVisibility(t *testing.T) {
 				t.Errorf("ListMessages label=seen %q, want %q", got, want)
 			}
 			labels, err := db.Labels(ctx, v)
-			if err != nil || len(want) > 0 && (len(labels) != 1 || labels[0].Messages != len(want)) || len(want) == 0 && len(labels) != 0 {
+			seen := slices.IndexFunc(labels, func(l store.LabelCount) bool { return l.Label == "seen" })
+			if err != nil || len(want) > 0 && (seen < 0 || labels[seen].Messages != len(want)) || len(want) == 0 && len(labels) != 0 {
 				t.Errorf("Labels %+v %v, want seen on %d", labels, err, len(want))
 			}
 			for n, id := range msgs {
 				h, err := db.MessageAnnotations(ctx, v, id)
-				if slices.Contains(want, n) != (err == nil && len(h) == 1) || err != nil && !errors.Is(err, store.ErrNotFound) {
-					t.Errorf("MessageAnnotations %s: %v %v", n, h, err)
+				// The operator's row and the agent's; an agent sees
+				// only its own.
+				rows := 1
+				if v == everyone && slices.Contains(ownProposals[restricted], n) {
+					rows = 2
+				}
+				if slices.Contains(want, n) != (err == nil && len(h) == rows) || err != nil && !errors.Is(err, store.ErrNotFound) {
+					t.Errorf("MessageAnnotations %s: %v %v, want %d rows", n, h, err, rows)
+				}
+				for _, e := range h {
+					if v != everyone && e.ActorID != v.PrincipalID {
+						t.Errorf("MessageAnnotations %s: row of %s", n, e.Actor)
+					}
 				}
 			}
 			props, err := db.Proposals(ctx, v, store.ProposalQuery{})
@@ -486,9 +526,37 @@ func TestVisibility(t *testing.T) {
 			ids = ids[:0]
 			for _, p := range props {
 				ids = append(ids, p.MessageID)
+				if _, err := db.ProposalByID(ctx, v, p.ID); err != nil {
+					t.Errorf("ProposalByID %s: %v", p.ID, err)
+				}
 			}
-			if got := names(ids); !slices.Equal(got, want) {
-				t.Errorf("Proposals %q, want %q", got, want)
+			if got := names(ids); !slices.Equal(got, ownProposals[v]) {
+				t.Errorf("Proposals %q, want %q", got, ownProposals[v])
+			}
+
+			// What a draft rule is generalized from: the deliveries v
+			// can see, none for mail it sees as a sent copy only.
+			for n, id := range msgs {
+				fs, err := db.FactsFor(ctx, v, id)
+				if slices.Contains(want, n) != (err == nil) || err != nil && !errors.Is(err, store.ErrNotFound) {
+					t.Errorf("FactsFor %s: %v", n, err)
+				}
+				inbound := !strings.HasPrefix(n, "sent-") && (n != "both" || v == everyone)
+				if err == nil && (len(fs) > 0) != inbound {
+					t.Errorf("FactsFor %s: %d deliveries", n, len(fs))
+				}
+			}
+			counts, err := db.CountMatches(ctx, v, []rules.Match{
+				{Field: rules.FieldAttachment, Op: rules.OpEq, Value: false},
+				{Field: rules.FieldSubject, Op: rules.OpEq, Value: "in-open"},
+			}, time.Time{})
+			wantIn := slices.DeleteFunc(slices.Clone(want), func(n string) bool { return strings.HasPrefix(n, "sent-") || v != everyone && n == "both" })
+			wantOpen := 0
+			if slices.Contains(want, "in-open") {
+				wantOpen = 1
+			}
+			if err != nil || counts[0] != len(wantIn) || counts[1] != wantOpen {
+				t.Errorf("CountMatches %v %v, want %d, %d", counts, err, len(wantIn), wantOpen)
 			}
 			// A preview matches inbound deliveries v can see only:
 			// both is visible through its sent copy, not its delivery.

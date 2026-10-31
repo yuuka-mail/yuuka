@@ -297,34 +297,14 @@ func (p *annPlan) write(ctx context.Context, tx pgx.Tx, w *writer, actionID stri
 	return nil
 }
 
-// annotate is the core every annotation writer goes through: decide ins
-// for message at rank, and if anything changes, record a (with the
-// outcomes as its result and its own id as the undo token) and write.
-// It reports whether a was recorded. The caller holds contentLock.
-func annotate(ctx context.Context, tx pgx.Tx, w *writer, a Action, rank Rank, message string, ins []Annotation) ([]AnnotationResult, bool, error) {
-	st, err := loadAnnState(ctx, tx, message)
-	if err != nil {
-		return nil, false, err
-	}
-	p := annPlan{st: st, rank: rank}
-	res := p.plan(ins)
-	if !p.changed() {
-		return res, false, nil
-	}
-	a.UndoToken = a.ID
-	if a.Result == nil {
-		a.Result = map[string]any{"message": message, "outcomes": res}
-	}
-	if err := insertAction(ctx, tx, a); err != nil {
-		return nil, false, err
-	}
-	return res, true, p.write(ctx, tx, w, a.ID)
-}
-
 // ErrNotPermitted: the principal may not do this, whatever its scopes:
-// an agent undoing someone else's action, anyone but a person deciding a
-// proposal.
+// anyone but a person deciding a proposal, or withdrawing someone
+// else's.
 var ErrNotPermitted = errors.New("not permitted for this principal")
+
+// ErrInvalidAnnotation: an Annotation that cannot be written (a label
+// rules.ValidLabel refuses, a value out of range, nothing asked).
+var ErrInvalidAnnotation = errors.New("invalid annotation")
 
 // Annotate is the annotation entry point of people, agents and services
 // (REST, MCP, notification buttons): it writes ins to message as v, at
@@ -333,6 +313,24 @@ var ErrNotPermitted = errors.New("not permitted for this principal")
 // otherwise ErrNotFound. Rules do not come through here: they run inside
 // ingest (Fold) and the retroactive runs.
 func (db *DB) Annotate(ctx context.Context, v *auth.Viewer, message string, ins []Annotation, a Action) ([]AnnotationResult, bool, error) {
+	res, recorded, err := db.annotateAs(ctx, v, message, false, ins, a)
+	if err != nil {
+		return nil, false, err
+	}
+	for _, r := range res { // the one message, by its resolved id
+		return r, recorded, nil
+	}
+	return nil, recorded, nil
+}
+
+// AnnotateThread is Annotate on every message of message's thread that v
+// can see, as one action: undoing it undoes all of them. The outcomes
+// are by message id.
+func (db *DB) AnnotateThread(ctx context.Context, v *auth.Viewer, message string, ins []Annotation, a Action) (map[string][]AnnotationResult, bool, error) {
+	return db.annotateAs(ctx, v, message, true, ins, a)
+}
+
+func (db *DB) annotateAs(ctx context.Context, v *auth.Viewer, message string, thread bool, ins []Annotation, a Action) (map[string][]AnnotationResult, bool, error) {
 	if err := needViewer(v, "annotate"); err != nil {
 		return nil, false, err
 	}
@@ -341,14 +339,14 @@ func (db *DB) Annotate(ctx context.Context, v *auth.Viewer, message string, ins 
 		return nil, false, fmt.Errorf("annotate as %s: %w", v, ErrNotPermitted)
 	}
 	if len(ins) == 0 {
-		return nil, false, errors.New("annotate: nothing asked")
+		return nil, false, fmt.Errorf("annotate: %w: nothing asked", ErrInvalidAnnotation)
 	}
 	for _, in := range ins {
 		if err := in.validate(); err != nil {
-			return nil, false, fmt.Errorf("annotate: %w", err)
+			return nil, false, fmt.Errorf("annotate: %w: %w", ErrInvalidAnnotation, err)
 		}
 	}
-	var res []AnnotationResult
+	res := map[string][]AnnotationResult{}
 	var recorded bool
 	err = pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, contentLock); err != nil {
@@ -358,9 +356,43 @@ func (db *DB) Annotate(ctx context.Context, v *auth.Viewer, message string, ins 
 		if err != nil {
 			return err
 		}
+		targets := []string{id}
+		if thread {
+			if targets, err = db.visibleThreadOf(ctx, tx, v, id); err != nil {
+				return err
+			}
+		}
 		w := writer{tx: tx}
-		if res, recorded, err = annotate(ctx, tx, &w, a, rank, id, ins); err != nil {
+		plans := make([]annPlan, len(targets))
+		changed := false
+		for i, m := range targets {
+			st, err := loadAnnState(ctx, tx, m)
+			if err != nil {
+				return err
+			}
+			plans[i] = annPlan{st: st, rank: rank}
+			res[m] = plans[i].plan(ins)
+			changed = changed || plans[i].changed()
+		}
+		if !changed {
+			return nil
+		}
+		a.UndoToken = a.ID
+		if a.Result == nil {
+			result := map[string]any{"message": id, "outcomes": res[id]}
+			if thread {
+				result = map[string]any{"thread_of": id, "outcomes": res}
+			}
+			a.Result = result
+		}
+		if err := insertAction(ctx, tx, a); err != nil {
 			return err
+		}
+		recorded = true
+		for i := range plans {
+			if err := plans[i].write(ctx, tx, &w, a.ID); err != nil {
+				return err
+			}
 		}
 		return w.flush(ctx)
 	})
@@ -368,6 +400,17 @@ func (db *DB) Annotate(ctx context.Context, v *auth.Viewer, message string, ins 
 		return nil, false, fmt.Errorf("annotate %s: %w", message, err)
 	}
 	return res, recorded, nil
+}
+
+// visibleThreadOf lists the messages of message's thread that v can see.
+func (db *DB) visibleThreadOf(ctx context.Context, tx pgx.Tx, v *auth.Viewer, message string) ([]string, error) {
+	rows, err := tx.Query(ctx, `SELECT m.id FROM messages m
+		WHERE m.thread_id = (SELECT thread_id FROM messages WHERE id = $1) AND `+db.visibleMessage(v, "m")+`
+		ORDER BY m.id`, message)
+	if err != nil {
+		return nil, fmt.Errorf("thread of %s: %w", message, err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[string])
 }
 
 // visibleMessageID resolves an alias and returns the message id if v may
@@ -399,8 +442,8 @@ type UndoResult struct {
 // Undo reverts the annotations action wrote, as v, and records a. Each
 // row is reverted only while it is still the latest for its attribute;
 // the revert is written at v's rank. Agents and services may undo only
-// their own actions (ErrNotPermitted otherwise). ErrNotFound if the
-// action wrote no annotations.
+// their own actions: anyone else's is ErrNotFound to them, as is an
+// action that wrote no annotations.
 func (db *DB) Undo(ctx context.Context, v *auth.Viewer, action string, a Action) (UndoResult, error) {
 	var res UndoResult
 	if err := needViewer(v, "undo"); err != nil {
@@ -422,8 +465,10 @@ func (db *DB) Undo(ctx context.Context, v *auth.Viewer, action string, a Action)
 		if err != nil {
 			return err
 		}
+		// An agent sees only its own actions (§13.8): anyone else's is
+		// as missing as one that does not exist.
 		if rank < RankPerson && (actor == nil || *actor != v.PrincipalID) {
-			return ErrNotPermitted
+			return ErrNotFound
 		}
 		rows, err := tx.Query(ctx, `
 			SELECT l.seq, l.message_id, l.attr, l.label, l.before, `+db.visibleMessage(v, "m")+`
@@ -535,16 +580,20 @@ type AnnotationEntry struct {
 	Before   *int16
 	After    *int16
 	Rank     Rank
-	// Actor is kind:name of the action's principal; "" if none.
-	Actor  string
-	Tool   string
-	At     time.Time
-	Undoes *int64
+	// ActorID is the action's principal and Actor its kind:name; both
+	// "" if none.
+	ActorID string
+	Actor   string
+	Tool    string
+	At      time.Time
+	Undoes  *int64
 }
 
 // MessageAnnotations returns the annotation history of message id as v
 // sees it, oldest first: where each label, the archived state and the
 // class override came from. ErrNotFound if v cannot see the message.
+// The history is the audit log's (§13.8): a person sees all of it, an
+// agent or service only the rows of its own actions.
 func (db *DB) MessageAnnotations(ctx context.Context, v *auth.Viewer, id string) ([]AnnotationEntry, error) {
 	if err := needViewer(v, "annotations"); err != nil {
 		return nil, err
@@ -557,17 +606,17 @@ func (db *DB) MessageAnnotations(ctx context.Context, v *auth.Viewer, id string)
 		}
 		rows, err := tx.Query(ctx, `
 			SELECT l.seq, l.action_id, l.attr, l.label, l.before, l.after, l.rank,
-				coalesce(p.kind || ':' || p.name, ''), a.tool, a.at, l.undoes
+				coalesce(p.id, ''), coalesce(p.kind || ':' || p.name, ''), a.tool, a.at, l.undoes
 			FROM annotation_log l JOIN actions a ON a.id = l.action_id
 			LEFT JOIN principals p ON p.id = a.actor
-			WHERE l.message_id = $1 ORDER BY l.seq`, mid)
+			WHERE l.message_id = $1 AND ($2 OR a.actor = $3) ORDER BY l.seq`, mid, isPerson(v), v.PrincipalID)
 		if err != nil {
 			return err
 		}
 		out, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (AnnotationEntry, error) {
 			var e AnnotationEntry
 			err := r.Scan(&e.Seq, &e.ActionID, &e.Attr, &e.Label, &e.Before, &e.After, &e.Rank,
-				&e.Actor, &e.Tool, &e.At, &e.Undoes)
+				&e.ActorID, &e.Actor, &e.Tool, &e.At, &e.Undoes)
 			return e, err
 		})
 		return err

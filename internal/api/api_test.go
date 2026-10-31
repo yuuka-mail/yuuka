@@ -28,6 +28,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/outbox"
 	"github.com/yuuka-mail/yuuka/internal/r2/r2fake"
+	"github.com/yuuka-mail/yuuka/internal/rules"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/submit"
@@ -129,6 +130,117 @@ func (s *spy) OutboxList(ctx context.Context, v *auth.Viewer, q store.OutboxQuer
 func (s *spy) OutboxByID(ctx context.Context, v *auth.Viewer, id string) (store.OutboxEntry, error) {
 	s.saw("OutboxByID", v)
 	return s.DB.OutboxByID(ctx, v, id)
+}
+
+func (s *spy) Annotate(ctx context.Context, v *auth.Viewer, id string, ins []store.Annotation, a store.Action) ([]store.AnnotationResult, bool, error) {
+	s.saw("Annotate", v)
+	return s.DB.Annotate(ctx, v, id, ins, a)
+}
+
+func (s *spy) AnnotateThread(ctx context.Context, v *auth.Viewer, id string, ins []store.Annotation, a store.Action) (map[string][]store.AnnotationResult, bool, error) {
+	s.saw("AnnotateThread", v)
+	return s.DB.AnnotateThread(ctx, v, id, ins, a)
+}
+
+func (s *spy) Undo(ctx context.Context, v *auth.Viewer, action string, a store.Action) (store.UndoResult, error) {
+	s.saw("Undo", v)
+	return s.DB.Undo(ctx, v, action, a)
+}
+
+func (s *spy) MessageAnnotations(ctx context.Context, v *auth.Viewer, id string) ([]store.AnnotationEntry, error) {
+	s.saw("MessageAnnotations", v)
+	return s.DB.MessageAnnotations(ctx, v, id)
+}
+
+func (s *spy) Labels(ctx context.Context, v *auth.Viewer) ([]store.LabelCount, error) {
+	s.saw("Labels", v)
+	return s.DB.Labels(ctx, v)
+}
+
+func (s *spy) CreateProposal(ctx context.Context, v *auth.Viewer, p store.NewProposal, a store.Action) (store.Proposal, []rules.Warning, error) {
+	s.saw("CreateProposal", v)
+	return s.DB.CreateProposal(ctx, v, p, a)
+}
+
+func (s *spy) Proposals(ctx context.Context, v *auth.Viewer, q store.ProposalQuery) ([]store.Proposal, error) {
+	s.saw("Proposals", v)
+	return s.DB.Proposals(ctx, v, q)
+}
+
+func (s *spy) ProposalByID(ctx context.Context, v *auth.Viewer, id string) (store.Proposal, error) {
+	s.saw("ProposalByID", v)
+	return s.DB.ProposalByID(ctx, v, id)
+}
+
+func (s *spy) AcceptProposal(ctx context.Context, v *auth.Viewer, id string, rule *store.NewRule, a store.Action) (store.Accepted, error) {
+	s.saw("AcceptProposal", v)
+	return s.DB.AcceptProposal(ctx, v, id, rule, a)
+}
+
+func (s *spy) RejectProposal(ctx context.Context, v *auth.Viewer, id string, a store.Action) error {
+	s.saw("RejectProposal", v)
+	return s.DB.RejectProposal(ctx, v, id, a)
+}
+
+func (s *spy) WithdrawProposal(ctx context.Context, v *auth.Viewer, id string, a store.Action) error {
+	s.saw("WithdrawProposal", v)
+	return s.DB.WithdrawProposal(ctx, v, id, a)
+}
+
+func (s *spy) PreviewRule(ctx context.Context, v *auth.Viewer, spec []byte, q store.PreviewQuery) (store.Preview, error) {
+	s.saw("PreviewRule", v)
+	return s.DB.PreviewRule(ctx, v, spec, q)
+}
+
+func (s *spy) FactsFor(ctx context.Context, v *auth.Viewer, id string) ([]rules.Facts, error) {
+	s.saw("FactsFor", v)
+	return s.DB.FactsFor(ctx, v, id)
+}
+
+func (s *spy) CountMatches(ctx context.Context, v *auth.Viewer, ms []rules.Match, since time.Time) ([]int, error) {
+	s.saw("CountMatches", v)
+	return s.DB.CountMatches(ctx, v, ms, since)
+}
+
+// Rules are configuration and their reads take no viewer (the handlers
+// let only people through); their writes are recorded as the actor.
+var configRead = &auth.Viewer{PrincipalKind: "config"}
+
+func actor(a store.Action) *auth.Viewer { return &auth.Viewer{PrincipalID: a.Actor} }
+
+func (s *spy) Rules(ctx context.Context, all bool) ([]store.Rule, error) {
+	s.saw("Rules", configRead)
+	return s.DB.Rules(ctx, all)
+}
+
+func (s *spy) RuleByID(ctx context.Context, id string) (store.Rule, error) {
+	s.saw("RuleByID", configRead)
+	return s.DB.RuleByID(ctx, id)
+}
+
+func (s *spy) CreateRule(ctx context.Context, n store.NewRule, a store.Action) (store.Rule, []rules.Warning, error) {
+	s.saw("CreateRule", actor(a))
+	return s.DB.CreateRule(ctx, n, a)
+}
+
+func (s *spy) UpdateRule(ctx context.Context, id string, u store.RuleUpdate, a store.Action) (store.Rule, []rules.Warning, error) {
+	s.saw("UpdateRule", actor(a))
+	return s.DB.UpdateRule(ctx, id, u, a)
+}
+
+func (s *spy) DeleteRule(ctx context.Context, id string, a store.Action) error {
+	s.saw("DeleteRule", actor(a))
+	return s.DB.DeleteRule(ctx, id, a)
+}
+
+func (s *spy) ApplyRule(ctx context.Context, id string, since time.Time, dry bool, a store.Action) (store.RetroStats, error) {
+	s.saw("ApplyRule", actor(a))
+	return s.DB.ApplyRule(ctx, id, since, dry, a)
+}
+
+func (s *spy) RevertRule(ctx context.Context, id string, since time.Time, a store.Action) (store.RevertStats, error) {
+	s.saw("RevertRule", actor(a))
+	return s.DB.RevertRule(ctx, id, since, a)
 }
 
 // localRaw reads raw messages the way ingest does without R2.
@@ -355,6 +467,11 @@ func TestACL(t *testing.T) {
 	get, upd, del, sub := mine(), mine(), mine(), mine()
 	sent, unknown := h.queued(), h.unknown()
 	other := principalNamed(t, h, "agent", "momoi")
+	// arisu's annotation and proposals, and the operator's rules (§8.5).
+	annotated := h.annotation(h.agent, msg.ID, store.SetLabel("acl", true))
+	propose := func(label string) string { return h.proposal(h.agent, msg.ID, label) }
+	seeProposal, accept, reject, withdraw := propose("p1"), propose("p2"), propose("p3"), propose("p4")
+	aRule, gone := h.rule("acl"), h.rule("gone")
 	h.spy.take()
 
 	// How to call each route, and the store methods it must go through.
@@ -362,9 +479,13 @@ func TestACL(t *testing.T) {
 		method, path, body string
 		as                 store.Principal // zero: agent:arisu
 		reads              []string
-		// private: the route acts on arisu's draft, which another agent
-		// must not be able to tell from a missing one.
+		// private: the route acts on arisu's draft, action or proposal,
+		// which another agent must not be able to tell from a missing
+		// one.
 		private bool
+		// people: only a person may call it (§8.5): an agent holding
+		// every scope is refused before the store is asked.
+		people bool
 	}
 	calls := map[string]call{
 		"GET /api/v1/messages":                         {path: "/api/v1/messages?prefix=github@example.com", reads: []string{"ListMessages"}},
@@ -397,7 +518,65 @@ func TestACL(t *testing.T) {
 		"GET /api/v1/outbox/{id}":         {path: "/api/v1/outbox/" + sent, reads: []string{"OutboxByID"}},
 		"POST /api/v1/outbox/{id}/resolve": {
 			method: http.MethodPost, path: "/api/v1/outbox/" + unknown + "/resolve", body: `{"resolution":"abandon"}`,
-			as: h.human, reads: []string{"OutboxByID"},
+			as: h.human, reads: []string{"OutboxByID"}, people: true,
+		},
+
+		"GET /api/v1/labels": {path: "/api/v1/labels", reads: []string{"Labels"}},
+		"POST /api/v1/messages/{id}/annotations": {
+			method: http.MethodPost, path: "/api/v1/messages/" + msg.ID + "/annotations",
+			body: `{"actions":[{"kind":"label","label":"acl2"}]}`, reads: []string{"Annotate"},
+		},
+		"GET /api/v1/messages/{id}/annotations": {path: "/api/v1/messages/" + msg.ID + "/annotations", reads: []string{"MessageAnnotations"}},
+		"POST /api/v1/actions/{id}/undo": {
+			method: http.MethodPost, path: "/api/v1/actions/" + annotated + "/undo", reads: []string{"Undo"}, private: true,
+		},
+		"GET /api/v1/proposals": {path: "/api/v1/proposals?state=pending", reads: []string{"Proposals"}},
+		"POST /api/v1/proposals": {
+			method: http.MethodPost, path: "/api/v1/proposals",
+			body:  `{"kind":"annotate","message_id":"` + msg.ID + `","actions":[{"kind":"archive"}],"rationale":"acl"}`,
+			reads: []string{"CreateProposal"},
+		},
+		"GET /api/v1/proposals/{id}": {path: "/api/v1/proposals/" + seeProposal, reads: []string{"ProposalByID"}, private: true},
+		"POST /api/v1/proposals/{id}/accept": {
+			method: http.MethodPost, path: "/api/v1/proposals/" + accept + "/accept", body: `{}`,
+			as: h.human, reads: []string{"ProposalByID", "AcceptProposal"}, people: true,
+		},
+		"POST /api/v1/proposals/{id}/reject": {
+			method: http.MethodPost, path: "/api/v1/proposals/" + reject + "/reject",
+			as: h.human, reads: []string{"RejectProposal", "ProposalByID"}, people: true,
+		},
+		"POST /api/v1/proposals/{id}/withdraw": {
+			method: http.MethodPost, path: "/api/v1/proposals/" + withdraw + "/withdraw",
+			reads: []string{"WithdrawProposal", "ProposalByID"}, private: true,
+		},
+		"GET /api/v1/rules": {path: "/api/v1/rules?deleted=true", as: h.human, reads: []string{"Rules"}, people: true},
+		"POST /api/v1/rules": {
+			method: http.MethodPost, path: "/api/v1/rules", body: `{"name":"new","match":` + aboutVerified + `,"actions":[{"kind":"label","label":"new"}]}`,
+			as: h.human, reads: []string{"CreateRule"}, people: true,
+		},
+		"POST /api/v1/rules/preview": {
+			method: http.MethodPost, path: "/api/v1/rules/preview", body: `{"match":` + aboutVerified + `,"actions":[{"kind":"archive"}]}`,
+			as: h.human, reads: []string{"PreviewRule"}, people: true,
+		},
+		"POST /api/v1/rules/draft": {
+			method: http.MethodPost, path: "/api/v1/rules/draft", body: `{"message_id":"` + msg.ID + `"}`,
+			as: h.human, reads: []string{"FactsFor", "CountMatches"}, people: true,
+		},
+		"GET /api/v1/rules/{id}": {path: "/api/v1/rules/" + aRule, as: h.human, reads: []string{"RuleByID"}, people: true},
+		"PUT /api/v1/rules/{id}": {
+			method: http.MethodPut, path: "/api/v1/rules/" + aRule, body: `{"name":"edited","match":` + aboutVerified + `,"actions":[{"kind":"archive"}]}`,
+			as: h.human, reads: []string{"UpdateRule"}, people: true,
+		},
+		"DELETE /api/v1/rules/{id}": {
+			method: http.MethodDelete, path: "/api/v1/rules/" + gone, as: h.human, reads: []string{"DeleteRule"}, people: true,
+		},
+		"POST /api/v1/rules/{id}/apply": {
+			method: http.MethodPost, path: "/api/v1/rules/" + aRule + "/apply", body: `{"dry_run":true}`,
+			as: h.human, reads: []string{"ApplyRule"}, people: true,
+		},
+		"POST /api/v1/rules/{id}/revert": {
+			method: http.MethodPost, path: "/api/v1/rules/" + aRule + "/revert", body: `{}`,
+			as: h.human, reads: []string{"RevertRule"}, people: true,
 		},
 	}
 	for _, rt := range routes {
@@ -451,6 +630,17 @@ func TestACL(t *testing.T) {
 			}
 			h.spy.take()
 		}
+		if row.people != (row.as.Kind == "human") {
+			t.Errorf("%s: people-only routes are called as a person, others as arisu", pattern)
+		}
+		if row.people {
+			if w := send(h.tokenFor(h.agent, auth.AllScopes...)); w.Code != http.StatusForbidden || problemOf(t, w).Code != openapi.CodeForbidden {
+				t.Errorf("%s as an agent with every scope: %d %s", pattern, w.Code, w.Body.String())
+			}
+			if calls := h.spy.take(); len(calls) != 0 {
+				t.Errorf("%s: an agent's request reached the store: %v", pattern, calls)
+			}
+		}
 
 		w := send(h.tokenFor(row.as, rt.Scopes...))
 		if w.Code != openapi.StatusOf(rt.Op) {
@@ -467,6 +657,9 @@ func TestACL(t *testing.T) {
 		for op, vs := range calls {
 			ops = append(ops, op)
 			for _, v := range vs {
+				if v == configRead {
+					continue
+				}
 				if v == nil || v.PrincipalID != row.as.ID {
 					t.Errorf("%s: %s for %v, want %s", pattern, op, v, row.as.ID)
 				}
@@ -478,6 +671,46 @@ func TestACL(t *testing.T) {
 			t.Errorf("%s: store calls %v, want %v", pattern, ops, want)
 		}
 	}
+}
+
+// aboutVerified is a valid match tree: verified mail from example.net.
+const aboutVerified = `{"all":[{"field":"from.org","op":"eq","value":"example.net"},{"field":"from.verified","op":"eq","value":true}]}`
+
+// annotation writes ins on message as p, through the store, and returns
+// the action's id.
+func (h *harness) annotation(p store.Principal, message string, ins ...store.Annotation) string {
+	h.t.Helper()
+	a := store.Action{ID: ulid.New(time.Now()), Actor: p.ID, Tool: "test.annotate", At: time.Now()}
+	if _, recorded, err := h.db.Annotate(h.t.Context(), viewer(p), message, ins, a); err != nil || !recorded {
+		h.t.Fatalf("annotate: %v %v", recorded, err)
+	}
+	return a.ID
+}
+
+// proposal is p's pending proposal to label message.
+func (h *harness) proposal(p store.Principal, message, label string) string {
+	h.t.Helper()
+	pr, _, err := h.db.CreateProposal(h.t.Context(), viewer(p), store.NewProposal{
+		Kind: store.ProposalAnnotate, MessageID: message,
+		Payload: []byte(`{"v":1,"scope":"message","actions":[{"kind":"label","label":"` + label + `"}]}`),
+	}, store.Action{ID: ulid.New(time.Now()), Actor: p.ID, Tool: "test.propose", At: time.Now()})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return pr.ID
+}
+
+// rule is a rule the operator created that labels verified mail from
+// example.net.
+func (h *harness) rule(label string) string {
+	h.t.Helper()
+	r, _, err := h.db.CreateRule(h.t.Context(), store.NewRule{
+		Name: label, Spec: []byte(`{"v":1,"match":` + aboutVerified + `,"actions":[{"kind":"label","label":"` + label + `"}]}`),
+	}, store.Action{ID: ulid.New(time.Now()), Actor: h.human.ID, Tool: "test.rule", At: time.Now()})
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	return r.ID
 }
 
 func principalNamed(t *testing.T, h *harness, kind, name string) store.Principal {

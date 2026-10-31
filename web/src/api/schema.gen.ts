@@ -4,6 +4,53 @@
  */
 
 export interface paths {
+    "/api/v1/actions/{id}/undo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Undo the annotations an action wrote; agents undo only their own */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["UndoResult"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/drafts": {
         parameters: {
             query?: never;
@@ -291,6 +338,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/labels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the labels in use, with how many messages carry each */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["LabelList"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/messages": {
         parameters: {
             query?: never;
@@ -307,6 +399,10 @@ export interface paths {
                     /** @description only mail of these classes */
                     class?: components["schemas"]["Class"][];
                     downgraded?: "hide" | "include" | "only";
+                    /** @description only mail carrying this label (exact, case-sensitive) */
+                    label?: string;
+                    /** @description only archived (true) or unarchived (false) mail; absent is both */
+                    archived?: boolean;
                     /** @description next_cursor of the previous page */
                     cursor?: string;
                     limit?: number;
@@ -386,6 +482,88 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/messages/{id}/annotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get where a message's labels, class and archived state came from */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AnnotationHistory"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Label, classify or archive a message or its thread; a higher-ranked writer's value is overruled, not an error */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AnnotateBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AnnotateResult"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -831,6 +1009,676 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/proposals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List proposals, newest first; agents see only their own */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description only proposals in this state */
+                    state?: components["schemas"]["ProposalState"];
+                    /** @description only proposals about this message */
+                    message_id?: string;
+                    /** @description next_cursor of the previous page */
+                    cursor?: string;
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProposalPage"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Propose annotations or a rule for a person to decide */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ProposalBody"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProposalCreated"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/proposals/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a proposal */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Proposal"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/proposals/{id}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Accept a proposal, optionally creating a rule from it (rule:manage); people only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AcceptBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AcceptResult"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/proposals/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject a proposal; people only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Proposal"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/proposals/{id}/withdraw": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Withdraw one's own proposal */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Proposal"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List rules in evaluation order; people only */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description also list deleted rules */
+                    deleted?: boolean;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RuleList"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /** Create a rule; it runs on mail arriving from now on; people only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RuleBody"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SavedRule"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/draft": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Draft the conditions of a rule for mail like an example message, with match counts; people only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RuleDraftBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RuleDraft"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Try a rule on the mail the caller can see without saving it; people only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["PreviewBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RulePreview"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a rule, deleted or not; people only */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Rule"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        /** Replace a rule; people only */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RuleBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SavedRule"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        /** Delete a rule; what it did stays until reverted; people only */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/{id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Run a rule over past mail; it never notifies; people only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RetroBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RetroStats"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rules/{id}/revert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Take back what a rule did to mail; people only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RetroBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["RevertStats"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/search": {
         parameters: {
             query?: never;
@@ -845,6 +1693,10 @@ export interface paths {
                     /** @description words that must all occur in subject, sender or body; empty matches everything */
                     q?: string;
                     downgraded?: "hide" | "include";
+                    /** @description only mail carrying this label (exact, case-sensitive) */
+                    label?: string;
+                    /** @description only archived (true) or unarchived (false) mail; absent is both */
+                    archived?: boolean;
                     /** @description next_cursor of the previous page */
                     cursor?: string;
                     limit?: number;
@@ -1275,6 +2127,14 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AcceptBody: {
+            rule?: components["schemas"]["RuleBody"];
+        };
+        AcceptResult: {
+            proposal: components["schemas"]["Proposal"];
+            messages: components["schemas"]["MessageOutcomes"][];
+            rule?: components["schemas"]["SavedRule"];
+        };
         Actor: {
             id: string;
             kind: string;
@@ -1283,6 +2143,52 @@ export interface components {
         Address: {
             name?: string;
             addr?: string;
+        };
+        AnnotateBody: {
+            actions: components["schemas"]["Annotation"][];
+            /** @description message (default) or thread */
+            scope?: components["schemas"]["AnnotateScope"];
+        };
+        /** @enum {string} */
+        AnnotateKind: "label" | "unlabel" | "archive" | "unarchive" | "classify" | "unclassify";
+        /** @enum {string} */
+        AnnotateOutcome: "applied" | "unchanged" | "overruled" | "labels_full";
+        AnnotateResult: {
+            action_id?: string;
+            messages: components["schemas"]["MessageOutcomes"][];
+        };
+        /** @enum {string} */
+        AnnotateScope: "message" | "thread";
+        Annotation: {
+            kind: components["schemas"]["AnnotateKind"];
+            /** @description label and unlabel: the label; exact and case-sensitive, at most 64 characters */
+            label?: string;
+            /** @description classify: the class to set */
+            class?: components["schemas"]["Class"];
+        };
+        AnnotationEntry: {
+            seq: number;
+            action_id: string;
+            change: components["schemas"]["Annotation"];
+            rank: components["schemas"]["WriterRank"];
+            by: components["schemas"]["Actor"];
+            tool: string;
+            /** Format: date-time */
+            at: string;
+            undoes?: number;
+            undone_by?: number;
+        };
+        AnnotationHistory: {
+            message_id: string;
+            history: components["schemas"]["AnnotationEntry"][];
+        };
+        AnnotationOutcome: {
+            kind: components["schemas"]["AnnotateKind"];
+            /** @description label and unlabel: the label; exact and case-sensitive, at most 64 characters */
+            label?: string;
+            /** @description classify: the class to set */
+            class?: components["schemas"]["Class"];
+            outcome: components["schemas"]["AnnotateOutcome"];
         };
         Attachment: {
             section: string;
@@ -1318,7 +2224,7 @@ export interface components {
         /** @enum {string} */
         Class: "unknown" | "machine" | "human";
         /** @enum {string} */
-        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "internal";
+        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "invalid_rule" | "internal";
         Content: {
             notice: string;
             from: components["schemas"]["Address"];
@@ -1443,6 +2349,13 @@ export interface components {
         };
         /** @enum {string} */
         Kind: "heading" | "para" | "item" | "pre" | "quote";
+        LabelCount: {
+            label: string;
+            messages: number;
+        };
+        LabelList: {
+            labels: components["schemas"]["LabelCount"][];
+        };
         LeakCheck: {
             to: string;
             verdict: components["schemas"]["LeakVerdict"];
@@ -1479,6 +2392,8 @@ export interface components {
             outgoing?: components["schemas"]["Outgoing"];
             extracted?: components["schemas"]["Extracted"];
             sender_verified?: boolean;
+            labels: string[];
+            archived: boolean;
             message_id: string;
             in_reply_to: string;
             references: string[];
@@ -1491,6 +2406,10 @@ export interface components {
             cc: components["schemas"]["Address"][];
             reply_to: components["schemas"]["Address"][];
             deliveries?: components["schemas"]["Delivery"][];
+        };
+        MessageOutcomes: {
+            message_id: string;
+            outcomes: components["schemas"]["AnnotationOutcome"][];
         };
         MessagePage: {
             messages: components["schemas"]["MessageSummary"][];
@@ -1513,7 +2432,11 @@ export interface components {
             outgoing?: components["schemas"]["Outgoing"];
             extracted?: components["schemas"]["Extracted"];
             sender_verified?: boolean;
+            labels: string[];
+            archived: boolean;
         };
+        /** @enum {string} */
+        NotifyLevel: "off" | "silent" | "normal";
         ObservedDomain: {
             domain: string;
             messages: number;
@@ -1614,12 +2537,97 @@ export interface components {
             total: number;
             prefixes: components["schemas"]["Prefix"][];
         };
+        PreviewBody: {
+            match: {
+                [key: string]: unknown;
+            };
+            actions: components["schemas"]["RuleAction"][];
+            /**
+             * Format: date-time
+             * @description only mail received at or after this time; absent is all mail
+             */
+            since?: string;
+            /** @description how many matching messages to return, default 10 */
+            samples?: number;
+        };
         Problem: {
             title: string;
             status: number;
             code: components["schemas"]["Code"];
             detail?: string;
+            path?: string;
         };
+        Proposal: {
+            id: string;
+            kind: components["schemas"]["ProposalKind"];
+            state: components["schemas"]["ProposalState"];
+            proposer: components["schemas"]["Actor"];
+            message_id?: string;
+            scope?: components["schemas"]["AnnotateScope"];
+            match?: {
+                [key: string]: unknown;
+            };
+            actions: components["schemas"]["RuleAction"][];
+            rationale: string;
+            cites: components["schemas"]["Cite"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            decided_by?: string;
+            /** Format: date-time */
+            decided_at?: string;
+            action_id?: string;
+            rule_id?: string;
+        };
+        ProposalBody: {
+            kind: components["schemas"]["ProposalKind"];
+            /** @description annotate: the message; rule: an example it matches */
+            message_id?: string;
+            /** @description annotate: message (default) or thread */
+            scope?: components["schemas"]["AnnotateScope"];
+            /** @description rule: the match tree */
+            match?: {
+                [key: string]: unknown;
+            };
+            actions: components["schemas"]["RuleAction"][];
+            /** @description why, for the person who decides; at most 4000 characters */
+            rationale?: string;
+            /** @description the passages it relies on */
+            cites?: components["schemas"]["Cite"][];
+        };
+        ProposalCreated: {
+            id: string;
+            kind: components["schemas"]["ProposalKind"];
+            state: components["schemas"]["ProposalState"];
+            proposer: components["schemas"]["Actor"];
+            message_id?: string;
+            scope?: components["schemas"]["AnnotateScope"];
+            match?: {
+                [key: string]: unknown;
+            };
+            actions: components["schemas"]["RuleAction"][];
+            rationale: string;
+            cites: components["schemas"]["Cite"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            decided_by?: string;
+            /** Format: date-time */
+            decided_at?: string;
+            action_id?: string;
+            rule_id?: string;
+            warnings: components["schemas"]["RuleWarning"][];
+        };
+        /** @enum {string} */
+        ProposalKind: "annotate" | "rule";
+        ProposalPage: {
+            proposals: components["schemas"]["Proposal"][];
+            next_cursor?: string;
+        };
+        /** @enum {string} */
+        ProposalState: "pending" | "accepted" | "rejected" | "withdrawn" | "expired";
         /** @enum {string} */
         RecipientKind: "to" | "cc" | "bcc";
         /** @enum {string} */
@@ -1652,6 +2660,138 @@ export interface components {
         Resolution: "sent" | "resend" | "abandon";
         ResolveBody: {
             resolution: components["schemas"]["Resolution"];
+        };
+        RetroBody: {
+            /**
+             * Format: date-time
+             * @description only mail received at or after this time; absent is all mail
+             */
+            since?: string;
+            /** @description apply only: count, write nothing */
+            dry_run?: boolean;
+        };
+        RetroStats: {
+            messages: number;
+            matched: number;
+            changed: number;
+            overruled: number;
+            failed: number;
+        };
+        RevertStats: {
+            messages: number;
+            reverted: number;
+            superseded: number;
+        };
+        Rule: {
+            id: string;
+            name: string;
+            priority: number;
+            enabled: boolean;
+            revision: number;
+            match: {
+                [key: string]: unknown;
+            };
+            actions: components["schemas"]["RuleAction"][];
+            proposal_id?: string;
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            deleted_at?: string;
+            unsupported?: string[];
+        };
+        RuleAction: {
+            kind: components["schemas"]["RuleActionKind"];
+            /** @description label: the label to add; exact and case-sensitive, at most 64 characters */
+            label?: string;
+            /** @description classify: the class to set */
+            class?: components["schemas"]["RuleClass"];
+            /** @description notify (rules only): off, silent or normal */
+            level?: components["schemas"]["NotifyLevel"];
+        };
+        /** @enum {string} */
+        RuleActionKind: "label" | "classify" | "archive" | "notify";
+        RuleBody: {
+            /** @description for people; at most 200 characters */
+            name?: string;
+            /** @description evaluation order, ascending, ties by id; the first match sets class, archived and notify, labels add up */
+            priority?: number;
+            /** @description saved but not run */
+            disabled?: boolean;
+            match: {
+                [key: string]: unknown;
+            };
+            actions: components["schemas"]["RuleAction"][];
+        };
+        RuleCandidate: {
+            condition: components["schemas"]["RuleCondition"];
+            selected: boolean;
+            matches: number;
+        };
+        /** @enum {string} */
+        RuleClass: "machine" | "human";
+        RuleCondition: {
+            /** @description such as from.addr, from.verified, list.id, to.addr */
+            field: string;
+            /** @description eq, in, contains, regex or has */
+            op: string;
+            /** @description a string, a boolean, or for in a list of strings */
+            value: unknown;
+        };
+        RuleDraft: {
+            message_id: string;
+            candidates: components["schemas"]["RuleCandidate"][];
+            match?: {
+                [key: string]: unknown;
+            };
+            matches: number;
+        };
+        RuleDraftBody: {
+            message_id: string;
+            /**
+             * Format: date-time
+             * @description count matches among mail received at or after this time; absent is all mail
+             */
+            since?: string;
+        };
+        RuleList: {
+            rules: components["schemas"]["Rule"][];
+        };
+        RulePreview: {
+            messages: number;
+            matched: number;
+            changed: number;
+            overruled: number;
+            failed: number;
+            warnings: components["schemas"]["RuleWarning"][];
+            samples: components["schemas"]["MessageSummary"][];
+        };
+        RuleWarning: {
+            code: string;
+            message: string;
+        };
+        SavedRule: {
+            id: string;
+            name: string;
+            priority: number;
+            enabled: boolean;
+            revision: number;
+            match: {
+                [key: string]: unknown;
+            };
+            actions: components["schemas"]["RuleAction"][];
+            proposal_id?: string;
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            deleted_at?: string;
+            unsupported?: string[];
+            warnings: components["schemas"]["RuleWarning"][];
         };
         /** @enum {string} */
         Scope: "message:read" | "delivery:read" | "prefix:read" | "message:annotate" | "draft:create" | "submission:send" | "prefix:manage" | "account:manage" | "rule:manage" | "admin";
@@ -1724,6 +2864,11 @@ export interface components {
         };
         /** @enum {string} */
         Tier: "none" | "draft" | "review" | "auto";
+        UndoResult: {
+            reverted: number;
+            superseded: number;
+            hidden: number;
+        };
         View: {
             uri: string;
             view_version: number;
@@ -1731,6 +2876,8 @@ export interface components {
             facts: components["schemas"]["Facts"];
             content: components["schemas"]["Content"];
         };
+        /** @enum {string} */
+        WriterRank: "rule" | "agent" | "person";
     };
     responses: never;
     parameters: never;

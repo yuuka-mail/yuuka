@@ -532,8 +532,10 @@ web/src/api/schema.gen.ts → openapi-fetch + openapi-react-query（web/src/api/
   客户端只按 `code` 分支。`type` 一律缺省（`about:blank`），所以 `title` 就是状态码的文字。
   §8.9 的"超出授权降级为草稿"不算错误：照常返回成功，结果里说明原因。
   store 和提交核心的哨兵错误只在 [`api.go`](../../internal/api/api.go) 的 `fail` 一处映射成 code，handler 不各自翻译：
-  对象已不在可改的状态（草稿已进 outbox、outbox 行不是 `unknown`）是 `409 conflict`，
-  `from` 没有身份覆盖是 `422 no_identity`，提交核心直接拒收是 `403 submission_rejected`
+  对象已不在可改的状态（草稿已进 outbox、outbox 行不是 `unknown`、提案已决定）是 `409 conflict`，
+  `from` 没有身份覆盖是 `422 no_identity`，提交核心直接拒收是 `403 submission_rejected`。
+  规则或提案校验不过是 `400 invalid_rule`，扩展成员 `path` 指向请求体里出错的位置（§8.5）；
+  只有人能做的事被别的主体调用是 `403 forbidden`；一个提议者待决的提案满了是 `429 rate_limited`
 - **写端点**：创建回 `201` 和新对象，删除回 `204`。修改是 `PUT` 整体替换，不做 `PATCH`：
   只有一种写法，就不必在 JSON 里区分「缺省」和「清空」（`omitempty` 的零值本来就算缺省）。
   例外只有一个且写在字段说明里：草稿缺省 `from` 表示保留原值，因为草稿总有一个发件地址
