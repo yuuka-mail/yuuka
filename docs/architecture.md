@@ -506,8 +506,10 @@ web/src/api/schema.gen.ts → openapi-fetch + openapi-react-query（web/src/api/
 
 - 自己写的这层（绑定、校验、表转文档：`internal/openapi` 的 schema 与 document，加 `internal/api/route.go`）
   落地时约 580 行代码（不计注释与空行），比预估的 300～400 多。多出来的主要是请求体的绑定和校验（M2 的写端点要用）
-  和为凑出 `$ref`、去掉 `null` 而补的推导胶水，已经越过当初定的 500 行警戒线。它再往上涨，或者开始实现
-  OpenAPI 的边角功能（多种媒体类型协商、`oneOf` 判别、回调……），说明在重造 huma，该直接用现成的
+  和为凑出 `$ref`、去掉 `null` 而补的推导胶水，越过了当初定的 500 行警戒线。超出的两块都是一次性的，
+  不随端点数增长，所以警戒线顺延到约 800 行：加端点只该加路由表条目和 handler，不该让这层变大。
+  越过 800 行，或者开始实现 OpenAPI 的边角功能（多种媒体类型协商、`oneOf` 判别、回调……），
+  说明在重造 huma，该直接用现成的
 - 出现需要双向流或高吞吐二进制的接口：只给那一部分单独考虑 Connect 或 WebSocket，不必把整套契约都迁过去
 
 ---
