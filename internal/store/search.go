@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
+	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/classify"
 )
 
@@ -147,7 +148,7 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 			SELECT m.id, m.thread_id, m.received_at, m.subject, m.from_addr, m.from_name, m.snippet,
 				coalesce(s.class_override, m.class), downgraded, m.parse_error IS NOT NULL, ob.id, ob.state, ob.from_addr,
-				hx.items, hx.sender_verified, coalesce(s.labels, '{}'), coalesce(s.archived, false)
+				hx.items, hx.auths, coalesce(s.labels, '{}'), coalesce(s.archived, false)
 			%s
 			ORDER BY m.received_at DESC, m.id DESC
 			LIMIT $%d`, page, len(pageArgs)), pageArgs...)
@@ -157,10 +158,12 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 		res.Hits, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (SearchHit, error) {
 			var h SearchHit
 			var obID, obState, obFrom *string
+			var auths []*authres.Auth
 			err := r.Scan(&h.ID, &h.ThreadID, &h.ReceivedAt, &h.Subject, &h.FromAddr, &h.FromName,
 				&h.Snippet, &h.Class, &h.Downgraded, &h.Quarantined, &obID, &obState, &obFrom,
-				&h.Extracted, &h.SenderVerified, &h.Labels, &h.Archived)
+				&h.Extracted, &auths, &h.Labels, &h.Archived)
 			h.Outgoing = outgoing(obID, obState, obFrom)
+			h.SenderVerified = senderVerified(auths, h.FromAddr)
 			return h, err
 		})
 		return err
@@ -171,12 +174,13 @@ func (db *DB) Search(ctx context.Context, v *auth.Viewer, q SearchQuery) (Search
 	return res, nil
 }
 
-// hitExtras joins hx for a page of hits: the best extractions and
-// whether a visible delivery proved the sender, as summaries have them.
+// hitExtras joins hx for a page of hits: the best extractions and the
+// auth facts of the visible deliveries, which decide SenderVerified as
+// in summaries.
 func hitExtras(db *DB, v *auth.Viewer) string {
 	return bestExtractions + `
-		CROSS JOIN LATERAL (SELECT ex.items, (SELECT bool_or(` + senderVerified + `) FROM deliveries d
-			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + `) AS sender_verified) hx`
+		CROSS JOIN LATERAL (SELECT ex.items, (SELECT jsonb_agg(d.auth ORDER BY d.received_at, d.id) FROM deliveries d
+			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + `) AS auths) hx`
 }
 
 // likeEscape makes a search term literal inside an ILIKE pattern, whose

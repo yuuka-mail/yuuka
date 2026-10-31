@@ -176,9 +176,11 @@ type MessageSummary struct {
 	// in extractor order: what the notification zone shows instead of
 	// the subject. The values are the sender's (§8.3).
 	Extracted []Extraction
-	// SenderVerified says whether the trusted receiver reported
-	// dmarc=pass on a visible delivery, i.e. whether the From domain is
-	// proven (§10.1.1); nil for mail with no visible delivery, which
+	// SenderVerified says whether a visible delivery proves the From
+	// the reader sees: the trusted receiver reported dmarc=pass for that
+	// From's organization (§10.1.1, leak.SenderOf). It is the rules'
+	// from.verified, so the list never calls verified what such a rule
+	// would not match. nil for mail with no visible delivery, which
 	// nobody judged. It is a delivery fact: callers withhold it from
 	// viewers without delivery:read.
 	SenderVerified *bool
@@ -194,7 +196,7 @@ type MessageSummary struct {
 // the §4.3 downgrade judges how mail arrived, and a sent copy did not.
 const summaryCols = `m.id, m.thread_id, m.received_at, m.subject, m.from_addr, m.from_name, m.snippet,
 	coalesce(s.class_override, m.class), g.downgraded, m.parse_error IS NOT NULL, m.has_attach, g.recipients,
-	ob.id, ob.state, ob.from_addr, ex.items, g.sender_verified, coalesce(s.labels, '{}'), coalesce(s.archived, false)`
+	ob.id, ob.state, ob.from_addr, ex.items, g.auths, coalesce(s.labels, '{}'), coalesce(s.archived, false)`
 
 func (db *DB) summaryFrom(v *auth.Viewer) string {
 	return `
@@ -203,15 +205,24 @@ func (db *DB) summaryFrom(v *auth.Viewer) string {
 		CROSS JOIN LATERAL (
 			SELECT ob.id IS NULL AND NOT coalesce(bool_or(` + notDowngraded + `), false) AS downgraded,
 				coalesce(array_agg(DISTINCT d.prefix || '@' || d.zone ORDER BY d.prefix || '@' || d.zone), '{}') AS recipients,
-				bool_or(` + senderVerified + `) AS sender_verified
+				jsonb_agg(d.auth ORDER BY d.received_at, d.id) AS auths
 			FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
 			WHERE d.message_id = m.id AND ` + db.visibleDelivery(v, "d") + `) g` + bestExtractions + `
 		WHERE ` + db.visibleMessage(v, "m")
 }
 
-// senderVerified is true for a delivery d whose trusted receiver
-// reported dmarc=pass: its From domain is proven (§10.1.1).
-const senderVerified = `coalesce(d.auth->>'trusted', '') = 'true' AND coalesce(d.auth->>'dmarc', '') = 'pass'`
+// senderVerified is SenderVerified from the auth facts of the visible
+// deliveries (nil: there are none) of a message whose From address is
+// from. It is decided in Go, by the function the rules and the leak
+// check use: whether a pass proves this From needs the organizational
+// domain, which SQL does not know.
+func senderVerified(auths []*authres.Auth, from string) *bool {
+	if auths == nil {
+		return nil
+	}
+	ok := slices.ContainsFunc(auths, func(a *authres.Auth) bool { return leak.SenderOf(a, from).Verified != "" })
+	return &ok
+}
 
 // bestExtractions joins ex.items, the best extraction of each kind of
 // message m as a JSON array in extractor order. The rows belong to m, so
@@ -225,10 +236,12 @@ const bestExtractions = `
 func scanSummary(r pgx.CollectableRow) (MessageSummary, error) {
 	var m MessageSummary
 	var obID, obState, obFrom *string
+	var auths []*authres.Auth
 	err := r.Scan(&m.ID, &m.ThreadID, &m.ReceivedAt, &m.Subject, &m.FromAddr, &m.FromName, &m.Snippet,
 		&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState, &obFrom,
-		&m.Extracted, &m.SenderVerified, &m.Labels, &m.Archived)
+		&m.Extracted, &auths, &m.Labels, &m.Archived)
 	m.Outgoing = outgoing(obID, obState, obFrom)
+	m.SenderVerified = senderVerified(auths, m.FromAddr)
 	return m, err
 }
 
@@ -353,10 +366,12 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 			var d MessageDetail
 			m := &d.MessageSummary
 			var obID, obState, obFrom *string
+			var auths []*authres.Auth
 			err := r.Scan(&m.ID, &m.ThreadID, &m.ReceivedAt, &m.Subject, &m.FromAddr, &m.FromName, &m.Snippet,
 				&m.Class, &m.Downgraded, &m.Quarantined, &m.HasAttach, &m.Recipients, &obID, &obState, &obFrom,
-				&m.Extracted, &m.SenderVerified, &m.Labels, &m.Archived, &d.MessageID, &d.InReplyTo, &d.References, &d.Date, &d.BodyText, &d.ParseError)
+				&m.Extracted, &auths, &m.Labels, &m.Archived, &d.MessageID, &d.InReplyTo, &d.References, &d.Date, &d.BodyText, &d.ParseError)
 			m.Outgoing = outgoing(obID, obState, obFrom)
+			m.SenderVerified = senderVerified(auths, m.FromAddr)
 			return d, err
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
