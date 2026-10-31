@@ -37,6 +37,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/triage/score"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
@@ -57,6 +58,9 @@ type Config struct {
 	// Submitter, if set, offers submit_draft. Without it there is no
 	// submit tool: nothing else reaches the outbox.
 	Submitter Submitter
+	// Triage is the configured scorer's profile (§15), nil when there
+	// is none: then no score is shown or searched by.
+	Triage *score.Profile
 }
 
 // Server holds the tools. It is safe for concurrent use.
@@ -67,11 +71,12 @@ type Server struct {
 	now     func() time.Time
 	version string
 	submit  Submitter
+	triage  *score.Profile
 }
 
 // New returns a Server.
 func New(cfg Config) *Server {
-	s := &Server{db: cfg.DB, raw: cfg.Raw, log: cfg.Log, now: cfg.Now, version: cfg.Version, submit: cfg.Submitter}
+	s := &Server{db: cfg.DB, raw: cfg.Raw, log: cfg.Log, now: cfg.Now, version: cfg.Version, submit: cfg.Submitter, triage: cfg.Triage}
 	if s.log == nil {
 		s.log = slog.Default()
 	}
@@ -101,8 +106,8 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 	sdk.AddTool(srv, &sdk.Tool{
 		Name:        "search_messages",
 		InputSchema: input[SearchInput](),
-		Description: "Search mail by words in subject, sender or body. Returns yuuka:// URIs with a snippet, " +
-			"newest first. Needs message:read.",
+		Description: "Search mail by words in subject, sender or body, or by what a decision model leaned to " +
+			"(triage, e.g. phishing:yes). Returns yuuka:// URIs with a snippet, newest first. Needs message:read.",
 		Annotations: readOnly,
 	}, tool(s, viewerOf, "search_messages", auth.MessageRead, s.searchMessages))
 	sdk.AddTool(srv, &sdk.Tool{
@@ -111,6 +116,7 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 		Description: "Read one message as structured text with stable anchors. level=snippet (default) gives " +
 			"facts and a snippet, sections a table of contents, part the text of the anchored part from the " +
 			"anchored paragraph on. The notes on the message or its thread that you may see come with it, each signed by its author. " +
+			"facts.triage, when present, is a decision model's estimate (probabilities per question), not a verdict; nothing acts on it. " +
 			"Needs message:read; delivery facts (recipients, SPF/DKIM/DMARC) also need delivery:read.",
 		Annotations: readOnly,
 	}, tool(s, viewerOf, "get_message", auth.MessageRead, s.getMessage))
@@ -126,7 +132,8 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 		InputSchema: input[ChangesInput](),
 		Description: "Follow what changes in the mailbox, old mail included: new mail, and a later classification, " +
 			"re-extracted codes and links, labels, class or archived set by a person or a rule (also a rule run over " +
-			"past mail), decisions on your proposals, your drafts and their sending, your notes. Searching by date sees new mail " +
+			"past mail), decisions on your proposals, your drafts and their sending, your notes, a new score by the decision " +
+			"model (kind triage: read it in get_message's facts.triage). Searching by date sees new mail " +
 			"only; this sees the rest. Returns kinds and ids (yuuka:// URIs for messages), oldest first, never content: " +
 			"read what you care about with get_message or list_proposals. Call once without cursor to start from now, " +
 			"then pass back the cursor each call returns; if more is true, call again right away. On cursor_expired " +

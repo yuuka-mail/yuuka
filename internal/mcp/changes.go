@@ -72,7 +72,7 @@ func (s *Server) changesSince(ctx context.Context, v *auth.Viewer, in ChangesInp
 	for i, c := range page.Changes {
 		ch := Change{Kind: agentview.ChangeKind(c.Kind), ID: c.ID, At: c.At.UTC()}
 		switch {
-		case c.Kind == "message" || c.Kind == "flag":
+		case c.Kind == "message" || c.Kind == "flag" || c.Kind == "triage":
 			ch.URI = agentview.MessageURI(c.ID)
 		case c.MessageID != "":
 			ch.URI = agentview.MessageURI(c.MessageID)

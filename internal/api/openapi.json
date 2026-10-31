@@ -1002,6 +1002,9 @@
           },
           "stripped": {
             "$ref": "#/components/schemas/Stripped"
+          },
+          "triage": {
+            "$ref": "#/components/schemas/Triage"
           }
         },
         "required": [
@@ -1409,6 +1412,12 @@
           "archived": {
             "type": "boolean"
           },
+          "triage": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
           "message_id": {
             "type": "string"
           },
@@ -1466,6 +1475,9 @@
             "items": {
               "$ref": "#/components/schemas/Note"
             }
+          },
+          "triage_score": {
+            "$ref": "#/components/schemas/TriageScore"
           }
         },
         "required": [
@@ -1592,6 +1604,12 @@
           },
           "archived": {
             "type": "boolean"
+          },
+          "triage": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
           }
         },
         "required": [
@@ -3502,6 +3520,266 @@
         },
         "additionalProperties": false
       },
+      "Triage": {
+        "type": "object",
+        "properties": {
+          "notice": {
+            "type": "string"
+          },
+          "scorer": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "questions": {
+            "type": "integer"
+          },
+          "scored_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TriageAnswer"
+            }
+          }
+        },
+        "required": [
+          "notice",
+          "scorer",
+          "model",
+          "questions",
+          "scored_at",
+          "answers"
+        ],
+        "additionalProperties": false
+      },
+      "TriageAnswer": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "p": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "top": {
+            "type": "string"
+          },
+          "abstained": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "additionalProperties": false
+      },
+      "TriageEndpoint": {
+        "type": "string",
+        "enum": [
+          "local",
+          "hosted"
+        ]
+      },
+      "TriageInput": {
+        "type": "object",
+        "properties": {
+          "endpoint": {
+            "$ref": "#/components/schemas/TriageEndpoint"
+          },
+          "view": {
+            "type": "integer"
+          },
+          "parser": {
+            "type": "integer"
+          },
+          "chars": {
+            "type": "integer"
+          },
+          "truncated": {
+            "type": "boolean"
+          },
+          "sha256": {
+            "type": "string"
+          },
+          "facts": {
+            "$ref": "#/components/schemas/TriageInputFacts"
+          }
+        },
+        "required": [
+          "endpoint",
+          "view",
+          "parser",
+          "chars",
+          "truncated",
+          "sha256",
+          "facts"
+        ],
+        "additionalProperties": false
+      },
+      "TriageInputFacts": {
+        "type": "object",
+        "properties": {
+          "auth": {
+            "type": "string"
+          },
+          "claimed": {
+            "type": "boolean"
+          },
+          "known_sender": {
+            "type": "boolean"
+          },
+          "reply_to_other": {
+            "type": "boolean"
+          },
+          "list_id": {
+            "type": "boolean"
+          },
+          "class": {
+            "$ref": "#/components/schemas/Class"
+          },
+          "has_code": {
+            "type": "boolean"
+          },
+          "has_link": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "auth",
+          "claimed",
+          "known_sender",
+          "reply_to_other",
+          "list_id",
+          "class",
+          "has_code",
+          "has_link"
+        ],
+        "additionalProperties": false
+      },
+      "TriageOptionCount": {
+        "type": "object",
+        "properties": {
+          "option": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "option",
+          "messages"
+        ],
+        "additionalProperties": false
+      },
+      "TriageQuestionCount": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TriageOptionCount"
+            }
+          },
+          "abstained": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "question",
+          "options",
+          "abstained"
+        ],
+        "additionalProperties": false
+      },
+      "TriageReport": {
+        "type": "object",
+        "properties": {
+          "scorer": {
+            "type": "string"
+          },
+          "questions": {
+            "type": "integer"
+          },
+          "since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scored": {
+            "type": "integer"
+          },
+          "unscored": {
+            "type": "integer"
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TriageQuestionCount"
+            }
+          },
+          "caveat": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "scorer",
+          "questions",
+          "scored",
+          "unscored",
+          "answers",
+          "caveat"
+        ],
+        "additionalProperties": false
+      },
+      "TriageScore": {
+        "type": "object",
+        "properties": {
+          "notice": {
+            "type": "string"
+          },
+          "scorer": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "questions": {
+            "type": "integer"
+          },
+          "scored_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "answers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TriageAnswer"
+            }
+          },
+          "input": {
+            "$ref": "#/components/schemas/TriageInput"
+          }
+        },
+        "required": [
+          "notice",
+          "scorer",
+          "model",
+          "questions",
+          "scored_at",
+          "answers"
+        ],
+        "additionalProperties": false
+      },
       "UndoResult": {
         "type": "object",
         "properties": {
@@ -4462,6 +4740,15 @@
             "description": "only archived (true) or unarchived (false) mail; absent is both",
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "name": "triage",
+            "in": "query",
+            "description": "only mail whose latest score gives this option of this question the highest probability, as \u003cquestion\u003e:\u003coption\u003e such as phishing:yes; no threshold, and a model that abstained matches nothing",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$"
             }
           },
           {
@@ -6338,6 +6625,15 @@
             }
           },
           {
+            "name": "triage",
+            "in": "query",
+            "description": "only mail whose latest score gives this option of this question the highest probability, as \u003cquestion\u003e:\u003coption\u003e such as phishing:yes; no threshold, and a model that abstained matches nothing",
+            "schema": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$"
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "description": "next_cursor of the previous page",
@@ -6412,6 +6708,55 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Thread"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/triage/report": {
+      "get": {
+        "summary": "Count how the latest scores of the configured scorer answer, over the mail the caller sees (§15); people only",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "description": "only mail received at or after this time (RFC 3339); absent is all",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriageReport"
                 }
               }
             }

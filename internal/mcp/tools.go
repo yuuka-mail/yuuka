@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/classify"
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/triage"
 )
 
 // SearchInput is the input of search_messages.
@@ -20,6 +23,7 @@ type SearchInput struct {
 	Class  agentview.Class `json:"class,omitempty" jsonschema:"only mail of this class"`
 	Since  string          `json:"since,omitempty" jsonschema:"only mail received at or after this time, RFC 3339 or YYYY-MM-DD"`
 	Label  string          `json:"label,omitempty" jsonschema:"only mail carrying this label (exact, case-sensitive)"`
+	Triage string          `json:"triage,omitempty" jsonschema:"only mail whose latest decision-model score gives this option the highest probability, as <question>:<option> such as phishing:yes or kind:spam; no threshold, so read the probabilities with get_message"`
 	Limit  int             `json:"limit,omitempty" jsonschema:"at most this many hits, default 20, at most 100"`
 	// The §4.3 downgrade hides spam-like mail from default views; an
 	// agent looking into a specific prefix may need it.
@@ -41,9 +45,13 @@ type Hit struct {
 	Downgraded  bool            `json:"downgraded,omitempty"`
 	Quarantined bool            `json:"quarantined,omitempty"`
 	// Labels and Archived are annotations (annotate), not mail content.
-	Labels   []string   `json:"labels,omitempty"`
-	Archived bool       `json:"archived,omitempty"`
-	Content  HitContent `json:"content"`
+	Labels   []string `json:"labels,omitempty"`
+	Archived bool     `json:"archived,omitempty"`
+	// Triage is what the decision model's latest score leans to, by
+	// question: the option it gave the highest probability. An estimate,
+	// not a verdict; get_message has the probabilities.
+	Triage  map[string]string `json:"triage,omitempty"`
+	Content HitContent        `json:"content"`
 }
 
 // HitContent is the untrusted part of a Hit.
@@ -81,15 +89,32 @@ func (s *Server) searchMessages(ctx context.Context, v *auth.Viewer, in SearchIn
 		}
 		q.Since = t
 	}
+	if in.Triage != "" {
+		f, err := s.answerFilter(in.Triage)
+		if err != nil {
+			return result{}, err
+		}
+		q.Answer = f
+	}
 	res, err := s.db.Search(ctx, v, q)
 	if err != nil {
 		return result{}, err
+	}
+	var tops map[string]map[string]string
+	if s.triage != nil && len(res.Hits) > 0 {
+		ids := make([]string, len(res.Hits))
+		for i, h := range res.Hits {
+			ids[i] = h.ID
+		}
+		if tops, err = s.db.TopAnswers(ctx, v, *s.triage, ids); err != nil {
+			return result{}, err
+		}
 	}
 	out := SearchOutput{Total: res.Total, Notice: agentview.Notice, Hits: make([]Hit, len(res.Hits))}
 	for i, h := range res.Hits {
 		out.Hits[i] = Hit{
 			URI: agentview.MessageURI(h.ID), ReceivedAt: h.ReceivedAt.UTC(), Class: agentview.Class(h.Class.String()),
-			Downgraded: h.Downgraded, Quarantined: h.Quarantined, Labels: h.Labels, Archived: h.Archived,
+			Downgraded: h.Downgraded, Quarantined: h.Quarantined, Labels: h.Labels, Archived: h.Archived, Triage: tops[h.ID],
 			Content: HitContent{From: agentview.Address{Name: h.FromName, Addr: h.FromAddr}, Subject: h.Subject, Snippet: h.Snippet},
 		}
 	}
@@ -98,6 +123,19 @@ func (s *Server) searchMessages(ctx context.Context, v *auth.Viewer, in SearchIn
 		text:       searchText(out, in.IncludeDowngraded),
 		audit:      map[string]any{"total": res.Total, "returned": len(res.Hits)},
 	}, nil
+}
+
+// answerFilter is the store filter of a triage input. Without a scorer
+// it is refused: finding nothing would read as "the model found none".
+func (s *Server) answerFilter(in string) (*store.AnswerFilter, error) {
+	if s.triage == nil {
+		return nil, refuse("triage: no decision model is configured here, so no mail is scored")
+	}
+	q, o, err := triage.ParseFilter(in)
+	if err != nil {
+		return nil, refuse("triage: %v", err)
+	}
+	return &store.AnswerFilter{Profile: *s.triage, Question: q, Option: o}, nil
 }
 
 func parseSince(s string) (time.Time, error) {
@@ -138,6 +176,13 @@ func searchText(out SearchOutput, downgraded bool) string {
 		}
 		for _, l := range h.Labels {
 			fmt.Fprintf(&b, " · label %q", l)
+		}
+		if len(h.Triage) > 0 {
+			var leans []string
+			for _, q := range slices.Sorted(maps.Keys(h.Triage)) {
+				leans = append(leans, q+" "+h.Triage[q])
+			}
+			fmt.Fprintf(&b, " · model leans to %s", strings.Join(leans, ", "))
 		}
 		b.WriteString("\n")
 		c := h.Content
@@ -182,7 +227,15 @@ func (s *Server) getMessage(ctx context.Context, v *auth.Viewer, in GetInput) (r
 	if err != nil {
 		return result{}, err
 	}
-	full := agentview.Build(agentview.InputOf(v, m, raw))
+	vin := agentview.InputOf(v, m, raw)
+	if s.triage != nil {
+		sc, err := s.db.LatestScore(ctx, v, m.ID, *s.triage)
+		if err != nil {
+			return result{}, err
+		}
+		vin.Triage = agentview.TriageOf(sc)
+	}
+	full := agentview.Build(vin)
 	view, err := agentview.Select(full, level, anchor)
 	if errors.Is(err, agentview.ErrNoAnchor) {
 		return result{}, refuse("%s has no %s", full.URI, anchor)
@@ -194,7 +247,7 @@ func (s *Server) getMessage(ctx context.Context, v *auth.Viewer, in GetInput) (r
 	if err != nil {
 		return result{}, err
 	}
-	audit := map[string]any{"uri": view.URI, "level": view.Level, "notes": len(notes)}
+	audit := map[string]any{"uri": view.URI, "level": view.Level, "notes": len(notes), "scored": view.Facts.Triage != nil}
 	if view.Content.More != "" {
 		audit["more"] = view.Content.More
 	}

@@ -450,7 +450,8 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 | `changes`（[`Changes`](../../internal/store/changes.go)，REST `/changes`、`changes_since`）/ 以后的 SSE、JMAP `queryChanges` | 目标不可见的事件跳过，游标照常前进；可见与否按目标对象自己的规则（§8.6），已消失的对象只给能看到全部的主体 |
 | `actions` / `proposals` | 审计日志只给 human 会话；agent 只看自己发起的 |
 | 提案（`Proposals`、`ProposalByID`，REST `/proposals`、`list_proposals`） | 人看全部，agent / service 只看自己提的；关于某封信的只在那封信可见时可见。理由和引用会引原文，可能是读者看不到的信 |
-| 评分（`LatestScore`，§15.2） | 消息可见才可取；评分的输入记的是投递事实，看不到这封信全部投递的主体拿不到输入 |
+| 评分（`LatestScore`，§15.2；消息详情的 `triage_score`、视图的 `facts.triage`） | 消息可见才可取；评分的输入记的是投递事实，看不到这封信全部投递的主体拿不到输入，REST 另外只给有 `delivery:read` 的人，agent 视图从不带输入 |
+| 评分的倾向与过滤（`TopAnswers`、`triage=`，列表、线程、搜索、`search_messages`）、报告（`ScoreCounts`，`yuuka triage report`、`/triage/report`） | 只在可见消息上取、过滤和计数；报告只给人 |
 | 笔记（`Notes`、`NoteByID`，消息详情的 `notes`、`get_message`，§8.10） | 在看得见的信上，人和读得到全部账户的主体看全部笔记，其他主体只看自己写的（`noteVisible`）：笔记的正文和引用可能引到读者看不到的信；线程笔记按锚点那封信可见与否算。`get_message` 给的和 REST 相同。删除另算：人能删他看得见的任何笔记，其他主体只删自己的。删掉的笔记在 `changes` 里只给人 |
 | 标注来源（`MessageAnnotations`，`GET /messages/{id}/annotations`） | 消息可见才可取；它是审计日志的一部分，agent / service 只看自己的 action 写的那几行 |
 | 撤销（`Undo`） | agent / service 只能撤销自己的 action，别人的和不存在一样；看不见的信上的行不动、只计数 |

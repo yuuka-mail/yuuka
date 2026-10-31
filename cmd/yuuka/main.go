@@ -410,6 +410,10 @@ func (a *app) mcp() *mcp.Server {
 	if a.submit != nil {
 		cfg.Submitter = a.submit
 	}
+	if a.cfg.Triage.On() {
+		p := a.cfg.Triage.Profile()
+		cfg.Triage = &p
+	}
 	return mcp.New(cfg)
 }
 
@@ -421,6 +425,10 @@ func (a *app) rest(log *slog.Logger) *api.API {
 	}
 	if a.cards != nil {
 		r.WithSuspendNotifier(suspendCards{db: a.db, cards: a.cards, log: log})
+	}
+	// The scores shown are the configured scorer's; without one, none.
+	if a.cfg.Triage.On() {
+		r.WithTriage(a.cfg.Triage.Profile())
 	}
 	return r
 }

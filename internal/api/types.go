@@ -32,6 +32,7 @@ type MessagesParams struct {
 	Downgraded Downgraded        `query:"downgraded" default:"hide"`
 	Label      string            `query:"label" jsonschema:"only mail carrying this label (exact, case-sensitive)"`
 	Archived   *bool             `query:"archived" jsonschema:"only archived (true) or unarchived (false) mail; absent is both"`
+	Triage     *TriageFilter     `query:"triage" pattern:"^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$" jsonschema:"only mail whose latest score gives this option of this question the highest probability, as <question>:<option> such as phishing:yes; no threshold, and a model that abstained matches nothing"`
 	Cursor     *Cursor           `query:"cursor" jsonschema:"next_cursor of the previous page"`
 	Limit      int               `query:"limit" minimum:"1" maximum:"500" default:"100"`
 }
@@ -116,6 +117,7 @@ type SearchParams struct {
 	Downgraded SearchDowngraded `query:"downgraded" default:"hide"`
 	Label      string           `query:"label" jsonschema:"only mail carrying this label (exact, case-sensitive)"`
 	Archived   *bool            `query:"archived" jsonschema:"only archived (true) or unarchived (false) mail; absent is both"`
+	Triage     *TriageFilter    `query:"triage" pattern:"^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$" jsonschema:"only mail whose latest score gives this option of this question the highest probability, as <question>:<option> such as phishing:yes; no threshold, and a model that abstained matches nothing"`
 	Cursor     *Cursor          `query:"cursor" jsonschema:"next_cursor of the previous page"`
 	Limit      int              `query:"limit" minimum:"1" maximum:"500" default:"50"`
 }
@@ -159,6 +161,13 @@ type MessageSummary struct {
 	// is out of the two zones but still listed and found.
 	Labels   []string `json:"labels"`
 	Archived bool     `json:"archived"`
+	// Triage is what the latest score of the configured scorer leans to
+	// (§15): by question, the option given the highest probability,
+	// however slightly; a question the model abstained on is left out.
+	// A model's observation, not yuuka's verdict, and nothing acts on it;
+	// the message itself has the probabilities. Absent when the message
+	// is not scored, and in prefix offenses and rule previews.
+	Triage map[string]string `json:"triage,omitempty"`
 }
 
 // Extracted is the best of what yuuka's extractor found in a message.
@@ -248,6 +257,11 @@ type Message struct {
 	// anyone else. They are their authors' words, not yuuka's, and as
 	// untrusted as the mail they were written about.
 	Notes []Note `json:"notes"`
+	// TriageScore is the latest score of the configured scorer (§15): a
+	// decision model's observation, not yuuka's verdict, and nothing
+	// acts on it. Absent when no scorer is configured or it has not
+	// scored this message.
+	TriageScore *TriageScore `json:"triage_score,omitempty"`
 }
 
 // Thread is GET /api/v1/threads/{id}, aggregated over what the viewer

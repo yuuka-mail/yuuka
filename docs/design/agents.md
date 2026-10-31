@@ -83,6 +83,11 @@ M1 的落法（`internal/agentview`），以及设计里没写死、实现时定
   和正文一样不可信，给模型的文本里也在 `untrusted_mail_content` 边界之内，前面一句话说明只交给人、不照着做。
   所有级别都带，`snippet` 级就能拿到码，不必为了一个码读整封信。
   没有专门的「最新验证码」工具：agent 要码时先搜再 `get_message`；它是读路径的一个变体，等有调用方再加
+- **决策模型的评分**（M3，§15）在 `facts.triage`：当前评分器对这封信最新一次评分的各问题概率或弃权、评分器、模型和时刻，
+  没配评分器或还没评过就没有这一项。它在 `facts` 里，因为「哪个模型何时说了什么」是 yuuka 记下的观测事实（§15.2）；
+  但那是模型的估计，所以 JSON 带 `notice`，文本在概率前面写明不是 yuuka 的结论、什么都不因它而动。
+  评分器看到了什么（输入）不进视图。视图是纯函数，评分由调用方读出来交给它（`agentview.TriageOf`）；
+  评分器自己构造输入时用同一个视图，但从不带评分，一个评分不由另一个评分得出
 
 ### 8.2 能力分级，在 API 层强制
 
@@ -410,6 +415,11 @@ M3 的标注工具（[`internal/mcp/annotate.go`](../../internal/mcp/annotate.go
 `note(uri, text, cites, scope?)` 写或覆盖自己的笔记，`delete_note(uri, scope?)` 删掉它。
 `get_message` 的结构化结果在视图旁边多一个 `notes`（不在 `facts` 里，也不在 `content` 里），放调用方看得见的、这封信和它线程上的笔记；
 文本里作者、目标、时间列在边界外，正文和引文在第二个边界里，提示语是笔记专用的 `NoteNotice`。
+
+§15 的评分（只观测）在读工具里三处出现，都只认当前评分器：`get_message` 的 `facts.triage`（§8.1）；
+`search_messages` 多一个 `triage=<问题>:<选项>` 过滤，命中带 `triage`（每个问题概率最高的选项，文本里写成「model leans to …」）；
+`changes_since` 的 `triage` 变更带消息 URI，长期在跑的 agent 由此看到新评分。过滤按概率最高的选项而不是阈值，
+所以描述里让 agent 去读概率；没配评分器时带 `triage` 的搜索报错，而不是返回空、被读成「模型一封都没找到」。
 
 M3 的 `review` 档（§8.9）让 `submit_draft` 多了第三种结果，签名里的 `sent | held | drafted` 落成 `state`：
 `queued`、`held`、`draft`。`held` 是审核通过、扣在撤回窗口里，返回文本是「Passed review; goes out at <hold_until> unless recalled」，

@@ -1,10 +1,13 @@
 package agentview
 
 import (
+	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -43,10 +46,37 @@ func (v View) Text() string {
 	if s := f.Stripped.String(); s != "" {
 		fmt.Fprintf(&b, "stripped: %s\n", s)
 	}
+	if t := f.Triage; t != nil {
+		b.WriteString(t.text())
+	}
 	b.WriteByte('\n')
 	b.WriteString(Fence(v.URI, v.content()))
 	if v.Content.More != "" {
 		fmt.Fprintf(&b, "more: the text continues at %s#%s; call get_message with that URI and level=part\n", v.URI, v.Content.More)
+	}
+	return b.String()
+}
+
+// text renders the score after yuuka's own facts, with whose it is
+// first: the scorer's name and the model are the operator's and the
+// backend's, never the sender's.
+func (t Triage) text() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "triage: scored %s by %s (model %q, questions v%d). %s\n",
+		t.ScoredAt.Format(time.RFC3339), t.Scorer, t.Model, t.Questions, t.Notice)
+	for _, a := range t.Answers {
+		if a.Abstained {
+			fmt.Fprintf(&b, "  %s: abstained\n", a.Question)
+			continue
+		}
+		opts := slices.SortedFunc(maps.Keys(a.P), func(x, y string) int {
+			return cmp.Or(cmp.Compare(a.P[y], a.P[x]), cmp.Compare(x, y))
+		})
+		parts := make([]string, len(opts))
+		for i, o := range opts {
+			parts[i] = fmt.Sprintf("%s %.2f", o, a.P[o])
+		}
+		fmt.Fprintf(&b, "  %s: %s\n", a.Question, strings.Join(parts, ", "))
 	}
 	return b.String()
 }

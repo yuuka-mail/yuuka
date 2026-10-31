@@ -18,7 +18,7 @@ Compose 自己的 `.env`（镜像、密码、备份策略）见 [deploy/README.m
 | `yuuka prefix` / `token` / `outbox` / `identity` / `grant` | 只要数据库 |
 | `yuuka triage status` / `report` | 数据库、`YUUKA_TRIAGE_*` |
 | `yuuka triage rescore` | 数据库、R2、`YUUKA_DATA_DIR`、`YUUKA_TRIAGE_*` |
-| `yuuka mcp --stdio` | 数据库、R2、`YUUKA_DATA_DIR`、`YUUKA_MCP_TOKEN` |
+| `yuuka mcp --stdio` | 数据库、R2、`YUUKA_DATA_DIR`、`YUUKA_MCP_TOKEN`；和 `serve` 一样设了 `YUUKA_TRIAGE_*` 才显示评分 |
 
 ## 数据库
 

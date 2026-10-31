@@ -49,6 +49,8 @@ type env struct {
 	svc    *authn.Service
 	bearer *authn.Bearer
 	agent  store.Principal
+	// raws are the raw messages the server reads.
+	raws rawMap
 	// ids maps a corpus file name to its message id.
 	ids map[string]string
 }
@@ -99,6 +101,7 @@ func newEnv(t *testing.T) *env {
 		}
 		e.ids[name] = f.MessageID
 	}
+	e.raws = raws
 	e.srv = mcp.New(mcp.Config{DB: db, Raw: raws, Log: quiet, Version: "test"})
 	svc, err := authn.New(authn.Config{DB: db, Origin: "https://mail.example.com", Log: quiet})
 	if err != nil {

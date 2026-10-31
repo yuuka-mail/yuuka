@@ -18,6 +18,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/classify"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
 	"github.com/yuuka-mail/yuuka/internal/store"
+	"github.com/yuuka-mail/yuuka/internal/triage/score"
 )
 
 var update = flag.Bool("update", false, "rewrite golden files")
@@ -479,5 +480,41 @@ func TestSentGolden(t *testing.T) {
 	f = Build(InputOf(blind, sentDetail(), sentOnly)).Facts
 	if f.Sent == nil || !f.Auth.Withheld || f.Auth.NotReceived || len(f.Warnings) != 0 {
 		t.Errorf("sent-only facts without delivery:read = %+v", f)
+	}
+}
+
+// A score is listed with yuuka's facts as whose estimate it is, outside
+// the sender's fence (§15): the JSON says so in triage.notice, the text
+// before the probabilities. The input the scorer was shown is not in
+// the view at all.
+func TestTriageGolden(t *testing.T) {
+	in := input(t, "phish-dmarc-fail")
+	in.Triage = TriageOf(&store.ScoreRead{Score: score.Score{
+		ID: testID, MessageID: testID, Profile: score.Profile{Scorer: "laya-ml-1", Questions: 1},
+		Model: "laya-ml 0.3", ScoredAt: time.Date(2026, 10, 31, 1, 42, 0, 0, time.UTC),
+		Answers: map[string]score.Answer{
+			"phishing":    {P: map[string]float64{"yes": 0.93, "no": 0.07}},
+			"kind":        {P: map[string]float64{"notification": 0.3, "conversation": 0.05, "marketing": 0.05, "spam": 0.6}},
+			"needs_reply": {Abstain: true},
+		},
+		Input: score.Input{SHA256: strings.Repeat("ab", 32)},
+	}})
+	v := Build(in)
+	j, err := json.MarshalIndent(v.Facts.Triage, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "triage.json", append(j, '\n'))
+	text := v.Text()
+	golden(t, "triage.txt", []byte(text))
+	fence := strings.Index(text, "<"+fenceTag)
+	if at := strings.Index(text, "triage: "); at < 0 || at > fence {
+		t.Errorf("the score is not among yuuka's facts:\n%s", text)
+	}
+	if strings.Contains(string(j), "abab") || strings.Contains(text, "abab") {
+		t.Error("the scorer's input is in the view")
+	}
+	if Build(input(t, "phish-dmarc-fail")).Facts.Triage != nil || TriageOf(nil) != nil {
+		t.Error("a triage fact without a score")
 	}
 }

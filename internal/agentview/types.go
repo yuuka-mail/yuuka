@@ -45,7 +45,8 @@ type View struct {
 }
 
 // Facts are asserted by yuuka itself: they come from the store and from
-// the trusted receiver, never from what the sender wrote.
+// the trusted receiver, never from what the sender wrote. Triage is
+// yuuka's record that a model said something, not yuuka saying it.
 type Facts struct {
 	// ReceivedAt is when the message reached yuuka: its earliest delivery,
 	// or for mail it only sent, when the sent copy was submitted (§4.6).
@@ -67,6 +68,40 @@ type Facts struct {
 	// Warnings are short sentences for the reader, in a fixed vocabulary.
 	Warnings []string `json:"warnings,omitempty"`
 	Stripped Stripped `json:"stripped"`
+	// Triage is the latest score of the configured scorer (§15): a
+	// decision model's observation, absent when there is none.
+	Triage *Triage `json:"triage,omitempty"`
+}
+
+// Triage is one scoring run of a message by a decision model (§15.2):
+// what the model estimated, which can be wrong. It is neither yuuka's
+// verdict nor a decision: nothing hides, moves, notifies or sends mail
+// because of it (§15.4).
+type Triage struct {
+	// Notice says so, for a reader of the JSON.
+	Notice string `json:"notice"`
+	// Scorer is the operator's name for the model behind it; Model is
+	// the model and version the backend reported.
+	Scorer string `json:"scorer"`
+	Model  string `json:"model"`
+	// Questions is the version of the question set asked.
+	Questions int       `json:"questions"`
+	ScoredAt  time.Time `json:"scored_at"`
+	// Answers are by question key, in key order.
+	Answers []TriageAnswer `json:"answers"`
+}
+
+// TriageAnswer is the model's answer to one question: the probability
+// of each option, or an abstention.
+type TriageAnswer struct {
+	Question string `json:"question"`
+	// P is the probability of each option; absent when it abstained.
+	P map[string]float64 `json:"p,omitempty"`
+	// Top is the option given the highest probability, however slightly:
+	// what the model leaned to, not a threshold. Absent when it
+	// abstained.
+	Top       string `json:"top,omitempty"`
+	Abstained bool   `json:"abstained,omitempty"`
 }
 
 // Sent marks mail this system sent: the sent copy of an outbox row.

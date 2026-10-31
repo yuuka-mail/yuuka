@@ -781,6 +781,8 @@ export interface paths {
                     label?: string;
                     /** @description only archived (true) or unarchived (false) mail; absent is both */
                     archived?: boolean;
+                    /** @description only mail whose latest score gives this option of this question the highest probability, as <question>:<option> such as phishing:yes; no threshold, and a model that abstained matches nothing */
+                    triage?: string;
                     /** @description next_cursor of the previous page */
                     cursor?: string;
                     limit?: number;
@@ -2355,6 +2357,8 @@ export interface paths {
                     label?: string;
                     /** @description only archived (true) or unarchived (false) mail; absent is both */
                     archived?: boolean;
+                    /** @description only mail whose latest score gives this option of this question the highest probability, as <question>:<option> such as phishing:yes; no threshold, and a model that abstained matches nothing */
+                    triage?: string;
                     /** @description next_cursor of the previous page */
                     cursor?: string;
                     limit?: number;
@@ -2419,6 +2423,54 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["Thread"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/triage/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Count how the latest scores of the configured scorer answer, over the mail the caller sees (§15); people only */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description only mail received at or after this time (RFC 3339); absent is all */
+                    since?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TriageReport"];
                     };
                 };
                 /** @description A problem */
@@ -3043,6 +3095,7 @@ export interface components {
             leak_checks?: components["schemas"]["LeakCheck"][];
             warnings?: string[];
             stripped: components["schemas"]["Stripped"];
+            triage?: components["schemas"]["Triage"];
         };
         GrantAdminList: {
             grants: components["schemas"]["ManagedGrant"][];
@@ -3149,6 +3202,9 @@ export interface components {
             sender_verified?: boolean;
             labels: string[];
             archived: boolean;
+            triage?: {
+                [key: string]: string;
+            };
             message_id: string;
             in_reply_to: string;
             references: string[];
@@ -3162,6 +3218,7 @@ export interface components {
             reply_to: components["schemas"]["Address"][];
             deliveries?: components["schemas"]["Delivery"][];
             notes: components["schemas"]["Note"][];
+            triage_score?: components["schemas"]["TriageScore"];
         };
         MessageOutcomes: {
             message_id: string;
@@ -3190,6 +3247,9 @@ export interface components {
             sender_verified?: boolean;
             labels: string[];
             archived: boolean;
+            triage?: {
+                [key: string]: string;
+            };
         };
         Note: {
             id: string;
@@ -3710,6 +3770,73 @@ export interface components {
             max_new_recipients_per_day?: number;
             hold_seconds?: number;
             suspended?: boolean;
+        };
+        Triage: {
+            notice: string;
+            scorer: string;
+            model: string;
+            questions: number;
+            /** Format: date-time */
+            scored_at: string;
+            answers: components["schemas"]["TriageAnswer"][];
+        };
+        TriageAnswer: {
+            question: string;
+            p?: {
+                [key: string]: number;
+            };
+            top?: string;
+            abstained?: boolean;
+        };
+        /** @enum {string} */
+        TriageEndpoint: "local" | "hosted";
+        TriageInput: {
+            endpoint: components["schemas"]["TriageEndpoint"];
+            view: number;
+            parser: number;
+            chars: number;
+            truncated: boolean;
+            sha256: string;
+            facts: components["schemas"]["TriageInputFacts"];
+        };
+        TriageInputFacts: {
+            auth: string;
+            claimed: boolean;
+            known_sender: boolean;
+            reply_to_other: boolean;
+            list_id: boolean;
+            class: components["schemas"]["Class"];
+            has_code: boolean;
+            has_link: boolean;
+        };
+        TriageOptionCount: {
+            option: string;
+            messages: number;
+        };
+        TriageQuestionCount: {
+            question: string;
+            options: components["schemas"]["TriageOptionCount"][];
+            abstained: number;
+        };
+        TriageReport: {
+            scorer: string;
+            questions: number;
+            /** Format: date-time */
+            since?: string;
+            scored: number;
+            unscored: number;
+            answers: components["schemas"]["TriageQuestionCount"][];
+            caveat: string;
+        };
+        TriageScore: {
+            notice: string;
+            scorer: string;
+            model: string;
+            questions: number;
+            /** Format: date-time */
+            scored_at: string;
+            answers: components["schemas"]["TriageAnswer"][];
+            input?: components["schemas"]["TriageInput"];
         };
         UndoResult: {
             reverted: number;

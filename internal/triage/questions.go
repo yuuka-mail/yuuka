@@ -6,6 +6,14 @@
 // v1 observes only (§15.4): a score is shown and acts on nothing.
 package triage
 
+import (
+	"errors"
+	"fmt"
+	"maps"
+	"slices"
+	"strings"
+)
+
 // QuestionsVersion is the version of Questions. Any change of wording,
 // options or type is a new version: scores of different versions are
 // never compared, and the scores of the old one stop being current.
@@ -92,4 +100,56 @@ var Questions = []Question{
 			"false": "No personal reply is expected.",
 		},
 	},
+}
+
+// Options are the options of question key in the set, as scores store
+// them, or nil when the set has no such question.
+func Options(key string) []string {
+	for _, q := range Questions {
+		if q.Key != key {
+			continue
+		}
+		if q.Type == YesNo {
+			return []string{Yes, No}
+		}
+		return slices.Sorted(maps.Keys(q.Criteria))
+	}
+	return nil
+}
+
+// Order is the questions of answers in the set's order, then any the
+// set does not have (a backend's extra, or a stale profile) by name.
+func Order[V any](answers map[string]V) []string {
+	var keys []string
+	for _, q := range Questions {
+		keys = append(keys, q.Key)
+	}
+	for _, k := range slices.Sorted(maps.Keys(answers)) {
+		if !slices.Contains(keys, k) {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+// ParseFilter reads a filter on what a score leans to, written
+// <question>:<option> (phishing:yes), against the set: a question or
+// option it does not have is an error, not a filter matching nothing.
+func ParseFilter(s string) (question, option string, err error) {
+	question, option, ok := strings.Cut(s, ":")
+	if !ok || question == "" || option == "" {
+		return "", "", errors.New("want <question>:<option>, such as phishing:yes or kind:spam")
+	}
+	opts := Options(question)
+	if opts == nil {
+		keys := make([]string, len(Questions))
+		for i, q := range Questions {
+			keys[i] = q.Key
+		}
+		return "", "", fmt.Errorf("no question %q; want one of %s", question, strings.Join(keys, ", "))
+	}
+	if !slices.Contains(opts, option) {
+		return "", "", fmt.Errorf("%s has no option %q; want one of %s", question, option, strings.Join(opts, ", "))
+	}
+	return question, option, nil
 }

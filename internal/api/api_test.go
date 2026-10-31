@@ -34,6 +34,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/submit"
 	"github.com/yuuka-mail/yuuka/internal/transport"
+	"github.com/yuuka-mail/yuuka/internal/triage/score"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
@@ -91,6 +92,21 @@ func (s *spy) Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (
 func (s *spy) Changes(ctx context.Context, v *auth.Viewer, q store.ChangeQuery) (store.ChangePage, error) {
 	s.saw("Changes", v)
 	return s.DB.Changes(ctx, v, q)
+}
+
+func (s *spy) LatestScore(ctx context.Context, v *auth.Viewer, id string, p score.Profile) (*store.ScoreRead, error) {
+	s.saw("LatestScore", v)
+	return s.DB.LatestScore(ctx, v, id, p)
+}
+
+func (s *spy) TopAnswers(ctx context.Context, v *auth.Viewer, p score.Profile, ids []string) (map[string]map[string]string, error) {
+	s.saw("TopAnswers", v)
+	return s.DB.TopAnswers(ctx, v, p, ids)
+}
+
+func (s *spy) ScoreCounts(ctx context.Context, v *auth.Viewer, p score.Profile, since time.Time) (store.ScoreCounts, error) {
+	s.saw("ScoreCounts", v)
+	return s.DB.ScoreCounts(ctx, v, p, since)
 }
 
 func (s *spy) DraftByID(ctx context.Context, v *auth.Viewer, id string) (store.Draft, error) {
@@ -419,7 +435,7 @@ func newHarness(t *testing.T) *harness {
 	sus := &suspendedSpy{}
 	return &harness{
 		t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, human: human, sub: sub, suspended: sus,
-		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).WithSuspendNotifier(sus).Handler(svc),
+		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).WithSuspendNotifier(sus).WithTriage(laya).Handler(svc),
 	}
 }
 
@@ -614,6 +630,10 @@ func TestACL(t *testing.T) {
 	h.grant(store.Grant{IdentityID: arisuID, PrincipalID: h.agent.ID, Policy: sendpolicy.Auto, RecipientScope: sendpolicy.ScopeAny})
 	h.grant(store.Grant{IdentityID: star, PrincipalID: h.agent.ID, Policy: sendpolicy.Draft, RecipientScope: sendpolicy.ScopeThread})
 	noted := h.note(h.agent, msg.ID, store.ScopeThread, "arisu's thread note")
+	// Scores (§15) on the mail the list below filters by them.
+	for _, m := range decode[MessagePage](t, h.get("/api/v1/messages?prefix=github@example.com", h.token(auth.MessageRead))).Messages {
+		h.score(m.ID, 0.1)
+	}
 	h.spy.take()
 
 	// How to call each route, and the store methods it must go through.
@@ -634,15 +654,23 @@ func TestACL(t *testing.T) {
 		authority bool
 	}
 	calls := map[string]call{
-		"GET /api/v1/messages":                         {path: "/api/v1/messages?prefix=github@example.com", reads: []string{"ListMessages"}},
-		"GET /api/v1/messages/{id}":                    {path: "/api/v1/messages/" + msg.ID, reads: []string{"MessageByID", "Notes"}},
-		"GET /api/v1/messages/{id}/view":               {path: "/api/v1/messages/" + msg.ID + "/view?level=sections", reads: []string{"MessageByID"}},
+		// Lists read what the scores lean to for the page (§15).
+		"GET /api/v1/messages": {
+			path: "/api/v1/messages?prefix=github@example.com&triage=kind:notification", reads: []string{"ListMessages", "TopAnswers"},
+		},
+		"GET /api/v1/messages/{id}": {path: "/api/v1/messages/" + msg.ID, reads: []string{"MessageByID", "Notes", "LatestScore"}},
+		"GET /api/v1/messages/{id}/view": {
+			path: "/api/v1/messages/" + msg.ID + "/view?level=sections", reads: []string{"MessageByID", "LatestScore"},
+		},
 		"GET /api/v1/messages/{id}/attachments/{part}": {path: "/api/v1/messages/" + att + "/attachments/2", reads: []string{"MessageByID"}},
-		"GET /api/v1/threads/{id}":                     {path: "/api/v1/threads/" + msg.ThreadID, reads: []string{"ThreadByID"}},
+		"GET /api/v1/threads/{id}":                     {path: "/api/v1/threads/" + msg.ThreadID, reads: []string{"ThreadByID", "TopAnswers"}},
 		"GET /api/v1/prefixes":                         {path: "/api/v1/prefixes", reads: []string{"PrefixStats"}},
 		"GET /api/v1/prefixes/{address}":               {path: "/api/v1/prefixes/github@example.com", reads: []string{"PrefixByAddress"}},
-		"GET /api/v1/search":                           {path: "/api/v1/search?q=verification", reads: []string{"Search"}},
-		"GET /api/v1/changes":                          {path: "/api/v1/changes?kinds=message,flag", reads: []string{"Changes"}},
+		"GET /api/v1/search":                           {path: "/api/v1/search?q=verification", reads: []string{"Search", "TopAnswers"}},
+		"GET /api/v1/triage/report": {
+			path: "/api/v1/triage/report?since=2026-10-01T00:00:00Z", as: h.human, reads: []string{"ScoreCounts"}, people: true,
+		},
+		"GET /api/v1/changes": {path: "/api/v1/changes?kinds=message,flag", reads: []string{"Changes"}},
 		"GET /api/v1/messages/{id}/reply-identities": {
 			path: "/api/v1/messages/" + msg.ID + "/reply-identities", reads: []string{"ReplyIdentities", "Standings"},
 		},

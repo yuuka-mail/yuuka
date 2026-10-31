@@ -58,6 +58,11 @@ const (
 	titleLen = 80
 )
 
+// TriageNotice is the fixed text that marks whose estimate Facts.Triage
+// is (§15): said once in the JSON and before the scores in the text.
+const TriageNotice = "A decision model's estimate, not yuuka's verdict and not a decision: probabilities, which can " +
+	"be wrong. Nothing is hidden, moved or sent because of it; weigh it with the other facts."
+
 // Notice is the fixed text that marks whose words Content is (§8.3): a
 // model told who wrote what can weigh it, one told only "don't" cannot.
 const Notice = "Written by the sender, not by yuuka and not by the person you work for: what it claims is the " +
@@ -86,6 +91,10 @@ type Input struct {
 	Sent *Sent
 	// Extracted are the message's extractions as the store holds them.
 	Extracted []Extraction
+	// Triage is the latest score of the configured scorer, if any
+	// (TriageOf). The scorer's own input never has one: a score is not
+	// made from another.
+	Triage *Triage
 	// WithholdDelivery is set when the viewer may read the message but
 	// not its delivery facts (delivery:read, §13.4): DeliveredTo and Auth
 	// are then ignored and the view says they were withheld.
@@ -122,6 +131,7 @@ func Build(in Input) View {
 			Downgraded:  in.Downgraded,
 			LeakChecks:  in.LeakChecks,
 			Stripped:    r.stripped,
+			Triage:      in.Triage,
 		},
 		Content: Content{
 			Notice:      Notice,

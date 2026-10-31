@@ -31,6 +31,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/sendpolicy"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/submit"
+	"github.com/yuuka-mail/yuuka/internal/triage/score"
 )
 
 // Store is the slice of the store the API uses. Every read and every
@@ -44,6 +45,11 @@ type Store interface {
 	PrefixByAddress(ctx context.Context, v *auth.Viewer, zone, prefix string, limit int) (store.PrefixDetail, error)
 	Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (store.SearchResult, error)
 	Changes(ctx context.Context, v *auth.Viewer, q store.ChangeQuery) (store.ChangePage, error)
+	// Scores (§15) go where their message goes; what the scorer was
+	// shown only to a viewer of every delivery (LatestScore).
+	LatestScore(ctx context.Context, v *auth.Viewer, id string, p score.Profile) (*store.ScoreRead, error)
+	TopAnswers(ctx context.Context, v *auth.Viewer, p score.Profile, ids []string) (map[string]map[string]string, error)
+	ScoreCounts(ctx context.Context, v *auth.Viewer, p score.Profile, since time.Time) (store.ScoreCounts, error)
 	// RecordAction appends to the audit log (attachment downloads).
 	RecordAction(ctx context.Context, a store.Action) error
 
@@ -142,7 +148,10 @@ type API struct {
 	raw       RawReader
 	submit    Submitter
 	suspended SuspendNotifier
-	log       *slog.Logger
+	// triage is the active scorer profile (§15), nil when no scorer is
+	// configured: then no score is shown, filtered by or reported.
+	triage *score.Profile
+	log    *slog.Logger
 }
 
 // New returns the API over db, reading raw messages for the structured
@@ -158,6 +167,13 @@ func New(db Store, raw RawReader, log *slog.Logger) *API {
 // route is not served at all: there is no other way into the outbox.
 func (a *API) WithSubmitter(s Submitter) *API {
 	a.submit = s
+	return a
+}
+
+// WithTriage makes a show the scores of profile p (§15): the profile
+// of the configured scorer, whose scores are the current ones.
+func (a *API) WithTriage(p score.Profile) *API {
+	a.triage = &p
 	return a
 }
 
@@ -210,6 +226,9 @@ var routes = []route{
 	jsonRoute(http.MethodGet, "/api/v1/prefixes/{address}", "Get a prefix with its leak check and the latest mail that leaked or spoofed",
 		[]auth.Scope{auth.PrefixRead, auth.MessageRead}, (*API).prefix),
 	jsonRoute(http.MethodGet, "/api/v1/search", "Search messages, newest first", read, (*API).search),
+	jsonRoute(http.MethodGet, "/api/v1/triage/report",
+		"Count how the latest scores of the configured scorer answer, over the mail the caller sees (§15); people only",
+		read, (*API).triageReport),
 	// Following the log of an object kind needs that kind's scopes too
 	// (agentview.ChangeKind.Scopes), checked by the handler.
 	jsonRoute(http.MethodGet, "/api/v1/changes", "List what changed after a cursor, old mail included, in commit order (§8.6)",
@@ -445,6 +464,10 @@ func (a *API) listMessages(ctx context.Context, v *auth.Viewer, p MessagesParams
 	q := store.MessageQuery{Limit: p.Limit, Before: (*store.MessageCursor)(p.Cursor)}
 	q.Downgraded = downgrades[p.Downgraded]
 	q.Label, q.Archived = p.Label, p.Archived
+	var err error
+	if q.Answer, err = a.answerFilter(p.Triage); err != nil {
+		return MessagePage{}, err
+	}
 	if p.Prefix != nil {
 		q.Prefix, q.Zone = p.Prefix.Prefix, p.Prefix.Zone
 	}
@@ -456,8 +479,17 @@ func (a *API) listMessages(ctx context.Context, v *auth.Viewer, p MessagesParams
 		return MessagePage{}, err
 	}
 	page := MessagePage{Messages: make([]MessageSummary, len(ms))}
+	ids := make([]string, len(ms))
+	for i, m := range ms {
+		ids[i] = m.ID
+	}
+	tops, err := a.tops(ctx, v, ids)
+	if err != nil {
+		return MessagePage{}, err
+	}
 	for i, m := range ms {
 		page.Messages[i] = summary(v, m)
+		page.Messages[i].Triage = tops[m.ID]
 	}
 	if len(ms) == p.Limit {
 		last := ms[len(ms)-1]
@@ -485,14 +517,19 @@ func (a *API) message(ctx context.Context, v *auth.Viewer, p IDParams) (Message,
 	if err != nil {
 		return Message{}, err
 	}
+	sc, err := a.latestScore(ctx, v, d.ID)
+	if err != nil {
+		return Message{}, err
+	}
 	out := Message{
 		MessageSummary: summary(v, d.MessageSummary),
 		Extractions:    make([]agentview.Extraction, len(d.Extractions)),
 		MessageID:      d.MessageID, InReplyTo: d.InReplyTo, References: nonNil(d.References),
 		Date: d.Date, BodyText: d.BodyText, ParseError: d.ParseError,
 		To: addressesOf(rc.To), Cc: addressesOf(rc.Cc), ReplyTo: addressesOf(rc.ReplyTo),
-		Notes: notesOut(notes),
+		Notes: notesOut(notes), TriageScore: triageOut(v, sc),
 	}
+	out.Triage = topsOf(sc)
 	for i, x := range d.Extractions {
 		out.Extractions[i] = agentview.ExtractionOf(x)
 	}
@@ -527,7 +564,13 @@ func (a *API) messageView(ctx context.Context, v *auth.Viewer, p ViewParams) (ag
 	if err != nil {
 		return agentview.View{}, err
 	}
-	view, err := agentview.Select(agentview.Build(agentview.InputOf(v, d, raw)), p.Level, p.Anchor)
+	sc, err := a.latestScore(ctx, v, d.ID)
+	if err != nil {
+		return agentview.View{}, err
+	}
+	in := agentview.InputOf(v, d, raw)
+	in.Triage = agentview.TriageOf(sc)
+	view, err := agentview.Select(agentview.Build(in), p.Level, p.Anchor)
 	if errors.Is(err, agentview.ErrNoAnchor) {
 		return view, openapi.Errorf(http.StatusNotFound, openapi.CodeNotFound, "anchor %s is not in this message", p.Anchor)
 	}
@@ -562,8 +605,17 @@ func (a *API) thread(ctx context.Context, v *auth.Viewer, p IDParams) (Thread, e
 		ID: t.ID, Subject: t.Subject, Participants: nonNil(t.Participants),
 		FirstAt: t.FirstAt, LastAt: t.LastAt, Messages: make([]MessageSummary, len(t.Messages)),
 	}
+	ids := make([]string, len(t.Messages))
+	for i, m := range t.Messages {
+		ids[i] = m.ID
+	}
+	tops, err := a.tops(ctx, v, ids)
+	if err != nil {
+		return Thread{}, err
+	}
 	for i, m := range t.Messages {
 		out.Messages[i] = summary(v, m)
+		out.Messages[i].Triage = tops[m.ID]
 	}
 	return out, nil
 }
@@ -613,10 +665,22 @@ func prefixOut(p store.PrefixStat) Prefix {
 }
 
 func (a *API) search(ctx context.Context, v *auth.Viewer, p SearchParams) (SearchResult, error) {
+	answer, err := a.answerFilter(p.Triage)
+	if err != nil {
+		return SearchResult{}, err
+	}
 	res, err := a.db.Search(ctx, v, store.SearchQuery{
 		Text: p.Q, Limit: p.Limit, Before: (*store.MessageCursor)(p.Cursor), IncludeDowngraded: p.Downgraded == "include",
-		Label: p.Label, Archived: p.Archived,
+		Label: p.Label, Archived: p.Archived, Answer: answer,
 	})
+	if err != nil {
+		return SearchResult{}, err
+	}
+	ids := make([]string, len(res.Hits))
+	for i, h := range res.Hits {
+		ids[i] = h.ID
+	}
+	tops, err := a.tops(ctx, v, ids)
 	if err != nil {
 		return SearchResult{}, err
 	}
@@ -626,7 +690,7 @@ func (a *API) search(ctx context.Context, v *auth.Viewer, p SearchParams) (Searc
 			ID: h.ID, ThreadID: h.ThreadID, ReceivedAt: h.ReceivedAt, Subject: h.Subject,
 			FromAddr: h.FromAddr, FromName: h.FromName, Snippet: h.Snippet, Class: classOf(h.Class),
 			Downgraded: h.Downgraded, Quarantined: h.Quarantined, Recipients: []string{},
-			Outgoing: outgoingOut(h.Outgoing), Labels: nonNil(h.Labels), Archived: h.Archived,
+			Outgoing: outgoingOut(h.Outgoing), Labels: nonNil(h.Labels), Archived: h.Archived, Triage: tops[h.ID],
 		}
 		// A hit from the notification zone shows its code there too
 		// (§12.9); other mail is found by its words, not its numbers.

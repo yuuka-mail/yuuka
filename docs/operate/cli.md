@@ -219,7 +219,8 @@ yuuka triage report [--since 2026-10-01]
 - `rescore`：把 `--since` 之后收到的信（RFC 3339 或 `YYYY-MM-DD`，必填）用当前评分器重新评一遍，
   写新的评分，旧的留着。换了模型又想看旧信的新分数时用。评分器连续失败时中途停下，已评的保留
 - `report`：按问题统计当前评分器的最新评分：每个问题各选项各有多少封（取概率最高的那个）、多少封弃权。
-  这不是阈值，也没有人工判断，只是分布；`--since` 缺省为全部
+  这不是阈值，也没有人工判断，只是分布；`--since` 缺省为全部。REST 的 `GET /api/v1/triage/report`（只给人）是同一份计数。
+  要看具体是哪些信，用消息列表或搜索的 `triage=phishing:yes`、`triage=kind:spam` 过滤
 
 ## MCP（stdio）
 

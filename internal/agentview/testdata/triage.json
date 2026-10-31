@@ -1,0 +1,31 @@
+{
+  "notice": "A decision model's estimate, not yuuka's verdict and not a decision: probabilities, which can be wrong. Nothing is hidden, moved or sent because of it; weigh it with the other facts.",
+  "scorer": "laya-ml-1",
+  "model": "laya-ml 0.3",
+  "questions": 1,
+  "scored_at": "2026-10-31T01:42:00Z",
+  "answers": [
+    {
+      "question": "kind",
+      "p": {
+        "conversation": 0.05,
+        "marketing": 0.05,
+        "notification": 0.3,
+        "spam": 0.6
+      },
+      "top": "spam"
+    },
+    {
+      "question": "needs_reply",
+      "abstained": true
+    },
+    {
+      "question": "phishing",
+      "p": {
+        "no": 0.07,
+        "yes": 0.93
+      },
+      "top": "yes"
+    }
+  ]
+}

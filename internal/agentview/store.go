@@ -1,6 +1,7 @@
 package agentview
 
 import (
+	"maps"
 	"slices"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
@@ -43,6 +44,23 @@ func InputOf(v *auth.Viewer, m store.MessageDetail, raw []byte) Input {
 		in.Sent = &Sent{OutboxID: o.OutboxID, From: o.From, State: o.State}
 	}
 	return in
+}
+
+// TriageOf is the view of score s, nil for none. The score's input is
+// not in it: what the scorer was shown is for people (§15.2).
+func TriageOf(s *store.ScoreRead) *Triage {
+	if s == nil {
+		return nil
+	}
+	out := &Triage{
+		Notice: TriageNotice, Scorer: s.Scorer, Model: s.Model, Questions: int(s.Questions),
+		ScoredAt: s.ScoredAt.UTC(), Answers: make([]TriageAnswer, 0, len(s.Answers)),
+	}
+	for _, q := range slices.Sorted(maps.Keys(s.Answers)) {
+		a := s.Answers[q]
+		out.Answers = append(out.Answers, TriageAnswer{Question: q, P: a.P, Top: a.Top(), Abstained: a.Abstain})
+	}
+	return out
 }
 
 // ExtractionOf is the view of one stored extraction, with the host of a

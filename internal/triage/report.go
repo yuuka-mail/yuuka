@@ -28,18 +28,7 @@ func WriteReport(w io.Writer, p score.Profile, since time.Time, c store.ScoreCou
 		say(", mail since %s", since.UTC().Format(time.RFC3339))
 	}
 	say(": %d scored, %d to score\n", c.Scored, c.Unscored)
-	// The questions of the set in their order, then any a score holds
-	// that the set does not (a backend's extra, or a stale profile).
-	var keys []string
-	for _, q := range Questions {
-		keys = append(keys, q.Key)
-	}
-	for _, k := range slices.Sorted(maps.Keys(c.Answers)) {
-		if !slices.Contains(keys, k) {
-			keys = append(keys, k)
-		}
-	}
-	for _, q := range keys {
+	for _, q := range Order(c.Answers) {
 		counts := c.Answers[q]
 		say("\n%s\n", q)
 		opts := slices.SortedFunc(maps.Keys(counts), func(a, b string) int {
