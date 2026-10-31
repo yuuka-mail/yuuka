@@ -1,0 +1,21 @@
+# Go
+/yuuka
+/dist/
+*.test
+*.out
+
+# 本地配置与凭据
+.env
+.env.*
+.dev.vars
+*.netrc
+
+# Cloudflare Worker
+node_modules/
+.wrangler/
+
+# 前端产物
+/web/dist/
+
+# 私有部署笔记与快照
+/local/
