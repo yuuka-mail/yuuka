@@ -117,6 +117,10 @@ if (enrollURL) {
       await s.goto(base + `/?m=${lunch}`);
       await s.getByRole("heading", { name: /lunch on friday/i }).waitFor();
       await shot(s, `reading-${tag}`);
+      // Quiet facts are one line until opened (§12.9).
+      await s.getByRole("button", { expanded: false }).filter({ hasText: "yuuka" }).click();
+      await s.getByRole("button", { name: /fold the facts/i }).waitFor();
+      await shot(s, `reading-facts-open-${tag}`);
       await s.goto(base + `/?m=${otp}`);
       await s.getByText("yuuka").last().waitFor();
       await shot(s, `reading-otp-${tag}`);

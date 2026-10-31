@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, ChevronDownIcon, OctagonAlertIcon, PaperclipIcon, TriangleAlertIcon } from "lucide-react";
+import { ArrowLeftIcon, ChevronDownIcon, ChevronUpIcon, OctagonAlertIcon, PaperclipIcon, TriangleAlertIcon } from "lucide-react";
 import { useState } from "react";
 
 import type { Facts } from "@/api/agentview.gen";
@@ -145,8 +145,20 @@ function SystemFacts({ message: m, facts }: { message: Message; facts?: Facts })
     );
   }
   const warns = warnings(facts);
+  // Quiet facts opened by hand can fold back into their line.
+  const fold = isQuiet(m, facts) && (
+    <button
+      type="button"
+      aria-expanded
+      aria-label="Fold the facts into one line"
+      onClick={() => setOpen(false)}
+      className="flex text-muted-foreground hover:text-foreground"
+    >
+      <ChevronUpIcon aria-hidden className="size-3" />
+    </button>
+  );
   return (
-    <Voice speaker={system} className={cn(warns.some((w) => w.tone === "bad") && "border-destructive/60")}>
+    <Voice speaker={system} action={fold} className={cn(warns.some((w) => w.tone === "bad") && "border-destructive/60")}>
       {warns.length > 0 && (
         <ul className="mb-1.5 flex flex-col gap-0.5 border-b border-system-border pb-1.5">
           {warns.map((w) => (

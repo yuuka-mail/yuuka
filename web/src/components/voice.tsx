@@ -34,13 +34,26 @@ export function Signature({ speaker, className }: { speaker: Speaker; className?
   );
 }
 
-/** A block of text attributed to a speaker. */
-export function Voice({ speaker, title, children, className }: { speaker: Speaker; title?: ReactNode; children: ReactNode; className?: string }) {
+/** A block of text attributed to a speaker; action sits at the right of its header. */
+export function Voice({
+  speaker,
+  title,
+  action,
+  children,
+  className,
+}: {
+  speaker: Speaker;
+  title?: ReactNode;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
   return (
     <section className={cn("rounded-md border px-3 py-2 text-small", styles[speaker.kind].box, className)}>
       <header className="mb-1 flex items-center gap-2">
         <Signature speaker={speaker} />
         {title && <span className="text-muted-foreground">{title}</span>}
+        {action && <span className="ml-auto">{action}</span>}
       </header>
       {children}
     </section>

@@ -97,10 +97,16 @@ export function MailShell({ session }: { session: SessionInfo }) {
             />
           ) : (
             <div className="m-auto text-center text-small text-muted-foreground">
-              <p>No message selected.</p>
-              <p className="mt-1">
-                <Kbd>j</Kbd> <Kbd>k</Kbd> move · <Kbd>/</Kbd> search · <Kbd>Esc</Kbd> close
-              </p>
+              {unclaimed ? (
+                <p>Pick a prefix to list its mail.</p>
+              ) : (
+                <>
+                  <p>No message selected.</p>
+                  <p className="mt-1">
+                    <Kbd>j</Kbd> <Kbd>k</Kbd> move · <Kbd>/</Kbd> search · <Kbd>Esc</Kbd> close
+                  </p>
+                </>
+              )}
             </div>
           )}
         </main>
@@ -152,10 +158,33 @@ function ListHeader({
   // all mail and search can.
   const canToggleDowngraded = !!view.q || (browsing && view.area === "all");
   const hint = browsing ? areaHints[view.area] : undefined;
+  // Without the sidebar the two zones are a switch over the list, standing
+  // in for the title it would repeat.
+  const zone = browsing && (view.area === "conversations" || view.area === "notifications");
   return (
     <div className="flex shrink-0 flex-col gap-1.5 border-b px-3 py-2">
       <div className="flex items-baseline gap-2">
-        <h1 className={cn("min-w-0 truncate font-semibold", view.prefix && "font-mono")}>{title}</h1>
+        {zone && (
+          <ToggleGroup
+            size="sm"
+            variant="outline"
+            spacing={0}
+            className="lg:hidden"
+            value={[view.area]}
+            onValueChange={(v: string[]) => {
+              const a = v[0] as Area | undefined;
+              if (a) pick({ area: a });
+            }}
+          >
+            <ToggleGroupItem value="conversations" className="h-6 px-2 text-small">
+              Conversations
+            </ToggleGroupItem>
+            <ToggleGroupItem value="notifications" className="h-6 px-2 text-small">
+              Notifications
+            </ToggleGroupItem>
+          </ToggleGroup>
+        )}
+        <h1 className={cn("min-w-0 truncate font-semibold", view.prefix && "font-mono", zone && "max-lg:sr-only")}>{title}</h1>
         {!list.isLoading && (
           <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
             {count(n)}
@@ -170,27 +199,6 @@ function ListHeader({
         )}
       </div>
       {hint && <p className="text-small text-muted-foreground">{hint}</p>}
-      {/* Without the sidebar, the two zones are a switch over the list. */}
-      {browsing && (
-        <ToggleGroup
-          size="sm"
-          variant="outline"
-          spacing={0}
-          className="lg:hidden"
-          value={view.area === "conversations" || view.area === "notifications" ? [view.area] : []}
-          onValueChange={(v: string[]) => {
-            const a = v[0] as Area | undefined;
-            if (a) pick({ area: a });
-          }}
-        >
-          <ToggleGroupItem value="conversations" className="h-6 px-2 text-small">
-            Conversations
-          </ToggleGroupItem>
-          <ToggleGroupItem value="notifications" className="h-6 px-2 text-small">
-            Notifications
-          </ToggleGroupItem>
-        </ToggleGroup>
-      )}
     </div>
   );
 }

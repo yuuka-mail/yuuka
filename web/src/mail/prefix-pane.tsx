@@ -32,7 +32,7 @@ export function PrefixPane({ view, onPick }: { view: View; onPick: (next: Partia
       <div className="flex shrink-0 flex-col py-2">
         <Item active={at("conversations")} label="Conversations" onClick={() => onPick({ area: "conversations" })} />
         <Item active={at("notifications")} label="Notifications" onClick={() => onPick({ area: "notifications" })} />
-        <Item active={at("all")} label="All mail" n={q.data && q.data.messages - q.data.downgraded} onClick={() => onPick({ area: "all" })} />
+        <Item active={at("all")} label="All mail" onClick={() => onPick({ area: "all" })} />
       </div>
       <Claimed ps={q.data?.prefixes} active={view.prefix} onPick={onPick} />
       <div className="flex shrink-0 flex-col border-t py-2">
