@@ -5,31 +5,30 @@
 ## 2. 总体架构
 
 ```
-          ┌──────────────── Cloudflare ────────────────┐
-  MX ───► │ Email Routing (catch-all *@example.com)       │
-          │          │                                  │
-          │          ▼                                  │
-          │   Email Worker  (薄，~150 行 TS，不解析)    │
+          ┌───────────────── Cloudflare ─────────────────┐
+  MX ───► │ Email Routing (catch-all *@example.com)      │
+          │          │                                   │
+          │          ▼                                   │
+          │   Email Worker  (薄，~150 行 TS，不解析)     │
           │     1. 写 pending/<id> 标记对象              │
-          │     2. raw MIME ──PUT──► R2 raw/YYYY/MM/..  │
-          │     3. HMAC 签名 webhook ──┐                │
-          │     4.（兜底）直推 TG 一行 │                │
-          │                            │                │
-          │   Email Sending (SMTP 465 / API)  ◄───┐     │
-          │   Access / Tunnel ─────────┼──────────┼──┐  │
-          └────────────────────────────┼──────────┼──┘  │
-                                       ▼          │     │
-          ┌──────── 自己的机器 (Go, 常驻) ─────────┴─────┴──┐
-          │  ingest ──► parse ──► classify ──► notify        │
-          │     │         │          │           └► TG / 其他 IM
-          │     │         │          └► 规则引擎 / 验证码提取 │
-          │     │         └► go-message                      │
-          │     └► 幂等 + reconcile(定时扫 pending/)          │
-          │  store: Postgres(元数据/索引) + 本地 raw 副本     │
-          │  api:   REST(内部) + JMAP 子集(对外) + MCP        │
-          │  out:   outbox 状态机 ──► CF SMTP                 │
-          │  web:   WebUI (嵌入 Go 二进制)                    │
-          └───────────────────────────────────────────────────┘
+          │     2. raw MIME ──PUT──► R2 raw/YYYY/MM/..   │
+          │     3. HMAC 签名 webhook ──┐                 │
+          │     4.（兜底）直推 TG 一行 │                 │
+          │                            │                 │
+          │   Email Sending (SMTP 465 / API)  ◄───┐      │
+          └────────────────────────────┼──────────┼──────┘
+                                       ▼          │
+          ┌──────── yuuka（Go，常驻，自托管） ────┴──────────────┐
+          │  ingest ──► parse ──► classify ──► notify            │
+          │     │         │          │           └► TG / 其他 IM │
+          │     │         │          └► 规则引擎 / 验证码提取    │
+          │     │         └► go-message                          │
+          │     └► 幂等 + reconcile(定时扫 pending/)             │
+          │  store: Postgres(元数据/索引) + 本地 raw 副本        │
+          │  api:   REST(内部) + JMAP 子集(对外) + MCP           │
+          │  out:   outbox 状态机 ──► CF SMTP                    │
+          │  web:   WebUI (嵌入 Go 二进制)                       │
+          └──────────────────────────────────────────────────────┘
 ```
 
 **Worker 为什么必须薄**：它是唯一不能用 Go 写的部分，所以把它压到"落盘 + 通知"
@@ -40,8 +39,9 @@
 可靠队列，且 R2 本身就是所需的归档层，少一个组件。webhook 只负责把延迟从
 "下次 reconcile"降到"秒级"，丢了不影响正确性。以后量大再换 Queues 不动上层。
 
-**机器在 NAT 后面**：用 `cloudflared` tunnel 暴露 ingest 和 WebUI；
-WebUI 前面挂 Cloudflare Access，ingest 端点靠 HMAC + 时间戳防重放。
+**不假设部署形态**：公网主机、反向代理之后、内网加隧道都应该能跑。
+yuuka 对网络只有两个要求：ingest 端点能被 Worker 访问到，WebUI 能被运维者的浏览器访问到。
+怎么做到（端口映射、反向代理、隧道）是部署的事；认证不靠它们，每个端点由 yuuka 自己认证（§13.7）。
 
 ### 2.1 收信提交协议
 

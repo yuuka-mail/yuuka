@@ -153,21 +153,42 @@ identity_grants(
 写 HTTP 的服务也可以走 REST/MCP + token，两条路并存。那条路径上信头 `From` 由系统按 identity 组装，
 调用方写不进去，上面的校验天然成立。
 
-### 13.7 认证边界：Access 只管浏览器
+### 13.7 认证边界：每个端点自己认证
 
-Cloudflare Access 是给浏览器会话的，**不能用来保护机器主体的入口**。所以：
+yuuka 不假设自己部署在什么网络里（§2）。所以**每个端点都由 yuuka 自己认证**；
+反向代理、身份代理、VPN 这类网络层保护可以加，但只算纵深防御——
+拿掉它们，不能让任何一个端点变成无认证。
 
-| 端点 | 认证方式 | 在 Access 之后？ |
+| 端点 | 认证方式 | 需要从哪里可达 |
 |---|---|---|
-| WebUI | Cloudflare Access → `session` 凭据 | ✓ |
-| ingest（Worker → 自建）| HMAC + 时间戳（§2） | ✗ |
-| SMTP submission | SASL → `smtp_password` 凭据 | ✗ |
-| REST / MCP | Bearer → `token` 凭据 | ✗ |
-| TG 回调按钮（§8.4） | 校验 `callback_query.from.id` → 运维者的 `session` 凭据 | ✗ |
+| WebUI | 内置登录 → `session` 凭据 | 运维者的浏览器 |
+| ingest（Worker → yuuka）| HMAC + 时间戳（§2） | Cloudflare |
+| SMTP submission | SASL → `smtp_password` 凭据 | 只有同一部署环境里的服务；默认不在公网地址上监听 |
+| REST / MCP | Bearer → `token` 凭据 | 调用它的 agent 和服务 |
+| TG 回调按钮（§8.4） | 校验 `callback_query.from.id` → 运维者的 `session` 凭据 | Telegram；改用长轮询则无需入站 |
 
 这几个端点各自认证，不要混。TG 容易被当成纯输出而漏掉，但它上面有「确认发送」按钮，
-就是 `submission:send` 的入口之一。SMTP submission 口只监听内网 / tailnet，不经 tunnel 暴露到公网。把 MCP 端点放在 Access 后面是个常见错误——
-agent 不是浏览器，它拿不到 Access 的 cookie。
+就是 `submission:send` 的入口之一。把 REST / MCP 放在只认浏览器 cookie 的身份代理后面是个常见错误——
+agent 不是浏览器，拿不到那个 cookie。
+
+**WebUI 的内置登录**：
+
+- 单一运维者，首选 **passkey（WebAuthn）**：没有密码可泄露，也不需要邮件找回——
+  邮件系统自己的登录不该依赖收邮件
+- 第一个 passkey 由 CLI 签发一次性注册链接（`yuuka admin enroll`），之后在 WebUI 里添加更多设备；
+  所有 passkey 都丢了，同样用 CLI 恢复。能在机器上跑 CLI 本身就是最高权限
+- **不提供密码 + TOTP 作为备用登录**。备用方式就是整条链上最弱的一环：
+  攻击者只需要走它，钓鱼页实时转发密码和 TOTP 就能绕过 passkey 的防钓鱼能力
+- 唯一的缺口是「passkey 全丢、又碰不到服务器的 shell」，用**离线恢复码**补：
+  - `yuuka admin enroll` 同时打印一组（约 8 个）一次性恢复码，运维者离线保存，库里只存哈希
+  - 恢复码只能在专门的恢复入口使用，作用只有一个：**发起一次新 passkey 的注册**。
+    它本身不建立会话、不能读信，偷到恢复码也不等于登录
+  - 用一个作废一个；每次使用记入 `actions` 并推送 TG 告警；恢复入口严格限速
+  - 和密码 + TOTP 的区别：它从不出现在日常登录页上，没有可供钓鱼的常规路径；
+    每个只能用一次，被人用了运维者会立刻知道
+- 可选「信任前置身份代理」：部署在 Cloudflare Access、oauth2-proxy 这类代理之后时，
+  可以把代理的身份断言映射成运维者的 `session`。但**必须验签**（例如 Access 的 JWT 对照它的 JWKS），
+  不能只信一个请求头；验签失败就拒绝，而不是回落成无认证
 
 ### 13.8 ACL 的粒度到账户为止
 
@@ -231,7 +252,7 @@ account_access(account_id → accounts, principal_id → principals, can_read bo
 
 | 阶段 | 内容 |
 |---|---|
-| M1 | **`principals` / `credentials` / `identity_grants` 建表**，WebUI 走 session 凭据 |
+| M1 | **`principals` / `credentials` / `identity_grants` 建表**，WebUI 内置 passkey 登录、走 session 凭据 |
 | M2 | SMTP submission 口（跟发信能力一起做）；MCP token |
 | M3.5 | `account_access`（跟多账户一起做） |
 

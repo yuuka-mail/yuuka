@@ -17,6 +17,7 @@ yuuka prefix ls|label|leaks             # 前缀注册表（§3.3）
 yuuka outbox ls|retry|dead              # 出口状态机（§3.6）
 yuuka account add|sync|caps             # 多账户（§9）
 yuuka doctor                            # DNS / SPF / DKIM / 出口授权自检（§10.4.4）
+yuuka admin enroll                      # 签发一次性 passkey 注册链接与离线恢复码（§13.7）
 yuuka://message/<ulid>#part/2/para/7    # agent 锚点 scheme（§8.1）
 yuuka mcp --stdio                       # 本地 stdio 形态的 MCP（§8.7）；HTTP 形态内置在 serve
 ```

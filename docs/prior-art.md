@@ -34,4 +34,6 @@ Cloudflare 生态里已有若干成熟的邮件项目。先说结论：**它们�
 - `References[0] || In-Reply-To || self` 的线程归并，外加无线程头时按 `subject + sender` 兜底匹配
 - 发信前先写 Sent 副本，再交给 transport
 - 内置 MCP 端点，让外部工具直接操作邮箱
-- Cloudflare Access 挡在应用前面做鉴权
+
+不沿用的一点：它把鉴权完全交给 Cloudflare Access。本设计由应用自己认证每个端点，
+前置身份代理只作纵深防御（§13.7）。
