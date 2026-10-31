@@ -27,6 +27,7 @@ import { shownExtraction } from "./extracted";
 import { ExtractedLine } from "./extracted-line";
 import { isQuiet, sentState, systemFacts, warnings, type Tone } from "./facts";
 import { ReadingBody } from "./reading-body";
+import { TriageBox } from "./triage-box";
 import { MessageNotes } from "./notes";
 import { MessageProposals } from "./proposals";
 import { useMessage, useReading } from "./reading-data";
@@ -148,6 +149,8 @@ function Reading({
       <SystemFacts message={m} facts={facts} onOpenOutbox={onOpenOutbox} />
 
       <ExtractedBox message={m} />
+
+      <TriageBox score={m.triage_score} />
 
       <MessageProposals id={m.id} highlight={proposal} can={can} onOpen={onOpen} />
 

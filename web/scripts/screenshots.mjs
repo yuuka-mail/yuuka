@@ -59,12 +59,14 @@ async function page(scheme, size, storageState, lang) {
     origin: new URL(base).origin,
   });
   const p = await ctx.newPage();
-  // A signed-out /auth/session is a 401 by design; anything else is a problem.
+  // A signed-out /auth/session is a 401 by design, and so is the 404 of
+  // the triage report without a scorer (§15); anything else is a problem.
   p.on(
     "console",
     (m) =>
       m.type() === "error" &&
       !/status of 401/.test(m.text()) &&
+      !(/status of 404/.test(m.text()) && m.location().url.includes("/api/v1/triage/report")) &&
       problems.push(`${scheme}/${size} ${p.url()}: ${m.text()}`),
   );
   p.on("pageerror", (e) => problems.push(`${scheme}/${size} ${p.url()}: ${e.message}`));
@@ -207,6 +209,13 @@ if (enrollURL) {
   // Who may do what (§13.10): only a person's own session with admin sees it.
   const admin = (await get("/auth/session"))?.scopes.includes("admin");
   const claimed = prefixes.prefixes.find((x) => x.claimed)?.address;
+  // A scorer's estimates (§15), when one is configured: the report answers
+  // 404 without one, and then none of the triage shots are taken. Scores
+  // come from whatever scorer the server was started with.
+  const triage = await get("/api/v1/triage/report");
+  const leaning =
+    triage &&
+    (await get("/api/v1/messages?triage=phishing:yes&downgraded=include&limit=1"))?.messages[0];
   await p.close();
 
   for (const scheme of ["light", "dark"]) {
@@ -472,6 +481,32 @@ if (enrollURL) {
         }
       }
 
+      // A scorer's estimates in their own voice (§12.5, §15.4): the leanings
+      // view and its marks, the estimate beside the mail, folded and open,
+      // search narrowed by a leaning, and the report.
+      if (triage) {
+        await s.goto(base + "/?area=leanings");
+        await s.getByRole("heading", { name: "Model leans to…" }).waitFor();
+        await shot(s, `area-leanings-${tag}`);
+        if (leaning) {
+          await s.goto(base + `/?area=leanings&m=${leaning.id}`);
+          await s.getByRole("region", { name: "A model's estimate" }).waitFor();
+          await shot(s, `reading-estimate-${tag}`);
+          await s
+            .getByRole("button", { name: "Every probability, and what the model was given" })
+            .click();
+          await s.getByRole("button", { name: "Fold the estimate into one line" }).waitFor();
+          await shot(s, `reading-estimate-open-${tag}`);
+          const word = leaning.subject.split(/\s+/).find((w) => w.length > 3) ?? leaning.subject;
+          await s.goto(base + `/?q=${encodeURIComponent(word)}&tr=phishing:yes`);
+          await s.getByRole("listbox", { name: "Messages" }).waitFor();
+          await shot(s, `search-leaning-${tag}`);
+        }
+        await s.goto(base + "/?settings=triage");
+        await s.getByRole("region", { name: "Estimate report" }).waitFor();
+        await shot(s, `settings-triage-${tag}`);
+      }
+
       // The account menu: who is signed in, the language, signing out.
       await s.goto(base + "/");
       await s.getByRole("button", { name: "Account" }).click();
@@ -580,6 +615,20 @@ if (enrollURL) {
             await s.getByRole("button", { name: t.grants_tighten_confirm }).waitFor();
             await shot(s, `settings-grant-tighten-${tag}`);
           }
+        }
+        if (triage) {
+          await s.goto(base + "/?area=leanings");
+          await s.getByRole("heading", { name: t.area_leanings }).waitFor();
+          await shot(s, `area-leanings-${tag}`);
+          if (leaning) {
+            await s.goto(base + `/?area=leanings&m=${leaning.id}`);
+            await s.getByRole("button", { name: t.triage_unfold }).click();
+            await s.getByRole("button", { name: t.triage_fold }).waitFor();
+            await shot(s, `reading-estimate-open-${tag}`);
+          }
+          await s.goto(base + "/?settings=triage");
+          await s.getByRole("region", { name: t.settings_triage }).waitFor();
+          await shot(s, `settings-triage-${tag}`);
         }
         await s.goto(base + "/?settings=rules");
         await s.locator("main h2").waitFor();

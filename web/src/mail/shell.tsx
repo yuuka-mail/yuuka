@@ -3,11 +3,12 @@ import { PanelLeftIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { markup } from "@/components/markup";
-import type { SessionInfo } from "@/api/types";
+import type { SessionInfo, TriageReport } from "@/api/types";
 import {
   useMessageList,
   usePrefixes,
   useSearchList,
+  useTriageReport,
   useUnclaimedPrefixes,
   type MailList,
 } from "@/api/queries";
@@ -35,11 +36,13 @@ import { MessageList } from "./message-list";
 import { PrefixPane } from "./prefix-pane";
 import { ProposalList, StandaloneProposal } from "./proposals";
 import { ReadingPane } from "./reading-pane";
+import { LeanFilter } from "./triage-box";
 import { UnclaimedList } from "./unclaimed-list";
 import {
   closeComposer,
   composing,
   knownTotal,
+  leanOf,
   mainOpen,
   parseView,
   viewHref,
@@ -87,6 +90,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
       o: undefined,
       st: undefined,
       p: undefined,
+      tr: undefined,
       ...closeComposer,
       ...next,
     });
@@ -105,8 +109,11 @@ export function MailShell({ session }: { session: SessionInfo }) {
   const outbox = browsing && view.area === "outbox";
   const proposals = browsing && view.area === "proposals";
   const messages = useMessageList(view, !searching);
-  const hits = useSearchList(view.q ?? "", view.dg, searching);
+  const hits = useSearchList(view.q ?? "", view.dg, searching, view.tr);
   const list = searching ? hits : messages;
+  // Whether a scorer is configured (§15): without one there is nothing to
+  // filter by, and the filter would answer 400.
+  const triage = useTriageReport(undefined, can.triage);
 
   useKeys(
     drafts || outbox || unclaimed || leaks || proposals ? noList : list,
@@ -166,7 +173,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
       ) : (
         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[22rem_1fr] lg:grid-cols-[13.5rem_24rem_1fr]">
           <aside className="hidden min-h-0 flex-col border-r bg-sidebar lg:flex">
-            <PrefixPane view={view} can={can} onPick={pick} />
+            <PrefixPane view={view} can={can} scorer={triage.scorer} onPick={pick} />
           </aside>
 
           <section
@@ -174,7 +181,7 @@ export function MailShell({ session }: { session: SessionInfo }) {
           >
             {showPrefixes && (
               <div className="flex min-h-0 flex-1 flex-col bg-sidebar lg:hidden">
-                <PrefixPane view={view} can={can} onPick={pick} />
+                <PrefixPane view={view} can={can} scorer={triage.scorer} onPick={pick} />
               </div>
             )}
             <div
@@ -186,6 +193,10 @@ export function MailShell({ session }: { session: SessionInfo }) {
                 go={go}
                 pick={pick}
                 managePrefixes={can.prefixes}
+                triage={triage.scorer ? triage.report : undefined}
+                onReport={
+                  can.triage ? () => go({ settings: "triage", rule: undefined }) : undefined
+                }
               />
               {unclaimed ? (
                 <UnclaimedList
@@ -336,6 +347,8 @@ function areaHint(a: Area): React.ReactNode {
       return <ParaglideMessage message={msg.area_unclaimed_hint} markup={markup} />;
     case "leaks":
       return <ParaglideMessage message={msg.area_leaks_hint} markup={markup} />;
+    case "leanings":
+      return msg.area_leanings_hint();
     default:
       return undefined;
   }
@@ -347,6 +360,8 @@ function ListHeader({
   go,
   pick,
   managePrefixes,
+  triage,
+  onReport,
 }: {
   view: View;
   list: MailList;
@@ -354,6 +369,10 @@ function ListHeader({
   pick: (next: Partial<View>) => void;
   /** Claiming, unclaiming and expected domains, beside the prefix's mail (§12.12). */
   managePrefixes: boolean;
+  /** The scorer's report (§15.5); absent without a scorer, and then no filter by estimate. */
+  triage?: TriageReport;
+  /** Opens the scorer's report in settings; absent when the session may not read it. */
+  onReport?: () => void;
 }) {
   const browsing = !view.q && !view.prefix && !view.label;
   const title = view.q
@@ -444,6 +463,26 @@ function ListHeader({
       )}
       {browsing && view.area === "outbox" && (
         <OutboxFilterBar st={view.st} onChange={(st) => go({ st, o: undefined })} />
+      )}
+      {/* By what a model's estimate leans to (§15.4): the leanings view, or narrowing a search. */}
+      {triage && (view.q || (browsing && view.area === "leanings")) && (
+        <div className="flex min-w-0 items-center gap-3">
+          <LeanFilter
+            report={triage}
+            value={view.q ? view.tr : leanOf(view)}
+            optional={!!view.q}
+            onChange={(tr) => go({ tr, m: undefined })}
+          />
+          {onReport && !view.q && (
+            <button
+              type="button"
+              className="shrink-0 text-small text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              onClick={onReport}
+            >
+              {msg.triage_report_open()}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

@@ -4,12 +4,16 @@ import { cn } from "@/lib/utils";
 
 /**
  * Who is speaking in a block (§11.1, §12.5). "system" is yuuka stating
- * facts the system established; "agent" is an agent's guess or proposal.
- * The two differ in colour, mark shape and signature, never only in
- * wording. Nothing in M1 speaks as an agent; the variant exists so the
- * tokens are in place before the first proposal card.
+ * facts the system established; "agent" is an agent's guess or proposal;
+ * "observation" is a scorer's estimate (§15), probabilities that act on
+ * nothing, signed with the scorer and model because no principal stands
+ * behind them. The three differ in colour, mark shape and signature,
+ * never only in wording.
  */
-export type Speaker = { kind: "system" } | { kind: "agent"; name: string };
+export type Speaker =
+  | { kind: "system" }
+  | { kind: "agent"; name: string }
+  | { kind: "observation"; scorer: string; model: string };
 
 const styles = {
   system: {
@@ -22,7 +26,23 @@ const styles = {
     mark: "rounded-full bg-agent",
     sign: "text-agent-foreground",
   },
+  // A diamond: neither yuuka's square nor an agent's circle.
+  observation: {
+    box: "border-observation-border bg-observation-surface",
+    mark: "m-px size-1.5 rotate-45 rounded-[1px] bg-observation",
+    sign: "text-observation-foreground",
+  },
 };
+
+/** The mark alone, for a row too small for a signature (a list row). */
+export function Mark({ kind, className }: { kind: Speaker["kind"]; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn("inline-block size-2 shrink-0", styles[kind].mark, className)}
+    />
+  );
+}
 
 export function Signature({ speaker, className }: { speaker: Speaker; className?: string }) {
   const s = styles[speaker.kind];
@@ -34,8 +54,19 @@ export function Signature({ speaker, className }: { speaker: Speaker; className?
         className,
       )}
     >
-      <span aria-hidden className={cn("size-2", s.mark)} />
-      {speaker.kind === "system" ? "yuuka" : speaker.name}
+      <Mark kind={speaker.kind} />
+      {speaker.kind === "system" ? (
+        "yuuka"
+      ) : speaker.kind === "agent" ? (
+        speaker.name
+      ) : (
+        <>
+          <span className="font-mono">{speaker.scorer}</span>
+          {speaker.model && (
+            <span className="font-mono font-normal tracking-normal">· {speaker.model}</span>
+          )}
+        </>
+      )}
     </span>
   );
 }

@@ -22,6 +22,8 @@
   "area_drafts": "草稿",
   "area_leaks": "泄漏与仿冒",
   "area_leaks_hint": "已认领的前缀收到了来自没给过它的发件方的信，或冒充这些发件方的信。在前缀的信上方写明它给了谁，或用 {#code}yuuka prefix expect{/code}。",
+  "area_leanings": "模型倾向…",
+  "area_leanings_hint": "按模型最新估计里概率最高的选项列出的信。没有阈值：51% 和 99% 都算。没有任何信因它被隐藏或移动。",
   "area_notifications": "通知",
   "area_outbox": "外发",
   "area_proposals": "提案",
@@ -216,6 +218,7 @@
   "nav_filter_prefixes": "筛选前缀",
   "nav_labels": "标签",
   "nav_leaks_title": "收到了来自没给过它的发件方的信的已认领前缀",
+  "nav_leanings_title": "模型的估计倾向于什么；它不触发任何动作",
   "nav_mailboxes": "邮箱",
   "nav_no_claimed": "还没有已认领的前缀。",
   "nav_no_match": "没有匹配项。",
@@ -623,6 +626,7 @@
   "settings_nothing": "这个会话在这里没有可做的。",
   "settings_rules": "规则",
   "settings_title": "设置",
+  "settings_triage": "估计报告",
   "shell_compose": "写信",
   "shell_compose_title": "写新邮件 (c)",
   "shell_drafts_draft": "草稿",
@@ -644,6 +648,100 @@
   "shell_show_drafts": "显示哪些草稿",
   "shell_show_outbox": "显示哪些外发",
   "shell_zone": "分区",
+  "triage_abstained": "弃权",
+  "triage_abstained_detail": "模型没有作答，不保存概率。",
+  "triage_filter_any": "不限",
+  "triage_filter_label": "模型倾向",
+  "triage_filter_option": "{lean}（{count}）",
+  "triage_fold": "把估计收成一行",
+  "triage_in_auth": "认证",
+  "triage_in_chars": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{count} 个字符"
+      }
+    }
+  ],
+  "triage_in_claimed": "已认领的前缀",
+  "triage_in_class": "分类",
+  "triage_in_code": "含验证码",
+  "triage_in_endpoint": "评分器",
+  "triage_in_hosted": "托管：信离开了这个部署环境",
+  "triage_in_known_sender": "该域以前来过信",
+  "triage_in_link": "含登录链接",
+  "triage_in_list_id": "List-Id",
+  "triage_in_local": "本地：在这个部署环境里",
+  "triage_in_reply_to_other": "Reply-To 指向别处",
+  "triage_in_text": "正文",
+  "triage_in_truncated": "截断以放得下",
+  "triage_in_versions": "渲染版本",
+  "triage_in_view_parser": "视图 v{view}，解析器 v{parser}",
+  "triage_input_hint": "评分时 yuuka 交给它的事实，记的是当时的状态。信的正文也一起给了它，这里不再重复。",
+  "triage_input_label": "模型拿到的输入",
+  "triage_label": "模型的估计",
+  "triage_lean": "{question}：{option}",
+  "triage_mark": "{what}？",
+  "triage_mark_title": "模型的估计倾向于 {lean}。没有任何信因它被隐藏或移动。",
+  "triage_notice": "这是模型的估计，不是 yuuka 的结论。没有任何信因它被隐藏或移动。",
+  "triage_o_conversation": "会话",
+  "triage_o_marketing": "营销",
+  "triage_o_no": "否",
+  "triage_o_notification": "通知",
+  "triage_o_spam": "垃圾",
+  "triage_o_yes": "是",
+  "triage_provenance": "评分于 {when}，问题集 v{version}。",
+  "triage_q_injection": "写给 AI 的指令",
+  "triage_q_kind": "类型",
+  "triage_q_needs_reply": "需要回复",
+  "triage_q_phishing": "钓鱼",
+  "triage_question_key": "问题的键，过滤和 agent 用的就是它",
+  "triage_report_abstained": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{count} 封弃权"
+      }
+    }
+  ],
+  "triage_report_all": "全部",
+  "triage_report_days": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "最近 {count} 天"
+      }
+    }
+  ],
+  "triage_report_hint": "当前评分器的最新估计在你看得到的信里怎么分布。这些是模型的估计：没有任何信因它们被隐藏或移动。点一个数打开那些信。",
+  "triage_report_none": "没有配置评分器，所以没有信被评分。在主机上设 YUUKA_TRIAGE_URL 和 YUUKA_TRIAGE_NAME；这条命令检查它连到的评分器：",
+  "triage_report_open": "报告",
+  "triage_report_open_lean": "打开倾向于 {lean} 的信",
+  "triage_report_scored": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "已评 {count} 封"
+      }
+    }
+  ],
+  "triage_report_totals": "{scored} · {unscored} · 问题集 v{version}",
+  "triage_report_unscored": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=other": "{count} 封尚未评分"
+      }
+    }
+  ],
+  "triage_report_window": "收信时间",
+  "triage_scored": "{when} 的估计",
+  "triage_unfold": "全部概率，以及模型拿到的输入",
   "undo": "撤销",
   "undo_reverted": "已撤销：恢复了 {n} 处",
   "undo_superseded": "{n} 处之后又被改过，保持原样",

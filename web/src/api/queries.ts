@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery, type QueryClient } from "@tanstack/react-qu
 import { listParams, type View } from "@/mail/view";
 import { outboxMoves } from "@/send/outgoing";
 
-import { $api, api, isUnauthenticated } from "./client";
+import { $api, api, ApiError, isUnauthenticated } from "./client";
 import type { paths } from "./schema.gen";
 import type { Draft, DraftState, MessageSummary, OutboxEntry, OutboxState, Prefix } from "./types";
 
@@ -135,13 +135,19 @@ export function useSearchList(
   text: string,
   includeDowngraded: boolean,
   enabled: boolean,
+  triage?: string,
 ): MailList {
   const q = $api.useInfiniteQuery(
     "get",
     "/api/v1/search",
     {
       params: {
-        query: { q: text, downgraded: includeDowngraded ? "include" : "hide", limit: pageSize },
+        query: {
+          q: text,
+          downgraded: includeDowngraded ? "include" : "hide",
+          triage,
+          limit: pageSize,
+        },
       },
     },
     { ...cursorPaging, enabled },
@@ -327,4 +333,32 @@ export function useThread(id: string | undefined) {
     { params: { path: { id: id ?? "" } } },
     { enabled: !!id, staleTime: 60_000 },
   );
+}
+
+/**
+ * How the configured scorer's latest estimates fall over the mail the
+ * viewer sees (§15.5); people only. It doubles as the question whether
+ * there is a scorer at all: 404 means none is configured, and then the
+ * WebUI offers no filter by estimate (the filter would answer 400).
+ */
+export function useTriageReport(since: string | undefined, enabled = true) {
+  const q = $api.useQuery(
+    "get",
+    "/api/v1/triage/report",
+    { params: { query: { since } } },
+    {
+      enabled,
+      staleTime: 5 * 60_000,
+      // 404 (no scorer) and 403 are answers, not failures to retry.
+      retry: (n, err) => !(err instanceof ApiError && err.status < 500) && n < 2,
+    },
+  );
+  const none = q.error instanceof ApiError && q.error.status === 404;
+  return {
+    report: q.data,
+    /** Whether a scorer is configured; undefined until known, or when not asked. */
+    scorer: q.data ? true : none ? false : undefined,
+    error: none ? undefined : q.error,
+    isLoading: q.isLoading,
+  };
 }

@@ -22,24 +22,29 @@ import { settingsSections, type SettingsSection, type View } from "@/mail/view";
 import { CredentialsSection } from "./credentials";
 import { GrantsSection } from "./grants";
 import { IdentitiesSection } from "./identities";
+import { TriageReportSection } from "./triage-report";
 
 // Settings (§12.12): the one page that does not follow a message,
 // entered from the account menu, never from the sidebar. It holds what
 // has no message of its own: rules, then who may do what (§13.10) —
 // credentials, identities and grants, which only a person's own session
-// with admin sees, to look at and tighten. Each section is listed only
-// when the session may see it.
+// with admin sees, to look at and tighten — and the scorer's report
+// (§15.5), which belongs to no one message either. Each section is
+// listed only when the session may see it.
 
 const sectionTitle: Record<SettingsSection, () => string> = {
   rules: m.settings_rules,
   credentials: m.settings_credentials,
   identities: m.settings_identities,
   grants: m.settings_grants,
+  triage: m.settings_triage,
 };
 
 /** The settings sections the session may see, in the page's order. */
 export function settingsFor(can: Abilities): SettingsSection[] {
-  return settingsSections.filter((s) => (s === "rules" ? can.rules : can.authority));
+  return settingsSections.filter((s) =>
+    s === "rules" ? can.rules : s === "triage" ? can.triage : can.authority,
+  );
 }
 
 export function SettingsPage({
@@ -105,6 +110,22 @@ export function SettingsPage({
         {section === "credentials" && <CredentialsSection />}
         {section === "identities" && <IdentitiesSection />}
         {section === "grants" && <GrantsSection />}
+        {section === "triage" && (
+          <TriageReportSection
+            onLean={(tr) =>
+              go({
+                settings: undefined,
+                rule: undefined,
+                area: "leanings",
+                tr,
+                q: undefined,
+                prefix: undefined,
+                label: undefined,
+                m: undefined,
+              })
+            }
+          />
+        )}
       </main>
     </div>
   );

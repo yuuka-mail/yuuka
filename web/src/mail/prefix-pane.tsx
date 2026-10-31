@@ -4,6 +4,7 @@ import { useDrafts, useLabels, useOutbox, usePrefixes, useUnclaimedPrefixes } fr
 import type { Prefix } from "@/api/types";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Mark } from "@/components/voice";
 import { count } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { m } from "@/paraglide/messages.js";
@@ -29,10 +30,13 @@ const filterFrom = 20;
 export function PrefixPane({
   view,
   can,
+  scorer,
   onPick,
 }: {
   view: View;
   can: Abilities;
+  /** Whether a scorer is configured (§15); the leanings view only exists with one. */
+  scorer?: boolean;
   onPick: (next: Partial<View>) => void;
 }) {
   const q = usePrefixes();
@@ -120,6 +124,16 @@ export function PrefixPane({
           title={flaggedCount ? m.nav_leaks_title() : undefined}
           onClick={() => onPick({ area: "leaks" })}
         />
+        {/* What a model guessed, beside what yuuka established: no count, it asks for nothing. */}
+        {scorer && (
+          <Item
+            active={at("leanings")}
+            label={areaTitle("leanings")}
+            observation
+            title={m.nav_leanings_title()}
+            onClick={() => onPick({ area: "leanings" })}
+          />
+        )}
       </div>
     </nav>
   );
@@ -234,6 +248,8 @@ function Item(props: {
   title?: string;
   mono?: boolean;
   mark?: LeakTone;
+  /** A scorer's estimates are behind it (§12.5): the observation mark. */
+  observation?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -259,6 +275,7 @@ function Item(props: {
           <span className="sr-only">{props.title}</span>
         </>
       )}
+      {props.observation && <Mark kind="observation" className="ml-auto" />}
       {props.n !== undefined && (
         <span
           className={cn(

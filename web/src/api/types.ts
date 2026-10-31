@@ -112,6 +112,12 @@ export type Proposal = S["Proposal"];
 export type ProposalState = S["ProposalState"];
 export type AcceptResult = S["AcceptResult"];
 
+// Triage (§15): a scorer's estimates, which act on nothing.
+export type TriageScore = S["TriageScore"];
+export type TriageAnswer = S["TriageAnswer"];
+export type TriageInput = S["TriageInput"];
+export type TriageReport = S["TriageReport"];
+
 // /auth/
 export type SessionInfo = S["SessionInfo"];
 export type RegisterBegin = S["RegisterBegin"];

@@ -12,8 +12,12 @@
  *                established. Teal, a square mark, signed "yuuka".
  *   agent        arisu speaking: guesses and proposals, always with
  *                cites. Violet, a round mark, signed with the agent's
- *                name. Reserved now so nothing else borrows it; the
- *                first agent content arrives with M3.
+ *                name.
+ *   observation  a scorer's estimate (§15): probabilities a decision
+ *                model gave, which act on nothing. Moss, a diamond
+ *                mark, signed with the scorer and model, no principal.
+ *                Muted on purpose: not green enough to read as "safe",
+ *                not warm enough to read as a warning.
  *
  * Hover is muted; the selection (accent) is a stronger neutral, so the
  * open message never looks like something the system is saying.
@@ -51,6 +55,11 @@
   --agent-foreground: oklch(0.38 0.13 300);
   --agent-surface: oklch(0.97 0.02 300);
   --agent-border: oklch(0.86 0.06 300);
+
+  --observation: oklch(0.54 0.07 135);
+  --observation-foreground: oklch(0.4 0.05 135);
+  --observation-surface: oklch(0.97 0.012 135);
+  --observation-border: oklch(0.87 0.035 135);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -81,6 +90,11 @@
     --agent-foreground: oklch(0.85 0.09 300);
     --agent-surface: oklch(0.22 0.04 300);
     --agent-border: oklch(0.38 0.09 300);
+
+    --observation: oklch(0.74 0.08 135);
+    --observation-foreground: oklch(0.84 0.05 135);
+    --observation-surface: oklch(0.22 0.02 135);
+    --observation-border: oklch(0.37 0.04 135);
   }
 }
 
@@ -153,6 +167,11 @@
   --color-agent-foreground: var(--agent-foreground);
   --color-agent-surface: var(--agent-surface);
   --color-agent-border: var(--agent-border);
+
+  --color-observation: var(--observation);
+  --color-observation-foreground: var(--observation-foreground);
+  --color-observation-surface: var(--observation-surface);
+  --color-observation-border: var(--observation-border);
 }
 
 @layer base {

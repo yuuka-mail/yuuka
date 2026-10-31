@@ -25,5 +25,7 @@ export function areaTitle(a: Area): string {
       return m.area_unclaimed();
     case "leaks":
       return m.area_leaks();
+    case "leanings":
+      return m.area_leanings();
   }
 }

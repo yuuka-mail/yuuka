@@ -1,5 +1,7 @@
 import type { MessageListQuery, PrefixList } from "@/api/types";
 
+import { defaultLean, leanParam, parseLean } from "./triage";
+
 /**
  * What the mail screen shows, kept entirely in the query string so that a
  * link (from Telegram, say) opens exactly this view, and back/forward
@@ -43,15 +45,24 @@ export interface View {
   settings?: SettingsSection;
   /** The rule open in the settings page. */
   rule?: string;
+  /**
+   * What a model's estimate leans to, as question:option (§15.4): the
+   * leanings view lists that mail, and search narrows to it.
+   */
+  tr?: string;
 }
 
-/** The sections of the settings page: rules, then who may do what (§13.10). */
-export type SettingsSection = "rules" | "credentials" | "identities" | "grants";
+/**
+ * The sections of the settings page: rules, then who may do what
+ * (§13.10), then the scorer's report (§15.5).
+ */
+export type SettingsSection = "rules" | "credentials" | "identities" | "grants" | "triage";
 export const settingsSections: readonly SettingsSection[] = [
   "rules",
   "credentials",
   "identities",
   "grants",
+  "triage",
 ];
 
 /**
@@ -61,7 +72,8 @@ export const settingsSections: readonly SettingsSection[] = [
  * review group, where the mail and prefixes the zones hide can still be
  * found, and the claimed prefixes whose mail leaked or was spoofed (§3.3).
  * Archived mail is out of the zones but kept (§8.5); proposals are what
- * agents suggest and only a person decides.
+ * agents suggest and only a person decides. Leanings is mail by what a
+ * scorer's estimate leans to (§15.4), the shadow list of §15.5.
  */
 export type Area =
   | "conversations"
@@ -73,7 +85,8 @@ export type Area =
   | "proposals"
   | "downgraded"
   | "unclaimed"
-  | "leaks";
+  | "leaks"
+  | "leanings";
 
 export const areas: readonly Area[] = [
   "conversations",
@@ -86,6 +99,7 @@ export const areas: readonly Area[] = [
   "downgraded",
   "unclaimed",
   "leaks",
+  "leanings",
 ];
 
 // The anchor grammar of §8.1, without yuuka://message/<id>#.
@@ -112,6 +126,7 @@ export function parseView(search: URLSearchParams): View {
     p: search.get("p") || undefined,
     settings: settings && settingsSections.includes(settings) ? settings : undefined,
     rule: (settings && search.get("rule")) || undefined,
+    tr: parseLean(search.get("tr")) ? (search.get("tr") ?? undefined) : undefined,
   };
 }
 
@@ -133,6 +148,7 @@ export function viewHref(v: View): string {
   if (v.p) p.set("p", v.p);
   if (v.settings) p.set("settings", v.settings);
   if (v.settings && v.rule) p.set("rule", v.rule);
+  if (v.tr) p.set("tr", v.tr);
   const s = p.toString();
   return s ? `/?${s}` : "/";
 }
@@ -150,6 +166,9 @@ export function viewHref(v: View): string {
  * Archived mail leaves the two zones and nothing else (§8.5): all mail,
  * a prefix, a label and search still have it. A label lists everything
  * carrying it, as its count in the sidebar does.
+ *
+ * Leanings hide nothing either: a score never moved the mail (§15.4), so
+ * the list counts what the report counts, archived or not.
  */
 export function listParams(v: View): MessageListQuery | undefined {
   if (v.prefix) return { prefix: v.prefix, downgraded: "include" };
@@ -165,6 +184,8 @@ export function listParams(v: View): MessageListQuery | undefined {
       return { archived: true, downgraded: "hide" };
     case "downgraded":
       return { downgraded: "only" };
+    case "leanings":
+      return { triage: leanOf(v), downgraded: "include" };
     case "drafts":
     case "outbox":
     case "proposals":
@@ -172,6 +193,12 @@ export function listParams(v: View): MessageListQuery | undefined {
     case "leaks":
       return undefined;
   }
+}
+
+/** The leaning v filters by: its tr, or in the leanings view the default. */
+export function leanOf(v: View): string | undefined {
+  if (v.tr) return v.tr;
+  return v.area === "leanings" && !v.prefix && !v.label ? leanParam(defaultLean) : undefined;
 }
 
 /** Whether the composer is open; it takes the main column. */

@@ -22,6 +22,8 @@
   "area_drafts": "Drafts",
   "area_leaks": "Leaks & spoofs",
   "area_leaks_hint": "Claimed prefixes that got mail from senders they were not given to, or mail pretending to be one of those senders. Set whom a prefix was given to above its mail, or with {#code}yuuka prefix expect{/code}.",
+  "area_leanings": "Model leans to…",
+  "area_leanings_hint": "Mail by the option a model's latest estimate gave the highest probability. No threshold: 51% and 99% both count. Nothing was hidden or moved because of it.",
   "area_notifications": "Notifications",
   "area_outbox": "Outbox",
   "area_proposals": "Proposals",
@@ -261,6 +263,7 @@
   "nav_filter_prefixes": "Filter prefixes",
   "nav_labels": "Labels",
   "nav_leaks_title": "claimed prefixes that got mail from senders they were not given to",
+  "nav_leanings_title": "What a model's estimates lean to; they act on nothing",
   "nav_mailboxes": "Mailboxes",
   "nav_no_claimed": "No claimed prefixes yet.",
   "nav_no_match": "No match.",
@@ -713,6 +716,7 @@
   "settings_nothing": "Nothing here for this session.",
   "settings_rules": "Rules",
   "settings_title": "Settings",
+  "settings_triage": "Estimate report",
   "shell_compose": "Compose",
   "shell_compose_title": "New message (c)",
   "shell_drafts_draft": "Drafts",
@@ -734,6 +738,105 @@
   "shell_show_drafts": "Show drafts",
   "shell_show_outbox": "Show outbox rows",
   "shell_zone": "Zone",
+  "triage_abstained": "abstained",
+  "triage_abstained_detail": "The model declined to answer; no probabilities were kept.",
+  "triage_filter_any": "anything",
+  "triage_filter_label": "Model leans to",
+  "triage_filter_option": "{lean} ({count})",
+  "triage_fold": "Fold the estimate into one line",
+  "triage_in_auth": "authentication",
+  "triage_in_chars": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} character",
+        "countPlural=other": "{count} characters"
+      }
+    }
+  ],
+  "triage_in_claimed": "claimed prefix",
+  "triage_in_class": "class",
+  "triage_in_code": "has a code",
+  "triage_in_endpoint": "scorer",
+  "triage_in_hosted": "hosted: the mail left this deployment",
+  "triage_in_known_sender": "domain wrote before",
+  "triage_in_link": "has a sign-in link",
+  "triage_in_list_id": "List-Id",
+  "triage_in_local": "local: in this deployment",
+  "triage_in_reply_to_other": "Reply-To elsewhere",
+  "triage_in_text": "text",
+  "triage_in_truncated": "cut to fit",
+  "triage_in_versions": "rendered by",
+  "triage_in_view_parser": "view v{view}, parser v{parser}",
+  "triage_input_hint": "The facts yuuka passed along when it scored, as they were then. The mail's text went with them; it is not repeated here.",
+  "triage_input_label": "What the model was given",
+  "triage_label": "A model's estimate",
+  "triage_lean": "{question}: {option}",
+  "triage_mark": "{what}?",
+  "triage_mark_title": "A model's estimate leans to {lean}. Nothing was hidden or moved because of it.",
+  "triage_notice": "A model's estimate, not yuuka's finding. Nothing was hidden or moved because of it.",
+  "triage_o_conversation": "conversation",
+  "triage_o_marketing": "marketing",
+  "triage_o_no": "no",
+  "triage_o_notification": "notification",
+  "triage_o_spam": "spam",
+  "triage_o_yes": "yes",
+  "triage_provenance": "Scored {when}, question set v{version}.",
+  "triage_q_injection": "instructions to an AI",
+  "triage_q_kind": "kind",
+  "triage_q_needs_reply": "needs a reply",
+  "triage_q_phishing": "phishing",
+  "triage_question_key": "The question's key, as the filter and agents name it",
+  "triage_report_abstained": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "abstained on {count}",
+        "countPlural=other": "abstained on {count}"
+      }
+    }
+  ],
+  "triage_report_all": "All time",
+  "triage_report_days": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "Last day",
+        "countPlural=other": "Last {count} days"
+      }
+    }
+  ],
+  "triage_report_hint": "How the latest estimates of the configured scorer fall over the mail you can see. They are a model's estimates: nothing was hidden or moved because of them. A count opens that mail.",
+  "triage_report_none": "No scorer is configured, so no mail is scored. Set YUUKA_TRIAGE_URL and YUUKA_TRIAGE_NAME on the host; this checks the scorer it reaches:",
+  "triage_report_open": "Report",
+  "triage_report_open_lean": "Open the mail that leans to {lean}",
+  "triage_report_scored": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} scored",
+        "countPlural=other": "{count} scored"
+      }
+    }
+  ],
+  "triage_report_totals": "{scored} · {unscored} · question set v{version}",
+  "triage_report_unscored": [
+    {
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
+      "match": {
+        "countPlural=one": "{count} not scored yet",
+        "countPlural=other": "{count} not scored yet"
+      }
+    }
+  ],
+  "triage_report_window": "Mail received in",
+  "triage_scored": "estimate of {when}",
+  "triage_unfold": "Every probability, and what the model was given",
   "undo": "Undo",
   "undo_reverted": "undone: {n} set back",
   "undo_superseded": "{n} changed again since, left as they are",

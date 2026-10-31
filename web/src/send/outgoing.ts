@@ -341,6 +341,8 @@ export function abilities(s: SessionInfo) {
     // Anyone with the scope writes their own note; a person deletes anyone's (§8.10).
     notes: has("message:annotate"),
     deleteNotes: isHuman(s) && has("message:annotate"),
+    // The scorer's report is a person's (§15.4); the server checks it again.
+    triage: isHuman(s) && has("message:read"),
   };
 }
 export type Abilities = ReturnType<typeof abilities>;

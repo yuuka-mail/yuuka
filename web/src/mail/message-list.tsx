@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 
 import { shownExtraction } from "./extracted";
 import { ExtractedLine } from "./extracted-line";
+import { LeanMarks } from "./triage-box";
 
 const rowHeight = 56;
 
@@ -162,6 +163,7 @@ function Row({
             {msg.list_notification_tag()}
           </span>
         )}
+        <LeanMarks tops={m.triage} />
         <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-meta text-muted-foreground tabular-nums">
           {/* Mail we sent says where it stands: its existence is not delivery (§12.10). */}
           {m.outgoing && <OutgoingMark state={m.outgoing.state} className="mr-1" />}
