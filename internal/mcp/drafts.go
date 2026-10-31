@@ -37,9 +37,14 @@ type Identity struct {
 	Own bool `json:"own"`
 	// Tier is the effective send_policy for the caller (§8.9).
 	Tier string `json:"tier"`
+	// Outcome is where a submission goes before its recipients, the
+	// limits and the thread are weighed: sends, held_after_review (the
+	// checks pass it to a recall window of HoldSeconds or escalate it to
+	// a draft), draft_only or none.
+	Outcome string `json:"outcome"`
 	// Sends: a submission goes out without a person, within
-	// RecipientScope and the limits. Otherwise every submission is held
-	// as a draft for a person, and HoldReason says why.
+	// RecipientScope and the limits. Otherwise HoldReason says why; under
+	// review it is review, as on a draft the review escalated.
 	Sends      bool   `json:"sends"`
 	HoldReason string `json:"hold_reason,omitempty"`
 	HoldDetail string `json:"hold_detail,omitempty"`
@@ -68,14 +73,14 @@ func (s *Server) listIdentities(ctx context.Context, v *auth.Viewer, _ Identitie
 		}
 		id := Identity{
 			Address: st.Identity.Address(), Own: st.Identity.OwnerID == v.PrincipalID, Tier: string(st.Tier),
-			Sends: st.Hold == "", HoldReason: string(st.Hold), HoldDetail: st.HoldDetail,
+			Outcome: string(st.Outcome()), Sends: st.Hold == "", HoldReason: string(st.Hold), HoldDetail: st.HoldDetail,
 			RecipientScope: string(st.Grant.RecipientScope),
 		}
 		if st.Tier == sendpolicy.Review && st.Hold == sendpolicy.HoldReview {
 			id.HoldSeconds = &st.HoldSeconds
 		}
 		out.Identities = append(out.Identities, id)
-		fmt.Fprintf(&b, "%s · tier %s · recipients %s · %s\n", id.Address, id.Tier, id.RecipientScope, standing(id.Sends, id.HoldReason, id.HoldDetail))
+		fmt.Fprintf(&b, "%s · tier %s · recipients %s · %s\n", id.Address, id.Tier, id.RecipientScope, standing(id.Outcome, id.HoldReason, id.HoldDetail))
 	}
 	text := fmt.Sprintf("%d identities you may write as (identities are the operator's configuration):\n", len(out.Identities)) + b.String()
 	if len(out.Identities) == 0 {
@@ -84,9 +89,12 @@ func (s *Server) listIdentities(ctx context.Context, v *auth.Viewer, _ Identitie
 	return result{structured: out, text: text, audit: map[string]any{"returned": len(out.Identities)}}, nil
 }
 
-func standing(sends bool, reason, detail string) string {
-	if sends {
+func standing(outcome, reason, detail string) string {
+	switch store.SendOutcome(outcome) {
+	case store.SendsAlone:
 		return "a submission is sent if its recipients are within scope and limits"
+	case store.SendsAfterReview:
+		return "a submission is reviewed: " + detail
 	}
 	return fmt.Sprintf("every submission is held as a draft for a person (%s: %s)", reason, detail)
 }
@@ -138,8 +146,9 @@ type DraftOutput struct {
 	Bcc       []string `json:"bcc"`
 	Subject   string   `json:"subject"`
 	InReplyTo string   `json:"in_reply_to,omitempty"`
-	// Sends and HoldReason say how submitting it as From would go now,
-	// before its recipients are looked at (list_identities).
+	// Outcome, Sends and HoldReason say how submitting it as From would
+	// go now, before its recipients are looked at (list_identities).
+	Outcome    string `json:"outcome"`
 	Sends      bool   `json:"sends"`
 	HoldReason string `json:"hold_reason,omitempty"`
 	HoldDetail string `json:"hold_detail,omitempty"`
@@ -240,15 +249,15 @@ func (s *Server) draftResult(ctx context.Context, v *auth.Viewer, d store.Draft,
 	if err != nil {
 		return result{}, err
 	}
-	out.HoldReason, out.HoldDetail = string(sendpolicy.HoldPolicy), "no grant to send as this identity"
+	out.Outcome, out.HoldReason, out.HoldDetail = string(store.SendsNone), string(sendpolicy.HoldPolicy), "no grant to send as this identity"
 	for _, st := range ss {
 		if st.Identity.ID == d.IdentityID && st.Tier != sendpolicy.None {
-			out.Sends, out.HoldReason, out.HoldDetail = st.Hold == "", string(st.Hold), st.HoldDetail
+			out.Outcome, out.Sends, out.HoldReason, out.HoldDetail = string(st.Outcome()), st.Hold == "", string(st.Hold), st.HoldDetail
 		}
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Draft %s %s. Nothing is sent until submit_draft; as its From, %s.\n\n", d.ID, verb,
-		standing(out.Sends, out.HoldReason, out.HoldDetail))
+		standing(out.Outcome, out.HoldReason, out.HoldDetail))
 	// The addressing may be copied from mail, and a default From names
 	// a local part a sender chose: it is fenced like mail content.
 	var addr strings.Builder

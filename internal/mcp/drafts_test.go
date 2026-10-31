@@ -80,7 +80,8 @@ func TestDraftTools(t *testing.T) {
 
 	ids := structured[mcp.IdentitiesOutput](t, callTool(t, cs, "list_identities", nil))
 	if len(ids.Identities) != 2 || ids.Identities[0].Address != "*@example.com" || ids.Identities[0].Sends ||
-		ids.Identities[0].HoldReason != "owner" || !ids.Identities[1].Own || ids.Identities[1].Tier != "review" {
+		ids.Identities[0].HoldReason != "owner" || ids.Identities[0].Outcome != "draft_only" || !ids.Identities[1].Own ||
+		ids.Identities[1].Tier != "review" || ids.Identities[1].Outcome != "held_after_review" {
 		t.Errorf("identities: %+v", ids)
 	}
 
@@ -91,7 +92,7 @@ func TestDraftTools(t *testing.T) {
 		"body_markdown": "SECRET-BODY", "cites": []map[string]any{{"uri": uri + "#part/1/para/1", "quote": "hello"}},
 	})
 	d := structured[mcp.DraftOutput](t, r)
-	if d.From != "a@example.com" || d.Sends || d.HoldReason != "owner" || d.InReplyTo != uri ||
+	if d.From != "a@example.com" || d.Sends || d.HoldReason != "owner" || d.Outcome != "draft_only" || d.InReplyTo != uri ||
 		!strings.Contains(r.text, "Nothing is sent") || !strings.Contains(r.text, fenceTag) {
 		t.Errorf("create_draft: %+v\n%s", d, r.text)
 	}

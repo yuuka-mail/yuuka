@@ -424,7 +424,7 @@ func (a *app) rest(log *slog.Logger) *api.API {
 		r.WithSubmitter(a.submit)
 	}
 	if a.cards != nil {
-		r.WithSuspendNotifier(suspendCards{db: a.db, cards: a.cards, log: log})
+		r.WithSuspendNotifier(suspendCards{cards: a.cards, log: log})
 	}
 	// The scores shown are the configured scorer's; without one, none.
 	if a.cfg.Triage.On() {

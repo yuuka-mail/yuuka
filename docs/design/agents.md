@@ -377,7 +377,7 @@ M1 的落法（`internal/mcp`）：
 
 M2 的写工具（[`internal/mcp/drafts.go`](../../internal/mcp/drafts.go)），四件都要 `draft:create`：
 
-- `list_identities`：调用方能用哪些发信地址、每个地址提交后是「会发出」还是「一律停在草稿」以及原因。
+- `list_identities`：调用方能用哪些发信地址、每个地址提交后是「会发出」「先审核、过了扣在撤回窗口里再发」还是「一律停在草稿」（`outcome`）以及原因。
   算法是 store 的 `Standings`：对每个身份用不带收件人的输入跑一遍 `sendpolicy.Decide`，
   只取「与这封信内容无关、每次提交都会遇到」的那几条规则（停用、硬上限、凭据、档位、熔断，加上 `review` 档）。
   它是预览，不是决定：收件人范围、限额、循环检查只在真正提交时才算

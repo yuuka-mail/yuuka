@@ -400,6 +400,37 @@ type Standing struct {
 	HoldSeconds int
 }
 
+// SendOutcome is where a submission as an identity goes before its
+// recipients, the limits and the thread are weighed: said outright, so
+// that a client need not tell the review tier (Hold HoldReview, which
+// an escalated draft also carries) from a draft-only one by HoldSeconds.
+type SendOutcome string
+
+const (
+	// SendsAlone: it goes out without a person.
+	SendsAlone SendOutcome = "sends"
+	// SendsAfterReview: it is reviewed; what the checks pass is held for
+	// a recall, then sent, and what they escalate stays a draft.
+	SendsAfterReview SendOutcome = "held_after_review"
+	// SendsDraftOnly: every submission stays a draft for a person.
+	SendsDraftOnly SendOutcome = "draft_only"
+	// SendsNone: the identity may not be used at all.
+	SendsNone SendOutcome = "none"
+)
+
+// Outcome is where a submission as s's identity goes.
+func (s Standing) Outcome() SendOutcome {
+	switch {
+	case s.Tier == sendpolicy.None:
+		return SendsNone
+	case s.Hold == "":
+		return SendsAlone
+	case s.Hold == sendpolicy.HoldReview:
+		return SendsAfterReview
+	}
+	return SendsDraftOnly
+}
+
 // Standings returns every enabled identity, by address, with where v's
 // submissions as it stand; those v may not use have Tier none. v's
 // credential counts: without submission:send everything is held (§8.9).

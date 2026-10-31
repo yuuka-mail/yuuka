@@ -379,15 +379,16 @@ handler 在 [`internal/api/sending.go`](../../internal/api/sending.go)；界面�
   「It was sent」（记成收下）、「Send it again」（可能让对方收到两封，选中时按钮变成错误色并重复这句话）、「Give up」（记成没发出）。
   选一个、再按一次才提交。只有 human 主体且带 `submission:send` 的会话看得到这三个选项，其余只看到一句「只有人能决定」
 - **review 档与撤回窗口**（§8.9）：身份预览把 review 档写成「Send runs the review · review — held 10 min after the checks」，
-  窗口取 `/identities` 的 `hold_seconds`。服务端对 review 档回 `sends: false`、`hold_reason: review`（按下时什么都还没发出），
-  界面以带 `hold_seconds` 为准把它当成「会发」，选择器里写「review, 10 min to recall」。
+  窗口取 `/identities` 的 `hold_seconds`。服务端对 review 档回 `outcome: held_after_review`；
+  `sends: false`、`hold_reason: review`（按下时什么都还没发出）和被审核拦下的草稿一样，只为兼容保留，
+  界面按 `outcome` 把它当成「会发」，不从 `hold_seconds` 推，选择器里写「review, 10 min to recall」。
   通过审核的提交回 `state: held`：表单变只读，框里是发出时刻、倒计时和撤回；撤回之后草稿可以再改再发。
   outbox 多一个「Pending」筛选（`held`），列表行的时间换成「sends in 56 min / 56 分钟后发出」，详情写「还有 56 分钟可撤回」：
   扣着的信到点就发出，不是过期，所以不借用验证码那套「n min left / 后过期」的文案——那会让人以为放着不管它就作废了。
   详情最上面是扣留框：几点发出、每项检查、撤回。
   撤回和 outbox 的裁决一样选一下、再按一次，第二次旁边写代价（「一天被人撤回两次会暂停授权」）。
-  `409` 说「已经不在窗口里」（已放行或已撤回），行的状态随即刷新；响应带 `suspended` 时写明哪条授权暂停了、连带撤回了几封，
-  并给出主机上的 `yuuka grant set … --resume`——恢复是放宽，不在界面上（§13.10）。
+  `409` 说「已经不在窗口里」（已放行或已撤回），行的状态随即刷新；响应带 `suspended` 时写明哪条授权暂停了（`identity` 和 `principal`）、连带撤回了几封，
+  并给出主机上的 `yuuka grant set --identity … --principal … --resume`——恢复是放宽，不在界面上（§13.10）。
   被审核升级的草稿在「停在草稿」框里逐项列检查：首次联系列地址，外泄只写类型、在哪、取自哪封信（从不显示值，
   服务端也不存），跨线程写引用原文和解析到的信，链接域写主机和组织域，可读性列读不了的部分。
   跨线程和链接域是 advisory（`advisory: true`）：不过也不拦信，只供撤回窗口里参考，单列在「发出前值得看一眼」下面，

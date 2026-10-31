@@ -20,9 +20,13 @@ WebUI 用的是浏览器会话，程序不要模仿它。
 - **超出授权不是错误**：提交草稿（`POST /api/v1/drafts/{id}/submit`）照常返回成功，`state` 说明信是进了队列（`queued`）、
   审核通过后扣在撤回窗口里（`held`，到 `hold_until` 发出）还是停在草稿（`draft`，`hold_reason` 说为什么）。
   被审核拦下的草稿带 `review`：每项检查的结论和触发它的东西；验证码和登录链接只说在哪里找到，不带值
+- **用某个身份发会怎样**：`GET /api/v1/identities` 每项的 `outcome` 直接说：`sends`（不经人发出）、
+  `held_after_review`（先审核，过了扣在 `hold_seconds` 的撤回窗口里再发，拦下的停在草稿）、`draft_only`、`none`。
+  `review` 档的 `sends` 是假、`hold_reason` 是 `review`，和被审核拦下的草稿一样，所以按 `outcome` 分支，不要从 `hold_seconds` 推
 - **撤回**扣在窗口里的信：`POST /api/v1/outbox/{id}/withdraw`，要 `submission:send`。人能撤回看得见的任何一封，
   agent 和 service 只能撤回自己提交的（别人的回 `403 forbidden`）。信回到草稿（`hold_reason = withdrawn`），可以改了再提交。
-  已经放行（`queued` 及之后）或已撤回的回 `409 conflict`。人撤回触发了熔断时，响应带 `suspended`。
+  已经放行（`queued` 及之后）或已撤回的回 `409 conflict`。人撤回触发了熔断时，响应带 `suspended`：
+  身份地址 `identity` 和主体 `principal`（`kind`、`name`），恢复就是 `yuuka grant set --identity <identity> --principal <kind>:<name> --resume`。
   没有让信提前发出或缩短窗口的端点
 - **被更高等级覆盖也不是错误**：标注（`POST /api/v1/messages/{id}/annotations`）对每项返回 `applied`、`unchanged`、
   `overruled`（人改过的值，agent 改不动）或 `labels_full`

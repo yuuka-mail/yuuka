@@ -26,7 +26,10 @@ func TestWithdraw(t *testing.T) {
 	for _, i := range decode[IdentityList](t, h.get("/api/v1/identities", agent)).Identities {
 		if i.Address == "arisu@example.com" {
 			hold = i.HoldSeconds
-		} else if i.HoldSeconds != nil {
+			if i.Outcome != "held_after_review" || i.Sends || i.HoldReason != "review" {
+				t.Errorf("arisu under review: %+v", i)
+			}
+		} else if i.HoldSeconds != nil || i.Outcome == "held_after_review" {
 			t.Errorf("%s has a recall window: %d", i.Address, *i.HoldSeconds)
 		}
 	}
@@ -115,7 +118,8 @@ func TestWithdrawSuspends(t *testing.T) {
 	}
 	w := h.post("/api/v1/outbox/"+b+"/withdraw", "", op)
 	s := decode[Withdrawal](t, w).Suspended
-	if w.Code != http.StatusOK || s == nil || s.PrincipalID != h.agent.ID || s.Recalls != 2 || !slices.Equal(s.Withdrawn, []string{c}) {
+	if w.Code != http.StatusOK || s == nil || s.PrincipalID != h.agent.ID || s.Recalls != 2 || !slices.Equal(s.Withdrawn, []string{c}) ||
+		s.Identity != "arisu@example.com" || s.Principal != (Actor{ID: h.agent.ID, Kind: "agent", Name: "arisu"}) {
 		t.Fatalf("second recall: %d %s", w.Code, w.Body.String())
 	}
 	if len(h.suspended.ss) != 1 || h.suspended.ss[0].IdentityID != s.IdentityID {
@@ -123,7 +127,7 @@ func TestWithdrawSuspends(t *testing.T) {
 	}
 	ids := decode[IdentityList](t, h.get("/api/v1/identities", h.token(auth.DraftCreate, auth.SubmissionSend)))
 	for _, i := range ids.Identities {
-		if i.Address == "arisu@example.com" && (!i.Suspended || i.HoldReason != "suspended" || i.HoldSeconds != nil) {
+		if i.Address == "arisu@example.com" && (!i.Suspended || i.HoldReason != "suspended" || i.HoldSeconds != nil || i.Outcome != "draft_only") {
 			t.Errorf("suspended identity: %+v", i)
 		}
 	}

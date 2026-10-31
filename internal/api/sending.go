@@ -286,7 +286,8 @@ func sendingIdentity(s store.Standing) SendingIdentity {
 			MaxPerHour: g.Limits.MaxPerHour, MaxPerDay: g.Limits.MaxPerDay,
 			MaxNewRecipientsPerDay: g.Limits.MaxNewRecipientsPerDay,
 		},
-		Suspended: g.Suspended, Sends: s.Hold == "", HoldReason: HoldReason(s.Hold), HoldDetail: s.HoldDetail,
+		Suspended: g.Suspended, Outcome: SendOutcome(s.Outcome()),
+		Sends: s.Hold == "", HoldReason: HoldReason(s.Hold), HoldDetail: s.HoldDetail,
 	}
 }
 
@@ -371,7 +372,11 @@ func (a *API) withdrawOutbox(ctx context.Context, v *auth.Viewer, p IDParams) (W
 	}
 	out := Withdrawal{OutboxID: w.OutboxID, DraftID: w.DraftID}
 	if s := w.Suspended; s != nil {
-		out.Suspended = &Suspension{IdentityID: s.IdentityID, PrincipalID: s.PrincipalID, Recalls: s.Recalls, Withdrawn: nonNil(s.Withdrawn)}
+		out.Suspended = &Suspension{
+			IdentityID: s.IdentityID, PrincipalID: s.PrincipalID, Identity: s.Identity,
+			Principal: Actor{ID: s.Principal.ID, Kind: s.Principal.Kind, Name: s.Principal.Name},
+			Recalls:   s.Recalls, Withdrawn: nonNil(s.Withdrawn),
+		}
 		if a.suspended != nil {
 			a.suspended.Suspended(ctx, *s)
 		}

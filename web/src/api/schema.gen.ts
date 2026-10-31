@@ -3683,6 +3683,8 @@ export interface components {
             blocks: number;
             chars: number;
         };
+        /** @enum {string} */
+        SendOutcome: "sends" | "held_after_review" | "draft_only" | "none";
         SendingIdentity: {
             id: string;
             address: string;
@@ -3695,6 +3697,7 @@ export interface components {
             allowlist: string[];
             limits: components["schemas"]["Limits"];
             suspended: boolean;
+            outcome: components["schemas"]["SendOutcome"];
             sends: boolean;
             hold_reason?: components["schemas"]["HoldReason"];
             hold_detail?: string;
@@ -3746,6 +3749,8 @@ export interface components {
         Suspension: {
             identity_id: string;
             principal_id: string;
+            identity: string;
+            principal: components["schemas"]["Actor"];
             recalls: number;
             withdrawn: string[];
         };

@@ -3181,6 +3181,15 @@
         ],
         "additionalProperties": false
       },
+      "SendOutcome": {
+        "type": "string",
+        "enum": [
+          "sends",
+          "held_after_review",
+          "draft_only",
+          "none"
+        ]
+      },
       "SendingIdentity": {
         "type": "object",
         "properties": {
@@ -3220,6 +3229,9 @@
           "suspended": {
             "type": "boolean"
           },
+          "outcome": {
+            "$ref": "#/components/schemas/SendOutcome"
+          },
           "sends": {
             "type": "boolean"
           },
@@ -3245,6 +3257,7 @@
           "allowlist",
           "limits",
           "suspended",
+          "outcome",
           "sends"
         ],
         "additionalProperties": false
@@ -3416,6 +3429,12 @@
           "principal_id": {
             "type": "string"
           },
+          "identity": {
+            "type": "string"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/Actor"
+          },
           "recalls": {
             "type": "integer"
           },
@@ -3429,6 +3448,8 @@
         "required": [
           "identity_id",
           "principal_id",
+          "identity",
+          "principal",
           "recalls",
           "withdrawn"
         ],

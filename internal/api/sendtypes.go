@@ -249,9 +249,16 @@ type SendingIdentity struct {
 	Allowlist      []string       `json:"allowlist"`
 	Limits         Limits         `json:"limits"`
 	Suspended      bool           `json:"suspended"`
+	// Outcome is where a submission goes, before its recipients, the
+	// limits and the thread are weighed: sends without a person; held
+	// after review (the checks pass it to a recall window of
+	// hold_seconds, or escalate it to a draft); draft only; or none.
+	Outcome SendOutcome `json:"outcome"`
 	// Sends: a submission goes out without a person, if its recipients
 	// are within recipient_scope and the limits allow. Otherwise every
-	// submission is held as a draft, and hold_reason says why.
+	// submission is held as a draft, and hold_reason says why. Under
+	// review, sends is false and hold_reason is review, as on a draft
+	// the review escalated: outcome tells the two apart.
 	Sends      bool       `json:"sends"`
 	HoldReason HoldReason `json:"hold_reason,omitempty"`
 	HoldDetail string     `json:"hold_detail,omitempty"`
@@ -259,6 +266,13 @@ type SendingIdentity struct {
 	// review): mail the checks pass waits this long before it is sent,
 	// 0 meaning only until the next release pass. Absent otherwise.
 	HoldSeconds *int `json:"hold_seconds,omitempty"`
+}
+
+// SendOutcome is where a submission as an identity goes (§8.9).
+type SendOutcome string
+
+func (SendOutcome) Enum() []string {
+	return []string{"sends", "held_after_review", "draft_only", "none"}
 }
 
 // IdentityList is GET /api/v1/identities: the identities the viewer may
@@ -406,6 +420,12 @@ type Withdrawal struct {
 type Suspension struct {
 	IdentityID  string `json:"identity_id"`
 	PrincipalID string `json:"principal_id"`
+	// Identity is the identity's address (*@zone for a pattern) and
+	// Principal the grant's principal: with them a person names the
+	// grant to resume (yuuka grant set --identity <identity>
+	// --principal <kind>:<name> --resume).
+	Identity  string `json:"identity"`
+	Principal Actor  `json:"principal"`
 	// Recalls by people of the grant's mail submitted in the last 24
 	// hours, this one included.
 	Recalls int `json:"recalls"`

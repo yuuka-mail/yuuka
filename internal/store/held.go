@@ -209,6 +209,11 @@ type Withdrawal struct {
 type Suspension struct {
 	IdentityID  string
 	PrincipalID string
+	// Identity is the identity's address (*@zone for a pattern) and
+	// Principal its submitter, read in the same transaction: what a
+	// person needs to name the grant to resume it.
+	Identity  string
+	Principal Principal
 	// Recalls by humans of the grant's mail submitted in the last 24
 	// hours, this one included.
 	Recalls int
@@ -308,6 +313,14 @@ func breaker(ctx context.Context, tx pgx.Tx, identityID, submitter string, at ti
 	}
 	if s.Recalls < sendpolicy.MaxRecallsPerDay {
 		return nil, nil
+	}
+	i, err := identityByID(ctx, tx, identityID)
+	if err != nil {
+		return nil, fmt.Errorf("breaker: %w", err)
+	}
+	s.Identity = i.Address()
+	if s.Principal, err = scanPrincipal(tx.QueryRow(ctx, `SELECT `+principalCols+` FROM principals WHERE id = $1`, submitter)); err != nil {
+		return nil, fmt.Errorf("breaker: principal %s: %w", submitter, err)
 	}
 	g, err := grantFor(ctx, tx, identityID, submitter)
 	switch {

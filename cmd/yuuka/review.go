@@ -79,28 +79,22 @@ func recaller(db *store.DB, v *auth.Viewer) func(context.Context, string, int64)
 		if w.Suspended == nil {
 			return "Recalled. It is a draft again.", true, nil, nil
 		}
-		card := suspendedCard(ctx, db, *w.Suspended)
+		card := suspendedCard(*w.Suspended)
 		return "Recalled. The grant is now suspended.", true, &card, nil
 	}
 }
 
-// suspendedCard is the card of grant s, named by address and principal
-// where they can be read, by count alone where not.
-func suspendedCard(ctx context.Context, db *store.DB, s store.Suspension) notify.SuspendedCard {
-	card := notify.SuspendedCard{Recalls: s.Recalls, Withdrawn: len(s.Withdrawn)}
-	if i, err := db.IdentityByID(ctx, s.IdentityID); err == nil {
-		card.Identity = i.Address()
+// suspendedCard is the card of grant s, named by address and principal.
+func suspendedCard(s store.Suspension) notify.SuspendedCard {
+	return notify.SuspendedCard{
+		Identity: s.Identity, Principal: s.Principal.Kind + ":" + s.Principal.Name,
+		Recalls: s.Recalls, Withdrawn: len(s.Withdrawn),
 	}
-	if p, err := db.Principal(ctx, s.PrincipalID); err == nil {
-		card.Principal = p.Kind + ":" + p.Name
-	}
-	return card
 }
 
 // suspendCards sends the card of a grant a recall through REST
 // suspended, as the recall button's poller does for its own.
 type suspendCards struct {
-	db    *store.DB
 	cards *notify.Cards
 	log   *slog.Logger
 }
@@ -112,7 +106,7 @@ const suspendCardTimeout = 30 * time.Second
 func (c suspendCards) Suspended(ctx context.Context, s store.Suspension) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), suspendCardTimeout)
 	defer cancel()
-	if err := c.cards.Suspended(ctx, suspendedCard(ctx, c.db, s)); err != nil {
+	if err := c.cards.Suspended(ctx, suspendedCard(s)); err != nil {
 		c.log.Warn("suspended card not sent", "identity", s.IdentityID, "principal", s.PrincipalID, "err", err)
 	}
 }

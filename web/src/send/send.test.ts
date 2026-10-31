@@ -54,6 +54,7 @@ const identity = (over: Partial<SendingIdentity>): SendingIdentity => ({
   allowlist: [],
   limits: { max_per_hour: 10, max_per_day: 50 },
   suspended: false,
+  outcome: "sends",
   sends: true,
   ...over,
 });
@@ -74,6 +75,7 @@ describe("standing", () => {
   it("says why it would be held, by reason, with the server's detail as given", () => {
     const s = standing(
       identity({
+        outcome: "draft_only",
         sends: false,
         tier: "draft",
         hold_reason: "owner",
@@ -92,6 +94,7 @@ describe("standing", () => {
   it("says the review tier goes to the checks, then waits its window", () => {
     const review = {
       tier: "review",
+      outcome: "held_after_review",
       sends: false,
       hold_reason: "review",
       hold_detail: "reviewed first: …",

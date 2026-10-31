@@ -202,7 +202,8 @@ func TestHeldBreaker(t *testing.T) {
 		t.Fatalf("first recall: %+v %v", w, err)
 	}
 	w, err = e.db.WithdrawOutbox(ctx, e.op, b, nil, e.at())
-	if err != nil || w.Suspended == nil || w.Suspended.Recalls != 2 || len(w.Suspended.Withdrawn) != 1 || w.Suspended.Withdrawn[0] != c {
+	if err != nil || w.Suspended == nil || w.Suspended.Recalls != 2 || len(w.Suspended.Withdrawn) != 1 || w.Suspended.Withdrawn[0] != c ||
+		w.Suspended.Identity == "" || w.Suspended.Principal.ID != w.Suspended.PrincipalID || w.Suspended.Principal.Name == "" {
 		t.Fatalf("second recall: %+v %v", w.Suspended, err)
 	}
 	if state, _, by := e.outboxState(c); state != "withdrawn" || by != store.SystemPrincipalID || e.draftHold(cDraft) != "suspended" {
