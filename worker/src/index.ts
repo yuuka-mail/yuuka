@@ -131,7 +131,14 @@ async function notify(env: Env, id: string, body: Uint8Array): Promise<void> {
 
 // Logs live on Cloudflare's side, outside the operator's control: only ids,
 // sizes and outcomes, never addresses, subjects or bodies.
-type LogFields = { id: string; step: string; raw_size?: number; ok?: boolean; status?: number; error?: string };
+type LogFields = {
+  id: string;
+  step: string;
+  raw_size?: number;
+  ok?: boolean;
+  status?: number;
+  error?: string;
+};
 
 function log(level: "info" | "warn" | "error", fields: LogFields): void {
   console[level](JSON.stringify(fields));

@@ -64,7 +64,10 @@ export function subsetOf(allowlist: string[], keep: string[]): boolean {
 }
 
 /** The request body of one tightening; values come from the form. */
-export function tightenBody(t: Tightening, v: { limit?: number; holdMinutes?: number; keep?: string[] }): TightenBody {
+export function tightenBody(
+  t: Tightening,
+  v: { limit?: number; holdMinutes?: number; keep?: string[] },
+): TightenBody {
   switch (t.kind) {
     case "suspend":
       return { suspended: true };
@@ -93,9 +96,15 @@ export function grantParts(a: AppliedGrant): { tier: string; rest: string[]; dor
     tier: a.send_policy === "review" ? reviewText(a.hold_seconds) : tierLabel(a.send_policy),
     rest: [
       m.send_to_scope({ scope: scopeText(a.recipient_scope, a.allowlist) }),
-      l.max_per_hour === undefined ? m.grant_unlimited_hour() : m.send_limit_hour({ n: l.max_per_hour }),
-      l.max_per_day === undefined ? m.grant_unlimited_day() : m.send_limit_day({ n: l.max_per_day }),
-      l.max_new_recipients_per_day === undefined ? m.grant_unlimited_new() : m.grant_limit_new({ n: l.max_new_recipients_per_day }),
+      l.max_per_hour === undefined
+        ? m.grant_unlimited_hour()
+        : m.send_limit_hour({ n: l.max_per_hour }),
+      l.max_per_day === undefined
+        ? m.grant_unlimited_day()
+        : m.send_limit_day({ n: l.max_per_day }),
+      l.max_new_recipients_per_day === undefined
+        ? m.grant_unlimited_new()
+        : m.grant_limit_new({ n: l.max_new_recipients_per_day }),
     ],
     dormant: a.send_policy === "none" || a.send_policy === "draft",
   };
@@ -108,16 +117,26 @@ export function grantSummary(a: AppliedGrant): string {
 }
 
 /** What tightening t costs, said beside the second press. */
-export function tighteningCost(g: ManagedGrant, t: Tightening, v: { limit?: number; holdMinutes?: number }): string {
+export function tighteningCost(
+  g: ManagedGrant,
+  t: Tightening,
+  v: { limit?: number; holdMinutes?: number },
+): string {
   const who = principal(g.principal);
   const as = g.identity.address;
   switch (t.kind) {
     case "suspend":
       return m.grant_cost_suspend({ who, as });
     case "tier":
-      return t.tier === "none" ? m.grant_cost_none({ who, as }) : t.tier === "draft" ? m.grant_cost_draft({ who, as }) : m.grant_cost_review({ who, as });
+      return t.tier === "none"
+        ? m.grant_cost_none({ who, as })
+        : t.tier === "draft"
+          ? m.grant_cost_draft({ who, as })
+          : m.grant_cost_review({ who, as });
     case "scope":
-      return t.scope === "thread" ? m.grant_cost_thread({ who, as }) : m.grant_cost_allowlist({ who, as });
+      return t.scope === "thread"
+        ? m.grant_cost_thread({ who, as })
+        : m.grant_cost_allowlist({ who, as });
     case "allowlist":
       return m.grant_cost_allowlist_remove({ who, as });
     case "limit":

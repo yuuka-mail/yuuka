@@ -9,7 +9,8 @@ const pad = (n: number) => String(n).padStart(2, "0");
 export function listTime(iso: string, now = new Date(), locale: string = getLocale()): string {
   const d = new Date(iso);
   if (d.toDateString() === now.toDateString()) return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  if (d.getFullYear() === now.getFullYear()) return d.toLocaleDateString(locale, { month: "short", day: "numeric" });
+  if (d.getFullYear() === now.getFullYear())
+    return d.toLocaleDateString(locale, { month: "short", day: "numeric" });
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 

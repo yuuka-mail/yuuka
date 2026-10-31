@@ -60,9 +60,15 @@ export function EnrollPage() {
     return (
       <AuthLayout title={m.auth_enroll_done_title()}>
         <Voice speaker={system}>
-          <p className="text-body text-foreground">{viaSession ? m.auth_enroll_done_session() : m.auth_enroll_done_link()}</p>
+          <p className="text-body text-foreground">
+            {viaSession ? m.auth_enroll_done_session() : m.auth_enroll_done_link()}
+          </p>
         </Voice>
-        <Button render={<a href={viaSession ? "/" : "/login"} />} nativeButton={false} className="self-start">
+        <Button
+          render={<a href={viaSession ? "/" : "/login"} />}
+          nativeButton={false}
+          className="self-start"
+        >
           {viaSession ? m.auth_back_to_mail() : m.auth_sign_in()}
         </Button>
       </AuthLayout>
@@ -73,19 +79,23 @@ export function EnrollPage() {
     <AuthLayout title={viaSession ? m.auth_enroll_add_title() : m.auth_enroll_title()}>
       {!usable && !session.isPending ? (
         <ErrorText>
-          <ParaglideMessage
-            message={m.auth_enroll_needs_link}
-            markup={markup}
-          />
+          <ParaglideMessage message={m.auth_enroll_needs_link} markup={markup} />
         </ErrorText>
       ) : (
         <form onSubmit={submit} className="flex flex-col gap-4">
           <p className="text-body text-muted-foreground">
-            {viaSession ? m.auth_enroll_adds_for({ principal: session.data?.principal ?? "" }) : m.auth_enroll_link_once()}
+            {viaSession
+              ? m.auth_enroll_adds_for({ principal: session.data?.principal ?? "" })
+              : m.auth_enroll_link_once()}
           </p>
           <label className="flex flex-col gap-1.5 text-body">
             <span className="font-medium">{m.auth_passkey_name()}</span>
-            <Input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={m.auth_passkey_name_hint()} maxLength={100} />
+            <Input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder={m.auth_passkey_name_hint()}
+              maxLength={100}
+            />
           </label>
           <Button type="submit" size="lg" disabled={busy || !supported()} className="self-start">
             <KeyRoundIcon data-icon="inline-start" />

@@ -28,7 +28,15 @@ import { checkLabel, problem, resumeCommand } from "./outgoing";
  * own heading so they never read as the reason it stopped. Passed ones
  * fold into one line. With only="failed" the passed line is left out.
  */
-export function ReviewVerdict({ review, onOpenMessage, only }: { review: Review; onOpenMessage?: (id: string) => void; only?: "failed" }) {
+export function ReviewVerdict({
+  review,
+  onOpenMessage,
+  only,
+}: {
+  review: Review;
+  onOpenMessage?: (id: string) => void;
+  only?: "failed";
+}) {
   const failed = review.checks.filter((c) => !c.pass && !c.advisory);
   const noted = review.checks.filter((c) => !c.pass && c.advisory);
   const passed = review.checks.filter((c) => c.pass);
@@ -57,7 +65,9 @@ export function ReviewVerdict({ review, onOpenMessage, only }: { review: Review;
       {passed.length > 0 && only !== "failed" && (
         <p className="flex flex-wrap items-center gap-x-1.5 text-muted-foreground">
           <CheckIcon aria-hidden className="size-3 shrink-0 text-system-foreground" />
-          <span>{m.review_passed({ checks: passed.map((c) => checkLabel(c.name)).join(" · ") })}</span>
+          <span>
+            {m.review_passed({ checks: passed.map((c) => checkLabel(c.name)).join(" · ") })}
+          </span>
         </p>
       )}
     </div>
@@ -68,7 +78,11 @@ export function ReviewVerdict({ review, onOpenMessage, only }: { review: Review;
 function Findings({ c, onOpenMessage }: { c: ReviewCheck; onOpenMessage?: (id: string) => void }) {
   const open = (id: string) =>
     onOpenMessage ? (
-      <button type="button" className="font-mono underline underline-offset-2 hover:text-foreground" onClick={() => onOpenMessage(id)}>
+      <button
+        type="button"
+        className="font-mono underline underline-offset-2 hover:text-foreground"
+        onClick={() => onOpenMessage(id)}
+      >
         {id}
       </button>
     ) : (
@@ -85,15 +99,18 @@ function Findings({ c, onOpenMessage }: { c: ReviewCheck; onOpenMessage?: (id: s
   for (const x of c.extracted ?? []) {
     items.push(
       <>
-        {x.kind === "link" ? m.review_found_link({ where: x.where }) : m.review_found_code({ where: x.where })} {open(x.message_id)}{" "}
-        <span className="text-muted-foreground">({x.source})</span>
+        {x.kind === "link"
+          ? m.review_found_link({ where: x.where })
+          : m.review_found_code({ where: x.where })}{" "}
+        {open(x.message_id)} <span className="text-muted-foreground">({x.source})</span>
       </>,
     );
   }
   for (const r of c.refs ?? []) {
     items.push(
       <>
-        <span className="font-mono wrap-anywhere">{r.as}</span> <span className="text-muted-foreground">({r.where})</span>{" "}
+        <span className="font-mono wrap-anywhere">{r.as}</span>{" "}
+        <span className="text-muted-foreground">({r.where})</span>{" "}
         {r.message_id ? (
           <>
             {m.review_ref_other_thread()} {open(r.message_id)}
@@ -107,7 +124,9 @@ function Findings({ c, onOpenMessage }: { c: ReviewCheck; onOpenMessage?: (id: s
   for (const l of c.links ?? []) {
     items.push(
       <>
-        <span className="font-mono">{l.host}</span> <span className="text-muted-foreground">({l.where})</span> {l.domain ? m.review_link_unseen({ domain: l.domain }) : m.review_link_not_domain()}
+        <span className="font-mono">{l.host}</span>{" "}
+        <span className="text-muted-foreground">({l.where})</span>{" "}
+        {l.domain ? m.review_link_unseen({ domain: l.domain }) : m.review_link_not_domain()}
       </>,
     );
   }
@@ -136,7 +155,10 @@ function Findings({ c, onOpenMessage }: { c: ReviewCheck; onOpenMessage?: (id: s
  * sent when its window ends; it does not lapse, so these words are never
  * the "left"/"expires" of a code's countdown (mail/extracted.ts).
  */
-export function untilSent(until: string, now: number): { unit: "s" | "min" | "h"; n: number } | undefined {
+export function untilSent(
+  until: string,
+  now: number,
+): { unit: "s" | "min" | "h"; n: number } | undefined {
   const s = Math.floor((Date.parse(until) - now) / 1000);
   if (Number.isNaN(s) || s <= 0) return undefined;
   if (s < 60) return { unit: "s", n: s };
@@ -145,7 +167,11 @@ export function untilSent(until: string, now: number): { unit: "s" | "min" | "h"
 }
 
 const sendsIn = { s: m.review_sends_in_s, min: m.review_sends_in_min, h: m.review_sends_in_h };
-const recallLeft = { s: m.review_recall_left_s, min: m.review_recall_left_min, h: m.review_recall_left_h };
+const recallLeft = {
+  s: m.review_recall_left_s,
+  min: m.review_recall_left_min,
+  h: m.review_recall_left_h,
+};
 
 /** "Sends at 04:42 unless recalled · 58 min to recall", refreshed as it counts down. */
 export function HoldUntil({ until }: { until: string }) {
@@ -153,8 +179,15 @@ export function HoldUntil({ until }: { until: string }) {
   const left = untilSent(until, now);
   return (
     <span title={fullTime(until)}>
-      <span className="font-medium">{left ? m.review_sends_at({ time: listTime(until) }) : m.review_sends_now()}</span>
-      {left && <span className="text-system-foreground tabular-nums"> · {recallLeft[left.unit]({ n: left.n })}</span>}
+      <span className="font-medium">
+        {left ? m.review_sends_at({ time: listTime(until) }) : m.review_sends_now()}
+      </span>
+      {left && (
+        <span className="text-system-foreground tabular-nums">
+          {" "}
+          · {recallLeft[left.unit]({ n: left.n })}
+        </span>
+      )}
     </span>
   );
 }
@@ -196,12 +229,22 @@ export function Recall({
     } finally {
       setBusy(false);
       setConfirm(false);
-      for (const k of ["/api/v1/outbox", "/api/v1/outbox/{id}", "/api/v1/drafts", "/api/v1/drafts/{id}", "/api/v1/messages", "/api/v1/threads/{id}"]) {
+      for (const k of [
+        "/api/v1/outbox",
+        "/api/v1/outbox/{id}",
+        "/api/v1/drafts",
+        "/api/v1/drafts/{id}",
+        "/api/v1/messages",
+        "/api/v1/threads/{id}",
+      ]) {
         void qc.invalidateQueries({ queryKey: ["get", k] });
       }
     }
   };
-  if (done) return <Recalled w={done} identity={identity} submitter={submitter} onOpenDraft={onOpenDraft} />;
+  if (done)
+    return (
+      <Recalled w={done} identity={identity} submitter={submitter} onOpenDraft={onOpenDraft} />
+    );
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -221,20 +264,36 @@ export function Recall({
           </Button>
         )}
       </div>
-      {err !== undefined && <ProblemLine p={problem(err, { conflict: m.review_recall_conflict })} />}
+      {err !== undefined && (
+        <ProblemLine p={problem(err, { conflict: m.review_recall_conflict })} />
+      )}
     </div>
   );
 }
 
 /** What a recall did: back to the draft, and the grant suspended if it tripped. */
-export function Recalled({ w, identity, submitter, onOpenDraft }: { w: Withdrawal; identity: string; submitter: string; onOpenDraft?: (id: string) => void }) {
+export function Recalled({
+  w,
+  identity,
+  submitter,
+  onOpenDraft,
+}: {
+  w: Withdrawal;
+  identity: string;
+  submitter: string;
+  onOpenDraft?: (id: string) => void;
+}) {
   const s = w.suspended;
   return (
     <div className="flex flex-col gap-1.5">
       <p className="flex flex-wrap items-baseline gap-x-2">
         <span className="font-medium text-system-foreground">{m.review_recalled()}</span>
         {onOpenDraft && (
-          <button type="button" className="underline underline-offset-2" onClick={() => onOpenDraft(w.draft_id)}>
+          <button
+            type="button"
+            className="underline underline-offset-2"
+            onClick={() => onOpenDraft(w.draft_id)}
+          >
             {m.send_open_draft()}
           </button>
         )}
@@ -244,8 +303,11 @@ export function Recalled({ w, identity, submitter, onOpenDraft }: { w: Withdrawa
           className="border-warning/60"
           why={
             <>
-              <span className="font-medium text-warning">{m.review_suspended({ who: submitter, identity })}</span>{" "}
-              {s.withdrawn.length > 0 && m.review_suspended_others({ n: s.withdrawn.length })} {m.review_resume_on_host()}
+              <span className="font-medium text-warning">
+                {m.review_suspended({ who: submitter, identity })}
+              </span>{" "}
+              {s.withdrawn.length > 0 && m.review_suspended_others({ n: s.withdrawn.length })}{" "}
+              {m.review_resume_on_host()}
             </>
           }
           command={resumeCommand(identity, submitter)}
@@ -259,5 +321,9 @@ export function Recalled({ w, identity, submitter, onOpenDraft }: { w: Withdrawa
 export function HeldLeft({ until, className }: { until: string; className?: string }) {
   const now = useNow(15_000);
   const left = untilSent(until, now);
-  return <span className={cn("shrink-0 text-meta text-system-foreground tabular-nums", className)}>{left ? sendsIn[left.unit]({ n: left.n }) : m.review_sends_now()}</span>;
+  return (
+    <span className={cn("shrink-0 text-meta text-system-foreground tabular-nums", className)}>
+      {left ? sendsIn[left.unit]({ n: left.n }) : m.review_sends_now()}
+    </span>
+  );
 }

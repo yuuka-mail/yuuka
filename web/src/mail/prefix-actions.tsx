@@ -17,7 +17,11 @@ import { problem } from "@/send/outgoing";
 /** After a prefix decision: the prefix lists and every list of its mail. */
 export function invalidatePrefixes(qc: QueryClient) {
   const stale = ["/api/v1/prefixes", "/api/v1/messages", "/api/v1/search", "/api/v1/threads"];
-  void qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[1] === "string" && stale.some((p) => (q.queryKey[1] as string).startsWith(p)) });
+  void qc.invalidateQueries({
+    predicate: (q) =>
+      typeof q.queryKey[1] === "string" &&
+      stale.some((p) => (q.queryKey[1] as string).startsWith(p)),
+  });
 }
 
 /** Claim: its mail stops being downgraded unless DMARC failed, and new mail to it notifies (§3.3). */
@@ -37,7 +41,9 @@ export function ClaimButton({ address, size = "xs" }: { address: string; size?: 
           setBusy(true);
           setErr(undefined);
           try {
-            await data(api.POST("/api/v1/prefixes/{address}/claim", { params: { path: { address } } }));
+            await data(
+              api.POST("/api/v1/prefixes/{address}/claim", { params: { path: { address } } }),
+            );
             invalidatePrefixes(qc);
           } catch (x) {
             setErr(x);
@@ -62,7 +68,9 @@ export function UnclaimButton({ address }: { address: string }) {
       confirmLabel={m.prefix_unclaim_confirm()}
       cost={m.prefix_unclaim_cost()}
       onConfirm={async () => {
-        await data(api.POST("/api/v1/prefixes/{address}/unclaim", { params: { path: { address } } }));
+        await data(
+          api.POST("/api/v1/prefixes/{address}/unclaim", { params: { path: { address } } }),
+        );
         invalidatePrefixes(qc);
       }}
     />
@@ -74,7 +82,15 @@ export function UnclaimButton({ address }: { address: string }) {
  * answers with what the leak check now makes of its mail; a subdomain is
  * compared by its organizational domain, which yuuka says once.
  */
-export function ExpectEditor({ address, expected, onClose }: { address: string; expected: string[]; onClose: (counted?: CountedAs[]) => void }) {
+export function ExpectEditor({
+  address,
+  expected,
+  onClose,
+}: {
+  address: string;
+  expected: string[];
+  onClose: (counted?: CountedAs[]) => void;
+}) {
   const qc = useQueryClient();
   const [text, setText] = useState(expected.join(", "));
   const [busy, setBusy] = useState(false);
@@ -87,7 +103,12 @@ export function ExpectEditor({ address, expected, onClose }: { address: string; 
         .split(/[\s,;]+/)
         .map((d) => d.trim())
         .filter(Boolean);
-      const r = await data(api.PUT("/api/v1/prefixes/{address}/expected-domains", { params: { path: { address } }, body: { domains } }));
+      const r = await data(
+        api.PUT("/api/v1/prefixes/{address}/expected-domains", {
+          params: { path: { address } },
+          body: { domains },
+        }),
+      );
       invalidatePrefixes(qc);
       onClose(r.counted_as);
     } catch (x) {

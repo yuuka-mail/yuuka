@@ -25,7 +25,9 @@ function message(from = "alice@example.net", to = "github@example.com", raw = RA
   };
 }
 
-function mockWebhook(impl: () => Promise<Response> = async () => new Response(null, { status: 204 })) {
+function mockWebhook(
+  impl: () => Promise<Response> = async () => new Response(null, { status: 204 }),
+) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(impl);
 }
 
@@ -68,7 +70,9 @@ describe("ingest", () => {
     expect(body).toBe(json);
     const timestamp = Number(req.headers.get("Yuuka-Timestamp"));
     expect(Math.abs(timestamp - Date.now() / 1000)).toBeLessThanOrEqual(hmac.window_seconds);
-    expect(await verify(env.WEBHOOK_SECRET, timestamp, body, req.headers.get("Yuuka-Signature")!)).toBe(true);
+    expect(
+      await verify(env.WEBHOOK_SECRET, timestamp, body, req.headers.get("Yuuka-Signature")!),
+    ).toBe(true);
 
     expect(msg.setReject).not.toHaveBeenCalled();
   });
@@ -90,7 +94,9 @@ describe("ingest", () => {
       }),
       RAW: bucket(rawPut),
     };
-    await expect(ingest(message(), broken, createExecutionContext())).rejects.toThrow("r2 unavailable");
+    await expect(ingest(message(), broken, createExecutionContext())).rejects.toThrow(
+      "r2 unavailable",
+    );
     expect(rawPut).not.toHaveBeenCalled();
   });
 
@@ -101,13 +107,20 @@ describe("ingest", () => {
         throw new Error("r2 unavailable");
       }),
     };
-    await expect(ingest(message(), broken, createExecutionContext())).rejects.toThrow("r2 unavailable");
+    await expect(ingest(message(), broken, createExecutionContext())).rejects.toThrow(
+      "r2 unavailable",
+    );
   });
 
   it("throws when the writes miss the deadline", async () => {
     const fetch = mockWebhook();
-    const slow: Env = { ...env, RAW: bucket(() => new Promise((r) => setTimeout(() => r(null), 1_000))) };
-    await expect(ingest(message(), slow, createExecutionContext(), 20)).rejects.toThrow(/exceeded 20 ms/);
+    const slow: Env = {
+      ...env,
+      RAW: bucket(() => new Promise((r) => setTimeout(() => r(null), 1_000))),
+    };
+    await expect(ingest(message(), slow, createExecutionContext(), 20)).rejects.toThrow(
+      /exceeded 20 ms/,
+    );
     expect(fetch).not.toHaveBeenCalled();
   });
 
@@ -122,9 +135,9 @@ describe("ingest", () => {
 
     const first = await ingest(message(), env, createExecutionContext());
     const other = new TextEncoder().encode("Subject: different\r\n\r\nother\r\n");
-    await expect(ingest(message(undefined, undefined, other), env, createExecutionContext())).rejects.toThrow(
-      "already exists",
-    );
+    await expect(
+      ingest(message(undefined, undefined, other), env, createExecutionContext()),
+    ).rejects.toThrow("already exists");
 
     const raw = await env.RAW.get(first.raw_key);
     expect(new Uint8Array(await raw!.arrayBuffer())).toEqual(RAW);
@@ -144,13 +157,22 @@ describe("ingest", () => {
 
 // Verifies with crypto.subtle.verify rather than the Worker's sign(), so a
 // bug in sign() cannot vouch for itself; sign() itself is pinned by hmac.json.
-async function verify(secret: string, timestamp: number, body: string, header: string): Promise<boolean> {
+async function verify(
+  secret: string,
+  timestamp: number,
+  body: string,
+  header: string,
+): Promise<boolean> {
   const hex = /^v1=([0-9a-f]{64})$/.exec(header)?.[1];
   if (!hex) return false;
   const mac = Uint8Array.from(hex.match(/../g)!, (h) => parseInt(h, 16));
   const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
-    "verify",
-  ]);
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
   return crypto.subtle.verify("HMAC", key, mac, enc.encode(`v1:${timestamp}:${body}`));
 }

@@ -45,7 +45,9 @@ export function LabelInput({
   const t = text.trim();
   const all = labels.data?.labels ?? [];
   const lower = t.toLowerCase();
-  const shown = all.filter((l) => !exclude.includes(l.label) && (!t || l.label.toLowerCase().includes(lower))).slice(0, 8);
+  const shown = all
+    .filter((l) => !exclude.includes(l.label) && (!t || l.label.toLowerCase().includes(lower)))
+    .slice(0, 8);
   const exact = all.some((l) => l.label === t);
   const nearly = !exact ? all.filter((l) => l.label !== t && l.label.toLowerCase() === lower) : [];
   const problem = labelProblem(t);
@@ -93,14 +95,23 @@ export function LabelInput({
         <span className="text-meta text-warning">
           {m.label_case_differs()}{" "}
           {nearly.map((l) => (
-            <button key={l.label} type="button" className="font-medium underline underline-offset-2" onClick={() => pick(l.label)}>
+            <button
+              key={l.label}
+              type="button"
+              className="font-medium underline underline-offset-2"
+              onClick={() => pick(l.label)}
+            >
               {l.label}
             </button>
           ))}
         </span>
       )}
       {shown.length > 0 && (
-        <ul role="listbox" aria-label={m.label_existing()} className="absolute top-7 left-0 z-20 w-56 rounded-md border bg-background p-1 shadow-md">
+        <ul
+          role="listbox"
+          aria-label={m.label_existing()}
+          className="absolute top-7 left-0 z-20 w-56 rounded-md border bg-background p-1 shadow-md"
+        >
           {shown.map((l, i) => (
             <li key={l.label} role="option" aria-selected={hi === i + 1}>
               <button
@@ -108,10 +119,15 @@ export function LabelInput({
                 // Keeps focus in the input, so Enter and the arrows still work.
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => pick(l.label)}
-                className={cn("flex h-6 w-full items-center gap-2 rounded-sm px-1.5 text-left text-small hover:bg-muted", hi === i + 1 && "bg-muted")}
+                className={cn(
+                  "flex h-6 w-full items-center gap-2 rounded-sm px-1.5 text-left text-small hover:bg-muted",
+                  hi === i + 1 && "bg-muted",
+                )}
               >
                 <span className="min-w-0 truncate">{l.label}</span>
-                <span className="ml-auto shrink-0 text-meta text-muted-foreground tabular-nums">{count(l.messages)}</span>
+                <span className="ml-auto shrink-0 text-meta text-muted-foreground tabular-nums">
+                  {count(l.messages)}
+                </span>
               </button>
             </li>
           ))}

@@ -47,7 +47,12 @@ export interface View {
 
 /** The sections of the settings page: rules, then who may do what (§13.10). */
 export type SettingsSection = "rules" | "credentials" | "identities" | "grants";
-export const settingsSections: readonly SettingsSection[] = ["rules", "credentials", "identities", "grants"];
+export const settingsSections: readonly SettingsSection[] = [
+  "rules",
+  "credentials",
+  "identities",
+  "grants",
+];
 
 /**
  * The sidebar's entries (§12.9). Conversations and notifications are the
@@ -58,9 +63,30 @@ export const settingsSections: readonly SettingsSection[] = ["rules", "credentia
  * Archived mail is out of the zones but kept (§8.5); proposals are what
  * agents suggest and only a person decides.
  */
-export type Area = "conversations" | "notifications" | "all" | "archived" | "drafts" | "outbox" | "proposals" | "downgraded" | "unclaimed" | "leaks";
+export type Area =
+  | "conversations"
+  | "notifications"
+  | "all"
+  | "archived"
+  | "drafts"
+  | "outbox"
+  | "proposals"
+  | "downgraded"
+  | "unclaimed"
+  | "leaks";
 
-export const areas: readonly Area[] = ["conversations", "notifications", "all", "archived", "drafts", "outbox", "proposals", "downgraded", "unclaimed", "leaks"];
+export const areas: readonly Area[] = [
+  "conversations",
+  "notifications",
+  "all",
+  "archived",
+  "drafts",
+  "outbox",
+  "proposals",
+  "downgraded",
+  "unclaimed",
+  "leaks",
+];
 
 // The anchor grammar of §8.1, without yuuka://message/<id>#.
 const anchorPattern = /^part\/[1-9][0-9]*(\.[1-9][0-9]*)*(\/para\/[1-9][0-9]*)?$/;

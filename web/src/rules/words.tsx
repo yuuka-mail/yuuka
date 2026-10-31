@@ -51,14 +51,17 @@ export function opName(op: string): string {
 
 /** A value of a condition: booleans in words, everything else as the data it is. */
 export function Value({ v }: { v: unknown }) {
-  if (typeof v === "boolean") return <span className="font-medium">{v ? m.rule_yes() : m.rule_no()}</span>;
+  if (typeof v === "boolean")
+    return <span className="font-medium">{v ? m.rule_yes() : m.rule_no()}</span>;
   const list = Array.isArray(v) ? v : [v];
   return (
     <>
       {list.map((x, i) => (
         <span key={i}>
           {i > 0 && ", "}
-          <span className="rounded-sm bg-muted px-1 font-mono text-small break-words">{String(x)}</span>
+          <span className="rounded-sm bg-muted px-1 font-mono text-small break-words">
+            {String(x)}
+          </span>
         </span>
       ))}
     </>
@@ -68,7 +71,8 @@ export function Value({ v }: { v: unknown }) {
 export function LeafWords({ leaf, className }: { leaf: Leaf; className?: string }) {
   return (
     <span className={cn("inline", className)}>
-      <span className="font-medium">{fieldName(leaf.field)}</span> <span className="text-muted-foreground">{opName(leaf.op)}</span> <Value v={leaf.value} />
+      <span className="font-medium">{fieldName(leaf.field)}</span>{" "}
+      <span className="text-muted-foreground">{opName(leaf.op)}</span> <Value v={leaf.value} />
     </span>
   );
 }
@@ -127,7 +131,8 @@ export function ActionWords({ a }: { a: RuleAction | Annotation }) {
     case "unlabel":
       return (
         <span>
-          {a.kind === "label" ? m.rule_action_label() : m.rule_action_unlabel()} <LabelChip label={a.label ?? ""} />
+          {a.kind === "label" ? m.rule_action_label() : m.rule_action_unlabel()}{" "}
+          <LabelChip label={a.label ?? ""} />
         </span>
       );
     case "archive":
@@ -135,7 +140,15 @@ export function ActionWords({ a }: { a: RuleAction | Annotation }) {
     case "unarchive":
       return <span>{m.rule_action_unarchive()}</span>;
     case "classify":
-      return <span>{a.class === "machine" ? m.rule_action_to_notifications() : a.class === "human" ? m.rule_action_to_conversations() : m.rule_action_classify({ class: a.class ?? "" })}</span>;
+      return (
+        <span>
+          {a.class === "machine"
+            ? m.rule_action_to_notifications()
+            : a.class === "human"
+              ? m.rule_action_to_conversations()
+              : m.rule_action_classify({ class: a.class ?? "" })}
+        </span>
+      );
     case "unclassify":
       return <span>{m.rule_action_unclassify()}</span>;
     case "notify":
@@ -143,7 +156,13 @@ export function ActionWords({ a }: { a: RuleAction | Annotation }) {
   }
 }
 
-export function ActionsWords({ actions, className }: { actions: (RuleAction | Annotation)[]; className?: string }) {
+export function ActionsWords({
+  actions,
+  className,
+}: {
+  actions: (RuleAction | Annotation)[];
+  className?: string;
+}) {
   return (
     <span className={cn("inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5", className)}>
       {actions.map((a, i) => (
@@ -160,9 +179,22 @@ export function ActionsWords({ actions, className }: { actions: (RuleAction | An
  * A label as it is stored: an exact, case-sensitive string someone typed
  * or a rule set, shown as data.
  */
-export function LabelChip({ label, className, children }: { label: string; className?: string; children?: ReactNode }) {
+export function LabelChip({
+  label,
+  className,
+  children,
+}: {
+  label: string;
+  className?: string;
+  children?: ReactNode;
+}) {
   return (
-    <span className={cn("inline-flex h-5 max-w-56 min-w-0 items-center gap-0.5 rounded-sm border bg-muted/60 px-1.5 text-small", className)}>
+    <span
+      className={cn(
+        "inline-flex h-5 max-w-56 min-w-0 items-center gap-0.5 rounded-sm border bg-muted/60 px-1.5 text-small",
+        className,
+      )}
+    >
       <span className="truncate">{label}</span>
       {children}
     </span>

@@ -33,29 +33,42 @@ export function leakSummary(p: Prefix): string {
 }
 
 function leakedText(p: Prefix): string {
-  return p.unverified ? m.leak_leaked_unproven({ n: count(p.leaks), unproven: count(p.unverified) }) : m.leak_leaked({ n: count(p.leaks) });
+  return p.unverified
+    ? m.leak_leaked_unproven({ n: count(p.leaks), unproven: count(p.unverified) })
+    : m.leak_leaked({ n: count(p.leaks) });
 }
 
 /** leakSummary in colour: a leak is a caution, a spoof an error. */
 function LeakCounts({ p }: { p: Prefix }) {
   return (
     <span className="font-medium">
-      {p.leaks > 0 && (
-        <span className="text-warning">{leakedText(p)}</span>
-      )}
+      {p.leaks > 0 && <span className="text-warning">{leakedText(p)}</span>}
       {p.leaks > 0 && p.spoofs > 0 && <span className="text-muted-foreground"> · </span>}
-      {p.spoofs > 0 && <span className="text-destructive">{m.leak_spoofed({ n: count(p.spoofs) })}</span>}
+      {p.spoofs > 0 && (
+        <span className="text-destructive">{m.leak_spoofed({ n: count(p.spoofs) })}</span>
+      )}
     </span>
   );
 }
 
 /** The mark of a prefix whose mail leaked or was spoofed. */
 export function LeakDot({ tone, className }: { tone: LeakTone; className?: string }) {
-  return <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", tone === "bad" ? "bg-destructive" : "bg-warning", className)} />;
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "size-1.5 shrink-0 rounded-full",
+        tone === "bad" ? "bg-destructive" : "bg-warning",
+        className,
+      )}
+    />
+  );
 }
 
 const flagged = (ps: Prefix[] | undefined) =>
-  (ps ?? []).filter((p) => p.leaks + p.spoofs > 0).toSorted((a, b) => (b.last_offense ?? "").localeCompare(a.last_offense ?? ""));
+  (ps ?? [])
+    .filter((p) => p.leaks + p.spoofs > 0)
+    .toSorted((a, b) => (b.last_offense ?? "").localeCompare(a.last_offense ?? ""));
 
 /** How many claimed prefixes the review group's entry counts. */
 export function useFlaggedCount(): number | undefined {
@@ -93,12 +106,23 @@ export function LeakList({ onPick }: { onPick: (address: string) => void }) {
               <span className="flex min-w-0 items-center gap-1.5">
                 <LeakDot tone={leakTone(p) ?? "warn"} />
                 <span className="min-w-0 truncate font-mono text-small">{p.address}</span>
-                {p.label && <span className="min-w-0 truncate text-meta text-muted-foreground">{p.label}</span>}
-                <span className="ml-auto shrink-0 pl-2 text-meta text-muted-foreground tabular-nums">{p.last_offense ? listTime(p.last_offense) : ""}</span>
+                {p.label && (
+                  <span className="min-w-0 truncate text-meta text-muted-foreground">
+                    {p.label}
+                  </span>
+                )}
+                <span className="ml-auto shrink-0 pl-2 text-meta text-muted-foreground tabular-nums">
+                  {p.last_offense ? listTime(p.last_offense) : ""}
+                </span>
               </span>
               <span className="truncate text-small">
                 <LeakCounts p={p} />
-                {strangers.length > 0 && <span className="text-muted-foreground"> · {m.leak_from({ domains: strangers.join(", ") })}</span>}
+                {strangers.length > 0 && (
+                  <span className="text-muted-foreground">
+                    {" "}
+                    · {m.leak_from({ domains: strangers.join(", ") })}
+                  </span>
+                )}
               </span>
             </button>
           </li>
@@ -117,7 +141,15 @@ const shownOffenses = 3;
  * proved to send to it, and the latest mail that leaked or spoofed.
  * One line while nothing offended; unclaimed prefixes have no check.
  */
-export function PrefixFacts({ address, manage, onOpen }: { address: string; manage: boolean; onOpen: (message: string) => void }) {
+export function PrefixFacts({
+  address,
+  manage,
+  onOpen,
+}: {
+  address: string;
+  manage: boolean;
+  onOpen: (message: string) => void;
+}) {
   const ps = usePrefixes();
   const p = ps.data?.prefixes.find((x) => x.address === address);
   const tone = p && leakTone(p);
@@ -156,7 +188,11 @@ export function PrefixFacts({ address, manage, onOpen }: { address: string; mana
         )}
         {tone && <LeakCounts p={p} />}
         {manage && !editing && (
-          <button type="button" className="text-muted-foreground underline underline-offset-2 hover:text-foreground" onClick={() => setEditing(true)}>
+          <button
+            type="button"
+            className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            onClick={() => setEditing(true)}
+          >
             {expects ? m.prefix_expect_edit() : m.prefix_expect_set()}
           </button>
         )}
@@ -179,13 +215,18 @@ export function PrefixFacts({ address, manage, onOpen }: { address: string; mana
             <span key={o.domain}>
               {i > 0 && ", "}
               <span className="whitespace-nowrap">
-                <span className={cn(expects && !o.expected && "font-medium text-warning")}>{o.domain}</span> {count(o.messages)}
+                <span className={cn(expects && !o.expected && "font-medium text-warning")}>
+                  {o.domain}
+                </span>{" "}
+                {count(o.messages)}
               </span>
             </span>
           ))}
         </p>
       )}
-      {tone && <Offenses offenses={detail.data?.offenses} total={p.leaks + p.spoofs} onOpen={onOpen} />}
+      {tone && (
+        <Offenses offenses={detail.data?.offenses} total={p.leaks + p.spoofs} onOpen={onOpen} />
+      )}
       {manage && (
         <div className="border-t border-system-border pt-1">
           <UnclaimButton address={address} />
@@ -198,7 +239,10 @@ export function PrefixFacts({ address, manage, onOpen }: { address: string; mana
 /** Above the mail of a prefix nobody claimed: why its mail is downgraded, and Claim. */
 function UnclaimedFacts({ address }: { address: string }) {
   return (
-    <section aria-label={m.leak_facts_label()} className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-system-border bg-system-surface px-2 py-1 text-small">
+    <section
+      aria-label={m.leak_facts_label()}
+      className="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-system-border bg-system-surface px-2 py-1 text-small"
+    >
       <Signature speaker={system} />
       <span className="text-muted-foreground">{m.prefix_unclaimed_facts()}</span>
       <ClaimButton address={address} />
@@ -206,24 +250,52 @@ function UnclaimedFacts({ address }: { address: string }) {
   );
 }
 
-function Offenses({ offenses, total, onOpen }: { offenses?: Offense[]; total: number; onOpen: (message: string) => void }) {
+function Offenses({
+  offenses,
+  total,
+  onOpen,
+}: {
+  offenses?: Offense[];
+  total: number;
+  onOpen: (message: string) => void;
+}) {
   if (!offenses) return <Skeleton className="h-3.5 w-2/3" />;
   const more = total - Math.min(offenses.length, shownOffenses);
   return (
-    <ul className="flex flex-col border-t border-system-border pt-1" aria-label={m.leak_offending_label()}>
+    <ul
+      className="flex flex-col border-t border-system-border pt-1"
+      aria-label={m.leak_offending_label()}
+    >
       {offenses.slice(0, shownOffenses).map((o) => (
         <li key={o.message.id}>
-          <button type="button" onClick={() => onOpen(o.message.id)} className="flex w-full min-w-0 items-baseline gap-1.5 rounded-sm text-left hover:bg-muted">
-            <span className={cn("w-9 shrink-0 font-medium", o.verdict === "spoof" ? "text-destructive" : "text-warning")}>{o.verdict}</span>
-            <span className="w-24 shrink-0 truncate text-muted-foreground">{o.domain ?? m.leak_unproven()}</span>
+          <button
+            type="button"
+            onClick={() => onOpen(o.message.id)}
+            className="flex w-full min-w-0 items-baseline gap-1.5 rounded-sm text-left hover:bg-muted"
+          >
+            <span
+              className={cn(
+                "w-9 shrink-0 font-medium",
+                o.verdict === "spoof" ? "text-destructive" : "text-warning",
+              )}
+            >
+              {o.verdict}
+            </span>
+            <span className="w-24 shrink-0 truncate text-muted-foreground">
+              {o.domain ?? m.leak_unproven()}
+            </span>
             <span className="min-w-0 flex-1 truncate underline-offset-2 hover:underline">
               {o.message.subject || sender(o.message.from_name, o.message.from_addr)}
             </span>
-            <span className="shrink-0 text-meta text-muted-foreground tabular-nums">{listTime(o.delivered_at)}</span>
+            <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
+              {listTime(o.delivered_at)}
+            </span>
           </button>
         </li>
       ))}
-      {more > 0 && <li className="text-meta text-muted-foreground">{m.leak_more_below({ n: count(more) })}</li>}
+      {more > 0 && (
+        <li className="text-meta text-muted-foreground">{m.leak_more_below({ n: count(more) })}</li>
+      )}
     </ul>
   );
 }

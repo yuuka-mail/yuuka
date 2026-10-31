@@ -2,7 +2,16 @@ import { describe, expect, it } from "vitest";
 
 import type { AppliedGrant, ManagedGrant } from "@/api/types";
 
-import { grantSummary, lowerLimit, lowerTiers, narrowerScopes, removeCommand, subsetOf, tightenBody, tightenings } from "./authority";
+import {
+  grantSummary,
+  lowerLimit,
+  lowerTiers,
+  narrowerScopes,
+  removeCommand,
+  subsetOf,
+  tightenBody,
+  tightenings,
+} from "./authority";
 
 const applied = (over: Partial<AppliedGrant> = {}): AppliedGrant => ({
   send_policy: "review",
@@ -24,10 +33,29 @@ describe("tightening a grant", () => {
     expect(narrowerScopes("allowlist")).toEqual([]);
   });
   it("lists every tighter change, and nothing when nothing is tighter", () => {
-    expect(tightenings(applied()).map((t) => t.kind)).toEqual(["suspend", "tier", "tier", "scope", "scope", "limit", "limit", "limit", "hold"]);
-    const tight = applied({ send_policy: "none", recipient_scope: "thread", suspended: true, limits: { max_per_hour: 0, max_per_day: 0, max_new_recipients_per_day: 0 } });
+    expect(tightenings(applied()).map((t) => t.kind)).toEqual([
+      "suspend",
+      "tier",
+      "tier",
+      "scope",
+      "scope",
+      "limit",
+      "limit",
+      "limit",
+      "hold",
+    ]);
+    const tight = applied({
+      send_policy: "none",
+      recipient_scope: "thread",
+      suspended: true,
+      limits: { max_per_hour: 0, max_per_day: 0, max_new_recipients_per_day: 0 },
+    });
     expect(tightenings(tight)).toEqual([]);
-    expect(tightenings(applied({ recipient_scope: "allowlist", allowlist: ["example.org"] })).some((t) => t.kind === "allowlist")).toBe(true);
+    expect(
+      tightenings(applied({ recipient_scope: "allowlist", allowlist: ["example.org"] })).some(
+        (t) => t.kind === "allowlist",
+      ),
+    ).toBe(true);
   });
   it("takes a lower limit or a smaller allowlist only", () => {
     expect(lowerLimit(10, 9)).toBe(true);
@@ -39,14 +67,22 @@ describe("tightening a grant", () => {
     expect(subsetOf(["example.org"], ["example.com"])).toBe(false);
   });
   it("sends one column at a time", () => {
-    expect(tightenBody({ kind: "limit", field: "max_per_day" }, { limit: 20 })).toEqual({ max_per_day: 20 });
+    expect(tightenBody({ kind: "limit", field: "max_per_day" }, { limit: 20 })).toEqual({
+      max_per_day: 20,
+    });
     expect(tightenBody({ kind: "hold" }, { holdMinutes: 30 })).toEqual({ hold_seconds: 1800 });
     expect(tightenBody({ kind: "suspend" }, {})).toEqual({ suspended: true });
   });
   it("says a grant in one line, and how to remove it on the host", () => {
-    expect(grantSummary(applied({ limits: {} }))).toBe("review — held 10 min after the checks · to any recipient · no hourly limit · no daily limit · no limit on new recipients");
+    expect(grantSummary(applied({ limits: {} }))).toBe(
+      "review — held 10 min after the checks · to any recipient · no hourly limit · no daily limit · no limit on new recipients",
+    );
     expect(grantSummary(applied({ send_policy: "draft" }))).toBe("drafts only");
-    const g = { host: "yuuka grant set --identity '*@example.com' --principal agent:arisu" } as ManagedGrant;
-    expect(removeCommand(g)).toBe("yuuka grant rm --identity '*@example.com' --principal agent:arisu");
+    const g = {
+      host: "yuuka grant set --identity '*@example.com' --principal agent:arisu",
+    } as ManagedGrant;
+    expect(removeCommand(g)).toBe(
+      "yuuka grant rm --identity '*@example.com' --principal agent:arisu",
+    );
   });
 });

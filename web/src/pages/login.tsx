@@ -20,7 +20,9 @@ export function LoginPage({ error }: { error?: unknown }) {
   const qc = useQueryClient();
   const { pathname } = useLocation();
   const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<Failure | undefined>(error ? ceremonyError(error) : undefined);
+  const [failure, setFailure] = useState<Failure | undefined>(
+    error ? ceremonyError(error) : undefined,
+  );
 
   async function signIn() {
     setBusy(true);

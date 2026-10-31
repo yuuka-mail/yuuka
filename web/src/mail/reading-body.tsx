@@ -37,7 +37,8 @@ export function ReadingBody({
   isFetchingMore: boolean;
 }) {
   const { parts, more } = reading;
-  const found = !anchor || parts.some((p) => p.anchor === anchor || p.blocks.some((b) => b.anchor === anchor));
+  const found =
+    !anchor || parts.some((p) => p.anchor === anchor || p.blocks.some((b) => b.anchor === anchor));
 
   // A deep link to text past the first stretch loads on until it is in.
   useEffect(() => {
@@ -57,31 +58,69 @@ export function ReadingBody({
     <div className="flex max-w-[78ch] flex-col gap-3 text-body">
       {parts.length === 0 && <p className="text-muted-foreground italic">{m.read_no_body()}</p>}
       {parts.map((p) => (
-        <section key={p.anchor} id={p.anchor} aria-label={parts.length > 1 ? m.read_part({ section: p.anchor.slice(5) }) : undefined} className="flex flex-col gap-2">
+        <section
+          key={p.anchor}
+          id={p.anchor}
+          aria-label={parts.length > 1 ? m.read_part({ section: p.anchor.slice(5) }) : undefined}
+          className="flex flex-col gap-2"
+        >
           {parts.length > 1 && (
             <p className="border-b pb-0.5 font-mono text-meta text-muted-foreground">
               {p.anchor} · {p.media_type}
             </p>
           )}
           {p.blocks.map((b) => (
-            <BlockView key={b.anchor} block={b} uri={uri} highlight={b.anchor === anchor} onAnchor={onAnchor} />
+            <BlockView
+              key={b.anchor}
+              block={b}
+              uri={uri}
+              highlight={b.anchor === anchor}
+              onAnchor={onAnchor}
+            />
           ))}
         </section>
       ))}
       {more && (
-        <Button variant="outline" size="sm" className="self-start" disabled={isFetchingMore} onClick={loadMore}>
+        <Button
+          variant="outline"
+          size="sm"
+          className="self-start"
+          disabled={isFetchingMore}
+          onClick={loadMore}
+        >
           {isFetchingMore ? m.read_loading() : m.read_load_rest()}
         </Button>
       )}
-      {!found && !more && <p className="text-small text-muted-foreground">{m.read_no_anchor({ anchor: anchor ?? "" })}</p>}
+      {!found && !more && (
+        <p className="text-small text-muted-foreground">
+          {m.read_no_anchor({ anchor: anchor ?? "" })}
+        </p>
+      )}
       {reading.content.attachments && <Attachments id={id} list={reading.content.attachments} />}
     </div>
   );
 }
 
-function BlockView({ block: b, uri, highlight, onAnchor }: { block: Block; uri: string; highlight: boolean; onAnchor: (a: string) => void }) {
+function BlockView({
+  block: b,
+  uri,
+  highlight,
+  onAnchor,
+}: {
+  block: Block;
+  uri: string;
+  highlight: boolean;
+  onAnchor: (a: string) => void;
+}) {
   return (
-    <div id={b.anchor} lang="" className={cn("group relative -mx-1.5 rounded-sm px-1.5 scroll-mt-4", highlight && "bg-ring/10 ring-1 ring-ring/40")}>
+    <div
+      id={b.anchor}
+      lang=""
+      className={cn(
+        "group relative -mx-1.5 rounded-sm px-1.5 scroll-mt-4",
+        highlight && "bg-ring/10 ring-1 ring-ring/40",
+      )}
+    >
       <button
         type="button"
         aria-label={m.read_link_to({ anchor: b.anchor })}
@@ -105,11 +144,16 @@ function BlockContent({ b }: { b: Block }) {
     case "heading": {
       const level = Math.min(Math.max(b.level ?? 1, 1), 5);
       const H = `h${level + 1}` as "h2" | "h3" | "h4" | "h5" | "h6";
-      return <H className={cn("font-semibold break-words", level === 1 ? "pt-2" : "pt-1")}>{spans}</H>;
+      return (
+        <H className={cn("font-semibold break-words", level === 1 ? "pt-2" : "pt-1")}>{spans}</H>
+      );
     }
     case "item":
       return (
-        <div className="flex gap-2 break-words" style={{ paddingLeft: `${Math.max((b.level ?? 1) - 1, 0)}rem` }}>
+        <div
+          className="flex gap-2 break-words"
+          style={{ paddingLeft: `${Math.max((b.level ?? 1) - 1, 0)}rem` }}
+        >
           <span aria-hidden className="text-muted-foreground select-none">
             {(b.level ?? 1) > 1 ? "◦" : "•"}
           </span>
@@ -117,7 +161,11 @@ function BlockContent({ b }: { b: Block }) {
         </div>
       );
     case "pre":
-      return <pre className="overflow-x-auto rounded-sm bg-muted px-2 py-1 font-mono text-small whitespace-pre">{spans}</pre>;
+      return (
+        <pre className="overflow-x-auto rounded-sm bg-muted px-2 py-1 font-mono text-small whitespace-pre">
+          {spans}
+        </pre>
+      );
     case "quote":
       return (
         <div className="flex items-baseline gap-1.5 border-l-2 pl-2 text-small text-muted-foreground">
@@ -154,8 +202,15 @@ function Spans({ spans }: { spans: Span[] }) {
         </a>
         {(t.mismatch || !echoed) && (
           <span
-            title={t.mismatch ? m.read_link_mismatch({ host: t.shown }) : m.read_link_goes({ host: t.shown })}
-            className={cn("ml-1 inline-flex items-baseline gap-0.5 font-mono text-meta", t.mismatch ? "font-semibold text-destructive" : "text-muted-foreground")}
+            title={
+              t.mismatch
+                ? m.read_link_mismatch({ host: t.shown })
+                : m.read_link_goes({ host: t.shown })
+            }
+            className={cn(
+              "ml-1 inline-flex items-baseline gap-0.5 font-mono text-meta",
+              t.mismatch ? "font-semibold text-destructive" : "text-muted-foreground",
+            )}
           >
             <ExternalLinkIcon aria-hidden className="size-3 self-center" />
             {t.shown}
@@ -174,21 +229,37 @@ function Spans({ spans }: { spans: Span[] }) {
 function Attachments({ id, list }: { id: string; list: Attachment[] }) {
   return (
     <section className="mt-1 border-t pt-2 text-small">
-      <h2 className="mb-1 font-medium text-muted-foreground">{m.read_attachments({ count: list.length })}</h2>
+      <h2 className="mb-1 font-medium text-muted-foreground">
+        {m.read_attachments({ count: list.length })}
+      </h2>
       <ul className="flex flex-col gap-0.5">
         {list.map((a) => (
           <li key={a.section} className="flex items-baseline gap-2">
-            <PaperclipIcon aria-hidden className="size-3 shrink-0 self-center text-muted-foreground" />
+            <PaperclipIcon
+              aria-hidden
+              className="size-3 shrink-0 self-center text-muted-foreground"
+            />
             <a
               href={attachmentHref(id, a.section)}
               download
-              title={a.filename ? m.read_download({ name: a.filename }) : m.read_download_part({ section: a.section })}
+              title={
+                a.filename
+                  ? m.read_download({ name: a.filename })
+                  : m.read_download_part({ section: a.section })
+              }
               className="group inline-flex min-w-0 items-baseline gap-1 text-primary underline decoration-muted-foreground/50 underline-offset-2 hover:decoration-current"
             >
-              <span className="min-w-0 truncate">{a.filename || m.read_no_filename({ section: a.section })}</span>
-              <DownloadIcon aria-hidden className="size-3 shrink-0 self-center text-muted-foreground group-hover:text-foreground" />
+              <span className="min-w-0 truncate">
+                {a.filename || m.read_no_filename({ section: a.section })}
+              </span>
+              <DownloadIcon
+                aria-hidden
+                className="size-3 shrink-0 self-center text-muted-foreground group-hover:text-foreground"
+              />
             </a>
-            <span className="shrink-0 font-mono text-meta text-muted-foreground">{a.media_type}</span>
+            <span className="shrink-0 font-mono text-meta text-muted-foreground">
+              {a.media_type}
+            </span>
           </li>
         ))}
       </ul>

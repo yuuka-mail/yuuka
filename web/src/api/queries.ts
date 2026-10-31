@@ -7,7 +7,8 @@ import { $api, api, isUnauthenticated } from "./client";
 import type { paths } from "./schema.gen";
 import type { Draft, DraftState, MessageSummary, OutboxEntry, OutboxState, Prefix } from "./types";
 
-type PreviewBody = paths["/api/v1/rules/preview"]["post"]["requestBody"]["content"]["application/json"];
+type PreviewBody =
+  paths["/api/v1/rules/preview"]["post"]["requestBody"]["content"]["application/json"];
 
 export const keys = {
   /** The key of useSession, which a 401 anywhere sets to null. */
@@ -37,7 +38,12 @@ export function useSession() {
  * paged in their own list.
  */
 export function usePrefixes() {
-  return $api.useQuery("get", "/api/v1/prefixes", { params: { query: { state: "claimed" } } }, { staleTime: 30_000 });
+  return $api.useQuery(
+    "get",
+    "/api/v1/prefixes",
+    { params: { query: { state: "claimed" } } },
+    { staleTime: 30_000 },
+  );
 }
 
 /**
@@ -125,11 +131,19 @@ export function useMessageList(v: View, enabled: boolean): MailList {
   };
 }
 
-export function useSearchList(text: string, includeDowngraded: boolean, enabled: boolean): MailList {
+export function useSearchList(
+  text: string,
+  includeDowngraded: boolean,
+  enabled: boolean,
+): MailList {
   const q = $api.useInfiniteQuery(
     "get",
     "/api/v1/search",
-    { params: { query: { q: text, downgraded: includeDowngraded ? "include" : "hide", limit: pageSize } } },
+    {
+      params: {
+        query: { q: text, downgraded: includeDowngraded ? "include" : "hide", limit: pageSize },
+      },
+    },
     { ...cursorPaging, enabled },
   );
   return {
@@ -153,7 +167,12 @@ export function useIdentities(enabled = true) {
 
 /** The identities a reply to message id defaults to, best first. */
 export function useReplyIdentities(id: string | undefined) {
-  return $api.useQuery("get", "/api/v1/messages/{id}/reply-identities", { params: { path: { id: id ?? "" } } }, { enabled: !!id, staleTime: 30_000 });
+  return $api.useQuery(
+    "get",
+    "/api/v1/messages/{id}/reply-identities",
+    { params: { path: { id: id ?? "" } } },
+    { enabled: !!id, staleTime: 30_000 },
+  );
 }
 
 export function useDrafts(state: DraftState[]) {
@@ -174,7 +193,12 @@ export function useDrafts(state: DraftState[]) {
 }
 
 export function useDraft(id: string | undefined) {
-  return $api.useQuery("get", "/api/v1/drafts/{id}", { params: { path: { id: id ?? "" } } }, { enabled: !!id });
+  return $api.useQuery(
+    "get",
+    "/api/v1/drafts/{id}",
+    { params: { path: { id: id ?? "" } } },
+    { enabled: !!id },
+  );
 }
 
 /** Outbox rows, newest first; they page by the last row's id. */
@@ -218,8 +242,19 @@ export function useOutboxEntry(id: string | undefined, enabled = true) {
  * labels, archived or class, or the proposals, is stale.
  */
 export function invalidateAnnotated(qc: QueryClient) {
-  const stale = ["/api/v1/messages", "/api/v1/search", "/api/v1/threads", "/api/v1/labels", "/api/v1/proposals", "/api/v1/rules"];
-  void qc.invalidateQueries({ predicate: (q) => typeof q.queryKey[1] === "string" && stale.some((p) => (q.queryKey[1] as string).startsWith(p)) });
+  const stale = [
+    "/api/v1/messages",
+    "/api/v1/search",
+    "/api/v1/threads",
+    "/api/v1/labels",
+    "/api/v1/proposals",
+    "/api/v1/rules",
+  ];
+  void qc.invalidateQueries({
+    predicate: (q) =>
+      typeof q.queryKey[1] === "string" &&
+      stale.some((p) => (q.queryKey[1] as string).startsWith(p)),
+  });
 }
 
 /** The labels in use, by name, with how many visible messages carry each. */
@@ -229,13 +264,23 @@ export function useLabels(enabled = true) {
 
 /** Where a message's labels, class and archived state came from, oldest first. */
 export function useAnnotations(id: string, enabled = true) {
-  return $api.useQuery("get", "/api/v1/messages/{id}/annotations", { params: { path: { id } } }, { enabled });
+  return $api.useQuery(
+    "get",
+    "/api/v1/messages/{id}/annotations",
+    { params: { path: { id } } },
+    { enabled },
+  );
 }
 
 type ProposalQuery = NonNullable<paths["/api/v1/proposals"]["get"]["parameters"]["query"]>;
 
 export function useProposals(query: ProposalQuery, enabled = true) {
-  return $api.useQuery("get", "/api/v1/proposals", { params: { query: { limit: 100, ...query } } }, { staleTime: 15_000, enabled });
+  return $api.useQuery(
+    "get",
+    "/api/v1/proposals",
+    { params: { query: { limit: 100, ...query } } },
+    { staleTime: 15_000, enabled },
+  );
 }
 
 export function useRules(deleted: boolean, enabled = true) {
@@ -243,12 +288,22 @@ export function useRules(deleted: boolean, enabled = true) {
 }
 
 export function useRule(id: string | undefined) {
-  return $api.useQuery("get", "/api/v1/rules/{id}", { params: { path: { id: id ?? "" } } }, { enabled: !!id });
+  return $api.useQuery(
+    "get",
+    "/api/v1/rules/{id}",
+    { params: { path: { id: id ?? "" } } },
+    { enabled: !!id },
+  );
 }
 
 /** "Mail like this" from message id: the conditions on offer and their counts. */
 export function useRuleDraft(id: string, enabled = true) {
-  return $api.useQuery("post", "/api/v1/rules/draft", { body: { message_id: id } }, { enabled, staleTime: 60_000 });
+  return $api.useQuery(
+    "post",
+    "/api/v1/rules/draft",
+    { body: { message_id: id } },
+    { enabled, staleTime: 60_000 },
+  );
 }
 
 /**
@@ -257,7 +312,12 @@ export function useRuleDraft(id: string, enabled = true) {
  * --dry-run`. Undefined body: nothing to try yet.
  */
 export function useRulePreview(body: PreviewBody | undefined) {
-  return $api.useQuery("post", "/api/v1/rules/preview", { body: body ?? { match: {}, actions: [] } }, { enabled: !!body, placeholderData: keepPreviousData, staleTime: 30_000 });
+  return $api.useQuery(
+    "post",
+    "/api/v1/rules/preview",
+    { body: body ?? { match: {}, actions: [] } },
+    { enabled: !!body, placeholderData: keepPreviousData, staleTime: 30_000 },
+  );
 }
 
 export function useThread(id: string | undefined) {

@@ -69,7 +69,12 @@ export function asMatch(x: unknown): RuleMatch | undefined {
     const inner = asMatch(o.not);
     return inner && { not: inner };
   }
-  if (keys.length === 3 && typeof o.field === "string" && typeof o.op === "string" && "value" in o) {
+  if (
+    keys.length === 3 &&
+    typeof o.field === "string" &&
+    typeof o.op === "string" &&
+    "value" in o
+  ) {
     return { field: o.field, op: o.op, value: o.value };
   }
   return undefined;
@@ -104,7 +109,11 @@ export function toEdit(m: RuleMatch): EditNode | undefined {
 
 export function fromEdit(n: EditNode): RuleMatch {
   const m: RuleMatch =
-    n.kind === "leaf" ? { field: n.field, op: n.op, value: n.value } : n.kind === "all" ? { all: n.children.map(fromEdit) } : { any: n.children.map(fromEdit) };
+    n.kind === "leaf"
+      ? { field: n.field, op: n.op, value: n.value }
+      : n.kind === "all"
+        ? { all: n.children.map(fromEdit) }
+        : { any: n.children.map(fromEdit) };
   return n.not ? { not: m } : m;
 }
 
@@ -137,7 +146,18 @@ export function allOf(conds: Leaf[]): RuleMatch | undefined {
 
 /** Whether actions can be saved: at least one, and every label named. */
 export function actionsComplete(as: RuleAction[]): boolean {
-  return as.length > 0 && as.every((a) => (a.kind === "label" ? !!a.label?.trim() : a.kind === "classify" ? !!a.class : a.kind === "notify" ? !!a.level : true));
+  return (
+    as.length > 0 &&
+    as.every((a) =>
+      a.kind === "label"
+        ? !!a.label?.trim()
+        : a.kind === "classify"
+          ? !!a.class
+          : a.kind === "notify"
+            ? !!a.level
+            : true,
+    )
+  );
 }
 
 /**
@@ -145,12 +165,15 @@ export function actionsComplete(as: RuleAction[]): boolean {
  * made by hand. Undoing kinds (unlabel, unarchive, unclassify) have no
  * rule action: rules only add (§8.5).
  */
-export function ruleActionsOf(as: { kind: string; label?: string; class?: string }[]): RuleAction[] {
+export function ruleActionsOf(
+  as: { kind: string; label?: string; class?: string }[],
+): RuleAction[] {
   const out: RuleAction[] = [];
   for (const a of as) {
     if (a.kind === "label" && a.label) out.push({ kind: "label", label: a.label });
     else if (a.kind === "archive") out.push({ kind: "archive" });
-    else if (a.kind === "classify" && (a.class === "machine" || a.class === "human")) out.push({ kind: "classify", class: a.class });
+    else if (a.kind === "classify" && (a.class === "machine" || a.class === "human"))
+      out.push({ kind: "classify", class: a.class });
   }
   return out;
 }

@@ -22,7 +22,15 @@ import { UndoResultText } from "./annotate";
  * change can be undone action by action; changed again since, it is
  * reported as superseded and left as it is.
  */
-export function History({ message, can, onOpenRule }: { message: Message; can: Abilities; onOpenRule?: (id: string) => void }) {
+export function History({
+  message,
+  can,
+  onOpenRule,
+}: {
+  message: Message;
+  can: Abilities;
+  onOpenRule?: (id: string) => void;
+}) {
   const q = useAnnotations(message.id);
   const rules = useRules(true, can.rules);
   const ruleName = (id: string) => rules.data?.rules.find((r) => r.id === id)?.name || id;
@@ -41,7 +49,15 @@ export function History({ message, can, onOpenRule }: { message: Message; can: A
       ) : (
         <ol className="flex flex-col gap-0.5">
           {h.map((e, i) => (
-            <Entry key={e.seq} e={e} ruleName={ruleName} onOpenRule={can.rules ? onOpenRule : undefined} undo={lastOfAction.get(e.action_id) === i && !e.undoes && !e.undone_by && can.annotate} />
+            <Entry
+              key={e.seq}
+              e={e}
+              ruleName={ruleName}
+              onOpenRule={can.rules ? onOpenRule : undefined}
+              undo={
+                lastOfAction.get(e.action_id) === i && !e.undoes && !e.undone_by && can.annotate
+              }
+            />
           ))}
         </ol>
       )}
@@ -62,14 +78,32 @@ function who(e: AnnotationEntry): string {
   return e.by.kind === "rule" ? m.history_a_rule() : e.by.name;
 }
 
-function Entry({ e, ruleName, onOpenRule, undo }: { e: AnnotationEntry; ruleName: (id: string) => string; onOpenRule?: (id: string) => void; undo: boolean }) {
+function Entry({
+  e,
+  ruleName,
+  onOpenRule,
+  undo,
+}: {
+  e: AnnotationEntry;
+  ruleName: (id: string) => string;
+  onOpenRule?: (id: string) => void;
+  undo: boolean;
+}) {
   const qc = useQueryClient();
   const [state, setState] = useState<UndoResult | "busy">();
   const [err, setErr] = useState<unknown>();
   const gone = !!e.undone_by;
   return (
-    <li className={cn("flex min-w-0 flex-wrap items-baseline gap-x-2", gone && "text-muted-foreground line-through decoration-muted-foreground/50")}>
-      <span className="w-12 shrink-0 text-meta text-muted-foreground tabular-nums" title={fullTime(e.at)}>
+    <li
+      className={cn(
+        "flex min-w-0 flex-wrap items-baseline gap-x-2",
+        gone && "text-muted-foreground line-through decoration-muted-foreground/50",
+      )}
+    >
+      <span
+        className="w-12 shrink-0 text-meta text-muted-foreground tabular-nums"
+        title={fullTime(e.at)}
+      >
         {listTime(e.at)}
       </span>
       <By e={e} ruleName={ruleName} onOpenRule={onOpenRule} />
@@ -85,7 +119,11 @@ function Entry({ e, ruleName, onOpenRule, undo }: { e: AnnotationEntry; ruleName
           onClick={async () => {
             setState("busy");
             try {
-              setState(await data(api.POST("/api/v1/actions/{id}/undo", { params: { path: { id: e.action_id } } })));
+              setState(
+                await data(
+                  api.POST("/api/v1/actions/{id}/undo", { params: { path: { id: e.action_id } } }),
+                ),
+              );
               invalidateAnnotated(qc);
             } catch (x) {
               setErr(x);
@@ -103,14 +141,26 @@ function Entry({ e, ruleName, onOpenRule, undo }: { e: AnnotationEntry; ruleName
 }
 
 /** Who made a change: a rule as yuuka's square, an agent as its dot, a person as is. */
-function By({ e, ruleName, onOpenRule }: { e: AnnotationEntry; ruleName: (id: string) => string; onOpenRule?: (id: string) => void }) {
+function By({
+  e,
+  ruleName,
+  onOpenRule,
+}: {
+  e: AnnotationEntry;
+  ruleName: (id: string) => string;
+  onOpenRule?: (id: string) => void;
+}) {
   if (e.by.kind === "rule") {
     const name = ruleName(e.by.name);
     return (
       <span className="inline-flex min-w-0 items-center gap-1 text-system-foreground">
         <span aria-hidden className="size-1.5 shrink-0 rounded-[1px] bg-system" />
         {onOpenRule ? (
-          <button type="button" className="truncate underline underline-offset-2" onClick={() => onOpenRule(e.by.name)}>
+          <button
+            type="button"
+            className="truncate underline underline-offset-2"
+            onClick={() => onOpenRule(e.by.name)}
+          >
             {m.history_rule({ name })}
           </button>
         ) : (
@@ -127,5 +177,7 @@ function By({ e, ruleName, onOpenRule }: { e: AnnotationEntry; ruleName: (id: st
       </span>
     );
   }
-  return <span className="font-medium">{e.by.kind === "system" ? m.history_host() : e.by.name}</span>;
+  return (
+    <span className="font-medium">{e.by.kind === "system" ? m.history_host() : e.by.name}</span>
+  );
 }

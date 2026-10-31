@@ -43,7 +43,12 @@ api.use({
     } catch {
       p = undefined;
     }
-    throw new ApiError(response.status, p?.detail ?? p?.title ?? response.statusText, p?.code, p?.path);
+    throw new ApiError(
+      response.status,
+      p?.detail ?? p?.title ?? response.statusText,
+      p?.code,
+      p?.path,
+    );
   },
 });
 

@@ -28,7 +28,11 @@ export function linkTarget(href: string, text: string): Target | undefined {
       // look-alike host shows as the xn-- name it really is.
       const host = u.hostname;
       const claimed = claimedHost(text);
-      const related = !claimed || claimed === host || host.endsWith("." + claimed) || claimed.endsWith("." + host);
+      const related =
+        !claimed ||
+        claimed === host ||
+        host.endsWith("." + claimed) ||
+        claimed.endsWith("." + host);
       return { href: u.href, shown: host, mismatch: !related };
     }
     case "mailto:":

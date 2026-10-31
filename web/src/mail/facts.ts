@@ -19,7 +19,8 @@ export interface Fact {
   parts: Part[];
 }
 
-const resultTone = (r: string): Tone => (r === "pass" ? "ok" : r === "fail" || r === "softfail" || r === "permerror" ? "bad" : "plain");
+const resultTone = (r: string): Tone =>
+  r === "pass" ? "ok" : r === "fail" || r === "softfail" || r === "permerror" ? "bad" : "plain";
 
 function authParts(a: Auth): Part[] {
   if (a.withheld) return [{ text: msg.facts_auth_withheld(), tone: "plain" }];
@@ -27,7 +28,15 @@ function authParts(a: Auth): Part[] {
   // suspect about that either (§4.6).
   if (a.not_received) return [{ text: msg.facts_auth_not_received(), tone: "plain" }];
   // The reason is the server's words, a note after ours (§12.11).
-  if (!a.verified) return [{ text: a.reason ? msg.facts_auth_unverified_because({ reason: a.reason }) : msg.facts_auth_unverified(), tone: "warn" }];
+  if (!a.verified)
+    return [
+      {
+        text: a.reason
+          ? msg.facts_auth_unverified_because({ reason: a.reason })
+          : msg.facts_auth_unverified(),
+        tone: "warn",
+      },
+    ];
   const parts: Part[] = [];
   for (const [name, r] of [
     ["dmarc", a.dmarc],
@@ -37,7 +46,8 @@ function authParts(a: Auth): Part[] {
     if (r) parts.push({ text: `${name}=${r}`, tone: resultTone(r) });
   }
   // DMARC alone says whether this domain is genuine (§8.1).
-  if (a.from_domain) parts.push({ text: msg.facts_auth_for({ domain: a.from_domain }), tone: "plain" });
+  if (a.from_domain)
+    parts.push({ text: msg.facts_auth_for({ domain: a.from_domain }), tone: "plain" });
   return parts;
 }
 
@@ -60,7 +70,8 @@ export function leakParts(c: LeakCheck): Part[] {
 
 export function strippedText(s: Stripped): string {
   const out: string[] = [];
-  const add = (n: number | undefined, text: (i: { count: number }) => string) => n && out.push(text({ count: n }));
+  const add = (n: number | undefined, text: (i: { count: number }) => string) =>
+    n && out.push(text({ count: n }));
   add(s.tracking_pixels, msg.facts_stripped_pixels);
   add(s.hidden, msg.facts_stripped_hidden);
   add(s.images, msg.facts_stripped_images);
@@ -72,14 +83,20 @@ export function strippedText(s: Stripped): string {
 /** The rows of the facts box; f is undefined until the view has loaded. */
 export function systemFacts(m: Message, f: Facts | undefined): Fact[] {
   const facts: Fact[] = [];
-  if (m.parse_error) facts.push({ label: msg.facts_parse_error(), parts: [{ text: m.parse_error, tone: "bad" }] });
+  if (m.parse_error)
+    facts.push({ label: msg.facts_parse_error(), parts: [{ text: m.parse_error, tone: "bad" }] });
   if (f?.sent) facts.push({ label: msg.facts_sent(), parts: sentParts(f.sent) });
   if (f) facts.push({ label: msg.facts_auth(), parts: authParts(f.auth) });
-  if (f?.leak_checks?.length) facts.push({ label: msg.facts_prefix(), parts: f.leak_checks.flatMap(leakParts) });
-  facts.push({ label: f?.auth.not_received ? msg.facts_submitted() : msg.facts_received(), parts: [{ text: fullTime(m.received_at), tone: "plain" }] });
+  if (f?.leak_checks?.length)
+    facts.push({ label: msg.facts_prefix(), parts: f.leak_checks.flatMap(leakParts) });
+  facts.push({
+    label: f?.auth.not_received ? msg.facts_submitted() : msg.facts_received(),
+    parts: [{ text: fullTime(m.received_at), tone: "plain" }],
+  });
   facts.push({ label: msg.facts_class(), parts: [{ text: m.class, tone: "plain" }] });
   const stripped = f && strippedText(f.stripped);
-  if (stripped) facts.push({ label: msg.facts_left_out(), parts: [{ text: stripped, tone: "plain" }] });
+  if (stripped)
+    facts.push({ label: msg.facts_left_out(), parts: [{ text: stripped, tone: "plain" }] });
   return facts;
 }
 
@@ -112,7 +129,15 @@ const badWarnings = new Set(["dmarc=fail", "quarantined", "spoof"]);
  * gets read when it does appear.
  */
 export function isQuiet(m: Message, f: Facts | undefined): boolean {
-  if (!f || m.parse_error || m.quarantined || m.downgraded || f.downgraded || warnings(f).length > 0) return false;
+  if (
+    !f ||
+    m.parse_error ||
+    m.quarantined ||
+    m.downgraded ||
+    f.downgraded ||
+    warnings(f).length > 0
+  )
+    return false;
   // Mail we sent and nobody delivered back: quiet while its outbox state
   // asks nothing of anyone; unknown, failed and the like open the box.
   if (f.auth.not_received) return !!f.sent && sentQuiet(f.sent.state);
@@ -121,7 +146,8 @@ export function isQuiet(m: Message, f: Facts | undefined): boolean {
 
 const sentQuiet = (s: string) => ["held", "queued", "sending", "sent", "withdrawn"].includes(s);
 
-const sentTone = (s: string): Tone => (s === "sent" ? "ok" : s === "dead" ? "bad" : sentQuiet(s) ? "plain" : "warn");
+const sentTone = (s: string): Tone =>
+  s === "sent" ? "ok" : s === "dead" ? "bad" : sentQuiet(s) ? "plain" : "warn";
 
 /** The outbox state of mail we sent, in words: "queued", "may have been sent". */
 export function sentState(s: Sent): Part {

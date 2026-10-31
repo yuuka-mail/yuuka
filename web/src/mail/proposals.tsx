@@ -29,14 +29,27 @@ import { useMessage } from "./reading-data";
 
 const citePattern = /^yuuka:\/\/message\/([0-9A-Za-z]+)(?:#(.+))?$/;
 
-const agentOf = (p: Proposal) => (p.proposer.kind === "agent" ? p.proposer.name : `${p.proposer.kind}:${p.proposer.name}`);
+const agentOf = (p: Proposal) =>
+  p.proposer.kind === "agent" ? p.proposer.name : `${p.proposer.kind}:${p.proposer.name}`;
 
 /** The pending proposals about one message, in the reading pane. */
-export function MessageProposals({ id, highlight, can, onOpen }: { id: string; highlight?: string; can: Abilities; onOpen: (id: string, anchor?: string) => void }) {
+export function MessageProposals({
+  id,
+  highlight,
+  can,
+  onOpen,
+}: {
+  id: string;
+  highlight?: string;
+  can: Abilities;
+  onOpen: (id: string, anchor?: string) => void;
+}) {
   const q = useProposals({ message_id: id });
   // Decided ones are history, not decisions; expired ones are shown
   // greyed until they would no longer be news.
-  const ps = (q.data?.proposals ?? []).filter((p) => p.state === "pending" || p.state === "expired" || p.id === highlight);
+  const ps = (q.data?.proposals ?? []).filter(
+    (p) => p.state === "pending" || p.state === "expired" || p.id === highlight,
+  );
   if (!ps.length) return null;
   return (
     <div className="flex flex-col gap-2">
@@ -49,7 +62,17 @@ export function MessageProposals({ id, highlight, can, onOpen }: { id: string; h
 
 type Deciding = { s: "idle" } | { s: "automate" } | { s: "review" } | { s: "confirm-reject" };
 
-export function ProposalCard({ p, can, onOpen, highlight }: { p: Proposal; can: Abilities; onOpen: (id: string, anchor?: string) => void; highlight?: boolean }) {
+export function ProposalCard({
+  p,
+  can,
+  onOpen,
+  highlight,
+}: {
+  p: Proposal;
+  can: Abilities;
+  onOpen: (id: string, anchor?: string) => void;
+  highlight?: boolean;
+}) {
   const qc = useQueryClient();
   const [step, setStep] = useState<Deciding>({ s: "idle" });
   const [busy, setBusy] = useState(false);
@@ -72,10 +95,22 @@ export function ProposalCard({ p, can, onOpen, highlight }: { p: Proposal; can: 
   };
   const accept = () =>
     decide(async () => {
-      setAccepted(await data(api.POST("/api/v1/proposals/{id}/accept", { params: { path: { id: p.id } }, body: {} })));
+      setAccepted(
+        await data(
+          api.POST("/api/v1/proposals/{id}/accept", { params: { path: { id: p.id } }, body: {} }),
+        ),
+      );
     });
-  const reject = () => decide(() => data(api.POST("/api/v1/proposals/{id}/reject", { params: { path: { id: p.id } } })));
-  const what = p.kind === "rule" ? m.proposal_kind_rule() : p.scope === "thread" ? m.proposal_kind_thread() : m.proposal_kind_message();
+  const reject = () =>
+    decide(() =>
+      data(api.POST("/api/v1/proposals/{id}/reject", { params: { path: { id: p.id } } })),
+    );
+  const what =
+    p.kind === "rule"
+      ? m.proposal_kind_rule()
+      : p.scope === "thread"
+        ? m.proposal_kind_thread()
+        : m.proposal_kind_message();
 
   return (
     <Voice
@@ -99,7 +134,11 @@ export function ProposalCard({ p, can, onOpen, highlight }: { p: Proposal; can: 
         )}
         {accepted ? (
           accepted.messages.length > 0 ? (
-            <Outcomes done={{ result: { action_id: accepted.proposal.action_id, messages: accepted.messages } }} />
+            <Outcomes
+              done={{
+                result: { action_id: accepted.proposal.action_id, messages: accepted.messages },
+              }}
+            />
           ) : (
             <p className="text-system-foreground">{m.proposal_accepted()}</p>
           )
@@ -118,21 +157,37 @@ export function ProposalCard({ p, can, onOpen, highlight }: { p: Proposal; can: 
                     {m.proposal_accept()}
                   </Button>
                   {can.rules && p.message_id && (
-                    <Button size="xs" variant="outline" aria-expanded={step.s === "automate"} onClick={() => setStep(step.s === "automate" ? { s: "idle" } : { s: "automate" })}>
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      aria-expanded={step.s === "automate"}
+                      onClick={() =>
+                        setStep(step.s === "automate" ? { s: "idle" } : { s: "automate" })
+                      }
+                    >
                       {m.proposal_accept_automate()}
                     </Button>
                   )}
                 </>
               ) : (
                 can.rules && (
-                  <Button size="xs" aria-expanded={step.s === "review"} onClick={() => setStep(step.s === "review" ? { s: "idle" } : { s: "review" })}>
+                  <Button
+                    size="xs"
+                    aria-expanded={step.s === "review"}
+                    onClick={() => setStep(step.s === "review" ? { s: "idle" } : { s: "review" })}
+                  >
                     {m.proposal_review_rule()}
                   </Button>
                 )
               )}
               {step.s === "confirm-reject" ? (
                 <>
-                  <Button size="xs" variant="destructive" disabled={busy} onClick={() => void reject()}>
+                  <Button
+                    size="xs"
+                    variant="destructive"
+                    disabled={busy}
+                    onClick={() => void reject()}
+                  >
                     {m.proposal_reject_confirm()}
                   </Button>
                   <Button size="xs" variant="ghost" onClick={() => setStep({ s: "idle" })}>
@@ -144,13 +199,21 @@ export function ProposalCard({ p, can, onOpen, highlight }: { p: Proposal; can: 
                   {m.proposal_reject()}
                 </Button>
               )}
-              {p.kind === "rule" && !can.rules && <span className="text-muted-foreground">{m.proposal_needs_rules()}</span>}
+              {p.kind === "rule" && !can.rules && (
+                <span className="text-muted-foreground">{m.proposal_needs_rules()}</span>
+              )}
             </div>
           )
         )}
         {err !== undefined && <ProblemLine p={problem(err, { conflict: m.proposal_conflict })} />}
         {step.s === "automate" && p.message_id && (
-          <RuleDrafter messageId={p.message_id} initialActions={ruleActionsOf(p.actions)} proposal={p.id} onClose={() => setStep({ s: "idle" })} onOpen={(id) => onOpen(id)} />
+          <RuleDrafter
+            messageId={p.message_id}
+            initialActions={ruleActionsOf(p.actions)}
+            proposal={p.id}
+            onClose={() => setStep({ s: "idle" })}
+            onOpen={(id) => onOpen(id)}
+          />
         )}
         {step.s === "review" && (
           <div className="rounded-md border bg-background px-3 py-2">
@@ -160,7 +223,12 @@ export function ProposalCard({ p, can, onOpen, highlight }: { p: Proposal; can: 
               submitLabel={m.proposal_accept_rule()}
               onOpen={(id) => onOpen(id)}
               onSubmit={async (rule) => {
-                const r = await data(api.POST("/api/v1/proposals/{id}/accept", { params: { path: { id: p.id } }, body: { rule } }));
+                const r = await data(
+                  api.POST("/api/v1/proposals/{id}/accept", {
+                    params: { path: { id: p.id } },
+                    body: { rule },
+                  }),
+                );
                 invalidateAnnotated(qc);
                 setAccepted(r);
                 setStep({ s: "idle" });
@@ -175,7 +243,12 @@ export function ProposalCard({ p, can, onOpen, highlight }: { p: Proposal; can: 
 }
 
 function StateMark({ p }: { p: Proposal }) {
-  if (p.state === "pending") return <span className="text-meta text-muted-foreground">{m.proposal_expires({ when: listTime(p.expires_at) })}</span>;
+  if (p.state === "pending")
+    return (
+      <span className="text-meta text-muted-foreground">
+        {m.proposal_expires({ when: listTime(p.expires_at) })}
+      </span>
+    );
   const words: Record<Proposal["state"], () => string> = {
     pending: m.proposal_state_pending,
     accepted: m.proposal_state_accepted,
@@ -187,7 +260,13 @@ function StateMark({ p }: { p: Proposal }) {
 }
 
 /** A passage the agent relied on: its quote as text, and the anchor to check it at. */
-export function CiteLine({ c, onOpen }: { c: Cite; onOpen: (id: string, anchor?: string) => void }) {
+export function CiteLine({
+  c,
+  onOpen,
+}: {
+  c: Cite;
+  onOpen: (id: string, anchor?: string) => void;
+}) {
   const hit = citePattern.exec(c.uri);
   return (
     <li className="flex min-w-0 items-baseline gap-1.5">
@@ -198,7 +277,11 @@ export function CiteLine({ c, onOpen }: { c: Cite; onOpen: (id: string, anchor?:
         </span>
       )}
       {hit ? (
-        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 font-mono text-meta underline underline-offset-2" onClick={() => onOpen(hit[1] ?? "", hit[2])}>
+        <button
+          type="button"
+          className="inline-flex shrink-0 items-center gap-0.5 font-mono text-meta underline underline-offset-2"
+          onClick={() => onOpen(hit[1] ?? "", hit[2])}
+        >
           {hit[2] ?? m.proposal_cite_message()}
           <ExternalLinkIcon aria-hidden className="size-3" />
         </button>
@@ -214,7 +297,13 @@ export function CiteLine({ c, onOpen }: { c: Cite; onOpen: (id: string, anchor?:
  * entry, §12.9): pending ones newest first, then the expired, greyed.
  * Picking one opens the mail it is about, where it is decided.
  */
-export function ProposalList({ selected, onPick }: { selected?: string; onPick: (p: Proposal) => void }) {
+export function ProposalList({
+  selected,
+  onPick,
+}: {
+  selected?: string;
+  onPick: (p: Proposal) => void;
+}) {
   const pending = useProposals({ state: "pending" });
   const expired = useProposals({ state: "expired" });
   if (pending.error) {
@@ -245,9 +334,18 @@ export function ProposalList({ selected, onPick }: { selected?: string; onPick: 
   );
 }
 
-function ProposalRow({ p, selected, onPick }: { p: Proposal; selected: boolean; onPick: (p: Proposal) => void }) {
+function ProposalRow({
+  p,
+  selected,
+  onPick,
+}: {
+  p: Proposal;
+  selected: boolean;
+  onPick: (p: Proposal) => void;
+}) {
   const about = useMessage(p.message_id ?? "", !!p.message_id);
-  const subj = about.data && (about.data.subject || sender(about.data.from_name, about.data.from_addr));
+  const subj =
+    about.data && (about.data.subject || sender(about.data.from_name, about.data.from_addr));
   return (
     <button
       type="button"
@@ -255,7 +353,8 @@ function ProposalRow({ p, selected, onPick }: { p: Proposal; selected: boolean; 
       onClick={() => onPick(p)}
       className={cn(
         "flex h-full w-full flex-col justify-center gap-0.5 border-b px-3 text-left outline-none hover:bg-muted focus-visible:bg-muted",
-        selected && "bg-accent text-accent-foreground shadow-[inset_2px_0_0_var(--color-foreground)] hover:bg-accent",
+        selected &&
+          "bg-accent text-accent-foreground shadow-[inset_2px_0_0_var(--color-foreground)] hover:bg-accent",
         p.state === "expired" && "text-muted-foreground opacity-60",
       )}
     >
@@ -286,7 +385,17 @@ export function usePendingProposals(enabled: boolean): { n?: number; more: boole
 }
 
 /** A proposal about no message, alone in the main column. */
-export function StandaloneProposal({ id, can, onBack, onOpen }: { id: string; can: Abilities; onBack: () => void; onOpen: (id: string, anchor?: string) => void }) {
+export function StandaloneProposal({
+  id,
+  can,
+  onBack,
+  onOpen,
+}: {
+  id: string;
+  can: Abilities;
+  onBack: () => void;
+  onOpen: (id: string, anchor?: string) => void;
+}) {
   const q = $api.useQuery("get", "/api/v1/proposals/{id}", { params: { path: { id } } });
   return (
     <article className="flex h-full min-h-0 flex-col">
@@ -297,7 +406,13 @@ export function StandaloneProposal({ id, can, onBack, onOpen }: { id: string; ca
         </Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
-        {q.data ? <ProposalCard p={q.data} can={can} onOpen={onOpen} /> : q.error ? <ProblemLine p={problem(q.error)} /> : <Skeleton className="h-24 w-full" />}
+        {q.data ? (
+          <ProposalCard p={q.data} can={can} onOpen={onOpen} />
+        ) : q.error ? (
+          <ProblemLine p={problem(q.error)} />
+        ) : (
+          <Skeleton className="h-24 w-full" />
+        )}
       </div>
     </article>
   );

@@ -26,7 +26,15 @@ const filterFrom = 20;
  * a count here and a paged list of their own: a catch-all collects
  * thousands of them.
  */
-export function PrefixPane({ view, can, onPick }: { view: View; can: Abilities; onPick: (next: Partial<View>) => void }) {
+export function PrefixPane({
+  view,
+  can,
+  onPick,
+}: {
+  view: View;
+  can: Abilities;
+  onPick: (next: Partial<View>) => void;
+}) {
   const q = usePrefixes();
   const unclaimed = useUnclaimedPrefixes();
   // Counts only for what asks for action (§12.9): open drafts, and outbox
@@ -42,10 +50,22 @@ export function PrefixPane({ view, can, onPick }: { view: View; can: Abilities; 
   return (
     <nav aria-label={m.nav_mailboxes()} className="flex min-h-0 flex-1 flex-col text-ui">
       <div className="flex shrink-0 flex-col py-2">
-        <Item active={at("conversations")} label={areaTitle("conversations")} onClick={() => onPick({ area: "conversations" })} />
-        <Item active={at("notifications")} label={areaTitle("notifications")} onClick={() => onPick({ area: "notifications" })} />
+        <Item
+          active={at("conversations")}
+          label={areaTitle("conversations")}
+          onClick={() => onPick({ area: "conversations" })}
+        />
+        <Item
+          active={at("notifications")}
+          label={areaTitle("notifications")}
+          onClick={() => onPick({ area: "notifications" })}
+        />
         <Item active={at("all")} label={areaTitle("all")} onClick={() => onPick({ area: "all" })} />
-        <Item active={at("archived")} label={areaTitle("archived")} onClick={() => onPick({ area: "archived" })} />
+        <Item
+          active={at("archived")}
+          label={areaTitle("archived")}
+          onClick={() => onPick({ area: "archived" })}
+        />
         <Item
           active={at("drafts")}
           label={areaTitle("drafts")}
@@ -80,8 +100,18 @@ export function PrefixPane({ view, can, onPick }: { view: View; can: Abilities; 
       <Claimed ps={q.data?.prefixes} active={view.prefix} onPick={onPick} />
       <div className="flex shrink-0 flex-col border-t py-2">
         <Heading>{m.nav_review()}</Heading>
-        <Item active={at("downgraded")} label={areaTitle("downgraded")} n={q.data?.downgraded} onClick={() => onPick({ area: "downgraded" })} />
-        <Item active={at("unclaimed")} label={areaTitle("unclaimed")} n={unclaimed.total} onClick={() => onPick({ area: "unclaimed" })} />
+        <Item
+          active={at("downgraded")}
+          label={areaTitle("downgraded")}
+          n={q.data?.downgraded}
+          onClick={() => onPick({ area: "downgraded" })}
+        />
+        <Item
+          active={at("unclaimed")}
+          label={areaTitle("unclaimed")}
+          n={unclaimed.total}
+          onClick={() => onPick({ area: "unclaimed" })}
+        />
         <Item
           active={at("leaks")}
           label={areaTitle("leaks")}
@@ -95,7 +125,15 @@ export function PrefixPane({ view, can, onPick }: { view: View; can: Abilities; 
   );
 }
 
-function Claimed({ ps, active, onPick }: { ps?: Prefix[]; active?: string; onPick: (next: Partial<View>) => void }) {
+function Claimed({
+  ps,
+  active,
+  onPick,
+}: {
+  ps?: Prefix[];
+  active?: string;
+  onPick: (next: Partial<View>) => void;
+}) {
   const [filter, setFilter] = useState("");
   if (!ps) {
     return (
@@ -116,7 +154,13 @@ function Claimed({ ps, active, onPick }: { ps?: Prefix[]; active?: string; onPic
       <Heading>{m.shell_prefixes()}</Heading>
       {ps.length > filterFrom && (
         <div className="px-1.5 pb-1">
-          <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={m.nav_filter()} aria-label={m.nav_filter_prefixes()} className="h-7" />
+          <Input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder={m.nav_filter()}
+            aria-label={m.nav_filter_prefixes()}
+            className="h-7"
+          />
         </div>
       )}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-2">
@@ -133,7 +177,11 @@ function Claimed({ ps, active, onPick }: { ps?: Prefix[]; active?: string; onPic
             onClick={() => onPick({ prefix: p.address })}
           />
         ))}
-        {shown.length === 0 && <p className="px-3 text-small text-muted-foreground">{ps.length ? m.nav_no_match() : m.nav_no_claimed()}</p>}
+        {shown.length === 0 && (
+          <p className="px-3 text-small text-muted-foreground">
+            {ps.length ? m.nav_no_match() : m.nav_no_claimed()}
+          </p>
+        )}
       </div>
     </div>
   );
@@ -153,7 +201,13 @@ function Labels({ active, onPick }: { active?: string; onPick: (next: Partial<Vi
       <Heading>{m.nav_labels()}</Heading>
       <div className="flex min-h-0 flex-col overflow-y-auto pb-2">
         {ls.map((l) => (
-          <Item key={l.label} active={active === l.label} label={l.label} n={l.messages} onClick={() => onPick({ label: l.label })} />
+          <Item
+            key={l.label}
+            active={active === l.label}
+            label={l.label}
+            n={l.messages}
+            onClick={() => onPick({ label: l.label })}
+          />
         ))}
       </div>
     </div>
@@ -161,7 +215,11 @@ function Labels({ active, onPick }: { active?: string; onPick: (next: Partial<Vi
 }
 
 function Heading({ children }: { children: string }) {
-  return <h2 className="mt-2 mb-1 px-3 text-meta font-medium tracking-wide text-muted-foreground uppercase">{children}</h2>;
+  return (
+    <h2 className="mt-2 mb-1 px-3 text-meta font-medium tracking-wide text-muted-foreground uppercase">
+      {children}
+    </h2>
+  );
 }
 
 function Item(props: {
@@ -189,8 +247,12 @@ function Item(props: {
         props.active && "bg-accent text-accent-foreground hover:bg-accent",
       )}
     >
-      <span className={cn("min-w-0 truncate", props.mono && "font-mono text-small")}>{props.label}</span>
-      {props.hint && <span className="min-w-0 truncate text-meta text-muted-foreground">{props.hint}</span>}
+      <span className={cn("min-w-0 truncate", props.mono && "font-mono text-small")}>
+        {props.label}
+      </span>
+      {props.hint && (
+        <span className="min-w-0 truncate text-meta text-muted-foreground">{props.hint}</span>
+      )}
       {props.mark && (
         <>
           <LeakDot tone={props.mark} className="ml-auto" />
@@ -198,7 +260,17 @@ function Item(props: {
         </>
       )}
       {props.n !== undefined && (
-        <span className={cn("shrink-0 text-meta tabular-nums", !props.mark && "ml-auto", props.warn ? "font-medium text-warning" : props.agent ? "font-medium text-agent-foreground" : "text-muted-foreground")}>
+        <span
+          className={cn(
+            "shrink-0 text-meta tabular-nums",
+            !props.mark && "ml-auto",
+            props.warn
+              ? "font-medium text-warning"
+              : props.agent
+                ? "font-medium text-agent-foreground"
+                : "text-muted-foreground",
+          )}
+        >
           {count(props.n)}
           {props.more && "+"}
         </span>

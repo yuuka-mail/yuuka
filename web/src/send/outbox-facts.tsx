@@ -14,9 +14,22 @@ import { outboxState, principal, recipientState } from "./outgoing";
 export function OutboxFacts({ e, className }: { e: OutboxEntry; className?: string }) {
   const s = outboxState(e.state);
   const rows: [string, React.ReactNode][] = [];
-  rows.push([m.send_fact_state(), <span key="state" className={toneText[s.tone]}>{s.label}</span>]);
-  rows.push([m.send_fact_from(), <span key="from" className="font-mono">{e.from}</span>]);
-  rows.push([m.send_fact_submitted(), m.send_fact_submitted_by({ time: fullTime(e.created_at), who: principal(e.submitted_by) })]);
+  rows.push([
+    m.send_fact_state(),
+    <span key="state" className={toneText[s.tone]}>
+      {s.label}
+    </span>,
+  ]);
+  rows.push([
+    m.send_fact_from(),
+    <span key="from" className="font-mono">
+      {e.from}
+    </span>,
+  ]);
+  rows.push([
+    m.send_fact_submitted(),
+    m.send_fact_submitted_by({ time: fullTime(e.created_at), who: principal(e.submitted_by) }),
+  ]);
   if (e.approved_by) rows.push([m.send_fact_approved_by(), principal(e.approved_by)]);
   if (e.withdrawn_by) rows.push([m.send_fact_withdrawn_by(), principal(e.withdrawn_by)]);
   rows.push([
@@ -27,8 +40,18 @@ export function OutboxFacts({ e, className }: { e: OutboxEntry; className?: stri
         : String(e.attempts)
       : m.send_fact_attempts_none(),
   ]);
-  if (e.next_retry_at) rows.push([m.send_fact_next_try(), `${listTime(e.next_retry_at)} (${fullTime(e.next_retry_at)})`]);
-  if (e.error) rows.push([m.send_fact_error(), <span key="error" className="font-mono wrap-anywhere">{e.error}</span>]);
+  if (e.next_retry_at)
+    rows.push([
+      m.send_fact_next_try(),
+      `${listTime(e.next_retry_at)} (${fullTime(e.next_retry_at)})`,
+    ]);
+  if (e.error)
+    rows.push([
+      m.send_fact_error(),
+      <span key="error" className="font-mono wrap-anywhere">
+        {e.error}
+      </span>,
+    ]);
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
@@ -46,9 +69,13 @@ export function OutboxFacts({ e, className }: { e: OutboxEntry; className?: stri
             const rs = recipientState(r.state);
             return (
               <tr key={`${r.kind}:${r.addr}`} className="align-baseline">
-                <td className="w-8 pt-1 pr-2 text-meta text-muted-foreground uppercase">{r.kind}</td>
+                <td className="w-8 pt-1 pr-2 text-meta text-muted-foreground uppercase">
+                  {r.kind}
+                </td>
                 <td className="pt-1 pr-3 font-mono wrap-anywhere">{r.addr}</td>
-                <td className={cn("pt-1 text-right whitespace-nowrap", toneText[rs.tone])}>{rs.label}</td>
+                <td className={cn("pt-1 text-right whitespace-nowrap", toneText[rs.tone])}>
+                  {rs.label}
+                </td>
               </tr>
             );
           })}

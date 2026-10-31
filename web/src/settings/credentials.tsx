@@ -26,9 +26,17 @@ export function CredentialsSection() {
   return (
     <div className="flex max-w-[64rem] flex-col gap-3 px-4 py-4 md:px-6">
       <SectionHeader title={m.settings_credentials()} />
-      <HostCommand why={m.credentials_on_host()} command="yuuka token issue --principal KIND:NAME --scope SCOPE,SCOPE" />
+      <HostCommand
+        why={m.credentials_on_host()}
+        command="yuuka token issue --principal KIND:NAME --scope SCOPE,SCOPE"
+      />
       <label className="flex items-center gap-1.5 self-start text-small text-muted-foreground">
-        <input type="checkbox" className="accent-current" checked={revoked} onChange={(e) => setRevoked(e.target.checked)} />
+        <input
+          type="checkbox"
+          className="accent-current"
+          checked={revoked}
+          onChange={(e) => setRevoked(e.target.checked)}
+        />
         {m.credentials_show_revoked({ n: all.length - all.filter((c) => !c.revoked_at).length })}
       </label>
       {q.error ? (
@@ -56,10 +64,18 @@ function CredentialRow({ c }: { c: ManagedCredential }) {
     <li className={cn("flex flex-col gap-1 border-b px-2 py-2", off && "text-muted-foreground")}>
       <p className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-ui">
         <span className="font-mono font-medium">{who}</span>
-        <span className="text-meta text-muted-foreground uppercase">{c.kind === "smtp_password" ? m.credentials_kind_smtp() : m.credentials_kind_token()}</span>
+        <span className="text-meta text-muted-foreground uppercase">
+          {c.kind === "smtp_password" ? m.credentials_kind_smtp() : m.credentials_kind_token()}
+        </span>
         {c.label && <span className="min-w-0 truncate">{c.label}</span>}
-        {c.principal_disabled && <span className="text-meta text-warning">{m.credentials_principal_disabled()}</span>}
-        {off && <span className="text-meta">{m.credentials_revoked({ when: listTime(c.revoked_at ?? "") })}</span>}
+        {c.principal_disabled && (
+          <span className="text-meta text-warning">{m.credentials_principal_disabled()}</span>
+        )}
+        {off && (
+          <span className="text-meta">
+            {m.credentials_revoked({ when: listTime(c.revoked_at ?? "") })}
+          </span>
+        )}
         <span className="ml-auto font-mono text-meta text-muted-foreground">{c.id}</span>
       </p>
       <p className="font-mono text-small wrap-anywhere">{c.scopes.join(" ")}</p>
@@ -67,7 +83,10 @@ function CredentialRow({ c }: { c: ManagedCredential }) {
         items={[
           [m.credentials_created(), listTime(c.created_at)],
           [m.credentials_expires(), c.expires_at && listTime(c.expires_at)],
-          [m.credentials_last_used(), c.last_used_at ? listTime(c.last_used_at) : m.credentials_never_used()],
+          [
+            m.credentials_last_used(),
+            c.last_used_at ? listTime(c.last_used_at) : m.credentials_never_used(),
+          ],
         ]}
       />
       {!off && (
@@ -75,9 +94,15 @@ function CredentialRow({ c }: { c: ManagedCredential }) {
           <ConfirmButton
             label={m.credentials_revoke()}
             confirmLabel={m.credentials_revoke_confirm()}
-            cost={c.kind === "smtp_password" ? m.credentials_revoke_cost_smtp({ who }) : m.credentials_revoke_cost({ who })}
+            cost={
+              c.kind === "smtp_password"
+                ? m.credentials_revoke_cost_smtp({ who })
+                : m.credentials_revoke_cost({ who })
+            }
             onConfirm={async () => {
-              await api.POST("/api/v1/admin/credentials/{id}/revoke", { params: { path: { id: c.id } } });
+              await api.POST("/api/v1/admin/credentials/{id}/revoke", {
+                params: { path: { id: c.id } },
+              });
               void qc.invalidateQueries({ queryKey: ["get", "/api/v1/admin/credentials"] });
             }}
           />

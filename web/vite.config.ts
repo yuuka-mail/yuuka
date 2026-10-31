@@ -22,7 +22,10 @@ function cleanAssets(): Plugin {
     name: "yuuka-clean-assets",
     apply: "build",
     buildStart() {
-      rmSync(fileURLToPath(new URL("./dist/assets", import.meta.url)), { recursive: true, force: true });
+      rmSync(fileURLToPath(new URL("./dist/assets", import.meta.url)), {
+        recursive: true,
+        force: true,
+      });
     },
   };
 }

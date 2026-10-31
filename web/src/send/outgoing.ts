@@ -1,5 +1,20 @@
 import { ApiError } from "@/api/client";
-import type { Actor, CheckName, Code, Draft, DraftBody, HoldReason, Message, OutboxEntry, OutboxState, RecipientScope, RecipientState, SendingIdentity, SessionInfo, Tier } from "@/api/types";
+import type {
+  Actor,
+  CheckName,
+  Code,
+  Draft,
+  DraftBody,
+  HoldReason,
+  Message,
+  OutboxEntry,
+  OutboxState,
+  RecipientScope,
+  RecipientState,
+  SendingIdentity,
+  SessionInfo,
+  Tier,
+} from "@/api/types";
 import { fullTime, sender } from "@/lib/format";
 import { m as msg } from "@/paraglide/messages.js";
 
@@ -103,7 +118,10 @@ export const outboxFilters = {
     },
     states: ["sent"],
   },
-} as const satisfies Record<string, { readonly label: string; states: readonly OutboxState[] | undefined }>;
+} as const satisfies Record<
+  string,
+  { readonly label: string; states: readonly OutboxState[] | undefined }
+>;
 export type OutboxFilter = keyof typeof outboxFilters;
 
 const holdReasons: Record<HoldReason, () => string> = {
@@ -138,7 +156,9 @@ const scopes = {
 
 /** Whom recipient_scope s lets mail go to, with the allowlist when it has one. */
 export function scopeText(s: RecipientScope, allowlist: string[]): string {
-  return s === "allowlist" && allowlist.length ? msg.send_scope_allowlist_some({ list: allowlist.join(", ") }) : (scopes[s]?.() ?? s);
+  return s === "allowlist" && allowlist.length
+    ? msg.send_scope_allowlist_some({ list: allowlist.join(", ") })
+    : (scopes[s]?.() ?? s);
 }
 
 /** A recall window as people say it: "10 min", "2 h", "45 s". */
@@ -155,8 +175,11 @@ export function goesToReview(i: Pick<SendingIdentity, "hold_reason" | "hold_seco
 
 /** What the From picker says beside identity i: "sends (auto)", "review, 10 min to recall", "held: drafts only". */
 export function identityNote(i: SendingIdentity): string {
-  if (goesToReview(i)) return msg.send_opt_review({ window: duration(i.hold_seconds ?? defaultHoldSeconds) });
-  return i.sends ? msg.send_opt_sends({ tier: i.tier }) : msg.send_note_held({ reason: holdLabel(i.hold_reason) });
+  if (goesToReview(i))
+    return msg.send_opt_review({ window: duration(i.hold_seconds ?? defaultHoldSeconds) });
+  return i.sends
+    ? msg.send_opt_sends({ tier: i.tier })
+    : msg.send_note_held({ reason: holdLabel(i.hold_reason) });
 }
 
 /** sendpolicy.DefaultHoldSeconds: the window when a grant leaves it unset. */
@@ -179,7 +202,12 @@ export function reviewText(holdSeconds: number | undefined): string {
  */
 export function standing(i: SendingIdentity): { sends: boolean; headline: string; detail: string } {
   const review = goesToReview(i);
-  if (!i.sends && !review) return { sends: false, headline: msg.send_held_as_draft({ reason: holdLabel(i.hold_reason) }), detail: i.hold_detail ?? "" };
+  if (!i.sends && !review)
+    return {
+      sends: false,
+      headline: msg.send_held_as_draft({ reason: holdLabel(i.hold_reason) }),
+      detail: i.hold_detail ?? "",
+    };
   const limits = [
     i.limits.max_per_hour && msg.send_limit_hour({ n: i.limits.max_per_hour }),
     i.limits.max_per_day && msg.send_limit_day({ n: i.limits.max_per_day }),
@@ -187,7 +215,11 @@ export function standing(i: SendingIdentity): { sends: boolean; headline: string
   return {
     sends: true,
     headline: review ? msg.send_reviews_it() : msg.send_queues_it(),
-    detail: [review ? reviewText(i.hold_seconds) : tierLabel(i.tier), msg.send_to_scope({ scope: scopeText(i.recipient_scope, i.allowlist) }), ...limits].join(" · "),
+    detail: [
+      review ? reviewText(i.hold_seconds) : tierLabel(i.tier),
+      msg.send_to_scope({ scope: scopeText(i.recipient_scope, i.allowlist) }),
+      ...limits,
+    ].join(" · "),
   };
 }
 
@@ -229,7 +261,10 @@ export function isMine(a: Actor, s: SessionInfo) {
  * owner itself, since the viewer may have no tier on the identity and
  * /identities then leaves it out.
  */
-export function onlyConfirmer(d: Pick<Draft, "identity_owner">, s: SessionInfo): string | undefined {
+export function onlyConfirmer(
+  d: Pick<Draft, "identity_owner">,
+  s: SessionInfo,
+): string | undefined {
   const o = d.identity_owner;
   return o.kind === "human" && !isMine(o, s) ? o.name : undefined;
 }
@@ -240,7 +275,10 @@ export function onlyConfirmer(d: Pick<Draft, "identity_owner">, s: SessionInfo):
  * owner. A person's address is theirs alone (§8.9 owner cap); anyone
  * else's needs a grant. Either way the submission stops at the draft.
  */
-export function strangerStanding(owner: Actor, s: SessionInfo): { reason: HoldReason; note: string; headline: string; detail: string } {
+export function strangerStanding(
+  owner: Actor,
+  s: SessionInfo,
+): { reason: HoldReason; note: string; headline: string; detail: string } {
   if (owner.kind === "human" && !isMine(owner, s)) {
     return {
       reason: "owner",
@@ -253,12 +291,18 @@ export function strangerStanding(owner: Actor, s: SessionInfo): { reason: HoldRe
     reason: "policy",
     note: msg.send_note_no_grant(),
     headline: msg.send_held_no_grant(),
-    detail: isMine(owner, s) ? msg.send_no_grant_yours() : msg.send_no_grant_theirs({ owner: principal(owner) }),
+    detail: isMine(owner, s)
+      ? msg.send_no_grant_yours()
+      : msg.send_no_grant_theirs({ owner: principal(owner) }),
   };
 }
 
 /** Whether the session may recall held row e: a person any, others their own (§8.9). */
-export function recallable(e: Pick<OutboxEntry, "state" | "submitted_by">, s: SessionInfo, can: { recall: boolean }): boolean {
+export function recallable(
+  e: Pick<OutboxEntry, "state" | "submitted_by">,
+  s: SessionInfo,
+  can: { recall: boolean },
+): boolean {
   return e.state === "held" && can.recall && (isHuman(s) || isMine(e.submitted_by, s));
 }
 
@@ -272,7 +316,8 @@ export function isHuman(s: SessionInfo) {
  * all of it again: this only decides what is offered.
  */
 export function abilities(s: SessionInfo) {
-  const has = (x: SessionInfo["scopes"][number]) => s.scopes.includes(x) || s.scopes.includes("admin");
+  const has = (x: SessionInfo["scopes"][number]) =>
+    s.scopes.includes(x) || s.scopes.includes("admin");
   return {
     compose: has("draft:create"),
     // The outbox lists Bcc recipients, which are delivery facts.
@@ -334,7 +379,15 @@ export function replyBody(m: Message): string {
 }
 
 /** The draft body to save, from the composer's fields. */
-export function draftBody(f: { from: string; to: string; cc: string; bcc: string; subject: string; body: string; inReplyTo?: string }): DraftBody {
+export function draftBody(f: {
+  from: string;
+  to: string;
+  cc: string;
+  bcc: string;
+  subject: string;
+  body: string;
+  inReplyTo?: string;
+}): DraftBody {
   return {
     from: f.from || undefined,
     to: parseAddrs(f.to),
@@ -374,7 +427,14 @@ const problems: Partial<Record<Code, () => string>> = {
 
 // The codes whose detail names what is wrong (a field, an address), or
 // the host command that does it (widening_requires_cli).
-const specific = new Set<Code>(["invalid_body", "invalid_param", "no_identity", "submission_rejected", "invalid_rule", "widening_requires_cli"]);
+const specific = new Set<Code>([
+  "invalid_body",
+  "invalid_param",
+  "no_identity",
+  "submission_rejected",
+  "invalid_rule",
+  "widening_requires_cli",
+]);
 
 /**
  * An error as people read it: a sentence chosen by its stable code, and
@@ -382,11 +442,20 @@ const specific = new Set<Code>(["invalid_body", "invalid_param", "no_identity", 
  * caller can word a code for its own context: a conflict on a proposal
  * is not one on a draft.
  */
-export function problem(err: unknown, words: Partial<Record<Code, () => string>> = {}): { text: string; detail?: string; code?: string } {
+export function problem(
+  err: unknown,
+  words: Partial<Record<Code, () => string>> = {},
+): { text: string; detail?: string; code?: string } {
   if (err instanceof ApiError) {
-    const text = (err.code && (words[err.code] ?? problems[err.code])?.()) || msg.send_problem_status({ status: String(err.status) });
+    const text =
+      (err.code && (words[err.code] ?? problems[err.code])?.()) ||
+      msg.send_problem_status({ status: String(err.status) });
     const detail = err.path ? `${err.path}: ${err.message}` : err.message;
-    return { text, detail: err.code && specific.has(err.code) ? detail : undefined, code: err.code };
+    return {
+      text,
+      detail: err.code && specific.has(err.code) ? detail : undefined,
+      code: err.code,
+    };
   }
   return { text: msg.send_problem_unreachable() };
 }

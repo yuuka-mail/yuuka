@@ -26,7 +26,10 @@ const enrollURL = process.env.ENROLL_URL;
 const out = process.env.OUT ?? "screenshots";
 mkdirSync(out, { recursive: true });
 
-const browser = await chromium.launch({ executablePath: process.env.CHROME ?? "/usr/bin/google-chrome", headless: true });
+const browser = await chromium.launch({
+  executablePath: process.env.CHROME ?? "/usr/bin/google-chrome",
+  headless: true,
+});
 const sizes = { wide: { width: 1440, height: 900 }, narrow: { width: 390, height: 844 } };
 const problems = [];
 
@@ -34,18 +37,36 @@ const problems = [];
 // Their screens are found by the accessible names in their own catalogue.
 const translations = ["zh"];
 const catalogues = Object.fromEntries(
-  await Promise.all(translations.map(async (l) => [l, JSON.parse(await readFile(new URL(`../messages/${l}.json`, import.meta.url), "utf8"))])),
+  await Promise.all(
+    translations.map(async (l) => [
+      l,
+      JSON.parse(await readFile(new URL(`../messages/${l}.json`, import.meta.url), "utf8")),
+    ]),
+  ),
 );
 
 async function page(scheme, size, storageState, lang) {
-  const ctx = await browser.newContext({ colorScheme: scheme, viewport: sizes[size], deviceScaleFactor: size === "narrow" ? 2 : 1, storageState });
+  const ctx = await browser.newContext({
+    colorScheme: scheme,
+    viewport: sizes[size],
+    deviceScaleFactor: size === "narrow" ? 2 : 1,
+    storageState,
+  });
   // The language choice the account menu stores (Paraglide's localStorage strategy).
   if (lang) await ctx.addInitScript((l) => localStorage.setItem("PARAGLIDE_LOCALE", l), lang);
   // The copy button of an extracted code writes to the clipboard.
-  await ctx.grantPermissions(["clipboard-read", "clipboard-write"], { origin: new URL(base).origin });
+  await ctx.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: new URL(base).origin,
+  });
   const p = await ctx.newPage();
   // A signed-out /auth/session is a 401 by design; anything else is a problem.
-  p.on("console", (m) => m.type() === "error" && !/status of 401/.test(m.text()) && problems.push(`${scheme}/${size} ${p.url()}: ${m.text()}`));
+  p.on(
+    "console",
+    (m) =>
+      m.type() === "error" &&
+      !/status of 401/.test(m.text()) &&
+      problems.push(`${scheme}/${size} ${p.url()}: ${m.text()}`),
+  );
   p.on("pageerror", (e) => problems.push(`${scheme}/${size} ${p.url()}: ${e.message}`));
   return p;
 }
@@ -54,7 +75,14 @@ async function authenticator(p) {
   const cdp = await p.context().newCDPSession(p);
   await cdp.send("WebAuthn.enable");
   await cdp.send("WebAuthn.addVirtualAuthenticator", {
-    options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true },
+    options: {
+      protocol: "ctap2",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
   });
 }
 
@@ -85,7 +113,10 @@ if (enrollURL) {
   await p.getByLabel(/name for this passkey/i).fill("screenshots");
   await shot(p, "enroll-light-wide");
   await p.getByRole("button", { name: /register passkey/i }).click();
-  await p.getByText(/passkey registered/i).first().waitFor();
+  await p
+    .getByText(/passkey registered/i)
+    .first()
+    .waitFor();
   await shot(p, "enrolled-light-wide");
   await p.goto(base + "/login");
   await p.getByRole("button", { name: /sign in with passkey/i }).click();
@@ -96,7 +127,11 @@ if (enrollURL) {
   // variants reuse corpus bodies under other subjects. Received mail
   // only: a reply sent from here can carry the same subject.
   const find = async (text, subject) => {
-    const r = await p.evaluate(async (t) => (await fetch(`/api/v1/search?downgraded=include&q=${encodeURIComponent(t)}`)).json(), text);
+    const r = await p.evaluate(
+      async (t) =>
+        (await fetch(`/api/v1/search?downgraded=include&q=${encodeURIComponent(t)}`)).json(),
+      text,
+    );
     return r.hits.find((h) => !h.outgoing && (!subject || h.subject === subject))?.id;
   };
   const lunch = await find("usual place", "Re: Lunch on Friday?");
@@ -117,13 +152,18 @@ if (enrollURL) {
   // Sending (§12.10), from whatever the database has: none of it is
   // required. The held shot presses Send only as an identity that holds
   // every submission (sends=false), so nothing ever reaches the outbox.
-  const get = (path) => p.evaluate(async (u) => {
-    const r = await fetch(u);
-    return r.ok ? r.json() : undefined;
-  }, path);
+  const get = (path) =>
+    p.evaluate(async (u) => {
+      const r = await fetch(u);
+      return r.ok ? r.json() : undefined;
+    }, path);
   // Not one that goes to the review: sends is false there too, and Send would hold real mail.
-  const heldFrom = (await get("/api/v1/identities"))?.identities.find((i) => !i.sends && i.hold_reason !== "review" && !i.address.startsWith("*@"))?.address;
-  const agentDraft = (await get("/api/v1/drafts"))?.drafts.find((d) => d.author.kind !== "human")?.id;
+  const heldFrom = (await get("/api/v1/identities"))?.identities.find(
+    (i) => !i.sends && i.hold_reason !== "review" && !i.address.startsWith("*@"),
+  )?.address;
+  const agentDraft = (await get("/api/v1/drafts"))?.drafts.find(
+    (d) => d.author.kind !== "human",
+  )?.id;
   // The outbox needs delivery:read; without it the view is not offered.
   const outbox = await get("/api/v1/outbox?limit=1");
   const unknown = (await get("/api/v1/outbox?state=unknown&limit=1"))?.entries[0]?.id;
@@ -131,11 +171,18 @@ if (enrollURL) {
   // The leak check (§3.3): a claimed prefix whose mail leaked or was
   // spoofed, and one message of each kind.
   const flagged = prefixes.prefixes.find((x) => x.leaks + x.spoofs > 0)?.address;
-  const offenses = flagged ? ((await get(`/api/v1/prefixes/${encodeURIComponent(flagged)}`))?.offenses ?? []) : [];
-  const offending = { leak: offenses.find((o) => o.verdict === "leak")?.message.id, spoof: offenses.find((o) => o.verdict === "spoof")?.message.id };
+  const offenses = flagged
+    ? ((await get(`/api/v1/prefixes/${encodeURIComponent(flagged)}`))?.offenses ?? [])
+    : [];
+  const offending = {
+    leak: offenses.find((o) => o.verdict === "leak")?.message.id,
+    spoof: offenses.find((o) => o.verdict === "spoof")?.message.id,
+  };
   // Annotations, rules and proposals (§8.5, §12.12), from whatever the
   // database has: a labelled message, a label, the rules, the proposals.
-  const labelled = (await get("/api/v1/messages?limit=200"))?.messages.find((x) => x.labels.length > 0);
+  const labelled = (await get("/api/v1/messages?limit=200"))?.messages.find(
+    (x) => x.labels.length > 0,
+  );
   const label = labelled?.labels[0];
   const rules = (await get("/api/v1/rules"))?.rules ?? [];
   const proposals = (await get("/api/v1/proposals?state=pending"))?.proposals ?? [];
@@ -145,8 +192,13 @@ if (enrollURL) {
   // checks escalated, and an identity whose submissions go to the checks.
   // None of it is required; the shots that need it are skipped without.
   const held = (await get("/api/v1/outbox?state=held&limit=1"))?.entries[0]?.id;
-  const escalated = (await get("/api/v1/drafts?state=held"))?.drafts.find((d) => d.hold_reason === "review" && d.review)?.id;
-  const reviewFrom = (await get("/api/v1/identities"))?.identities.find((i) => i.hold_reason === "review" && i.hold_seconds !== undefined && !i.address.startsWith("*@"))?.address;
+  const escalated = (await get("/api/v1/drafts?state=held"))?.drafts.find(
+    (d) => d.hold_reason === "review" && d.review,
+  )?.id;
+  const reviewFrom = (await get("/api/v1/identities"))?.identities.find(
+    (i) =>
+      i.hold_reason === "review" && i.hold_seconds !== undefined && !i.address.startsWith("*@"),
+  )?.address;
   // Notes (§8.10): the first of these messages that has any.
   let noted;
   for (const id of [lunch, otp]) {
@@ -257,7 +309,11 @@ if (enrollURL) {
       }
       await s.goto(base + "/?area=drafts" + (agentDraft ? `&d=${agentDraft}` : ""));
       // A draft that an agent wrote opens in the composer, over the list on a phone.
-      await (agentDraft ? s.getByRole("textbox", { name: "Body" }) : s.getByRole("heading", { name: "Drafts" })).waitFor();
+      await (
+        agentDraft
+          ? s.getByRole("textbox", { name: "Body" })
+          : s.getByRole("heading", { name: "Drafts" })
+      ).waitFor();
       await shot(s, `drafts-${tag}`);
       if (outbox) {
         await s.goto(base + "/?area=outbox");
@@ -271,7 +327,10 @@ if (enrollURL) {
       }
       if (sent) {
         await s.goto(base + `/?m=${sent}`);
-        await s.getByText(/sent as |by this system as /).first().waitFor();
+        await s
+          .getByText(/sent as |by this system as /)
+          .first()
+          .waitFor();
         await shot(s, `reading-sent-${tag}`);
       }
       if (size === "narrow") {
@@ -291,7 +350,11 @@ if (enrollURL) {
       if (labelled) {
         await s.goto(base + `/?m=${labelled.id}`);
         await s.getByRole("button", { name: "Why it is here" }).click();
-        await s.getByRole("region", { name: "Where its labels, zone and archived state came from" }).getByRole("listitem").first().waitFor();
+        await s
+          .getByRole("region", { name: "Where its labels, zone and archived state came from" })
+          .getByRole("listitem")
+          .first()
+          .waitFor();
         await shot(s, `reading-history-${tag}`);
         await s.getByRole("button", { name: "Label", exact: true }).click();
         await s.getByRole("textbox", { name: "Label" }).fill(label.slice(0, 2));
@@ -305,7 +368,10 @@ if (enrollURL) {
         await s.getByRole("button", { name: "Draft a rule" }).waitFor();
         await shot(s, `reading-reclassified-${tag}`);
         await s.getByRole("button", { name: "Draft a rule" }).click();
-        await s.getByRole("region", { name: "What the rule would do" }).getByText(/^Matches /).waitFor();
+        await s
+          .getByRole("region", { name: "What the rule would do" })
+          .getByText(/^Matches /)
+          .waitFor();
         await shot(s, `reading-drafter-${tag}`);
         await s.getByRole("button", { name: "Undo" }).first().click();
         await s.getByText(/^undone: /).waitFor();
@@ -315,15 +381,23 @@ if (enrollURL) {
       await s.getByRole("list", { name: "Proposals" }).waitFor();
       await shot(s, `area-proposals-${tag}`);
       if (annotateProposal) {
-        await s.goto(base + `/?area=proposals&p=${annotateProposal.id}&m=${annotateProposal.message_id}`);
+        await s.goto(
+          base + `/?area=proposals&p=${annotateProposal.id}&m=${annotateProposal.message_id}`,
+        );
         await s.getByRole("button", { name: "Accept and automate…" }).click();
-        await s.getByRole("region", { name: "Rule draft" }).getByText(/^Matches /).waitFor();
+        await s
+          .getByRole("region", { name: "Rule draft" })
+          .getByText(/^Matches /)
+          .waitFor();
         await shot(s, `proposal-automate-${tag}`);
       }
       if (ruleProposal) {
         await s.goto(base + `/?area=proposals&p=${ruleProposal.id}&m=${ruleProposal.message_id}`);
         await s.getByRole("button", { name: "Review rule…" }).click();
-        await s.getByRole("region", { name: "What the rule would do" }).getByText(/^Matches /).waitFor();
+        await s
+          .getByRole("region", { name: "What the rule would do" })
+          .getByText(/^Matches /)
+          .waitFor();
         await shot(s, `proposal-rule-${tag}`);
       }
       // Settings and the rules in it (§12.12), from the account menu.
@@ -331,7 +405,9 @@ if (enrollURL) {
       await s.getByRole("heading", { name: "Rules" }).waitFor();
       await shot(s, `settings-rules-${tag}`);
       if (rules[0]) {
-        await s.goto(base + `/?settings=rules&rule=${rules.find((r) => r.match?.all)?.id ?? rules[0].id}`);
+        await s.goto(
+          base + `/?settings=rules&rule=${rules.find((r) => r.match?.all)?.id ?? rules[0].id}`,
+        );
         await s.getByRole("button", { name: "Count past mail…" }).click();
         await s.getByRole("button", { name: /^Apply to / }).waitFor();
         await shot(s, `settings-rule-${tag}`);
@@ -373,7 +449,10 @@ if (enrollURL) {
       // Whom a claimed prefix was given to, edited where its mail is (§12.12).
       if (claimed) {
         await s.goto(base + `/?prefix=${encodeURIComponent(claimed)}`);
-        await s.getByRole("region", { name: "Prefix facts" }).getByRole("button", { name: /^(Edit|Set expected domains)$/ }).click();
+        await s
+          .getByRole("region", { name: "Prefix facts" })
+          .getByRole("button", { name: /^(Edit|Set expected domains)$/ })
+          .click();
         await s.getByLabel("Given to").waitFor();
         await shot(s, `prefix-expect-${tag}`);
       }
@@ -413,7 +492,11 @@ if (enrollURL) {
           await s.getByRole("listbox").waitFor();
           await shot(s, `list-${area}-${tag}`);
         }
-        for (const [name, id] of Object.entries({ reading: lunch, "reading-otp": otp, "reading-attachments": invoice })) {
+        for (const [name, id] of Object.entries({
+          reading: lunch,
+          "reading-otp": otp,
+          "reading-attachments": invoice,
+        })) {
           if (!id) continue;
           await s.goto(base + `/?m=${id}`);
           await s.locator("article h1").waitFor();
@@ -431,13 +514,21 @@ if (enrollURL) {
         if (labelled) {
           await s.goto(base + `/?m=${labelled.id}`);
           await s.getByRole("button", { name: t.annotate_why }).click();
-          await s.getByRole("region", { name: t.history_label }).getByRole("listitem").first().waitFor();
+          await s
+            .getByRole("region", { name: t.history_label })
+            .getByRole("listitem")
+            .first()
+            .waitFor();
           await shot(s, `reading-history-${tag}`);
         }
         if (lunch) {
           await s.goto(base + `/?m=${lunch}`);
           await s.getByRole("button", { name: t.annotate_like_this }).click();
-          await s.getByRole("region", { name: t.drafter_label }).getByRole("checkbox").first().waitFor();
+          await s
+            .getByRole("region", { name: t.drafter_label })
+            .getByRole("checkbox")
+            .first()
+            .waitFor();
           await s.waitForLoadState("networkidle");
           await shot(s, `reading-drafter-${tag}`);
         }

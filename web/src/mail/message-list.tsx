@@ -78,16 +78,32 @@ export function MessageList({
   }
 
   return (
-    <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto" role="listbox" aria-label={msg.list_messages()}>
+    <div
+      ref={scroller}
+      className="min-h-0 flex-1 overflow-y-auto"
+      role="listbox"
+      aria-label={msg.list_messages()}
+    >
       <div className="relative w-full" style={{ height: v.getTotalSize() }}>
         {items.map((it) => {
           const m = list.items[it.index];
           return (
-            <div key={it.key} className="absolute top-0 left-0 w-full" style={{ height: it.size, transform: `translateY(${it.start}px)` }}>
+            <div
+              key={it.key}
+              className="absolute top-0 left-0 w-full"
+              style={{ height: it.size, transform: `translateY(${it.start}px)` }}
+            >
               {m ? (
-                <Row m={m} selected={m.id === selected} tag={markNotifications && m.class === "machine"} onSelect={onSelect} />
+                <Row
+                  m={m}
+                  selected={m.id === selected}
+                  tag={markNotifications && m.class === "machine"}
+                  onSelect={onSelect}
+                />
               ) : (
-                <div className="flex h-full items-center px-3 text-small text-muted-foreground">{msg.list_loading_more()}</div>
+                <div className="flex h-full items-center px-3 text-small text-muted-foreground">
+                  {msg.list_loading_more()}
+                </div>
               )}
             </div>
           );
@@ -97,7 +113,17 @@ export function MessageList({
   );
 }
 
-function Row({ m, selected, tag, onSelect }: { m: MessageSummary; selected: boolean; tag?: boolean; onSelect: (id: string) => void }) {
+function Row({
+  m,
+  selected,
+  tag,
+  onSelect,
+}: {
+  m: MessageSummary;
+  selected: boolean;
+  tag?: boolean;
+  onSelect: (id: string) => void;
+}) {
   const x = shownExtraction(m);
   // A row is a focusable option rather than a button, so that the copy
   // button and the link of an extraction can sit inside it.
@@ -115,20 +141,36 @@ function Row({ m, selected, tag, onSelect }: { m: MessageSummary; selected: bool
       }}
       className={cn(
         "flex h-full w-full cursor-default flex-col justify-center gap-0.5 border-b px-3 text-left outline-none hover:bg-muted focus-visible:bg-muted",
-        selected && "bg-accent text-accent-foreground shadow-[inset_2px_0_0_var(--color-foreground)] hover:bg-accent",
+        selected &&
+          "bg-accent text-accent-foreground shadow-[inset_2px_0_0_var(--color-foreground)] hover:bg-accent",
         m.downgraded && !selected && "text-muted-foreground",
       )}
     >
       <span className="flex min-w-0 items-center gap-1.5 text-ui">
-        <span className={cn("min-w-0 truncate", m.class === "human" ? "font-semibold" : "font-medium")}>{sender(m.from_name, m.from_addr)}</span>
+        <span
+          className={cn("min-w-0 truncate", m.class === "human" ? "font-semibold" : "font-medium")}
+        >
+          {sender(m.from_name, m.from_addr)}
+        </span>
         {m.recipients.length > 0 && (
-          <span className="shrink-0 truncate font-mono text-meta text-muted-foreground">→ {m.recipients.map(localPart).join(", ")}</span>
+          <span className="shrink-0 truncate font-mono text-meta text-muted-foreground">
+            → {m.recipients.map(localPart).join(", ")}
+          </span>
         )}
-        {tag && <span className="shrink-0 rounded-sm bg-muted px-1 text-meta text-muted-foreground">{msg.list_notification_tag()}</span>}
+        {tag && (
+          <span className="shrink-0 rounded-sm bg-muted px-1 text-meta text-muted-foreground">
+            {msg.list_notification_tag()}
+          </span>
+        )}
         <span className="ml-auto flex shrink-0 items-center gap-1 pl-2 text-meta text-muted-foreground tabular-nums">
           {/* Mail we sent says where it stands: its existence is not delivery (§12.10). */}
           {m.outgoing && <OutgoingMark state={m.outgoing.state} className="mr-1" />}
-          {m.quarantined && <TriangleAlertIcon aria-label={msg.list_quarantined()} className="size-3 text-warning" />}
+          {m.quarantined && (
+            <TriangleAlertIcon
+              aria-label={msg.list_quarantined()}
+              className="size-3 text-warning"
+            />
+          )}
           {m.has_attach && <PaperclipIcon aria-label={msg.list_attachment()} className="size-3" />}
           {listTime(m.received_at)}
         </span>

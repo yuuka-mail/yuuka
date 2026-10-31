@@ -113,13 +113,8 @@
   "facts_sent_as": "by this system as {from}",
   "facts_stripped_hidden": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} hidden element",
         "countPlural=other": "{count} hidden elements"
@@ -128,13 +123,8 @@
   ],
   "facts_stripped_images": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} image without alt text",
         "countPlural=other": "{count} images without alt text"
@@ -143,13 +133,8 @@
   ],
   "facts_stripped_links": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} unsafe link target",
         "countPlural=other": "{count} unsafe link targets"
@@ -158,13 +143,8 @@
   ],
   "facts_stripped_pixels": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} tracking pixel",
         "countPlural=other": "{count} tracking pixels"
@@ -173,13 +153,8 @@
   ],
   "facts_stripped_quoted": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} quoted line",
         "countPlural=other": "{count} quoted lines"
@@ -320,13 +295,8 @@
   "outcome_labels_full": "not added: it has 64 labels",
   "outcome_messages": [
     {
-      "declarations": [
-        "input n",
-        "local nPlural = n: plural"
-      ],
-      "selectors": [
-        "nPlural"
-      ],
+      "declarations": ["input n", "local nPlural = n: plural"],
+      "selectors": ["nPlural"],
       "match": {
         "nPlural=one": "{n} message:",
         "nPlural=other": "{n} messages:"
@@ -374,13 +344,8 @@
   "proposal_state_withdrawn": "withdrawn",
   "read_attachments": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} attachment",
         "countPlural=other": "{count} attachments"
@@ -391,13 +356,8 @@
   "read_download_part": "Download part {section}",
   "read_lines_collapsed": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} line collapsed",
         "countPlural=other": "{count} lines collapsed"
@@ -425,13 +385,8 @@
   "reading_more": "+{count} more",
   "reading_n_messages": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} message",
         "countPlural=other": "{count} messages"
@@ -440,13 +395,8 @@
   ],
   "reading_n_participants": [
     {
-      "declarations": [
-        "input count",
-        "local countPlural = count: plural"
-      ],
-      "selectors": [
-        "countPlural"
-      ],
+      "declarations": ["input count", "local countPlural = count: plural"],
+      "selectors": ["countPlural"],
       "match": {
         "countPlural=one": "{count} participant",
         "countPlural=other": "{count} participants"

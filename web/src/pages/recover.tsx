@@ -18,7 +18,10 @@ function recoverError(err: unknown): Failure {
     if (err.status === 429) return { text: m.auth_err_too_many() };
     return { text: m.auth_recover_bad_code(), detail: err.message };
   }
-  return { text: m.auth_err_unreachable(), detail: err instanceof Error ? err.message : String(err) };
+  return {
+    text: m.auth_err_unreachable(),
+    detail: err instanceof Error ? err.message : String(err),
+  };
 }
 
 /**
@@ -51,7 +54,14 @@ export function RecoverPage() {
       <form onSubmit={submit} className="flex flex-col gap-4">
         <label className="flex flex-col gap-1.5 text-body">
           <span className="font-medium">{m.auth_recover_code()}</span>
-          <Input value={code} onChange={(e) => setCode(e.target.value)} autoComplete="off" spellCheck={false} className="font-mono" required />
+          <Input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            autoComplete="off"
+            spellCheck={false}
+            className="font-mono"
+            required
+          />
         </label>
         <Button type="submit" size="lg" disabled={busy || !code.trim()} className="self-start">
           {busy ? m.auth_recover_checking() : m.auth_recover_continue()}

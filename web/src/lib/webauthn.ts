@@ -18,7 +18,10 @@ export function fromB64url(s: string): ArrayBuffer {
 }
 
 export function toB64url(buf: ArrayBuffer | ArrayBufferView): string {
-  const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+  const bytes =
+    buf instanceof ArrayBuffer
+      ? new Uint8Array(buf)
+      : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
   let bin = "";
   for (const b of bytes) bin += String.fromCharCode(b);
   return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
@@ -31,7 +34,10 @@ interface JSONDescriptor {
 }
 
 interface JSONCreation {
-  publicKey: Omit<PublicKeyCredentialCreationOptions, "challenge" | "user" | "excludeCredentials"> & {
+  publicKey: Omit<
+    PublicKeyCredentialCreationOptions,
+    "challenge" | "user" | "excludeCredentials"
+  > & {
     challenge: string;
     user: { id: string; name: string; displayName: string };
     excludeCredentials?: JSONDescriptor[];
@@ -45,7 +51,10 @@ interface JSONRequest {
   };
 }
 
-const descriptor = (d: JSONDescriptor): PublicKeyCredentialDescriptor => ({ ...d, id: fromB64url(d.id) });
+const descriptor = (d: JSONDescriptor): PublicKeyCredentialDescriptor => ({
+  ...d,
+  id: fromB64url(d.id),
+});
 
 export function creationOptions(j: JSONCreation): PublicKeyCredentialCreationOptions {
   const pk = j.publicKey;
@@ -89,13 +98,19 @@ export function credentialJSON(c: PublicKeyCredential) {
 }
 
 export function supported() {
-  return typeof window !== "undefined" && "PublicKeyCredential" in window && !!navigator.credentials;
+  return (
+    typeof window !== "undefined" && "PublicKeyCredential" in window && !!navigator.credentials
+  );
 }
 
 /** Signs in with a discoverable passkey; the session arrives as a cookie. */
 export async function login(): Promise<LoginResult> {
-  const opts = (await data(api.POST("/auth/passkey/login/begin", { body: {} }))) as unknown as JSONRequest;
-  const cred = (await navigator.credentials.get({ publicKey: requestOptions(opts) })) as PublicKeyCredential | null;
+  const opts = (await data(
+    api.POST("/auth/passkey/login/begin", { body: {} }),
+  )) as unknown as JSONRequest;
+  const cred = (await navigator.credentials.get({
+    publicKey: requestOptions(opts),
+  })) as PublicKeyCredential | null;
   if (!cred) throw new Error(m.auth_no_passkey_chosen());
   return data(api.POST("/auth/passkey/login/finish", { body: credentialJSON(cred) }));
 }
@@ -107,8 +122,12 @@ export async function login(): Promise<LoginResult> {
 export async function register(token: string, label: string): Promise<RegisterResult> {
   const body: RegisterBegin = { label };
   if (token) body.enrollment_token = token;
-  const opts = (await data(api.POST("/auth/passkey/register/begin", { body }))) as unknown as JSONCreation;
-  const cred = (await navigator.credentials.create({ publicKey: creationOptions(opts) })) as PublicKeyCredential | null;
+  const opts = (await data(
+    api.POST("/auth/passkey/register/begin", { body }),
+  )) as unknown as JSONCreation;
+  const cred = (await navigator.credentials.create({
+    publicKey: creationOptions(opts),
+  })) as PublicKeyCredential | null;
   if (!cred) throw new Error(m.auth_no_passkey_created());
   return data(api.POST("/auth/passkey/register/finish", { body: credentialJSON(cred) }));
 }

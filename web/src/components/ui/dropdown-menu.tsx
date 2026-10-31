@@ -25,7 +25,10 @@ function DropdownMenuContent({
       <MenuPrimitive.Positioner className="z-50 outline-none" align={align} sideOffset={sideOffset}>
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
-          className={cn("min-w-44 rounded-md border bg-background p-1 text-ui text-foreground shadow-md outline-none", className)}
+          className={cn(
+            "min-w-44 rounded-md border bg-background p-1 text-ui text-foreground shadow-md outline-none",
+            className,
+          )}
           {...props}
         />
       </MenuPrimitive.Positioner>
@@ -37,11 +40,22 @@ const itemClass =
   "relative flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-highlighted:bg-muted data-disabled:pointer-events-none data-disabled:opacity-50 [&_svg]:size-3.5 [&_svg]:shrink-0";
 
 function DropdownMenuItem({ className, ...props }: MenuPrimitive.Item.Props) {
-  return <MenuPrimitive.Item data-slot="dropdown-menu-item" className={cn(itemClass, className)} {...props} />;
+  return (
+    <MenuPrimitive.Item
+      data-slot="dropdown-menu-item"
+      className={cn(itemClass, className)}
+      {...props}
+    />
+  );
 }
 
 function DropdownMenuLabel({ className, ...props }: MenuPrimitive.GroupLabel.Props) {
-  return <MenuPrimitive.GroupLabel className={cn("px-2 py-1 text-meta text-muted-foreground", className)} {...props} />;
+  return (
+    <MenuPrimitive.GroupLabel
+      className={cn("px-2 py-1 text-meta text-muted-foreground", className)}
+      {...props}
+    />
+  );
 }
 
 function DropdownMenuGroup(props: MenuPrimitive.Group.Props) {
@@ -64,7 +78,9 @@ function DropdownMenuRadioItem({ className, children, ...props }: MenuPrimitive.
 }
 
 function DropdownMenuSeparator({ className, ...props }: MenuPrimitive.Separator.Props) {
-  return <MenuPrimitive.Separator className={cn("-mx-1 my-1 h-px bg-border", className)} {...props} />;
+  return (
+    <MenuPrimitive.Separator className={cn("-mx-1 my-1 h-px bg-border", className)} {...props} />
+  );
 }
 
 export {

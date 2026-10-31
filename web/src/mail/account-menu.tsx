@@ -28,7 +28,15 @@ const autonyms: Record<Locale, string> = { en: "English", zh: "中文" };
  * out. Changing the language reloads the page; a draft being written is
  * saved as it is typed (§12.10).
  */
-export function AccountMenu({ session, className, onSettings }: { session: SessionInfo; className?: string; onSettings?: () => void }) {
+export function AccountMenu({
+  session,
+  className,
+  onSettings,
+}: {
+  session: SessionInfo;
+  className?: string;
+  onSettings?: () => void;
+}) {
   const qc = useQueryClient();
   return (
     <DropdownMenu>
@@ -55,7 +63,10 @@ export function AccountMenu({ session, className, onSettings }: { session: Sessi
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuLabel>{m.account_language()}</DropdownMenuLabel>
-          <DropdownMenuRadioGroup value={getLocale()} onValueChange={(l: Locale) => void setLocale(l)}>
+          <DropdownMenuRadioGroup
+            value={getLocale()}
+            onValueChange={(l: Locale) => void setLocale(l)}
+          >
             {locales.map((l) => (
               <DropdownMenuRadioItem key={l} value={l} lang={l}>
                 {autonyms[l]}

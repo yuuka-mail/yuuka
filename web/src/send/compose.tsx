@@ -6,7 +6,18 @@ import { useEffect, useRef, useState } from "react";
 import { markup } from "@/components/markup";
 import { $api, api, data } from "@/api/client";
 import { useDraft, useIdentities, useOutboxEntry, useReplyIdentities } from "@/api/queries";
-import type { Cite, Draft, HoldReason, Message, ReplyIdentity, Review, SendingIdentity, SessionInfo, SubmitResult, Withdrawal } from "@/api/types";
+import type {
+  Cite,
+  Draft,
+  HoldReason,
+  Message,
+  ReplyIdentity,
+  Review,
+  SendingIdentity,
+  SessionInfo,
+  SubmitResult,
+  Withdrawal,
+} from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Signature, system, Voice } from "@/components/voice";
@@ -17,7 +28,22 @@ import { m as msg } from "@/paraglide/messages.js";
 
 import { AuthorMark, OutgoingMark, ProblemLine } from "./marks";
 import { OutboxFacts } from "./outbox-facts";
-import { abilities, badAddrs, draftBody, goesToReview, holdLabel, identityNote, isMine, onlyConfirmer, principal, problem, replyBody, replySubject, standing, strangerStanding } from "./outgoing";
+import {
+  abilities,
+  badAddrs,
+  draftBody,
+  goesToReview,
+  holdLabel,
+  identityNote,
+  isMine,
+  onlyConfirmer,
+  principal,
+  problem,
+  replyBody,
+  replySubject,
+  standing,
+  strangerStanding,
+} from "./outgoing";
 import { HoldUntil, Recall, Recalled, ReviewVerdict } from "./review";
 
 // The composer (§12.1, §12.10): Markdown in a textarea, saved as a draft
@@ -64,12 +90,17 @@ export function Composer(props: Props) {
   // (the shell keeps this composer mounted across that change).
   const [start, setStart] = useState<{ fields: Fields; draft?: Draft }>();
 
-  const ready = ids.data && (opened ? draft.data : props.replyTo ? replied.data && cands.data : true);
+  const ready =
+    ids.data && (opened ? draft.data : props.replyTo ? replied.data && cands.data : true);
   if (!start && ready) {
     const identities = ids.data?.identities ?? [];
     if (opened && draft.data) setStart({ fields: fieldsOf(draft.data), draft: draft.data });
-    else if (props.replyTo && replied.data) setStart({ fields: replyFields(replied.data, cands.data?.candidates ?? [], identities) });
-    else setStart({ fields: { from: defaultFrom(identities), to: "", cc: "", bcc: "", subject: "", body: "" } });
+    else if (props.replyTo && replied.data)
+      setStart({ fields: replyFields(replied.data, cands.data?.candidates ?? [], identities) });
+    else
+      setStart({
+        fields: { from: defaultFrom(identities), to: "", cc: "", bcc: "", subject: "", body: "" },
+      });
   }
 
   const error = ids.error ?? draft.error ?? replied.error ?? cands.error;
@@ -111,7 +142,15 @@ function ComposeError({ err, onClose }: { err: unknown; onClose: () => void }) {
 const join = (xs: string[]) => xs.join(", ");
 
 function fieldsOf(d: Draft): Fields {
-  return { from: d.from, to: join(d.to), cc: join(d.cc), bcc: join(d.bcc), subject: d.subject, body: d.body_markdown, inReplyTo: d.in_reply_to };
+  return {
+    from: d.from,
+    to: join(d.to),
+    cc: join(d.cc),
+    bcc: join(d.bcc),
+    subject: d.subject,
+    body: d.body_markdown,
+    inReplyTo: d.in_reply_to,
+  };
 }
 
 /** A pattern identity (*@zone) is not an address; From needs one. */
@@ -140,15 +179,25 @@ function replyFields(m: Message, cands: ReplyIdentity[], ids: SendingIdentity[])
 }
 
 /** The identity that covers address a: its own, else its zone's pattern. */
-function identityFor(a: string, ids: SendingIdentity[], cands: ReplyIdentity[]): SendingIdentity | undefined {
+function identityFor(
+  a: string,
+  ids: SendingIdentity[],
+  cands: ReplyIdentity[],
+): SendingIdentity | undefined {
   const lower = a.toLowerCase();
-  const exact = cands.find((c) => c.from.toLowerCase() === lower)?.identity ?? ids.find((i) => i.address.toLowerCase() === lower);
+  const exact =
+    cands.find((c) => c.from.toLowerCase() === lower)?.identity ??
+    ids.find((i) => i.address.toLowerCase() === lower);
   if (exact) return exact;
   const zone = lower.slice(lower.lastIndexOf("@") + 1);
   return ids.find((i) => i.address.toLowerCase() === `*@${zone}`);
 }
 
-type SaveState = { s: "idle" } | { s: "saving" } | { s: "saved"; at: string } | { s: "error"; err: unknown };
+type SaveState =
+  | { s: "idle" }
+  | { s: "saving" }
+  | { s: "saved"; at: string }
+  | { s: "error"; err: unknown };
 
 function Editor({
   session,
@@ -161,7 +210,12 @@ function Editor({
   onDeleted,
   onOpenMessage,
   onOpenOutbox,
-}: Props & { initial: Fields; initialDraft?: Draft; identities: SendingIdentity[]; candidates: ReplyIdentity[] }) {
+}: Props & {
+  initial: Fields;
+  initialDraft?: Draft;
+  identities: SendingIdentity[];
+  candidates: ReplyIdentity[];
+}) {
   const qc = useQueryClient();
   const can = abilities(session);
   const [f, setF] = useState(initial);
@@ -205,7 +259,11 @@ function Editor({
       const saved = curId
         ? await data(api.PUT("/api/v1/drafts/{id}", { params: { path: { id: curId } }, body }))
         : await data(api.POST("/api/v1/drafts", { body }));
-      qc.setQueryData($api.queryOptions("get", "/api/v1/drafts/{id}", { params: { path: { id: saved.id } } }).queryKey, saved);
+      qc.setQueryData(
+        $api.queryOptions("get", "/api/v1/drafts/{id}", { params: { path: { id: saved.id } } })
+          .queryKey,
+        saved,
+      );
       if (!curId) {
         latest.current.id = saved.id;
         setId(saved.id);
@@ -259,13 +317,24 @@ function Editor({
   // An SMTP submission's bytes are what its client sent (§13.6).
   const readOnly = inOutbox || !!d?.smtp;
   const confirming = !!d && !isMine(d.author, session);
-  const identity = identityFor(f.from, identities, candidates) ?? identities.find((i) => i.id === d?.identity_id);
+  const identity =
+    identityFor(f.from, identities, candidates) ?? identities.find((i) => i.id === d?.identity_id);
   // The draft's From as saved, when no identity the viewer may use
   // covers it: the draft itself names whose it is (§8.9).
-  const stranger = !identity && d?.identity_id && d.from.toLowerCase() === f.from.toLowerCase() ? strangerStanding(d.identity_owner, session) : undefined;
+  const stranger =
+    !identity && d?.identity_id && d.from.toLowerCase() === f.from.toLowerCase()
+      ? strangerStanding(d.identity_owner, session)
+      : undefined;
   const bad = [...badAddrs(f.to), ...badAddrs(f.cc), ...badAddrs(f.bcc)];
   const noRecipients = !f.to.trim() && !f.cc.trim() && !f.bcc.trim();
-  const canSend = can.compose && !inOutbox && !sending && !!f.from && !isPattern(f.from) && bad.length === 0 && !noRecipients;
+  const canSend =
+    can.compose &&
+    !inOutbox &&
+    !sending &&
+    !!f.from &&
+    !isPattern(f.from) &&
+    bad.length === 0 &&
+    !noRecipients;
 
   const send = async () => {
     if (!canSend) return;
@@ -279,7 +348,9 @@ function Editor({
       await persist();
       const draftId = latest.current.id;
       if (!draftId) throw new Error("no draft");
-      const r = await data(api.POST("/api/v1/drafts/{id}/submit", { params: { path: { id: draftId } } }));
+      const r = await data(
+        api.POST("/api/v1/drafts/{id}/submit", { params: { path: { id: draftId } } }),
+      );
       setResult(r);
       refresh();
       void qc.invalidateQueries({ queryKey: ["get", "/api/v1/drafts/{id}"] });
@@ -314,19 +385,38 @@ function Editor({
     onDeleted();
   };
 
-  const title = inOutbox ? msg.send_title_in_outbox() : f.inReplyTo ? msg.send_title_reply() : d ? msg.send_title_draft() : msg.send_title_new();
+  const title = inOutbox
+    ? msg.send_title_in_outbox()
+    : f.inReplyTo
+      ? msg.send_title_reply()
+      : d
+        ? msg.send_title_draft()
+        : msg.send_title_new();
   const outboxId = result?.outbox_id ?? d?.outbox?.outbox_id;
   // The hold, from this submit or from the draft as stored.
-  const held = result?.state === "draft" ? result : !result && d?.state === "held" ? { hold_reason: d.hold_reason, hold_detail: d.hold_detail } : undefined;
+  const held =
+    result?.state === "draft"
+      ? result
+      : !result && d?.state === "held"
+        ? { hold_reason: d.hold_reason, hold_detail: d.hold_detail }
+        : undefined;
 
   return (
     <>
       <header className="flex h-11 shrink-0 items-center gap-2 border-b px-2 md:px-4">
-        <Button variant="ghost" size="icon-sm" className="md:hidden" aria-label={msg.send_back()} onClick={onClose}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="md:hidden"
+          aria-label={msg.send_back()}
+          onClick={onClose}
+        >
           <ArrowLeftIcon />
         </Button>
         <h1 className="font-semibold">{title}</h1>
-        {d && !isMine(d.author, session) && d.author.kind !== "human" && <AuthorMark author={d.author} />}
+        {d && !isMine(d.author, session) && d.author.kind !== "human" && (
+          <AuthorMark author={d.author} />
+        )}
         <SaveStatus save={save} />
         <span className="ml-auto flex items-center gap-1">
           {!inOutbox &&
@@ -340,11 +430,24 @@ function Editor({
                 </Button>
               </>
             ) : (
-              <Button variant="ghost" size="icon-sm" aria-label={msg.send_delete_draft()} title={msg.send_delete_draft()} onClick={() => setConfirmDelete(true)}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label={msg.send_delete_draft()}
+                title={msg.send_delete_draft()}
+                onClick={() => setConfirmDelete(true)}
+              >
                 <Trash2Icon />
               </Button>
             ))}
-          <Button variant="ghost" size="icon-sm" className="max-md:hidden" aria-label={msg.send_close_composer()} title={msg.send_close_composer_title()} onClick={onClose}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="max-md:hidden"
+            aria-label={msg.send_close_composer()}
+            title={msg.send_close_composer_title()}
+            onClick={onClose}
+          >
             <XIcon />
           </Button>
         </span>
@@ -395,16 +498,39 @@ function Editor({
             {readOnly || confirming ? (
               <span className="font-mono">{f.from}</span>
             ) : (
-              <FromPicker value={f.from} identities={identities} candidates={candidates} stranger={stranger?.note} onChange={(from) => edit({ from })} />
+              <FromPicker
+                value={f.from}
+                identities={identities}
+                candidates={candidates}
+                stranger={stranger?.note}
+                onChange={(from) => edit({ from })}
+              />
             )}
           </Row>
           {!inOutbox && (
-            <Standing identity={identity} stranger={stranger} confirming={confirming ? d : undefined} session={session} from={f.from} held={held?.hold_reason} />
+            <Standing
+              identity={identity}
+              stranger={stranger}
+              confirming={confirming ? d : undefined}
+              session={session}
+              from={f.from}
+              held={held?.hold_reason}
+            />
           )}
           <Row label={msg.send_field_to()}>
-            <AddrInput value={f.to} readOnly={readOnly} onChange={(to) => edit({ to })} label={msg.send_field_to()} autoFocus={!initial.to && !readOnly} />
+            <AddrInput
+              value={f.to}
+              readOnly={readOnly}
+              onChange={(to) => edit({ to })}
+              label={msg.send_field_to()}
+              autoFocus={!initial.to && !readOnly}
+            />
             {!showCc && !readOnly && (
-              <button type="button" className="shrink-0 text-small text-muted-foreground hover:text-foreground" onClick={() => setShowCc(true)}>
+              <button
+                type="button"
+                className="shrink-0 text-small text-muted-foreground hover:text-foreground"
+                onClick={() => setShowCc(true)}
+              >
                 {msg.send_cc_bcc()}
               </button>
             )}
@@ -412,10 +538,20 @@ function Editor({
           {showCc && (
             <>
               <Row label={msg.send_field_cc()}>
-                <AddrInput value={f.cc} readOnly={readOnly} onChange={(cc) => edit({ cc })} label={msg.send_field_cc()} />
+                <AddrInput
+                  value={f.cc}
+                  readOnly={readOnly}
+                  onChange={(cc) => edit({ cc })}
+                  label={msg.send_field_cc()}
+                />
               </Row>
               <Row label={msg.send_field_bcc()}>
-                <AddrInput value={f.bcc} readOnly={readOnly} onChange={(bcc) => edit({ bcc })} label={msg.send_field_bcc()} />
+                <AddrInput
+                  value={f.bcc}
+                  readOnly={readOnly}
+                  onChange={(bcc) => edit({ bcc })}
+                  label={msg.send_field_bcc()}
+                />
               </Row>
             </>
           )}
@@ -428,7 +564,11 @@ function Editor({
               className="h-8 min-w-0 flex-1 bg-transparent font-medium outline-none"
             />
           </Row>
-          {bad.length > 0 && <p className="py-1 text-small text-warning">{msg.send_not_an_address({ list: bad.join(", ") })}</p>}
+          {bad.length > 0 && (
+            <p className="py-1 text-small text-warning">
+              {msg.send_not_an_address({ list: bad.join(", ") })}
+            </p>
+          )}
         </div>
 
         {d?.smtp ? (
@@ -461,7 +601,9 @@ function Editor({
               // Text an agent wrote keeps the agent's colour at its edge
               // (§12.5), inset to the text's column: at the pane's edge it
               // would read as the pane divider.
-              d && d.author.kind !== "human" && "ml-2 w-auto border-l-2 border-agent-border pl-2 md:ml-4 md:pl-2",
+              d &&
+                d.author.kind !== "human" &&
+                "ml-2 w-auto border-l-2 border-agent-border pl-2 md:ml-4 md:pl-2",
             )}
           />
         )}
@@ -471,11 +613,21 @@ function Editor({
         <footer className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-t px-4 py-2 md:px-6">
           <Button size="sm" disabled={!canSend} onClick={() => void send()}>
             <SendIcon data-icon="inline-start" />
-            {sending ? msg.send_sending() : confirming ? msg.send_confirm_and_send() : msg.send_send()}
+            {sending
+              ? msg.send_sending()
+              : confirming
+                ? msg.send_confirm_and_send()
+                : msg.send_send()}
           </Button>
           <span className="text-meta text-muted-foreground max-sm:hidden">Ctrl+Enter</span>
-          {!can.compose && <span className="text-small text-muted-foreground">{msg.send_no_draft_scope({ scope: "draft:create" })}</span>}
-          {noRecipients && can.compose && <span className="text-small text-muted-foreground">{msg.send_add_recipient()}</span>}
+          {!can.compose && (
+            <span className="text-small text-muted-foreground">
+              {msg.send_no_draft_scope({ scope: "draft:create" })}
+            </span>
+          )}
+          {noRecipients && can.compose && (
+            <span className="text-small text-muted-foreground">{msg.send_add_recipient()}</span>
+          )}
           {sendErr !== undefined && <ProblemLine p={problem(sendErr)} />}
         </footer>
       )}
@@ -492,7 +644,19 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-function AddrInput({ value, onChange, label, readOnly, autoFocus }: { value: string; onChange: (v: string) => void; label: string; readOnly?: boolean; autoFocus?: boolean }) {
+function AddrInput({
+  value,
+  onChange,
+  label,
+  readOnly,
+  autoFocus,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+  readOnly?: boolean;
+  autoFocus?: boolean;
+}) {
   return (
     <input
       aria-label={label}
@@ -627,7 +791,9 @@ function Standing({
     const owner = onlyConfirmer(confirming, session);
     sends = !owner;
     reason = owner ? "owner" : undefined;
-    headline = owner ? msg.send_only_owner_confirms({ name: owner }) : msg.send_confirms_draft({ name: confirming.author.name });
+    headline = owner
+      ? msg.send_only_owner_confirms({ name: owner })
+      : msg.send_confirms_draft({ name: confirming.author.name });
     detail = owner ? msg.send_owner_cap_detail() : msg.send_confirm_detail();
   } else if (!from || isPattern(from)) {
     return null;
@@ -646,17 +812,29 @@ function Standing({
   return (
     <div className="flex min-h-7 flex-wrap items-center gap-x-2 border-b py-1 text-small">
       <Signature speaker={system} />
-      <span className={cn("font-medium", sends ? "text-system-foreground" : "text-foreground")}>{headline}</span>
+      <span className={cn("font-medium", sends ? "text-system-foreground" : "text-foreground")}>
+        {headline}
+      </span>
       {detail && <span className="min-w-0 text-muted-foreground">{detail}</span>}
     </div>
   );
 }
 
 /** The agent that wrote the draft, and what it cites (§8.5). */
-function AgentNote({ draft, onOpenMessage }: { draft: Draft; onOpenMessage: (id: string, anchor?: string) => void }) {
-  const name = draft.author.kind === "agent" ? draft.author.name : `${draft.author.kind}:${draft.author.name}`;
+function AgentNote({
+  draft,
+  onOpenMessage,
+}: {
+  draft: Draft;
+  onOpenMessage: (id: string, anchor?: string) => void;
+}) {
+  const name =
+    draft.author.kind === "agent" ? draft.author.name : `${draft.author.kind}:${draft.author.name}`;
   return (
-    <Voice speaker={{ kind: "agent", name }} title={msg.send_agent_drafted({ time: listTime(draft.created_at) })}>
+    <Voice
+      speaker={{ kind: "agent", name }}
+      title={msg.send_agent_drafted({ time: listTime(draft.created_at) })}
+    >
       {draft.cites.length > 0 ? (
         <ul className="flex flex-col gap-0.5">
           {draft.cites.map((c, i) => (
@@ -679,7 +857,11 @@ function CiteItem({ cite, onOpen }: { cite: Cite; onOpen: (id: string, anchor?: 
       <span className="text-muted-foreground">{msg.send_cites()}</span>
       {cite.quote && <span className="min-w-0 truncate italic">“{cite.quote}”</span>}
       {hit ? (
-        <button type="button" className="inline-flex shrink-0 items-center gap-0.5 underline underline-offset-2" onClick={() => onOpen(hit[1] ?? "", hit[2])}>
+        <button
+          type="button"
+          className="inline-flex shrink-0 items-center gap-0.5 underline underline-offset-2"
+          onClick={() => onOpen(hit[1] ?? "", hit[2])}
+        >
           {hit[2] ?? msg.send_cite_message()}
           <ExternalLinkIcon aria-hidden className="size-3" />
         </button>
@@ -721,7 +903,9 @@ function HeldNote({
         </div>
       )}
       <p className="mt-0.5 text-muted-foreground">
-        {confirmer ? msg.send_held_nothing_sent_owner({ name: confirmer }) : msg.send_held_nothing_sent()}
+        {confirmer
+          ? msg.send_held_nothing_sent_owner({ name: confirmer })
+          : msg.send_held_nothing_sent()}
       </p>
     </Voice>
   );
@@ -761,7 +945,11 @@ function QueuedNote({
       title={state === "held" ? msg.review_held_title() : msg.send_submitted_title()}
       action={
         canSeeOutbox && (
-          <button type="button" className="text-small underline underline-offset-2" onClick={() => onOpenOutbox(outboxId)}>
+          <button
+            type="button"
+            className="text-small underline underline-offset-2"
+            onClick={() => onOpenOutbox(outboxId)}
+          >
             {msg.send_open_in_outbox()}
           </button>
         )
@@ -781,7 +969,12 @@ function QueuedNote({
           </p>
         )}
         {state === "held" && canRecall && (
-          <Recall id={outboxId} identity={e.data?.identity ?? from} submitter={e.data ? principal(e.data.submitted_by) : submitter} onRecalled={(w) => onRecalled(w, e.data?.identity ?? from)} />
+          <Recall
+            id={outboxId}
+            identity={e.data?.identity ?? from}
+            submitter={e.data ? principal(e.data.submitted_by) : submitter}
+            onRecalled={(w) => onRecalled(w, e.data?.identity ?? from)}
+          />
         )}
       </div>
     </Voice>
@@ -795,8 +988,16 @@ function SaveStatus({ save }: { save: SaveState }) {
     case "saving":
       return <span className="text-meta text-muted-foreground">{msg.send_saving()}</span>;
     case "saved":
-      return <span className="text-meta text-muted-foreground">{msg.send_saved({ time: listTime(save.at) })}</span>;
+      return (
+        <span className="text-meta text-muted-foreground">
+          {msg.send_saved({ time: listTime(save.at) })}
+        </span>
+      );
     case "error":
-      return <span className="text-meta font-medium text-destructive">{msg.send_not_saved({ reason: problem(save.err).text })}</span>;
+      return (
+        <span className="text-meta font-medium text-destructive">
+          {msg.send_not_saved({ reason: problem(save.err).text })}
+        </span>
+      );
   }
 }

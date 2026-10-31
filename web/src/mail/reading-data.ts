@@ -1,5 +1,10 @@
 import { $api } from "@/api/client";
-import type { Facts, Content as ViewContent, Part as ViewPart, View as MessageView } from "@/api/types";
+import type {
+  Facts,
+  Content as ViewContent,
+  Part as ViewPart,
+  View as MessageView,
+} from "@/api/types";
 
 // The reading pane's data access, kept in this one module on purpose.
 // The header and thread strip read the parsed fields of
@@ -12,7 +17,12 @@ export function useMessage(id: string, enabled = true) {
   // Derived content changes only on reparse; no need to refetch. The
   // outbox state on mail we sent does change; that is followed through
   // the outbox, not here.
-  return $api.useQuery("get", "/api/v1/messages/{id}", { params: { path: { id } } }, { staleTime: 5 * 60_000, enabled: enabled && !!id });
+  return $api.useQuery(
+    "get",
+    "/api/v1/messages/{id}",
+    { params: { path: { id } } },
+    { staleTime: 5 * 60_000, enabled: enabled && !!id },
+  );
 }
 
 /**
@@ -66,7 +76,8 @@ export function merge(first: MessageView, rest: MessageView[] = []): Reading {
   for (const page of pages) {
     for (const p of page.content.parts ?? []) {
       const last = parts.at(-1);
-      if (last?.anchor === p.anchor) parts[parts.length - 1] = { ...last, blocks: [...last.blocks, ...p.blocks] };
+      if (last?.anchor === p.anchor)
+        parts[parts.length - 1] = { ...last, blocks: [...last.blocks, ...p.blocks] };
       else parts.push(p);
     }
   }

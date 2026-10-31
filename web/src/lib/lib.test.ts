@@ -48,7 +48,9 @@ describe("WebAuthn options", () => {
     });
     expect(new Uint8Array(o.user.id as ArrayBuffer)).toEqual(new Uint8Array([1, 2, 3]));
     expect(new Uint8Array(o.challenge as ArrayBuffer)).toEqual(new Uint8Array([4, 5, 6]));
-    expect(new Uint8Array(o.excludeCredentials?.[0]?.id as ArrayBuffer)).toEqual(new Uint8Array([7, 8]));
+    expect(new Uint8Array(o.excludeCredentials?.[0]?.id as ArrayBuffer)).toEqual(
+      new Uint8Array([7, 8]),
+    );
     expect(o.rp.id).toBe("mail.example.com");
   });
   it("decodes request options without allowCredentials", () => {
@@ -61,7 +63,13 @@ describe("WebAuthn options", () => {
 describe("view state", () => {
   const home = { area: "conversations" as const, dg: false };
   it("round-trips through the query string", () => {
-    const v = { area: "all" as const, prefix: "github@example.com", dg: true, q: "code", m: "01ABC" };
+    const v = {
+      area: "all" as const,
+      prefix: "github@example.com",
+      dg: true,
+      q: "code",
+      m: "01ABC",
+    };
     expect(parseView(new URL(viewHref(v), "http://x").searchParams)).toEqual(v);
     expect(viewHref(home)).toBe("/");
   });
@@ -69,23 +77,41 @@ describe("view state", () => {
     expect(parseView(new URLSearchParams("area=spam&dg=maybe&q=%20"))).toEqual(home);
   });
   it("keeps an anchor only with its message", () => {
-    expect(parseView(new URLSearchParams("m=01ABC&a=part/1.2/para/7"))).toEqual({ ...home, m: "01ABC", a: "part/1.2/para/7" });
+    expect(parseView(new URLSearchParams("m=01ABC&a=part/1.2/para/7"))).toEqual({
+      ...home,
+      m: "01ABC",
+      a: "part/1.2/para/7",
+    });
     expect(parseView(new URLSearchParams("a=part/1"))).toEqual(home);
     expect(parseView(new URLSearchParams("m=01ABC&a=part/0/para/1")).a).toBeUndefined();
     expect(parseView(new URLSearchParams("m=01ABC&a=javascript:x")).a).toBeUndefined();
     expect(viewHref({ ...home, a: "part/1" })).toBe("/");
   });
   it("puts unknown mail with conversations", () => {
-    expect(listParams(home)).toEqual({ class: ["human", "unknown"], downgraded: "hide", archived: false });
-    expect(listParams({ ...home, area: "notifications" })).toEqual({ class: ["machine"], downgraded: "hide", archived: false });
+    expect(listParams(home)).toEqual({
+      class: ["human", "unknown"],
+      downgraded: "hide",
+      archived: false,
+    });
+    expect(listParams({ ...home, area: "notifications" })).toEqual({
+      class: ["machine"],
+      downgraded: "hide",
+      archived: false,
+    });
     expect(listParams({ ...home, area: "downgraded" })).toEqual({ downgraded: "only" });
     expect(listParams({ ...home, area: "unclaimed" })).toBeUndefined();
   });
   it("shows all of a prefix's mail", () => {
-    expect(listParams({ ...home, area: "notifications", prefix: "k3x9q@example.com" })).toEqual({ prefix: "k3x9q@example.com", downgraded: "include" });
+    expect(listParams({ ...home, area: "notifications", prefix: "k3x9q@example.com" })).toEqual({
+      prefix: "k3x9q@example.com",
+      downgraded: "include",
+    });
   });
   it("keeps archived mail out of the zones only", () => {
-    expect(listParams({ ...home, area: "archived" })).toEqual({ archived: true, downgraded: "hide" });
+    expect(listParams({ ...home, area: "archived" })).toEqual({
+      archived: true,
+      downgraded: "hide",
+    });
     expect(listParams({ ...home, area: "all" })).toEqual({ downgraded: "hide" });
     expect(listParams({ ...home, label: "aws" })).toEqual({ label: "aws", downgraded: "include" });
     expect(listParams({ ...home, area: "proposals" })).toBeUndefined();
@@ -103,7 +129,24 @@ describe("list totals", () => {
     messages: 10,
     downgraded: 3,
     total: 1,
-    prefixes: [{ zone: "example.com", prefix: "github", address: "github@example.com", claimed: true, label: "", first_seen: "", last_seen: "", messages: 2, downgraded: 0, expected_domains: [], observed: [], leaks: 0, unverified: 0, spoofs: 0 }],
+    prefixes: [
+      {
+        zone: "example.com",
+        prefix: "github",
+        address: "github@example.com",
+        claimed: true,
+        label: "",
+        first_seen: "",
+        last_seen: "",
+        messages: 2,
+        downgraded: 0,
+        expected_domains: [],
+        observed: [],
+        leaks: 0,
+        unverified: 0,
+        spoofs: 0,
+      },
+    ],
   };
   const all = { area: "all" as const, dg: false };
   it("comes from the prefix aggregation", () => {

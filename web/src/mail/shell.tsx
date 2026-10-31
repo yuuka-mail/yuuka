@@ -4,7 +4,13 @@ import { useEffect, useRef, useState } from "react";
 
 import { markup } from "@/components/markup";
 import type { SessionInfo } from "@/api/types";
-import { useMessageList, usePrefixes, useSearchList, useUnclaimedPrefixes, type MailList } from "@/api/queries";
+import {
+  useMessageList,
+  usePrefixes,
+  useSearchList,
+  useUnclaimedPrefixes,
+  type MailList,
+} from "@/api/queries";
 import { Logo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -30,7 +36,16 @@ import { PrefixPane } from "./prefix-pane";
 import { ProposalList, StandaloneProposal } from "./proposals";
 import { ReadingPane } from "./reading-pane";
 import { UnclaimedList } from "./unclaimed-list";
-import { closeComposer, composing, knownTotal, mainOpen, parseView, viewHref, type Area, type View } from "./view";
+import {
+  closeComposer,
+  composing,
+  knownTotal,
+  mainOpen,
+  parseView,
+  viewHref,
+  type Area,
+  type View,
+} from "./view";
 
 /**
  * The three columns: prefixes · message list · reading pane. Below lg the
@@ -63,7 +78,18 @@ export function MailShell({ session }: { session: SessionInfo }) {
   // so Back from it lands where it was picked.
   const pick = (next: Partial<View>) => {
     setShowPrefixes(false);
-    go({ q: undefined, m: undefined, prefix: undefined, label: undefined, dg: false, o: undefined, st: undefined, p: undefined, ...closeComposer, ...next });
+    go({
+      q: undefined,
+      m: undefined,
+      prefix: undefined,
+      label: undefined,
+      dg: false,
+      o: undefined,
+      st: undefined,
+      p: undefined,
+      ...closeComposer,
+      ...next,
+    });
   };
   const compose = (next: Partial<View>) => go({ ...closeComposer, o: undefined, ...next });
   const startNew = () => {
@@ -82,122 +108,221 @@ export function MailShell({ session }: { session: SessionInfo }) {
   const hits = useSearchList(view.q ?? "", view.dg, searching);
   const list = searching ? hits : messages;
 
-  useKeys(drafts || outbox || unclaimed || leaks || proposals ? noList : list, view, go, searchBox, can.compose ? startNew : undefined);
+  useKeys(
+    drafts || outbox || unclaimed || leaks || proposals ? noList : list,
+    view,
+    go,
+    searchBox,
+    can.compose ? startNew : undefined,
+  );
 
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-11 shrink-0 items-center gap-2 border-b px-2 md:px-3">
-        <Button variant="ghost" size="icon-sm" className="lg:hidden" aria-label={msg.shell_prefixes()} aria-pressed={showPrefixes} onClick={() => setShowPrefixes((s) => !s)}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="lg:hidden"
+          aria-label={msg.shell_prefixes()}
+          aria-pressed={showPrefixes}
+          onClick={() => setShowPrefixes((s) => !s)}
+        >
           <PanelLeftIcon />
         </Button>
         <Logo className="hidden w-[12.25rem] sm:inline-flex" />
-        <SearchBox ref={searchBox} value={view.q ?? ""} onSearch={(q) => go({ q: q || undefined, m: undefined }, !!view.q === !!q)} />
+        <SearchBox
+          ref={searchBox}
+          value={view.q ?? ""}
+          onSearch={(q) => go({ q: q || undefined, m: undefined }, !!view.q === !!q)}
+        />
         {can.compose && (
-          <Button variant="outline" size="sm" aria-label={msg.shell_compose()} title={msg.shell_compose_title()} onClick={startNew}>
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label={msg.shell_compose()}
+            title={msg.shell_compose_title()}
+            onClick={startNew}
+          >
             <SquarePenIcon data-icon="inline-start" />
             <span className="max-sm:sr-only">{msg.shell_compose()}</span>
           </Button>
         )}
-        <AccountMenu session={session} className="ml-auto" onSettings={settings[0] ? () => go({ settings: settings[0], rule: undefined }) : undefined} />
+        <AccountMenu
+          session={session}
+          className="ml-auto"
+          onSettings={
+            settings[0] ? () => go({ settings: settings[0], rule: undefined }) : undefined
+          }
+        />
       </header>
 
       {view.settings ? (
-        <SettingsPage view={view} can={can} go={go} onOpenMessage={(m) => go({ settings: undefined, rule: undefined, m })} />
+        <SettingsPage
+          view={view}
+          can={can}
+          go={go}
+          onOpenMessage={(m) => go({ settings: undefined, rule: undefined, m })}
+        />
       ) : (
-      <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[22rem_1fr] lg:grid-cols-[13.5rem_24rem_1fr]">
-        <aside className="hidden min-h-0 flex-col border-r bg-sidebar lg:flex">
-          <PrefixPane view={view} can={can} onPick={pick} />
-        </aside>
+        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[22rem_1fr] lg:grid-cols-[13.5rem_24rem_1fr]">
+          <aside className="hidden min-h-0 flex-col border-r bg-sidebar lg:flex">
+            <PrefixPane view={view} can={can} onPick={pick} />
+          </aside>
 
-        <section className={cn("min-h-0 flex-col border-r", mainOpen(view) ? "hidden md:flex" : "flex")}>
-          {showPrefixes && (
-            <div className="flex min-h-0 flex-1 flex-col bg-sidebar lg:hidden">
-              <PrefixPane view={view} can={can} onPick={pick} />
-            </div>
-          )}
-          <div className={cn("min-h-0 flex-1 flex-col", showPrefixes ? "hidden lg:flex" : "flex")}>
-            <ListHeader view={view} list={list} go={go} pick={pick} managePrefixes={can.prefixes} />
-            {unclaimed ? (
-              <UnclaimedList canClaim={can.prefixes} onPick={(prefix) => go({ prefix, m: undefined })} />
-            ) : leaks ? (
-              <LeakList onPick={(prefix) => go({ prefix, m: undefined })} />
-            ) : drafts ? (
-              <DraftsList session={session} states={parseDraftFilter(view.st)} selected={view.d} onSelect={(d) => compose({ d, m: undefined })} />
-            ) : outbox ? (
-              <OutboxList filter={parseOutboxFilter(view.st)} selected={view.o} onSelect={(o) => go({ ...closeComposer, o, m: undefined }, true)} />
-            ) : proposals ? (
-              <ProposalList selected={view.p} onPick={(p) => go({ ...closeComposer, o: undefined, p: p.id, m: p.message_id, a: undefined }, true)} />
-            ) : (
-              <MessageList list={list} selected={view.m} markNotifications={searching} onSelect={(m) => go({ m }, true)} />
+          <section
+            className={cn("min-h-0 flex-col border-r", mainOpen(view) ? "hidden md:flex" : "flex")}
+          >
+            {showPrefixes && (
+              <div className="flex min-h-0 flex-1 flex-col bg-sidebar lg:hidden">
+                <PrefixPane view={view} can={can} onPick={pick} />
+              </div>
             )}
-          </div>
-        </section>
-
-        <main className={cn("min-h-0 min-w-0 flex-col", mainOpen(view) ? "flex" : "hidden md:flex")}>
-          {composing(view) ? (
-            <Composer
-              key={composerKey}
-              session={session}
-              draftId={view.d}
-              replyTo={view.reply}
-              onCreated={(id) => {
-                setAdopted({ key: composerKey, id });
-                go({ ...closeComposer, d: id }, true);
-              }}
-              onClose={() => go(closeComposer, true)}
-              onDeleted={() => go(closeComposer, true)}
-              onOpenMessage={(m, a) => go({ ...closeComposer, m, a })}
-              onOpenOutbox={(o) => go({ ...closeComposer, area: "outbox", prefix: undefined, q: undefined, m: undefined, st: undefined, o })}
-            />
-          ) : view.o ? (
-            <OutboxPane
-              key={view.o}
-              id={view.o}
-              session={session}
-              can={can}
-              onBack={() => go({ o: undefined }, true)}
-              onOpenMessage={(m) => go({ o: undefined, m })}
-              onOpenDraft={(d) => go({ o: undefined, area: "drafts", st: "outbox", d })}
-            />
-          ) : view.m ? (
-            <ReadingPane
-              key={view.m}
-              id={view.m}
-              anchor={view.a}
-              onAnchor={(a) => go({ a }, true)}
-              onBack={() => go({ m: undefined }, true)}
-              onOpen={(m, a) => go({ m, a }, true)}
-              onReply={can.compose ? () => compose({ reply: view.m }) : undefined}
-              onOpenOutbox={can.outbox ? (o) => go({ area: "outbox", prefix: undefined, q: undefined, m: undefined, st: undefined, o }) : undefined}
-              session={session}
-              can={can}
-              proposal={view.p}
-              onOpenRule={(rule) => go({ settings: "rules", rule })}
-            />
-          ) : view.p ? (
-            <StandaloneProposal key={view.p} id={view.p} can={can} onBack={() => go({ p: undefined }, true)} onOpen={(m, a) => go({ m, a })} />
-          ) : (
-            <div className="m-auto text-center text-small text-muted-foreground">
-              {unclaimed || leaks ? (
-                <p>{msg.shell_pick_prefix()}</p>
+            <div
+              className={cn("min-h-0 flex-1 flex-col", showPrefixes ? "hidden lg:flex" : "flex")}
+            >
+              <ListHeader
+                view={view}
+                list={list}
+                go={go}
+                pick={pick}
+                managePrefixes={can.prefixes}
+              />
+              {unclaimed ? (
+                <UnclaimedList
+                  canClaim={can.prefixes}
+                  onPick={(prefix) => go({ prefix, m: undefined })}
+                />
+              ) : leaks ? (
+                <LeakList onPick={(prefix) => go({ prefix, m: undefined })} />
               ) : drafts ? (
-                <p>{msg.shell_no_draft_open()}</p>
+                <DraftsList
+                  session={session}
+                  states={parseDraftFilter(view.st)}
+                  selected={view.d}
+                  onSelect={(d) => compose({ d, m: undefined })}
+                />
               ) : outbox ? (
-                <p>{msg.shell_pick_outbox_row()}</p>
+                <OutboxList
+                  filter={parseOutboxFilter(view.st)}
+                  selected={view.o}
+                  onSelect={(o) => go({ ...closeComposer, o, m: undefined }, true)}
+                />
               ) : proposals ? (
-                <p>{msg.shell_pick_proposal()}</p>
+                <ProposalList
+                  selected={view.p}
+                  onPick={(p) =>
+                    go(
+                      { ...closeComposer, o: undefined, p: p.id, m: p.message_id, a: undefined },
+                      true,
+                    )
+                  }
+                />
               ) : (
-                <>
-                  <p>{msg.shell_no_message()}</p>
-                  <p className="mt-1">
-                    <ParaglideMessage message={msg.shell_keys} markup={markup} />
-                  </p>
-                </>
+                <MessageList
+                  list={list}
+                  selected={view.m}
+                  markNotifications={searching}
+                  onSelect={(m) => go({ m }, true)}
+                />
               )}
             </div>
-          )}
-        </main>
-      </div>
+          </section>
+
+          <main
+            className={cn("min-h-0 min-w-0 flex-col", mainOpen(view) ? "flex" : "hidden md:flex")}
+          >
+            {composing(view) ? (
+              <Composer
+                key={composerKey}
+                session={session}
+                draftId={view.d}
+                replyTo={view.reply}
+                onCreated={(id) => {
+                  setAdopted({ key: composerKey, id });
+                  go({ ...closeComposer, d: id }, true);
+                }}
+                onClose={() => go(closeComposer, true)}
+                onDeleted={() => go(closeComposer, true)}
+                onOpenMessage={(m, a) => go({ ...closeComposer, m, a })}
+                onOpenOutbox={(o) =>
+                  go({
+                    ...closeComposer,
+                    area: "outbox",
+                    prefix: undefined,
+                    q: undefined,
+                    m: undefined,
+                    st: undefined,
+                    o,
+                  })
+                }
+              />
+            ) : view.o ? (
+              <OutboxPane
+                key={view.o}
+                id={view.o}
+                session={session}
+                can={can}
+                onBack={() => go({ o: undefined }, true)}
+                onOpenMessage={(m) => go({ o: undefined, m })}
+                onOpenDraft={(d) => go({ o: undefined, area: "drafts", st: "outbox", d })}
+              />
+            ) : view.m ? (
+              <ReadingPane
+                key={view.m}
+                id={view.m}
+                anchor={view.a}
+                onAnchor={(a) => go({ a }, true)}
+                onBack={() => go({ m: undefined }, true)}
+                onOpen={(m, a) => go({ m, a }, true)}
+                onReply={can.compose ? () => compose({ reply: view.m }) : undefined}
+                onOpenOutbox={
+                  can.outbox
+                    ? (o) =>
+                        go({
+                          area: "outbox",
+                          prefix: undefined,
+                          q: undefined,
+                          m: undefined,
+                          st: undefined,
+                          o,
+                        })
+                    : undefined
+                }
+                session={session}
+                can={can}
+                proposal={view.p}
+                onOpenRule={(rule) => go({ settings: "rules", rule })}
+              />
+            ) : view.p ? (
+              <StandaloneProposal
+                key={view.p}
+                id={view.p}
+                can={can}
+                onBack={() => go({ p: undefined }, true)}
+                onOpen={(m, a) => go({ m, a })}
+              />
+            ) : (
+              <div className="m-auto text-center text-small text-muted-foreground">
+                {unclaimed || leaks ? (
+                  <p>{msg.shell_pick_prefix()}</p>
+                ) : drafts ? (
+                  <p>{msg.shell_no_draft_open()}</p>
+                ) : outbox ? (
+                  <p>{msg.shell_pick_outbox_row()}</p>
+                ) : proposals ? (
+                  <p>{msg.shell_pick_proposal()}</p>
+                ) : (
+                  <>
+                    <p>{msg.shell_no_message()}</p>
+                    <p className="mt-1">
+                      <ParaglideMessage message={msg.shell_keys} markup={markup} />
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
+          </main>
+        </div>
       )}
     </div>
   );
@@ -231,7 +356,13 @@ function ListHeader({
   managePrefixes: boolean;
 }) {
   const browsing = !view.q && !view.prefix && !view.label;
-  const title = view.q ? msg.shell_search_title({ q: view.q }) : view.prefix ? view.prefix : view.label ? msg.shell_label_title({ label: view.label }) : areaTitle(view.area);
+  const title = view.q
+    ? msg.shell_search_title({ q: view.q })
+    : view.prefix
+      ? view.prefix
+      : view.label
+        ? msg.shell_label_title({ label: view.label })
+        : areaTitle(view.area);
   const prefixes = usePrefixes();
   const unclaimed = useUnclaimedPrefixes(browsing && view.area === "unclaimed");
   const flagged = useFlaggedCount();
@@ -251,7 +382,8 @@ function ListHeader({
   // in for the title it would repeat.
   const zone = browsing && (view.area === "conversations" || view.area === "notifications");
   // Drafts and the outbox are not mail lists: their own lists, own filters.
-  const sending = browsing && (view.area === "drafts" || view.area === "outbox" || view.area === "proposals");
+  const sending =
+    browsing && (view.area === "drafts" || view.area === "outbox" || view.area === "proposals");
   return (
     <div className="flex shrink-0 flex-col gap-1.5 border-b px-3 py-2">
       <div className="flex items-baseline gap-2">
@@ -272,7 +404,15 @@ function ListHeader({
             <ToggleGroupItem value="notifications">{msg.area_notifications()}</ToggleGroupItem>
           </ToggleGroup>
         )}
-        <h1 className={cn("min-w-0 truncate font-semibold", view.prefix && "font-mono", zone && "max-lg:sr-only")}>{title}</h1>
+        <h1
+          className={cn(
+            "min-w-0 truncate font-semibold",
+            view.prefix && "font-mono",
+            zone && "max-lg:sr-only",
+          )}
+        >
+          {title}
+        </h1>
         {!list.isLoading && !sending && (
           <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
             {count(n)}
@@ -281,23 +421,48 @@ function ListHeader({
         )}
         {canToggleDowngraded && (
           <label className="ml-auto flex shrink-0 items-center gap-1.5 self-center text-small text-muted-foreground">
-            <input type="checkbox" className="accent-current" checked={view.dg} onChange={(e) => go({ dg: e.target.checked, m: undefined })} />
+            <input
+              type="checkbox"
+              className="accent-current"
+              checked={view.dg}
+              onChange={(e) => go({ dg: e.target.checked, m: undefined })}
+            />
             {msg.shell_include_downgraded()}
           </label>
         )}
       </div>
       {hint && <p className="text-small text-muted-foreground">{hint}</p>}
-      {view.prefix && !view.q && <PrefixFacts address={view.prefix} manage={managePrefixes} onOpen={(m) => go({ m }, true)} />}
-      {browsing && view.area === "drafts" && <DraftFilter st={view.st} onChange={(st) => go({ st, d: undefined })} />}
-      {browsing && view.area === "outbox" && <OutboxFilterBar st={view.st} onChange={(st) => go({ st, o: undefined })} />}
+      {view.prefix && !view.q && (
+        <PrefixFacts
+          address={view.prefix}
+          manage={managePrefixes}
+          onOpen={(m) => go({ m }, true)}
+        />
+      )}
+      {browsing && view.area === "drafts" && (
+        <DraftFilter st={view.st} onChange={(st) => go({ st, d: undefined })} />
+      )}
+      {browsing && view.area === "outbox" && (
+        <OutboxFilterBar st={view.st} onChange={(st) => go({ st, o: undefined })} />
+      )}
     </div>
   );
 }
 
-const draftFilterLabels = { draft: () => msg.shell_drafts_draft(), held: () => msg.shell_drafts_held(), outbox: () => msg.shell_drafts_outbox() } as const;
+const draftFilterLabels = {
+  draft: () => msg.shell_drafts_draft(),
+  held: () => msg.shell_drafts_held(),
+  outbox: () => msg.shell_drafts_outbox(),
+} as const;
 
 /** Which drafts to list: any of draft, held, in the outbox (§12.10). */
-function DraftFilter({ st, onChange }: { st?: string; onChange: (st: string | undefined) => void }) {
+function DraftFilter({
+  st,
+  onChange,
+}: {
+  st?: string;
+  onChange: (st: string | undefined) => void;
+}) {
   const value = parseDraftFilter(st);
   return (
     <ToggleGroup
@@ -322,7 +487,13 @@ function DraftFilter({ st, onChange }: { st?: string; onChange: (st: string | un
   );
 }
 
-function OutboxFilterBar({ st, onChange }: { st?: string; onChange: (st: string | undefined) => void }) {
+function OutboxFilterBar({
+  st,
+  onChange,
+}: {
+  st?: string;
+  onChange: (st: string | undefined) => void;
+}) {
   return (
     <ToggleGroup
       size="xs"
@@ -344,7 +515,15 @@ function OutboxFilterBar({ st, onChange }: { st?: string; onChange: (st: string 
   );
 }
 
-function SearchBox({ ref, value, onSearch }: { ref: React.Ref<HTMLInputElement>; value: string; onSearch: (q: string) => void }) {
+function SearchBox({
+  ref,
+  value,
+  onSearch,
+}: {
+  ref: React.Ref<HTMLInputElement>;
+  value: string;
+  onSearch: (q: string) => void;
+}) {
   const [text, setText] = useState(value);
   const [lastValue, setLastValue] = useState(value);
   // Follow the URL when it changes underneath (Back, a prefix click).
@@ -364,7 +543,10 @@ function SearchBox({ ref, value, onSearch }: { ref: React.Ref<HTMLInputElement>;
 
   return (
     <div className="relative min-w-0 flex-1 md:max-w-md">
-      <SearchIcon aria-hidden className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+      <SearchIcon
+        aria-hidden
+        className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+      />
       <Input
         ref={ref}
         type="search"
@@ -379,7 +561,12 @@ function SearchBox({ ref, value, onSearch }: { ref: React.Ref<HTMLInputElement>;
         className="h-7 pr-7 pl-7"
       />
       {text && (
-        <button type="button" aria-label={msg.shell_search_clear()} onClick={() => setText("")} className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+        <button
+          type="button"
+          aria-label={msg.shell_search_clear()}
+          onClick={() => setText("")}
+          className="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+        >
           <XIcon className="size-3.5" />
         </button>
       )}
@@ -387,7 +574,14 @@ function SearchBox({ ref, value, onSearch }: { ref: React.Ref<HTMLInputElement>;
   );
 }
 
-const noList: MailList = { items: [], hasMore: false, loadMore: () => undefined, isLoading: false, isFetchingMore: false, error: undefined };
+const noList: MailList = {
+  items: [],
+  hasMore: false,
+  loadMore: () => undefined,
+  isLoading: false,
+  isFetchingMore: false,
+  error: undefined,
+};
 
 /**
  * j/k move through the list, / focuses search, Esc closes what the main
@@ -407,7 +601,8 @@ function useKeys(
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement;
-      if (e.metaKey || e.ctrlKey || e.altKey || t.closest("input, textarea, [contenteditable]")) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || t.closest("input, textarea, [contenteditable]"))
+        return;
       const cur = state.current;
       if (e.key === "/") {
         e.preventDefault();

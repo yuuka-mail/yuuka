@@ -61,13 +61,17 @@ export function RuleDrafter({
   const [err, setErr] = useState<unknown>();
   const [saved, setSaved] = useState<SavedRule>();
 
-  const conds: Leaf[] = cands.filter((_, i) => sel[i]).flatMap((c) => {
-    const leaf = asMatch(c.condition);
-    return leaf && isLeaf(leaf) ? [leaf] : [];
-  });
+  const conds: Leaf[] = cands
+    .filter((_, i) => sel[i])
+    .flatMap((c) => {
+      const leaf = asMatch(c.condition);
+      return leaf && isLeaf(leaf) ? [leaf] : [];
+    });
   const match = allOf(conds);
   const ready = !!match && actionsComplete(actions);
-  const defaultName = conds[0] ? String(Array.isArray(conds[0].value) ? conds[0].value.join(", ") : conds[0].value) : "";
+  const defaultName = conds[0]
+    ? String(Array.isArray(conds[0].value) ? conds[0].value.join(", ") : conds[0].value)
+    : "";
 
   const save = async () => {
     if (!match || !ready) return;
@@ -76,7 +80,12 @@ export function RuleDrafter({
     const rule = { name: (name ?? defaultName).trim(), match, actions };
     try {
       if (proposal) {
-        const r = await data(api.POST("/api/v1/proposals/{id}/accept", { params: { path: { id: proposal } }, body: { rule } }));
+        const r = await data(
+          api.POST("/api/v1/proposals/{id}/accept", {
+            params: { path: { id: proposal } },
+            body: { rule },
+          }),
+        );
         setSaved(r.rule);
       } else {
         setSaved(await data(api.POST("/api/v1/rules", { body: rule })));
@@ -91,10 +100,18 @@ export function RuleDrafter({
   };
 
   return (
-    <section aria-label={m.drafter_label()} className="flex flex-col gap-2 rounded-md border px-3 py-2 text-small">
+    <section
+      aria-label={m.drafter_label()}
+      className="flex flex-col gap-2 rounded-md border px-3 py-2 text-small"
+    >
       <header className="flex items-center gap-2">
         <h2 className="font-semibold">{proposal ? m.drafter_title_accept() : m.drafter_title()}</h2>
-        <button type="button" aria-label={m.rule_cancel()} className="ml-auto text-muted-foreground hover:text-foreground" onClick={onClose}>
+        <button
+          type="button"
+          aria-label={m.rule_cancel()}
+          className="ml-auto text-muted-foreground hover:text-foreground"
+          onClick={onClose}
+        >
           <XIcon className="size-3.5" />
         </button>
       </header>
@@ -118,19 +135,28 @@ export function RuleDrafter({
             {cands.map((c, i) => {
               const leaf = asMatch(c.condition);
               return (
-                <label key={i} className="flex min-w-0 cursor-pointer items-baseline gap-2 rounded-sm px-1 hover:bg-muted">
+                <label
+                  key={i}
+                  className="flex min-w-0 cursor-pointer items-baseline gap-2 rounded-sm px-1 hover:bg-muted"
+                >
                   <input
                     type="checkbox"
                     className="shrink-0 self-center accent-current"
                     checked={!!sel[i]}
                     onChange={(e) => setTicked(sel.map((x, j) => (j === i ? e.target.checked : x)))}
                   />
-                  <span className="min-w-0 flex-1">{leaf && isLeaf(leaf) ? <LeafWords leaf={leaf} /> : null}</span>
-                  <span className="shrink-0 text-meta text-muted-foreground tabular-nums">{m.drafter_alone({ n: count(c.matches) })}</span>
+                  <span className="min-w-0 flex-1">
+                    {leaf && isLeaf(leaf) ? <LeafWords leaf={leaf} /> : null}
+                  </span>
+                  <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
+                    {m.drafter_alone({ n: count(c.matches) })}
+                  </span>
                 </label>
               );
             })}
-            {cands.length === 0 && <p className="text-muted-foreground">{m.drafter_no_candidates()}</p>}
+            {cands.length === 0 && (
+              <p className="text-muted-foreground">{m.drafter_no_candidates()}</p>
+            )}
           </fieldset>
           {match ? (
             <div className="flex flex-col gap-0.5">
@@ -148,7 +174,12 @@ export function RuleDrafter({
           <div className="flex flex-wrap items-center gap-2">
             <label className="flex min-w-0 items-center gap-1.5">
               <span className="shrink-0 text-muted-foreground">{m.rule_name()}</span>
-              <Input value={name ?? defaultName} onChange={(e) => setName(e.target.value)} maxLength={200} className="h-6 w-56 text-small" />
+              <Input
+                value={name ?? defaultName}
+                onChange={(e) => setName(e.target.value)}
+                maxLength={200}
+                className="h-6 w-56 text-small"
+              />
             </label>
             <Button size="xs" disabled={!ready || busy} onClick={() => void save()}>
               {proposal ? m.drafter_accept_save() : m.drafter_save()}

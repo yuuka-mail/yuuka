@@ -18,7 +18,17 @@ import { openable, timeLeft } from "./extracted";
  * Nothing here opens a link by itself: "open" is a plain link a person
  * presses, in a new tab, without a referrer.
  */
-export function ExtractedLine({ x, verified, subject, mark = true }: { x: Extracted; verified?: boolean; subject?: string; mark?: boolean }) {
+export function ExtractedLine({
+  x,
+  verified,
+  subject,
+  mark = true,
+}: {
+  x: Extracted;
+  verified?: boolean;
+  subject?: string;
+  mark?: boolean;
+}) {
   const now = useNow(x.expires_at ? 15_000 : 0);
   const left = x.expires_at ? timeLeft(x.expires_at, now) : undefined;
   const expired = left?.expired ?? x.expired;
@@ -27,11 +37,22 @@ export function ExtractedLine({ x, verified, subject, mark = true }: { x: Extrac
   const tone = expired ? "text-muted-foreground" : "text-system-foreground";
   return (
     <span className="flex min-w-0 items-center gap-1.5 text-ui">
-      {mark && <span aria-hidden className={cn("size-1.5 shrink-0 rounded-[1px]", expired ? "bg-muted-foreground" : "bg-system")} />}
+      {mark && (
+        <span
+          aria-hidden
+          className={cn(
+            "size-1.5 shrink-0 rounded-[1px]",
+            expired ? "bg-muted-foreground" : "bg-system",
+          )}
+        />
+      )}
       {x.code ? (
         <>
           <span
-            className={cn("shrink-0 font-mono text-body font-semibold tracking-wider tabular-nums", tone)}
+            className={cn(
+              "shrink-0 font-mono text-body font-semibold tracking-wider tabular-nums",
+              tone,
+            )}
             title={m.x_code_title({ source: x.code.source, confidence: x.code.confidence })}
           >
             {x.code.value}
@@ -47,7 +68,10 @@ export function ExtractedLine({ x, verified, subject, mark = true }: { x: Extrac
             referrerPolicy="no-referrer"
             onClick={stop}
             onKeyDown={stop}
-            className={cn("inline-flex min-w-0 shrink items-center gap-1 underline underline-offset-2", tone)}
+            className={cn(
+              "inline-flex min-w-0 shrink items-center gap-1 underline underline-offset-2",
+              tone,
+            )}
             title={m.x_open_title({ href: link.href })}
           >
             <span className="shrink-0 font-medium">{m.x_open()}</span>
@@ -56,13 +80,27 @@ export function ExtractedLine({ x, verified, subject, mark = true }: { x: Extrac
           </a>
         )
       )}
-      {left && <span className={cn("shrink-0 text-meta tabular-nums", expired ? "text-muted-foreground" : "text-system-foreground")}>{left.text}</span>}
+      {left && (
+        <span
+          className={cn(
+            "shrink-0 text-meta tabular-nums",
+            expired ? "text-muted-foreground" : "text-system-foreground",
+          )}
+        >
+          {left.text}
+        </span>
+      )}
       {verified === false && (
-        <span className="shrink-0 text-meta font-medium text-warning" title={m.x_unverified_title()}>
+        <span
+          className="shrink-0 text-meta font-medium text-warning"
+          title={m.x_unverified_title()}
+        >
           {m.x_unverified()}
         </span>
       )}
-      {subject !== undefined && <span className="min-w-0 truncate text-muted-foreground">{subject}</span>}
+      {subject !== undefined && (
+        <span className="min-w-0 truncate text-muted-foreground">{subject}</span>
+      )}
     </span>
   );
 }
@@ -91,7 +129,11 @@ function CopyButton({ value }: { value: string }) {
       onKeyDown={stop}
       className="inline-flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
     >
-      {copied ? <CheckIcon className="size-3.5 text-system-foreground" /> : <CopyIcon className="size-3.5" />}
+      {copied ? (
+        <CheckIcon className="size-3.5 text-system-foreground" />
+      ) : (
+        <CopyIcon className="size-3.5" />
+      )}
     </button>
   );
 }

@@ -18,11 +18,22 @@ const rowHeight = 28;
  * one near the top is either a leak or a service the operator forgot to
  * claim; the long tail is dictionary attacks. Picking one lists its mail.
  */
-export function UnclaimedList({ canClaim, onPick }: { canClaim: boolean; onPick: (address: string) => void }) {
+export function UnclaimedList({
+  canClaim,
+  onPick,
+}: {
+  canClaim: boolean;
+  onPick: (address: string) => void;
+}) {
   const list = useUnclaimedPrefixes();
   const scroller = useRef<HTMLDivElement>(null);
   const rows = list.items.length + (list.hasMore ? 1 : 0);
-  const v = useVirtualizer({ count: rows, getScrollElement: () => scroller.current, estimateSize: () => rowHeight, overscan: 20 });
+  const v = useVirtualizer({
+    count: rows,
+    getScrollElement: () => scroller.current,
+    estimateSize: () => rowHeight,
+    overscan: 20,
+  });
   const items = v.getVirtualItems();
   const lastIndex = items.at(-1)?.index ?? -1;
   const { hasMore, isFetchingMore, loadMore } = list;
@@ -52,22 +63,39 @@ export function UnclaimedList({ canClaim, onPick }: { canClaim: boolean; onPick:
 
   return (
     <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto py-1">
-      <ul className="relative w-full" style={{ height: v.getTotalSize() }} aria-label={m.leak_unclaimed_label()}>
+      <ul
+        className="relative w-full"
+        style={{ height: v.getTotalSize() }}
+        aria-label={m.leak_unclaimed_label()}
+      >
         {items.map((it) => {
           const p = list.items[it.index];
           return (
-            <li key={it.key} className="absolute top-0 left-0 w-full" style={{ height: it.size, transform: `translateY(${it.start}px)` }}>
+            <li
+              key={it.key}
+              className="absolute top-0 left-0 w-full"
+              style={{ height: it.size, transform: `translateY(${it.start}px)` }}
+            >
               {p ? (
                 // Claiming sits beside the row, not in it: a button in a button is not allowed.
                 <div className="flex h-full items-center hover:bg-muted">
                   <button
                     type="button"
                     onClick={() => onPick(p.address)}
-                    className={cn("flex h-full min-w-0 flex-1 items-center gap-3 pl-3 text-left outline-none focus-visible:bg-muted", !canClaim && "pr-3")}
+                    className={cn(
+                      "flex h-full min-w-0 flex-1 items-center gap-3 pl-3 text-left outline-none focus-visible:bg-muted",
+                      !canClaim && "pr-3",
+                    )}
                   >
-                    <span className="min-w-0 flex-1 truncate font-mono text-small">{p.address}</span>
-                    <span className="shrink-0 text-meta text-muted-foreground tabular-nums">{count(p.messages)}</span>
-                    <span className="w-14 shrink-0 text-right text-meta text-muted-foreground tabular-nums">{p.last_seen ? listTime(p.last_seen) : ""}</span>
+                    <span className="min-w-0 flex-1 truncate font-mono text-small">
+                      {p.address}
+                    </span>
+                    <span className="shrink-0 text-meta text-muted-foreground tabular-nums">
+                      {count(p.messages)}
+                    </span>
+                    <span className="w-14 shrink-0 text-right text-meta text-muted-foreground tabular-nums">
+                      {p.last_seen ? listTime(p.last_seen) : ""}
+                    </span>
                   </button>
                   {canClaim && (
                     <span className="shrink-0 px-2">
@@ -76,7 +104,9 @@ export function UnclaimedList({ canClaim, onPick }: { canClaim: boolean; onPick:
                   )}
                 </div>
               ) : (
-                <div className="flex h-full items-center px-3 text-small text-muted-foreground">{m.leak_loading_more()}</div>
+                <div className="flex h-full items-center px-3 text-small text-muted-foreground">
+                  {m.leak_loading_more()}
+                </div>
               )}
             </li>
           );

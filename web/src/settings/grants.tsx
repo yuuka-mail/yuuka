@@ -13,7 +13,17 @@ import { m } from "@/paraglide/messages.js";
 import { ProblemLine } from "@/send/marks";
 import { duration, principal, problem, resumeCommand, scopeText, tierLabel } from "@/send/outgoing";
 
-import { grantParts, grantSummary, lowerLimit, removeCommand, subsetOf, tightenBody, tightenings, tighteningCost, type Tightening } from "./authority";
+import {
+  grantParts,
+  grantSummary,
+  lowerLimit,
+  removeCommand,
+  subsetOf,
+  tightenBody,
+  tightenings,
+  tighteningCost,
+  type Tightening,
+} from "./authority";
 import { SectionHeader } from "./section";
 
 // Grants (§13.5, §13.10): who may send as which identity, and how far.
@@ -28,7 +38,10 @@ export function GrantsSection() {
   return (
     <div className="flex max-w-[64rem] flex-col gap-3 px-4 py-4 md:px-6">
       <SectionHeader title={m.settings_grants()} />
-      <HostCommand why={m.grants_on_host()} command="yuuka grant set --identity ADDRESS --principal KIND:NAME --policy TIER" />
+      <HostCommand
+        why={m.grants_on_host()}
+        command="yuuka grant set --identity ADDRESS --principal KIND:NAME --policy TIER"
+      />
       {q.error ? (
         <ProblemLine p={problem(q.error)} />
       ) : !q.data ? (
@@ -60,23 +73,47 @@ function GrantRow({ g }: { g: ManagedGrant }) {
         <span className="font-mono font-medium">{g.identity.address}</span>
         <span className="text-muted-foreground">→</span>
         <span className="font-mono">{principal(g.principal)}</span>
-        {a.suspended && <span className="text-meta font-medium text-warning">{m.grants_suspended()}</span>}
+        {a.suspended && (
+          <span className="text-meta font-medium text-warning">{m.grants_suspended()}</span>
+        )}
         {off && <span className="text-meta">{m.grants_identity_disabled()}</span>}
       </p>
       <p className="flex flex-wrap items-baseline gap-x-2 text-small">
         <Signature speaker={system} />
         <span>{grantSummary(a)}</span>
-        {parts.dormant && <span className="text-muted-foreground">{m.grants_dormant({ rest: parts.rest.join(" · ") })}</span>}
+        {parts.dormant && (
+          <span className="text-muted-foreground">
+            {m.grants_dormant({ rest: parts.rest.join(" · ") })}
+          </span>
+        )}
       </p>
-      {g.owner_capped && <p className="text-small text-muted-foreground">{m.grants_owner_capped({ owner: principal(g.identity.owner), stored: tierLabel(g.stored.send_policy) })}</p>}
+      {g.owner_capped && (
+        <p className="text-small text-muted-foreground">
+          {m.grants_owner_capped({
+            owner: principal(g.identity.owner),
+            stored: tierLabel(g.stored.send_policy),
+          })}
+        </p>
+      )}
       {a.suspended && (
         // Resuming lets mail through again: the host's to do (§13.10).
-        <HostCommand className="border-warning/60" why={m.grants_suspended_why()} command={resumeCommand(g.identity.address, principal(g.principal))} />
+        <HostCommand
+          className="border-warning/60"
+          why={m.grants_suspended_why()}
+          command={resumeCommand(g.identity.address, principal(g.principal))}
+        />
       )}
-      <p className="text-small text-muted-foreground">{m.grants_default({ summary: grantSummary(g.default) })}</p>
+      <p className="text-small text-muted-foreground">
+        {m.grants_default({ summary: grantSummary(g.default) })}
+      </p>
       {!off && (
         <div className="flex flex-wrap items-start gap-2 pt-0.5">
-          <Button size="xs" variant="outline" aria-expanded={tightening} onClick={() => setTightening((t) => !t)}>
+          <Button
+            size="xs"
+            variant="outline"
+            aria-expanded={tightening}
+            onClick={() => setTightening((t) => !t)}
+          >
             {m.grants_tighten()}
           </Button>
           <Remove g={g} />
@@ -107,8 +144,14 @@ function Remove({ g }: { g: ManagedGrant }) {
   if (g.removal_widens.length > 0) {
     return (
       <details className="text-small">
-        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">{m.grants_remove_on_host()}</summary>
-        <HostCommand className="mt-1" why={m.grants_remove_widens({ fields: g.removal_widens.join(", ") })} command={removeCommand(g)} />
+        <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+          {m.grants_remove_on_host()}
+        </summary>
+        <HostCommand
+          className="mt-1"
+          why={m.grants_remove_widens({ fields: g.removal_widens.join(", ") })}
+          command={removeCommand(g)}
+        />
       </details>
     );
   }
@@ -119,7 +162,9 @@ function Remove({ g }: { g: ManagedGrant }) {
         confirmLabel={m.grants_remove_confirm()}
         cost={m.grants_remove_cost({ summary: grantSummary(g.default) })}
         onConfirm={async () => {
-          await api.DELETE("/api/v1/admin/grants/{identity}/{principal}", { params: { path: key(g) } });
+          await api.DELETE("/api/v1/admin/grants/{identity}/{principal}", {
+            params: { path: key(g) },
+          });
           void qc.invalidateQueries({ queryKey: grantsKey });
         }}
         onError={(e) => {
@@ -152,7 +197,14 @@ function WideningHint({ host }: { host: { why: string; command: string } }) {
   );
 }
 
-const optionKey = (t: Tightening) => (t.kind === "tier" ? `tier:${t.tier}` : t.kind === "scope" ? `scope:${t.scope}` : t.kind === "limit" ? `limit:${t.field}` : t.kind);
+const optionKey = (t: Tightening) =>
+  t.kind === "tier"
+    ? `tier:${t.tier}`
+    : t.kind === "scope"
+      ? `scope:${t.scope}`
+      : t.kind === "limit"
+        ? `limit:${t.field}`
+        : t.kind;
 
 /**
  * The changes that only tighten this grant, one at a time: pick one (with
@@ -177,7 +229,9 @@ function Tighten({ g, onDone }: { g: ManagedGrant; onDone: () => void }) {
   const valid = (t: Tightening) => {
     switch (t.kind) {
       case "limit":
-        return (limits[t.field] ?? "") !== "" && lowerLimit(a.limits[t.field], Number(limits[t.field]));
+        return (
+          (limits[t.field] ?? "") !== "" && lowerLimit(a.limits[t.field], Number(limits[t.field]))
+        );
       case "hold":
         return Number.isInteger(Number(hold)) && Number(hold) * 60 > a.hold_seconds;
       case "allowlist":
@@ -186,7 +240,8 @@ function Tighten({ g, onDone }: { g: ManagedGrant; onDone: () => void }) {
         return true;
     }
   };
-  if (options.length === 0) return <p className="text-small text-muted-foreground">{m.grants_nothing_tighter()}</p>;
+  if (options.length === 0)
+    return <p className="text-small text-muted-foreground">{m.grants_nothing_tighter()}</p>;
   return (
     <fieldset className="flex flex-col gap-1.5 rounded-md border px-2 py-2 text-small">
       <legend className="px-1 text-muted-foreground">{m.grants_tighten_legend()}</legend>
@@ -194,7 +249,13 @@ function Tighten({ g, onDone }: { g: ManagedGrant; onDone: () => void }) {
         const k = optionKey(t);
         return (
           // A div, not a label: some options hold inputs of their own.
-          <div key={k} className={cn("flex items-start gap-2 rounded-md border px-2 py-1.5 hover:bg-muted", pick === k && "border-foreground/40 bg-accent")}>
+          <div
+            key={k}
+            className={cn(
+              "flex items-start gap-2 rounded-md border px-2 py-1.5 hover:bg-muted",
+              pick === k && "border-foreground/40 bg-accent",
+            )}
+          >
             <input
               id={`${id}-${k}`}
               type="radio"
@@ -234,7 +295,12 @@ function Tighten({ g, onDone }: { g: ManagedGrant; onDone: () => void }) {
           onConfirm={async () => {
             if (!chosen) return;
             setHost(undefined);
-            await data(api.POST("/api/v1/admin/grants/{identity}/{principal}/tighten", { params: { path: key(g) }, body: tightenBody(chosen, value(chosen)) }));
+            await data(
+              api.POST("/api/v1/admin/grants/{identity}/{principal}/tighten", {
+                params: { path: key(g) },
+                body: tightenBody(chosen, value(chosen)),
+              }),
+            );
             onDone();
           }}
           onError={(e) => {
@@ -249,9 +315,14 @@ function Tighten({ g, onDone }: { g: ManagedGrant; onDone: () => void }) {
   );
 }
 
-const numberInput = "h-6 w-16 rounded-md border border-input bg-background px-1.5 font-mono text-small tabular-nums outline-none focus-visible:border-ring";
+const numberInput =
+  "h-6 w-16 rounded-md border border-input bg-background px-1.5 font-mono text-small tabular-nums outline-none focus-visible:border-ring";
 
-const limitWords = { max_per_hour: m.grants_opt_hour, max_per_day: m.grants_opt_day, max_new_recipients_per_day: m.grants_opt_new };
+const limitWords = {
+  max_per_hour: m.grants_opt_hour,
+  max_per_day: m.grants_opt_day,
+  max_new_recipients_per_day: m.grants_opt_new,
+};
 
 /** The words of one option, the radio's label. */
 function optionName(t: Tightening, g: ManagedGrant): string {
@@ -325,7 +396,9 @@ function OptionValue({
             onFocus={onFocus}
             onChange={(e) => onLimit(e.target.value)}
           />
-          <span className="text-muted-foreground">{cur === undefined ? m.grants_now_unlimited() : m.grants_now({ n: cur })}</span>
+          <span className="text-muted-foreground">
+            {cur === undefined ? m.grants_now_unlimited() : m.grants_now({ n: cur })}
+          </span>
         </>
       );
     }
@@ -341,7 +414,9 @@ function OptionValue({
             onFocus={onFocus}
             onChange={(e) => onHold(e.target.value)}
           />
-          <span className="text-muted-foreground">{m.grants_minutes_now({ now: duration(a.hold_seconds) })}</span>
+          <span className="text-muted-foreground">
+            {m.grants_minutes_now({ now: duration(a.hold_seconds) })}
+          </span>
         </>
       );
     default:

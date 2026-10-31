@@ -15,7 +15,12 @@ import { problem } from "@/send/outgoing";
 // and only a person runs it backwards, after seeing the count of a dry
 // run. Both are what `yuuka rule apply` and `yuuka rule revert` do.
 
-type Step = { s: "idle" } | { s: "counted"; n: RetroStats } | { s: "applied"; n: RetroStats } | { s: "confirm-revert" } | { s: "reverted"; n: RevertStats };
+type Step =
+  | { s: "idle" }
+  | { s: "counted"; n: RetroStats }
+  | { s: "applied"; n: RetroStats }
+  | { s: "confirm-revert" }
+  | { s: "reverted"; n: RevertStats };
 
 export function RetroActions({ id, enabled = true }: { id: string; enabled?: boolean }) {
   const qc = useQueryClient();
@@ -35,13 +40,17 @@ export function RetroActions({ id, enabled = true }: { id: string; enabled?: boo
   };
   const apply = (dry: boolean) =>
     run(async () => {
-      const n = await data(api.POST("/api/v1/rules/{id}/apply", { params: { path: { id } }, body: { dry_run: dry } }));
+      const n = await data(
+        api.POST("/api/v1/rules/{id}/apply", { params: { path: { id } }, body: { dry_run: dry } }),
+      );
       if (!dry) invalidateAnnotated(qc);
       return dry ? { s: "counted", n } : { s: "applied", n };
     });
   const revert = () =>
     run(async () => {
-      const n = await data(api.POST("/api/v1/rules/{id}/revert", { params: { path: { id } }, body: {} }));
+      const n = await data(
+        api.POST("/api/v1/rules/{id}/revert", { params: { path: { id } }, body: {} }),
+      );
       invalidateAnnotated(qc);
       return { s: "reverted", n };
     });
@@ -51,7 +60,11 @@ export function RetroActions({ id, enabled = true }: { id: string; enabled?: boo
       <div className="flex flex-wrap items-center gap-2">
         {step.s === "counted" ? (
           <>
-            <Button size="xs" disabled={busy || step.n.changed === 0} onClick={() => void apply(false)}>
+            <Button
+              size="xs"
+              disabled={busy || step.n.changed === 0}
+              onClick={() => void apply(false)}
+            >
               {m.rule_apply_n({ n: count(step.n.changed) })}
             </Button>
             <Button size="xs" variant="ghost" onClick={() => setStep({ s: "idle" })}>
@@ -69,10 +82,21 @@ export function RetroActions({ id, enabled = true }: { id: string; enabled?: boo
           </>
         ) : (
           <>
-            <Button size="xs" variant="outline" disabled={busy || !enabled} title={enabled ? undefined : m.rule_apply_disabled()} onClick={() => void apply(true)}>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={busy || !enabled}
+              title={enabled ? undefined : m.rule_apply_disabled()}
+              onClick={() => void apply(true)}
+            >
               {m.rule_apply_past()}
             </Button>
-            <Button size="xs" variant="outline" disabled={busy} onClick={() => setStep({ s: "confirm-revert" })}>
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={busy}
+              onClick={() => setStep({ s: "confirm-revert" })}
+            >
               {m.rule_revert()}
             </Button>
           </>
@@ -80,16 +104,34 @@ export function RetroActions({ id, enabled = true }: { id: string; enabled?: boo
       </div>
       {step.s === "counted" && (
         <p>
-          {m.rule_apply_dry({ matched: count(step.n.matched), messages: count(step.n.messages), changed: count(step.n.changed) })}
-          {step.n.overruled > 0 && <span className="text-muted-foreground"> · {m.rule_preview_overruled({ overruled: count(step.n.overruled) })}</span>}
+          {m.rule_apply_dry({
+            matched: count(step.n.matched),
+            messages: count(step.n.messages),
+            changed: count(step.n.changed),
+          })}
+          {step.n.overruled > 0 && (
+            <span className="text-muted-foreground">
+              {" "}
+              · {m.rule_preview_overruled({ overruled: count(step.n.overruled) })}
+            </span>
+          )}
         </p>
       )}
-      {step.s === "applied" && <p className="text-system-foreground">{m.rule_applied({ changed: count(step.n.changed), matched: count(step.n.matched) })}</p>}
+      {step.s === "applied" && (
+        <p className="text-system-foreground">
+          {m.rule_applied({ changed: count(step.n.changed), matched: count(step.n.matched) })}
+        </p>
+      )}
       {step.s === "confirm-revert" && <p className="text-warning">{m.rule_revert_cost()}</p>}
       {step.s === "reverted" && (
         <p className="text-system-foreground">
           {m.rule_reverted({ reverted: count(step.n.reverted) })}
-          {step.n.superseded > 0 && <span className="text-muted-foreground"> · {m.undo_superseded({ n: count(step.n.superseded) })}</span>}
+          {step.n.superseded > 0 && (
+            <span className="text-muted-foreground">
+              {" "}
+              · {m.undo_superseded({ n: count(step.n.superseded) })}
+            </span>
+          )}
         </p>
       )}
       {err !== undefined && <ProblemLine p={problem(err)} />}

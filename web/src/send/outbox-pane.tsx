@@ -49,16 +49,28 @@ export function OutboxPane({
           <div className="flex max-w-[56rem] flex-col gap-4 px-4 py-4 md:px-6">
             <header className="flex flex-col gap-1">
               <h1 className="text-title font-semibold break-words">
-                {e.subject || <span className="text-muted-foreground">{e.message_id ? m.send_no_subject() : m.send_outbox_row_title({ id: e.id })}</span>}
+                {e.subject || (
+                  <span className="text-muted-foreground">
+                    {e.message_id ? m.send_no_subject() : m.send_outbox_row_title({ id: e.id })}
+                  </span>
+                )}
               </h1>
               <p className="flex flex-wrap gap-x-3 text-small text-muted-foreground">
                 {e.message_id && (
-                  <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={() => onOpenMessage(e.message_id ?? "")}>
+                  <button
+                    type="button"
+                    className="underline underline-offset-2 hover:text-foreground"
+                    onClick={() => onOpenMessage(e.message_id ?? "")}
+                  >
                     {m.send_open_sent_copy()}
                   </button>
                 )}
                 {e.draft_id && (
-                  <button type="button" className="underline underline-offset-2 hover:text-foreground" onClick={() => onOpenDraft(e.draft_id ?? "")}>
+                  <button
+                    type="button"
+                    className="underline underline-offset-2 hover:text-foreground"
+                    onClick={() => onOpenDraft(e.draft_id ?? "")}
+                  >
                     {m.send_open_draft()}
                   </button>
                 )}
@@ -68,9 +80,22 @@ export function OutboxPane({
             {/* First while it can still be stopped; kept after a recall, which
                 refetches the row as withdrawn, so what the recall did stays in view. */}
             {(e.state === "held" || recalled) && (
-              <Held e={e} canRecall={recallable(e, session, can) || recalled} onRecalled={() => setRecalled(true)} onOpenMessage={onOpenMessage} onOpenDraft={onOpenDraft} />
+              <Held
+                e={e}
+                canRecall={recallable(e, session, can) || recalled}
+                onRecalled={() => setRecalled(true)}
+                onOpenMessage={onOpenMessage}
+                onOpenDraft={onOpenDraft}
+              />
             )}
-            <Voice speaker={system} title={m.send_outbox_voice_title()} className={cn(e.state === "unknown" && "border-warning/60", e.state === "dead" && "border-destructive/60")}>
+            <Voice
+              speaker={system}
+              title={m.send_outbox_voice_title()}
+              className={cn(
+                e.state === "unknown" && "border-warning/60",
+                e.state === "dead" && "border-destructive/60",
+              )}
+            >
               <OutboxFacts e={e} />
             </Voice>
             {e.state !== "held" && !recalled && e.review && (
@@ -121,7 +146,19 @@ function Held({
           </p>
         )}
         {e.review && <ReviewVerdict review={e.review} onOpenMessage={onOpenMessage} />}
-        {canRecall ? <Recall id={e.id} identity={e.identity} submitter={principal(e.submitted_by)} onRecalled={onRecalled} onOpenDraft={onOpenDraft} /> :<p className="text-muted-foreground">{m.review_recall_not_yours({ scope: "submission:send" })}</p>}
+        {canRecall ? (
+          <Recall
+            id={e.id}
+            identity={e.identity}
+            submitter={principal(e.submitted_by)}
+            onRecalled={onRecalled}
+            onOpenDraft={onOpenDraft}
+          />
+        ) : (
+          <p className="text-muted-foreground">
+            {m.review_recall_not_yours({ scope: "submission:send" })}
+          </p>
+        )}
       </div>
     </Voice>
   );
@@ -150,7 +187,12 @@ function Unknown({ e, canResolve }: { e: OutboxEntry; canResolve: boolean }) {
     setBusy(true);
     setErr(undefined);
     try {
-      await data(api.POST("/api/v1/outbox/{id}/resolve", { params: { path: { id: e.id } }, body: { resolution: pick } }));
+      await data(
+        api.POST("/api/v1/outbox/{id}/resolve", {
+          params: { path: { id: e.id } },
+          body: { resolution: pick },
+        }),
+      );
       setPick(undefined);
       void qc.invalidateQueries({ queryKey: ["get", "/api/v1/outbox"] });
       void qc.invalidateQueries({ queryKey: ["get", "/api/v1/outbox/{id}"] });
@@ -163,7 +205,10 @@ function Unknown({ e, canResolve }: { e: OutboxEntry; canResolve: boolean }) {
     }
   };
   return (
-    <section aria-label={m.send_unknown_label()} className="flex flex-col gap-2 rounded-md border border-warning/60 px-3 py-2 text-small">
+    <section
+      aria-label={m.send_unknown_label()}
+      className="flex flex-col gap-2 rounded-md border border-warning/60 px-3 py-2 text-small"
+    >
       <h2 className="flex items-center gap-1.5 font-semibold text-warning">
         <TriangleAlertIcon aria-hidden className="size-3.5" />
         {m.send_unknown_title()}
@@ -174,8 +219,20 @@ function Unknown({ e, canResolve }: { e: OutboxEntry; canResolve: boolean }) {
           <fieldset className="flex flex-col gap-1.5">
             <legend className="sr-only">{m.send_unknown_decide()}</legend>
             {resolutions().map((x) => (
-              <label key={x.r} className={cn("flex cursor-pointer items-start gap-2 rounded-md border px-2 py-1.5 hover:bg-muted", pick === x.r && "border-foreground/40 bg-accent")}>
-                <input type="radio" name={`resolve-${e.id}`} className="mt-0.5 accent-current" checked={pick === x.r} onChange={() => setPick(x.r)} />
+              <label
+                key={x.r}
+                className={cn(
+                  "flex cursor-pointer items-start gap-2 rounded-md border px-2 py-1.5 hover:bg-muted",
+                  pick === x.r && "border-foreground/40 bg-accent",
+                )}
+              >
+                <input
+                  type="radio"
+                  name={`resolve-${e.id}`}
+                  className="mt-0.5 accent-current"
+                  checked={pick === x.r}
+                  onChange={() => setPick(x.r)}
+                />
                 <span>
                   <span className="font-medium">{x.label}</span>
                   <span className="block text-muted-foreground">{x.risk}</span>
@@ -184,15 +241,26 @@ function Unknown({ e, canResolve }: { e: OutboxEntry; canResolve: boolean }) {
             ))}
           </fieldset>
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" variant={pick === "resend" ? "destructive" : "default"} disabled={!pick || busy} onClick={() => void apply()}>
-              {busy ? m.send_recording() : pick ? `${resolutions().find((x) => x.r === pick)?.label}` : m.send_choose_one()}
+            <Button
+              size="sm"
+              variant={pick === "resend" ? "destructive" : "default"}
+              disabled={!pick || busy}
+              onClick={() => void apply()}
+            >
+              {busy
+                ? m.send_recording()
+                : pick
+                  ? `${resolutions().find((x) => x.r === pick)?.label}`
+                  : m.send_choose_one()}
             </Button>
             {pick === "resend" && <span className="text-warning">{m.send_resend_twice()}</span>}
             {err !== undefined && <ProblemLine p={problem(err)} />}
           </div>
         </>
       ) : (
-        <p className="text-muted-foreground">{m.send_unknown_only_person({ scope: "submission:send" })}</p>
+        <p className="text-muted-foreground">
+          {m.send_unknown_only_person({ scope: "submission:send" })}
+        </p>
       )}
     </section>
   );

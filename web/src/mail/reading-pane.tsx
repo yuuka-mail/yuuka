@@ -1,4 +1,12 @@
-import { ArrowLeftIcon, ChevronDownIcon, ChevronUpIcon, OctagonAlertIcon, PaperclipIcon, ReplyIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  OctagonAlertIcon,
+  PaperclipIcon,
+  ReplyIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import { useState } from "react";
 
 import { useThread } from "@/api/queries";
@@ -78,14 +86,31 @@ const toneClass: Record<Tone, string> = {
   plain: "text-foreground",
 };
 
-function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox, session, can, proposal, onOpenRule }: { message: Message } & Omit<Props, "id" | "onBack">) {
+function Reading({
+  message: m,
+  anchor,
+  onAnchor,
+  onOpen,
+  onReply,
+  onOpenOutbox,
+  session,
+  can,
+  proposal,
+  onOpenRule,
+}: { message: Message } & Omit<Props, "id" | "onBack">) {
   const body = useReading(m.id);
   const facts = body.reading?.facts;
   return (
     <div className="flex max-w-[56rem] flex-col gap-4 px-4 py-4 md:px-6">
       <header className="flex flex-col gap-1.5">
         <div className="flex items-start gap-2">
-          <h1 className="min-w-0 flex-1 text-title font-semibold break-words">{m.subject ? <span lang="">{m.subject}</span> : <span className="text-muted-foreground">{msg.no_subject()}</span>}</h1>
+          <h1 className="min-w-0 flex-1 text-title font-semibold break-words">
+            {m.subject ? (
+              <span lang="">{m.subject}</span>
+            ) : (
+              <span className="text-muted-foreground">{msg.no_subject()}</span>
+            )}
+          </h1>
           {onReply && (
             <Button variant="outline" size="sm" className="shrink-0" onClick={onReply}>
               <ReplyIcon data-icon="inline-start" />
@@ -106,7 +131,9 @@ function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox, 
               {r}
             </Badge>
           ))}
-          {m.date && <span className="ml-auto">{msg.reading_dated({ when: fullTime(m.date) })}</span>}
+          {m.date && (
+            <span className="ml-auto">{msg.reading_dated({ when: fullTime(m.date) })}</span>
+          )}
           {m.has_attach && (
             <span className="inline-flex items-center gap-1">
               <PaperclipIcon className="size-3" aria-hidden />
@@ -148,7 +175,11 @@ function Reading({ message: m, anchor, onAnchor, onOpen, onReply, onOpenOutbox, 
         </div>
       )}
 
-      {m.message_id && <p className="font-mono text-meta break-all text-muted-foreground">Message-ID &lt;{m.message_id}&gt;</p>}
+      {m.message_id && (
+        <p className="font-mono text-meta break-all text-muted-foreground">
+          Message-ID &lt;{m.message_id}&gt;
+        </p>
+      )}
     </div>
   );
 }
@@ -161,7 +192,10 @@ function ExtractedBox({ message: m }: { message: Message }) {
   const x = shownExtraction(m);
   if (!x) return null;
   return (
-    <section aria-label={msg.reading_extracted_label()} className="flex max-w-full min-w-0 items-center gap-2 self-start rounded-md border border-system-border bg-system-surface px-2 py-0.5">
+    <section
+      aria-label={msg.reading_extracted_label()}
+      className="flex max-w-full min-w-0 items-center gap-2 self-start rounded-md border border-system-border bg-system-surface px-2 py-0.5"
+    >
       <Signature speaker={system} />
       <ExtractedLine x={x} verified={m.sender_verified} mark={false} />
     </section>
@@ -203,7 +237,11 @@ function HeaderAddresses({ message: m }: { message: Message }) {
           ),
       )}
       {hidden > 0 && !all && (
-        <button type="button" className="text-muted-foreground underline underline-offset-2 hover:text-foreground" onClick={() => setAll(true)}>
+        <button
+          type="button"
+          className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          onClick={() => setAll(true)}
+        >
           {msg.reading_more({ count: hidden })}
         </button>
       )}
@@ -226,7 +264,15 @@ function AddressText({ a }: { a: Address }) {
  * Until the view loads the line shows only what is already known, so
  * quiet mail, the common case, opens without the box flashing up.
  */
-function SystemFacts({ message: m, facts, onOpenOutbox }: { message: Message; facts?: Facts; onOpenOutbox?: (id: string) => void }) {
+function SystemFacts({
+  message: m,
+  facts,
+  onOpenOutbox,
+}: {
+  message: Message;
+  facts?: Facts;
+  onOpenOutbox?: (id: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const sent = facts?.sent;
   if (!open && (!facts || isQuiet(m, facts))) {
@@ -241,19 +287,24 @@ function SystemFacts({ message: m, facts, onOpenOutbox }: { message: Message; fa
         <Signature speaker={system} />
         {sent ? (
           <span className="truncate">
-            {msg.reading_sent_as({ from: sent.from })} · <span className={toneClass[sentState(sent).tone]}>{sentState(sent).text}</span>
+            {msg.reading_sent_as({ from: sent.from })} ·{" "}
+            <span className={toneClass[sentState(sent).tone]}>{sentState(sent).text}</span>
           </span>
         ) : (
           facts && (
             <span className="truncate">
               <span className="text-system-foreground">dmarc=pass</span> {facts.auth.from_domain}
               {/* Quiet mail only ever has ok verdicts: a leak or spoof warns. */}
-              {facts.leak_checks?.length ? <span className="text-muted-foreground"> · {msg.reading_expected_sender()}</span> : null}
+              {facts.leak_checks?.length ? (
+                <span className="text-muted-foreground"> · {msg.reading_expected_sender()}</span>
+              ) : null}
             </span>
           )
         )}
         <span className="shrink-0 text-muted-foreground">
-          {facts?.auth.not_received ? msg.reading_submitted_at({ when: listTime(m.received_at) }) : msg.reading_received_at({ when: listTime(m.received_at) })}
+          {facts?.auth.not_received
+            ? msg.reading_submitted_at({ when: listTime(m.received_at) })
+            : msg.reading_received_at({ when: listTime(m.received_at) })}
         </span>
         {facts && <ChevronDownIcon aria-hidden className="size-3 shrink-0 text-muted-foreground" />}
       </button>
@@ -274,17 +325,31 @@ function SystemFacts({ message: m, facts, onOpenOutbox }: { message: Message; fa
   ) : (
     sent &&
     onOpenOutbox && (
-      <button type="button" className="text-small underline underline-offset-2" onClick={() => onOpenOutbox(sent.outbox_id)}>
+      <button
+        type="button"
+        className="text-small underline underline-offset-2"
+        onClick={() => onOpenOutbox(sent.outbox_id)}
+      >
         {msg.reading_open_in_outbox()}
       </button>
     )
   );
   return (
-    <Voice speaker={system} action={fold} className={cn(warns.some((w) => w.tone === "bad") && "border-destructive/60")}>
+    <Voice
+      speaker={system}
+      action={fold}
+      className={cn(warns.some((w) => w.tone === "bad") && "border-destructive/60")}
+    >
       {warns.length > 0 && (
         <ul className="mb-1.5 flex flex-col gap-0.5 border-b border-system-border pb-1.5">
           {warns.map((w) => (
-            <li key={`${w.key} ${w.text}`} className={cn("flex items-baseline gap-1.5", w.tone === "bad" ? "text-destructive" : "text-warning")}>
+            <li
+              key={`${w.key} ${w.text}`}
+              className={cn(
+                "flex items-baseline gap-1.5",
+                w.tone === "bad" ? "text-destructive" : "text-warning",
+              )}
+            >
               {w.tone === "bad" ? (
                 <OctagonAlertIcon aria-hidden className="size-3 shrink-0 self-center" />
               ) : (
@@ -331,7 +396,10 @@ function ThreadStrip({ message, onOpen }: { message: Message; onOpen: (id: strin
   return (
     <section className="rounded-md border text-small">
       <header className="border-b px-3 py-1.5 text-muted-foreground">
-        {msg.reading_thread({ messages: msg.reading_n_messages({ count: ms.length }), participants: msg.reading_n_participants({ count: t.data?.participants.length ?? 0 }) })}
+        {msg.reading_thread({
+          messages: msg.reading_n_messages({ count: ms.length }),
+          participants: msg.reading_n_participants({ count: t.data?.participants.length ?? 0 }),
+        })}
       </header>
       {/* Mailing-list threads run long; the strip stays a strip. */}
       <ol className="relative max-h-56 overflow-y-auto">
@@ -342,13 +410,20 @@ function ThreadStrip({ message, onOpen }: { message: Message; onOpen: (id: strin
               onClick={() => onOpen(s.id)}
               className={cn(
                 "flex w-full items-baseline gap-2 px-3 py-1 text-left hover:bg-muted",
-                s.id === message.id && "bg-accent text-accent-foreground shadow-[inset_2px_0_0_var(--color-foreground)]",
+                s.id === message.id &&
+                  "bg-accent text-accent-foreground shadow-[inset_2px_0_0_var(--color-foreground)]",
               )}
             >
-              <span className="w-28 shrink-0 truncate font-medium">{sender(s.from_name, s.from_addr)}</span>
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">{s.snippet || s.subject}</span>
+              <span className="w-28 shrink-0 truncate font-medium">
+                {sender(s.from_name, s.from_addr)}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-muted-foreground">
+                {s.snippet || s.subject}
+              </span>
               {s.outgoing && <OutgoingMark state={s.outgoing.state} />}
-              <span className="shrink-0 text-muted-foreground tabular-nums">{listTime(s.received_at)}</span>
+              <span className="shrink-0 text-muted-foreground tabular-nums">
+                {listTime(s.received_at)}
+              </span>
             </button>
           </li>
         ))}

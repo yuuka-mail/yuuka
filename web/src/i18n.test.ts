@@ -10,14 +10,20 @@ import { locales } from "@/paraglide/runtime.js";
 // so text nodes are checked the way design.test.ts checks type sizes.
 
 type Message = string | { declarations?: string[] }[];
-const catalogues = import.meta.glob<Record<string, Message>>("../messages/*.json", { import: "default", eager: true });
-const byLocale = Object.fromEntries(Object.entries(catalogues).map(([f, c]) => [f.replace(/^.*\/(.+)\.json$/, "$1"), c]));
+const catalogues = import.meta.glob<Record<string, Message>>("../messages/*.json", {
+  import: "default",
+  eager: true,
+});
+const byLocale = Object.fromEntries(
+  Object.entries(catalogues).map(([f, c]) => [f.replace(/^.*\/(.+)\.json$/, "$1"), c]),
+);
 
 const keys = (c: Record<string, Message>) => Object.keys(c).filter((k) => !k.startsWith("$"));
 
 /** The inputs a message uses: {name} placeholders, or a variant message's declared inputs. */
 function inputs(v: Message): string[] {
-  if (typeof v === "string") return [...v.matchAll(/\{([a-zA-Z_]\w*)(?::[^}]*)?\}/g)].map((x) => x[1] ?? "");
+  if (typeof v === "string")
+    return [...v.matchAll(/\{([a-zA-Z_]\w*)(?::[^}]*)?\}/g)].map((x) => x[1] ?? "");
   return v.flatMap((x) => (x.declarations ?? []).flatMap((d) => /^input (\w+)/.exec(d)?.[1] ?? []));
 }
 
@@ -57,7 +63,8 @@ describe("compiled messages", () => {
       for (const locale of locales) {
         for (const n of [1, 2]) {
           const out = (fn as (i: unknown, o: { locale: string }) => string)(every(n), { locale });
-          if (out === key || out.includes("undefined")) broken.push(`${locale} ${key}(${n}): ${out}`);
+          if (out === key || out.includes("undefined"))
+            broken.push(`${locale} ${key}(${n}): ${out}`);
         }
       }
     }
@@ -67,19 +74,28 @@ describe("compiled messages", () => {
 
 // Text between tags, outside {expressions}: a word in JSX is UI text and
 // belongs in the catalogue. shadcn's copied-in base pieces carry none.
-const sources = import.meta.glob<string>(["./**/*.tsx", "!./components/ui/**"], { query: "?raw", import: "default", eager: true });
-const stripComments = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+const sources = import.meta.glob<string>(["./**/*.tsx", "!./components/ui/**"], {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+const stripComments = (s: string) =>
+  s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 // Code between a > and a < (a comparison, a ternary) has punctuation a
 // sentence of UI text would not. The product name and key names are
 // not translated.
-const textNode = /(?<![=-])>([^<>{}();=&|?]*[A-Za-z\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}][^<>{}();=&|?]*)</gu;
+const textNode =
+  /(?<![=-])>([^<>{}();=&|?]*[A-Za-z\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}][^<>{}();=&|?]*)</gu;
 const names = new Set(["yuuka", "Ctrl+Enter"]);
 
 describe("JSX text", () => {
   it("comes from the message catalogue", () => {
     expect(Object.keys(sources).length).toBeGreaterThan(10);
     const found = Object.entries(sources).flatMap(([file, src]) =>
-      [...stripComments(src).matchAll(textNode)].map((x) => x[1]?.trim() ?? "").filter((t) => !names.has(t)).map((t) => `${file}: ${t}`),
+      [...stripComments(src).matchAll(textNode)]
+        .map((x) => x[1]?.trim() ?? "")
+        .filter((t) => !names.has(t))
+        .map((t) => `${file}: ${t}`),
     );
     expect(found).toEqual([]);
   });

@@ -9,7 +9,16 @@ import { ProblemLine } from "@/send/marks";
 import { problem } from "@/send/outgoing";
 
 import { ActionsEditor } from "./actions-editor";
-import { actionsComplete, asMatch, fromEdit, newID, newLeaf, toEdit, type EditNode, type RuleMatch } from "./match";
+import {
+  actionsComplete,
+  asMatch,
+  fromEdit,
+  newID,
+  newLeaf,
+  toEdit,
+  type EditNode,
+  type RuleMatch,
+} from "./match";
 import { MatchEditor } from "./match-editor";
 import { RulePreviewBox, Warnings } from "./preview";
 import { MatchWords } from "./words";
@@ -54,9 +63,13 @@ export function RuleEditor({
   // A new rule starts with one condition; a stored one the form cannot
   // hold (a field this version does not know, say) opens as JSON.
   const startTree: EditNode | undefined =
-    initial.match === undefined ? { id: newID(), kind: "all", not: false, children: [newLeaf("from.addr")] } : start && toEdit(start);
+    initial.match === undefined
+      ? { id: newID(), kind: "all", not: false, children: [newLeaf("from.addr")] }
+      : start && toEdit(start);
   const [tree, setTree] = useState(startTree);
-  const [raw, setRaw] = useState(() => JSON.stringify(initial.match ?? (startTree && fromEdit(startTree)), null, 2));
+  const [raw, setRaw] = useState(() =>
+    JSON.stringify(initial.match ?? (startTree && fromEdit(startTree)), null, 2),
+  );
   const [json, setJSON] = useState(!tree);
   const [name, setName] = useState(initial.name);
   const [priority, setPriority] = useState(String(initial.priority));
@@ -76,7 +89,13 @@ export function RuleEditor({
     setBusy(true);
     setErr(undefined);
     try {
-      const w = await onSubmit({ name: name.trim(), priority: prio, disabled: !enabled, match, actions });
+      const w = await onSubmit({
+        name: name.trim(),
+        priority: prio,
+        disabled: !enabled,
+        match,
+        actions,
+      });
       setWarnings(w ?? undefined);
     } catch (e) {
       setErr(e);
@@ -90,15 +109,30 @@ export function RuleEditor({
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
         <label className="flex min-w-0 items-center gap-1.5">
           <span className="text-muted-foreground">{m.rule_name()}</span>
-          <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} className="h-6 w-56 text-small" />
+          <Input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            maxLength={200}
+            className="h-6 w-56 text-small"
+          />
         </label>
         <label className="flex items-center gap-1.5" title={m.rule_priority_hint()}>
           <span className="text-muted-foreground">{m.rule_priority()}</span>
-          <Input value={priority} inputMode="numeric" onChange={(e) => setPriority(e.target.value)} className="h-6 w-16 text-small tabular-nums" />
+          <Input
+            value={priority}
+            inputMode="numeric"
+            onChange={(e) => setPriority(e.target.value)}
+            className="h-6 w-16 text-small tabular-nums"
+          />
         </label>
         {showEnabled && (
           <label className="flex items-center gap-1.5">
-            <input type="checkbox" className="accent-current" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
+            <input
+              type="checkbox"
+              className="accent-current"
+              checked={enabled}
+              onChange={(e) => setEnabled(e.target.checked)}
+            />
             {m.rule_enabled()}
           </label>
         )}
@@ -132,7 +166,10 @@ export function RuleEditor({
               value={raw}
               spellCheck={false}
               onChange={(e) => setRaw(e.target.value)}
-              className={cn("min-h-40 w-full rounded-md border bg-background p-2 font-mono text-small outline-none focus-visible:border-ring", !match && "border-warning")}
+              className={cn(
+                "min-h-40 w-full rounded-md border bg-background p-2 font-mono text-small outline-none focus-visible:border-ring",
+                !match && "border-warning",
+              )}
             />
             {!match && <p className="text-warning">{m.rule_json_invalid()}</p>}
           </>

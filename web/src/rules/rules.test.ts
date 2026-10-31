@@ -1,13 +1,28 @@
 import { describe, expect, it } from "vitest";
 
 import { labelProblem } from "./label-input";
-import { actionsComplete, asMatch, fromEdit, newLeaf, ruleActionsOf, splitValues, toEdit } from "./match";
+import {
+  actionsComplete,
+  asMatch,
+  fromEdit,
+  newLeaf,
+  ruleActionsOf,
+  splitValues,
+  toEdit,
+} from "./match";
 
 describe("match trees", () => {
   const tree = {
     all: [
       { field: "from.addr", op: "eq", value: "a@example.com" },
-      { not: { any: [{ field: "list.id", op: "in", value: ["x", "y"] }, { field: "attachment", op: "eq", value: true }] } },
+      {
+        not: {
+          any: [
+            { field: "list.id", op: "in", value: ["x", "y"] },
+            { field: "attachment", op: "eq", value: true },
+          ],
+        },
+      },
     ],
   };
   it("reads the store format and nothing else", () => {
@@ -23,7 +38,9 @@ describe("match trees", () => {
     expect(e && fromEdit(e)).toEqual(tree);
   });
   it("leaves to JSON what the form cannot hold", () => {
-    expect(toEdit({ not: { not: { field: "attachment", op: "eq", value: true } } })).toBeUndefined();
+    expect(
+      toEdit({ not: { not: { field: "attachment", op: "eq", value: true } } }),
+    ).toBeUndefined();
     expect(toEdit({ field: "header.x", op: "eq", value: "1" })).toBeUndefined();
     expect(toEdit({ field: "attachment", op: "contains", value: "1" })).toBeUndefined();
   });
@@ -53,7 +70,11 @@ describe("actions", () => {
         { kind: "classify", class: "machine" },
         { kind: "archive" },
       ]),
-    ).toEqual([{ kind: "label", label: "aws" }, { kind: "classify", class: "machine" }, { kind: "archive" }]);
+    ).toEqual([
+      { kind: "label", label: "aws" },
+      { kind: "classify", class: "machine" },
+      { kind: "archive" },
+    ]);
   });
 });
 

@@ -23,7 +23,19 @@ import { CiteLine } from "./proposals";
 // what it relied on.
 
 /** The notes on a message, and a person's own to write. */
-export function MessageNotes({ message, session, can, anchor, onOpen }: { message: Message; session: SessionInfo; can: Abilities; anchor?: string; onOpen: (id: string, anchor?: string) => void }) {
+export function MessageNotes({
+  message,
+  session,
+  can,
+  anchor,
+  onOpen,
+}: {
+  message: Message;
+  session: SessionInfo;
+  can: Abilities;
+  anchor?: string;
+  onOpen: (id: string, anchor?: string) => void;
+}) {
   const [writing, setWriting] = useState<{ initial?: Note; start: Cite[] }>();
   const notes = message.notes;
   const own = notes.find((n) => isMine(n.author, session) && n.scope === "message");
@@ -42,7 +54,12 @@ export function MessageNotes({ message, session, can, anchor, onOpen }: { messag
         />
       ))}
       {writing ? (
-        <NoteEditor message={message.id} initial={writing.initial} start={writing.start} onClose={() => setWriting(undefined)} />
+        <NoteEditor
+          message={message.id}
+          initial={writing.initial}
+          start={writing.start}
+          onClose={() => setWriting(undefined)}
+        />
       ) : (
         can.notes &&
         !own && (
@@ -52,7 +69,11 @@ export function MessageNotes({ message, session, can, anchor, onOpen }: { messag
             className="self-start text-muted-foreground"
             // Keeps a selection in the mail, so it can be the note's first cite.
             onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setWriting({ start: [citeFromSelection(message.id) ?? wholeCite(message.id, anchor)] })}
+            onClick={() =>
+              setWriting({
+                start: [citeFromSelection(message.id) ?? wholeCite(message.id, anchor)],
+              })
+            }
           >
             <PlusIcon data-icon="inline-start" />
             {m.notes_add()}
@@ -96,7 +117,12 @@ function NoteCard({
           cost={mine ? m.notes_delete_cost_own() : m.notes_delete_cost({ who: authorName(n) })}
           onConfirm={async () => {
             // A person may delete anyone's note on mail they can see; the author names whose.
-            await api.DELETE("/api/v1/messages/{id}/note", { params: { path: { id: message }, query: { scope: n.scope, author: mine ? undefined : n.author.id } } });
+            await api.DELETE("/api/v1/messages/{id}/note", {
+              params: {
+                path: { id: message },
+                query: { scope: n.scope, author: mine ? undefined : n.author.id },
+              },
+            });
             void qc.invalidateQueries({ queryKey: ["get", "/api/v1/messages/{id}"] });
           }}
         />
@@ -133,7 +159,15 @@ function NoteCard({
 }
 
 /** A person's note: signed with their name, in the frame's grey; no voice colour. */
-function PersonNote({ name, title, children }: { name: string; title: string; children: ReactNode }) {
+function PersonNote({
+  name,
+  title,
+  children,
+}: {
+  name: string;
+  title: string;
+  children: ReactNode;
+}) {
   return (
     <section className="rounded-md border px-3 py-2 text-small">
       <header className="mb-1 flex items-center gap-2">
@@ -177,7 +211,17 @@ function citeFromSelection(id: string): Cite | undefined {
  * (§12.5); it starts with the selected text, or the message, and more
  * passages can be added from a selection.
  */
-function NoteEditor({ message, initial, start, onClose }: { message: string; initial?: Note; start: Cite[]; onClose: () => void }) {
+function NoteEditor({
+  message,
+  initial,
+  start,
+  onClose,
+}: {
+  message: string;
+  initial?: Note;
+  start: Cite[];
+  onClose: () => void;
+}) {
   const qc = useQueryClient();
   const [text, setText] = useState(initial?.text ?? "");
   const [cites, setCites] = useState<Cite[]>(start);
@@ -189,7 +233,12 @@ function NoteEditor({ message, initial, start, onClose }: { message: string; ini
     setBusy(true);
     setErr(undefined);
     try {
-      await data(api.PUT("/api/v1/messages/{id}/note", { params: { path: { id: message } }, body: { text: text.trim(), cites, scope: thread ? "thread" : "message" } }));
+      await data(
+        api.PUT("/api/v1/messages/{id}/note", {
+          params: { path: { id: message } },
+          body: { text: text.trim(), cites, scope: thread ? "thread" : "message" },
+        }),
+      );
       void qc.invalidateQueries({ queryKey: ["get", "/api/v1/messages/{id}"] });
       onClose();
     } catch (x) {
@@ -201,7 +250,8 @@ function NoteEditor({ message, initial, start, onClose }: { message: string; ini
   const addSelection = () => {
     const c = citeFromSelection(message);
     setNoSelection(!c);
-    if (c && cites.length < maxCites) setCites((cs) => [...cs.filter((x) => x.quote || x.uri !== c.uri), c]);
+    if (c && cites.length < maxCites)
+      setCites((cs) => [...cs.filter((x) => x.quote || x.uri !== c.uri), c]);
   };
   return (
     <form
@@ -228,7 +278,10 @@ function NoteEditor({ message, initial, start, onClose }: { message: string; ini
         <ul className="flex flex-col gap-0.5">
           {cites.map((c, i) => (
             <li key={`${c.uri} ${i}`} className="flex min-w-0 items-baseline gap-1.5">
-              <span className="shrink-0 font-mono text-meta text-muted-foreground">{c.uri.replace(/^yuuka:\/\/message\/[0-9A-Za-z]+#?/, "") || m.proposal_cite_message()}</span>
+              <span className="shrink-0 font-mono text-meta text-muted-foreground">
+                {c.uri.replace(/^yuuka:\/\/message\/[0-9A-Za-z]+#?/, "") ||
+                  m.proposal_cite_message()}
+              </span>
               {c.quote && (
                 <span lang="" className="min-w-0 truncate italic">
                   “{c.quote}”
@@ -247,11 +300,24 @@ function NoteEditor({ message, initial, start, onClose }: { message: string; ini
           ))}
         </ul>
         <span className="flex flex-wrap items-center gap-2">
-          <Button size="xs" variant="ghost" type="button" onMouseDown={(e) => e.preventDefault()} onClick={addSelection} disabled={cites.length >= maxCites}>
+          <Button
+            size="xs"
+            variant="ghost"
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={addSelection}
+            disabled={cites.length >= maxCites}
+          >
             {m.notes_cite_selection()}
           </Button>
           {!cites.some((c) => !c.quote && !c.uri.includes("#")) && (
-            <Button size="xs" variant="ghost" type="button" onClick={() => setCites((cs) => [...cs, wholeCite(message)])} disabled={cites.length >= maxCites}>
+            <Button
+              size="xs"
+              variant="ghost"
+              type="button"
+              onClick={() => setCites((cs) => [...cs, wholeCite(message)])}
+              disabled={cites.length >= maxCites}
+            >
               {m.notes_cite_message()}
             </Button>
           )}
@@ -259,7 +325,12 @@ function NoteEditor({ message, initial, start, onClose }: { message: string; ini
         </span>
       </div>
       <label className="flex items-center gap-1.5 self-start text-muted-foreground">
-        <input type="checkbox" className="accent-current" checked={thread} onChange={(e) => setThread(e.target.checked)} />
+        <input
+          type="checkbox"
+          className="accent-current"
+          checked={thread}
+          onChange={(e) => setThread(e.target.checked)}
+        />
         {m.notes_about_thread()}
       </label>
       <span className="flex flex-wrap items-center gap-2">

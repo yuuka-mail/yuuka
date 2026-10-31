@@ -1,10 +1,24 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { ArchiveIcon, ArchiveRestoreIcon, ArrowRightLeftIcon, HistoryIcon, PlusIcon, WandSparklesIcon, XIcon } from "lucide-react";
+import {
+  ArchiveIcon,
+  ArchiveRestoreIcon,
+  ArrowRightLeftIcon,
+  HistoryIcon,
+  PlusIcon,
+  WandSparklesIcon,
+  XIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { api, data } from "@/api/client";
 import { invalidateAnnotated } from "@/api/queries";
-import type { AnnotateResult, Annotation, AnnotationOutcome, Message, RuleAction } from "@/api/types";
+import type {
+  AnnotateResult,
+  Annotation,
+  AnnotationOutcome,
+  Message,
+  RuleAction,
+} from "@/api/types";
 import { Button } from "@/components/ui/button";
 import { Signature, system } from "@/components/voice";
 import { cn } from "@/lib/utils";
@@ -29,7 +43,17 @@ interface Done {
   asked: Annotation[];
 }
 
-export function AnnotateBar({ message: msg, can, onOpen, onOpenRule }: { message: Message; can: Abilities; onOpen: (id: string) => void; onOpenRule?: (id: string) => void }) {
+export function AnnotateBar({
+  message: msg,
+  can,
+  onOpen,
+  onOpenRule,
+}: {
+  message: Message;
+  can: Abilities;
+  onOpen: (id: string) => void;
+  onOpenRule?: (id: string) => void;
+}) {
   const qc = useQueryClient();
   const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -44,7 +68,12 @@ export function AnnotateBar({ message: msg, can, onOpen, onOpenRule }: { message
     setBusy(true);
     setErr(undefined);
     try {
-      const result = await data(api.POST("/api/v1/messages/{id}/annotations", { params: { path: { id: msg.id } }, body: { actions: asked } }));
+      const result = await data(
+        api.POST("/api/v1/messages/{id}/annotations", {
+          params: { path: { id: msg.id } },
+          body: { actions: asked },
+        }),
+      );
       setDone({ result, asked });
       invalidateAnnotated(qc);
       return result;
@@ -58,7 +87,8 @@ export function AnnotateBar({ message: msg, can, onOpen, onOpenRule }: { message
   const reclassify = async () => {
     const r = await annotate([{ kind: "classify", class: toZone }]);
     // A rule is offered, never made (§12.9): only when the move took.
-    if (can.rules && r?.messages[0]?.outcomes[0]?.outcome === "applied") setOffer([{ kind: "classify", class: toZone }]);
+    if (can.rules && r?.messages[0]?.outcomes[0]?.outcome === "applied")
+      setOffer([{ kind: "classify", class: toZone }]);
   };
 
   // e archives or brings back the open message; l adds a label.
@@ -71,7 +101,13 @@ export function AnnotateBar({ message: msg, can, onOpen, onOpenRule }: { message
     if (!can.annotate) return;
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement;
-      if (e.metaKey || e.ctrlKey || e.altKey || t.closest("input, textarea, select, [contenteditable]")) return;
+      if (
+        e.metaKey ||
+        e.ctrlKey ||
+        e.altKey ||
+        t.closest("input, textarea, select, [contenteditable]")
+      )
+        return;
       if (e.key === "e") keys.current.toggleArchive();
       else if (e.key === "l") {
         e.preventDefault();
@@ -88,7 +124,13 @@ export function AnnotateBar({ message: msg, can, onOpen, onOpenRule }: { message
         {msg.labels.map((l) => (
           <LabelChip key={l} label={l}>
             {can.annotate && (
-              <button type="button" aria-label={m.label_remove({ label: l })} className="text-muted-foreground hover:text-foreground" disabled={busy} onClick={() => void annotate([{ kind: "unlabel", label: l }])}>
+              <button
+                type="button"
+                aria-label={m.label_remove({ label: l })}
+                className="text-muted-foreground hover:text-foreground"
+                disabled={busy}
+                onClick={() => void annotate([{ kind: "unlabel", label: l }])}
+              >
                 <XIcon className="size-3" />
               </button>
             )}
@@ -106,7 +148,12 @@ export function AnnotateBar({ message: msg, can, onOpen, onOpenRule }: { message
               onCancel={() => setAdding(false)}
             />
           ) : (
-            <Button size="xs" variant="ghost" title={m.label_add_key()} onClick={() => setAdding(true)}>
+            <Button
+              size="xs"
+              variant="ghost"
+              title={m.label_add_key()}
+              onClick={() => setAdding(true)}
+            >
               <PlusIcon data-icon="inline-start" />
               {m.label_add()}
             </Button>
@@ -114,35 +161,69 @@ export function AnnotateBar({ message: msg, can, onOpen, onOpenRule }: { message
         <span className="ml-auto flex flex-wrap items-center gap-1">
           {can.annotate && (
             <>
-              <Button size="xs" variant="outline" disabled={busy} title={msg.archived ? m.annotate_unarchive_key() : m.annotate_archive_key()} onClick={toggleArchive}>
-                {msg.archived ? <ArchiveRestoreIcon data-icon="inline-start" /> : <ArchiveIcon data-icon="inline-start" />}
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={busy}
+                title={msg.archived ? m.annotate_unarchive_key() : m.annotate_archive_key()}
+                onClick={toggleArchive}
+              >
+                {msg.archived ? (
+                  <ArchiveRestoreIcon data-icon="inline-start" />
+                ) : (
+                  <ArchiveIcon data-icon="inline-start" />
+                )}
                 {msg.archived ? m.annotate_unarchive() : m.annotate_archive()}
               </Button>
               <Button size="xs" variant="outline" disabled={busy} onClick={() => void reclassify()}>
                 <ArrowRightLeftIcon data-icon="inline-start" />
-                {toZone === "machine" ? m.annotate_to_notifications() : m.annotate_to_conversations()}
+                {toZone === "machine"
+                  ? m.annotate_to_notifications()
+                  : m.annotate_to_conversations()}
               </Button>
             </>
           )}
           {can.rules && (
-            <Button size="xs" variant="outline" aria-expanded={!!drafting} onClick={() => setDrafting(drafting ? undefined : [])}>
+            <Button
+              size="xs"
+              variant="outline"
+              aria-expanded={!!drafting}
+              onClick={() => setDrafting(drafting ? undefined : [])}
+            >
               <WandSparklesIcon data-icon="inline-start" />
               {m.annotate_like_this()}
             </Button>
           )}
-          <Button size="xs" variant="ghost" aria-expanded={history} onClick={() => setHistory((h) => !h)}>
+          <Button
+            size="xs"
+            variant="ghost"
+            aria-expanded={history}
+            onClick={() => setHistory((h) => !h)}
+          >
             <HistoryIcon data-icon="inline-start" />
             {m.annotate_why()}
           </Button>
         </span>
       </div>
-      {msg.archived && !done && <p className="text-small text-muted-foreground">{m.annotate_is_archived()}</p>}
-      {done && <Outcomes key={done.result.action_id ?? ""} done={done} onUndone={() => setOffer(undefined)} />}
+      {msg.archived && !done && (
+        <p className="text-small text-muted-foreground">{m.annotate_is_archived()}</p>
+      )}
+      {done && (
+        <Outcomes
+          key={done.result.action_id ?? ""}
+          done={done}
+          onUndone={() => setOffer(undefined)}
+        />
+      )}
       {err !== undefined && <ProblemLine p={problem(err)} />}
       {offer && !drafting && (
         <div className="flex flex-wrap items-center gap-2 rounded-md border border-system-border bg-system-surface px-2 py-1 text-small">
           <Signature speaker={system} />
-          <span>{offer[0]?.class === "machine" ? m.offer_moved_notifications() : m.offer_moved_conversations()}</span>
+          <span>
+            {offer[0]?.class === "machine"
+              ? m.offer_moved_notifications()
+              : m.offer_moved_conversations()}
+          </span>
           <span className="ml-auto flex gap-1">
             <Button
               size="xs"
@@ -159,7 +240,14 @@ export function AnnotateBar({ message: msg, can, onOpen, onOpenRule }: { message
           </span>
         </div>
       )}
-      {drafting && <RuleDrafter messageId={msg.id} initialActions={drafting} onClose={() => setDrafting(undefined)} onOpen={onOpen} />}
+      {drafting && (
+        <RuleDrafter
+          messageId={msg.id}
+          initialActions={drafting}
+          onClose={() => setDrafting(undefined)}
+          onOpen={onOpen}
+        />
+      )}
       {history && <History message={msg} can={can} onOpenRule={onOpenRule} />}
     </section>
   );
@@ -184,7 +272,13 @@ export function outcomeText(o: AnnotationOutcome["outcome"]): string | undefined
  * latest thing done here. overruled is a normal result: someone of higher
  * rank decided this value last (§8.5).
  */
-export function Outcomes({ done, onUndone }: { done: Done | { result: AnnotateResult }; onUndone?: () => void }) {
+export function Outcomes({
+  done,
+  onUndone,
+}: {
+  done: Done | { result: AnnotateResult };
+  onUndone?: () => void;
+}) {
   const qc = useQueryClient();
   const [undo, setUndo] = useState<{ reverted: number; superseded: number } | "busy">();
   const [err, setErr] = useState<unknown>();
@@ -194,13 +288,27 @@ export function Outcomes({ done, onUndone }: { done: Done | { result: AnnotateRe
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-md border border-system-border bg-system-surface px-2 py-0.5 text-small">
       <Signature speaker={system} />
-      {many && <span className="text-muted-foreground">{m.outcome_messages({ n: done.result.messages.length })}</span>}
+      {many && (
+        <span className="text-muted-foreground">
+          {m.outcome_messages({ n: done.result.messages.length })}
+        </span>
+      )}
       {dedupe(outs).map((o, i) => {
         const why = outcomeText(o.outcome);
         return (
-          <span key={i} className={cn("inline-flex items-center gap-1", o.outcome === "overruled" || o.outcome === "labels_full" ? "text-warning" : "")}>
+          <span
+            key={i}
+            className={cn(
+              "inline-flex items-center gap-1",
+              o.outcome === "overruled" || o.outcome === "labels_full" ? "text-warning" : "",
+            )}
+          >
             <ActionWords a={o} />
-            {why && <span className={o.outcome === "unchanged" ? "text-muted-foreground" : "font-medium"}>· {why}</span>}
+            {why && (
+              <span className={o.outcome === "unchanged" ? "text-muted-foreground" : "font-medium"}>
+                · {why}
+              </span>
+            )}
           </span>
         );
       })}
@@ -211,7 +319,9 @@ export function Outcomes({ done, onUndone }: { done: Done | { result: AnnotateRe
           onClick={async () => {
             setUndo("busy");
             try {
-              const r = await data(api.POST("/api/v1/actions/{id}/undo", { params: { path: { id } } }));
+              const r = await data(
+                api.POST("/api/v1/actions/{id}/undo", { params: { path: { id } } }),
+              );
               setUndo(r);
               invalidateAnnotated(qc);
               onUndone?.();
@@ -244,7 +354,9 @@ export function UndoResultText({ r }: { r: { reverted: number; superseded: numbe
   return (
     <span className="text-muted-foreground">
       {m.undo_reverted({ n: String(r.reverted) })}
-      {r.superseded > 0 && <span className="text-warning"> · {m.undo_superseded({ n: String(r.superseded) })}</span>}
+      {r.superseded > 0 && (
+        <span className="text-warning"> · {m.undo_superseded({ n: String(r.superseded) })}</span>
+      )}
     </span>
   );
 }

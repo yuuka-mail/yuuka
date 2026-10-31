@@ -17,7 +17,15 @@ export function parseOutboxFilter(st: string | undefined): OutboxFilter {
  * Outgoing mail, newest first, each row with every recipient's state.
  * The subject is the sent copy's, which the server reads for the row.
  */
-export function OutboxList({ filter, selected, onSelect }: { filter: OutboxFilter; selected?: string; onSelect: (id: string) => void }) {
+export function OutboxList({
+  filter,
+  selected,
+  onSelect,
+}: {
+  filter: OutboxFilter;
+  selected?: string;
+  onSelect: (id: string) => void;
+}) {
   const states = outboxFilters[filter].states;
   const list = useOutbox(states ? [...states] : undefined);
   if (list.isLoading) {
@@ -33,7 +41,8 @@ export function OutboxList({ filter, selected, onSelect }: { filter: OutboxFilte
     );
   }
   if (list.error) return <p className="p-4 text-destructive">{problem(list.error).text}</p>;
-  if (list.items.length === 0) return <p className="p-4 text-muted-foreground">{m.send_outbox_empty()}</p>;
+  if (list.items.length === 0)
+    return <p className="p-4 text-muted-foreground">{m.send_outbox_empty()}</p>;
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <ul aria-label={m.send_outbox_list_label()}>
@@ -44,7 +53,12 @@ export function OutboxList({ filter, selected, onSelect }: { filter: OutboxFilte
         ))}
       </ul>
       {list.hasMore && (
-        <button type="button" className="w-full py-2 text-small text-muted-foreground hover:text-foreground" disabled={list.isFetchingMore} onClick={list.loadMore}>
+        <button
+          type="button"
+          className="w-full py-2 text-small text-muted-foreground hover:text-foreground"
+          disabled={list.isFetchingMore}
+          onClick={list.loadMore}
+        >
           {list.isFetchingMore ? m.send_loading() : m.send_load_more()}
         </button>
       )}
@@ -52,7 +66,15 @@ export function OutboxList({ filter, selected, onSelect }: { filter: OutboxFilte
   );
 }
 
-function Row({ e, selected, onSelect }: { e: OutboxEntry; selected: boolean; onSelect: (id: string) => void }) {
+function Row({
+  e,
+  selected,
+  onSelect,
+}: {
+  e: OutboxEntry;
+  selected: boolean;
+  onSelect: (id: string) => void;
+}) {
   return (
     <button
       type="button"
@@ -60,7 +82,8 @@ function Row({ e, selected, onSelect }: { e: OutboxEntry; selected: boolean; onS
       onClick={() => onSelect(e.id)}
       className={cn(
         "flex h-full w-full flex-col justify-center gap-0.5 border-b px-3 text-left outline-none hover:bg-muted focus-visible:bg-muted",
-        selected && "bg-accent text-accent-foreground shadow-[inset_2px_0_0_var(--color-foreground)] hover:bg-accent",
+        selected &&
+          "bg-accent text-accent-foreground shadow-[inset_2px_0_0_var(--color-foreground)] hover:bg-accent",
       )}
     >
       <span className="flex min-w-0 items-center gap-1.5 text-ui">
@@ -68,14 +91,25 @@ function Row({ e, selected, onSelect }: { e: OutboxEntry; selected: boolean; onS
             it does not fit, it wraps onto a line that is clipped, since
             a From cut to a few letters says nothing (the detail has it). */}
         <span className="flex h-[1lh] min-w-0 flex-wrap items-baseline overflow-hidden">
-          <span className="min-w-0 truncate font-medium">{e.subject || <span className="font-normal text-muted-foreground">{m.send_no_subject()}</span>}</span>
-          <span className="shrink-0 font-mono text-small whitespace-pre text-muted-foreground"> · {e.from}</span>
+          <span className="min-w-0 truncate font-medium">
+            {e.subject || (
+              <span className="font-normal text-muted-foreground">{m.send_no_subject()}</span>
+            )}
+          </span>
+          <span className="shrink-0 font-mono text-small whitespace-pre text-muted-foreground">
+            {" "}
+            · {e.from}
+          </span>
         </span>
         {e.submitted_by.kind !== "human" && <AuthorMark author={e.submitted_by} />}
         <span className="ml-auto flex shrink-0 items-center gap-2 pl-2 text-meta text-muted-foreground tabular-nums">
           <OutgoingMark state={e.state} />
           {/* Held mail goes by itself: how long is left matters more than when it was submitted. */}
-          {e.state === "held" && e.hold_until ? <HeldLeft until={e.hold_until} /> : listTime(e.created_at)}
+          {e.state === "held" && e.hold_until ? (
+            <HeldLeft until={e.hold_until} />
+          ) : (
+            listTime(e.created_at)
+          )}
         </span>
       </span>
       <Recipients rs={e.recipients} />
@@ -93,7 +127,13 @@ function Recipients({ rs }: { rs: OutboxEntry["recipients"] }) {
   if (!first) return null;
   return (
     <span className="flex min-w-0 items-baseline text-small">
-      <Recipient r={first} className={cn("flex shrink-0 items-baseline gap-1", rest.length > 0 ? "max-w-[calc(100%-3ch)]" : "max-w-full")} />
+      <Recipient
+        r={first}
+        className={cn(
+          "flex shrink-0 items-baseline gap-1",
+          rest.length > 0 ? "max-w-[calc(100%-3ch)]" : "max-w-full",
+        )}
+      />
       {rest.length > 0 && (
         <span className="min-w-0 truncate">
           {rest.map((r) => (
@@ -112,7 +152,8 @@ function Recipient({ r, className }: { r: OutboxEntry["recipients"][number]; cla
   const s = recipientState(r.state);
   return (
     <span className={className}>
-      <span className="min-w-0 truncate font-mono">{r.addr}</span> <span className={cn("shrink-0", toneText[s.tone])}>{s.label}</span>
+      <span className="min-w-0 truncate font-mono">{r.addr}</span>{" "}
+      <span className={cn("shrink-0", toneText[s.tone])}>{s.label}</span>
     </span>
   );
 }

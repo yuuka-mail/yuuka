@@ -20,10 +20,23 @@ export const toneText: Record<Tone, string> = {
 };
 
 /** Where outgoing mail stands, e.g. "↗ queued", in a row of a list. */
-export function OutgoingMark({ state, className }: { state: OutboxState | string; className?: string }) {
+export function OutgoingMark({
+  state,
+  className,
+}: {
+  state: OutboxState | string;
+  className?: string;
+}) {
   const s = outboxState(state);
   return (
-    <span className={cn("inline-flex shrink-0 items-center gap-1 text-meta", toneText[s.tone], className)} title={m.send_mark_outbox_title({ state: s.label })}>
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 text-meta",
+        toneText[s.tone],
+        className,
+      )}
+      title={m.send_mark_outbox_title({ state: s.label })}
+    >
       <SendIcon aria-hidden className="size-3" />
       {s.label}
     </span>
@@ -33,7 +46,12 @@ export function OutgoingMark({ state, className }: { state: OutboxState | string
 /** Why a draft stopped short of the outbox, said by yuuka. */
 export function HeldMark({ reason, className }: { reason?: HoldReason; className?: string }) {
   return (
-    <span className={cn("inline-flex shrink-0 items-center gap-1 text-meta text-system-foreground", className)}>
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 text-meta text-system-foreground",
+        className,
+      )}
+    >
       <span aria-hidden className="size-1.5 rounded-[1px] bg-system" />
       {m.send_mark_held({ reason: holdLabel(reason) })}
     </span>
@@ -54,7 +72,12 @@ export function ProblemLine({ p }: { p: ReturnType<typeof problem> }) {
 /** Who wrote a draft, when it was not a person: in the agent's voice. */
 export function AuthorMark({ author, className }: { author: Actor; className?: string }) {
   return (
-    <span className={cn("inline-flex shrink-0 items-center gap-1 text-meta font-semibold text-agent-foreground", className)}>
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 text-meta font-semibold text-agent-foreground",
+        className,
+      )}
+    >
       <span aria-hidden className="size-1.5 rounded-full bg-agent" />
       {author.kind === "agent" ? author.name : principal(author)}
     </span>

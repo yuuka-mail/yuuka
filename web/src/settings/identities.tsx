@@ -23,7 +23,10 @@ export function IdentitiesSection() {
   return (
     <div className="flex max-w-[64rem] flex-col gap-3 px-4 py-4 md:px-6">
       <SectionHeader title={m.settings_identities()} />
-      <HostCommand why={m.identities_on_host()} command="yuuka identity add LOCAL@ZONE --owner KIND:NAME --transport NAME" />
+      <HostCommand
+        why={m.identities_on_host()}
+        command="yuuka identity add LOCAL@ZONE --owner KIND:NAME --transport NAME"
+      />
       {q.error ? (
         <ProblemLine p={problem(q.error)} />
       ) : !q.data ? (
@@ -49,7 +52,11 @@ function IdentityRow({ i }: { i: ManagedIdentity }) {
       <p className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-ui">
         <span className="font-mono font-medium">{i.address}</span>
         {i.display_name && <span className="min-w-0 truncate">{i.display_name}</span>}
-        {off && <span className="text-meta">{m.identities_disabled({ when: listTime(i.disabled_at ?? "") })}</span>}
+        {off && (
+          <span className="text-meta">
+            {m.identities_disabled({ when: listTime(i.disabled_at ?? "") })}
+          </span>
+        )}
       </p>
       <Dates
         items={[
@@ -61,8 +68,14 @@ function IdentityRow({ i }: { i: ManagedIdentity }) {
       {!off &&
         (i.taken_over_by ? (
           <details className="text-small">
-            <summary className="cursor-pointer text-muted-foreground hover:text-foreground">{m.identities_disable_on_host()}</summary>
-            <HostCommand className="mt-1" why={m.identities_taken_over({ pattern: i.taken_over_by })} command={i.host} />
+            <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+              {m.identities_disable_on_host()}
+            </summary>
+            <HostCommand
+              className="mt-1"
+              why={m.identities_taken_over({ pattern: i.taken_over_by })}
+              command={i.host}
+            />
           </details>
         ) : (
           <div className="pt-0.5">
@@ -71,8 +84,14 @@ function IdentityRow({ i }: { i: ManagedIdentity }) {
               confirmLabel={m.identities_disable_confirm()}
               cost={m.identities_disable_cost({ address: i.address })}
               onConfirm={async () => {
-                await api.POST("/api/v1/admin/identities/{id}/disable", { params: { path: { id: i.id } } });
-                for (const k of ["/api/v1/admin/identities", "/api/v1/admin/grants", "/api/v1/identities"]) {
+                await api.POST("/api/v1/admin/identities/{id}/disable", {
+                  params: { path: { id: i.id } },
+                });
+                for (const k of [
+                  "/api/v1/admin/identities",
+                  "/api/v1/admin/grants",
+                  "/api/v1/identities",
+                ]) {
                   void qc.invalidateQueries({ queryKey: ["get", k] });
                 }
               }}
