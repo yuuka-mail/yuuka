@@ -6,7 +6,7 @@
 
 | 阶段 | 内容 | 产出 |
 |---|---|---|
-| **M0** | **第一个实验：Worker 抛错时发件方是否重投**（§3.5）；Worker（pending 标记 + R2 + HMAC webhook）；Go ingest + raw 归档 + 幂等 + reconcile；TG 推送一行摘要 | 一周内可日用：所有信已自持 + 有通知。无 UI |
+| **M0** | Worker（pending 标记 + R2 + HMAC webhook + 写入截止时间，§2.1）；重投去重（§4.1）；Go ingest + raw 归档 + 幂等 + reconcile；TG 推送一行摘要 | 一周内可日用：所有信已自持 + 有通知。无 UI |
 | **M1** | go-message 解析入库；**主体/凭据建表**（§13.9）；**`changes` 变更日志建表**（§4）；前缀 claimed/discovered 两态 + 最低垃圾降级（§4.3）；WebUI 列表/阅读/按前缀聚合；trgm 搜索；**agent 读路径**（文本化视图 + MCP 只读 tools） | 替代现有查看方式；agent 已能检索邮箱 |
 | **M2** | outbox 状态机（含 `unknown` / 逐收件人结果）+ 任意前缀发信 + 回复/线程；**CF 出口的字节比对实测**（Message-ID 能否回填，§10.4.1）；草稿可由 agent 起、人确认发出；**SMTP submission 口**（§13.6），其他服务可直接发信 | 不再用 curl 发信 |
 | **M3** | 规则引擎 + machine/human 分区 + 验证码提取 + 前缀注册表/泄漏检测；agent 提案→规则的闭环；**agent 专属身份的 `review` / `auto` 外发**（§8.9，外泄检查依赖本阶段的验证码提取） | 本项目的差异化能力 |

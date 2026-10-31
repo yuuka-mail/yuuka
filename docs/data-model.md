@@ -22,7 +22,8 @@ zones(zone pk, account_id, catchall bool, sending_onboarded bool)
 
 -- 原始件（不可变）
 raw_objects(id ulid pk, r2_key, local_path, size, sha256 unique, received_at, ingest_state,
-            completeness smallint)  -- full | header_only（§4.4）；原件不可变，补全正文是另一份 raw
+            completeness smallint,  -- full | header_only（§4.4）；原件不可变，补全正文是另一份 raw
+            duplicate_of → raw_objects)  -- 发件方重投产生的第二份原件：照样落盘，但不再生成 delivery（§4.1）
 
 -- 消息（派生，可重建；id 跨 reparse 稳定，见 §4.2）
 messages(
@@ -131,8 +132,13 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 `message_id
   代价是同一封信显示两次（它们仍按 Message-ID 进同一条线程），比误合并吞掉内容便宜得多。
   不改成对解码后内容取哈希：那会让折叠键依赖解析器版本，解析器一升级折叠结果就变
 - 缺失 Message-ID 时合成 `<sha256@zone>`，既不丢信也不误折叠
-- raw 的 sha256（`raw_objects.sha256 unique`）只负责**同一路径的重投去重**（Worker 重试、
-  IMAP 重扫）。跨路径折叠不能靠它——每一路的 Received 头不同，sha256 必然不同
+- raw 的 sha256（`raw_objects.sha256 unique`）只负责**字节完全相同的重复**（IMAP 重扫、
+  reconcile 重跑）。**发件方重投不在其列**：Cloudflare 每次接收都加一行带新事务 id 和时间戳的
+  `Received`，重投的原件 sha256 必然不同（§2.1.1 实测）。跨路径折叠同理也不能靠它
+- **重投去重**：同一账户、同一 `envelope_to`、同一 `(message_id, body_hash)` 的第二次投递
+  视为重投——原件照样落盘（不可变、可审计），`raw_objects.duplicate_of` 指向第一份，
+  不生成新的 delivery。多收件人事务里一路失败就会让其余各路重投（§2.1.1），所以这是常规路径。
+  代价是同一封信被有意投递两次到同一地址时也会被合并，可以接受
 - §1 沿用的 `subject + sender` 兜底线程匹配**只对 `class=human` 启用**：
   机器邮件里同一发件人的所有「Your verification code」会被它归成一条巨型线程
 
@@ -168,6 +174,8 @@ Cloudflare Email Routing 基本不做内容过滤，`spam_score` 字段必须有
 
 - M1 最低实现：`dmarc=fail`、或 `prefixes.state=discovered`（§3.3）→ 直接降级，
   不推送、不进聚合视图、不参与泄漏基线，只静默入库
+- Cloudflare 入站会加 `X-CF-SpamH-Score: <n>`（§10.1.1 实测）。刻度没有文档，
+  先原样记进 `deliveries.auth`、作为一个信号，积累样本后再决定阈值
 - 需要更强判定时旁路 rspamd（标准协议，ingest 多一步调用），不影响模型
 
 ### 4.4 只有头部的信

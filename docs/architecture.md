@@ -40,6 +40,9 @@
 可靠队列，且 R2 本身就是所需的归档层，少一个组件。webhook 只负责把延迟从
 "下次 reconcile"降到"秒级"，丢了不影响正确性。以后量大再换 Queues 不动上层。
 
+**机器在 NAT 后面**：用 `cloudflared` tunnel 暴露 ingest 和 WebUI；
+WebUI 前面挂 Cloudflare Access，ingest 端点靠 HMAC + 时间戳防重放。
+
 ### 2.1 收信提交协议
 
 信封（`MAIL FROM` / `RCPT TO`）不在 `.eml` 里，而 catch-all 判前缀靠的正是 `RCPT TO`。
@@ -52,8 +55,35 @@
 3. 发 HMAC webhook（尽力而为，失败不抛错）
 4. 正常返回 = 向 Cloudflare 确认收下
 
-**Worker 侧的提交点是第 2 步成功。** 之前任何一步失败都抛错，交给 Cloudflare 让发件方重投
-（这条行为尚待 M0 实验确认，见 §3 原则 5）。
+**Worker 侧的提交点是第 2 步成功。** 之前任何一步失败都抛错，交给 Cloudflare 让发件方重投。
+Worker 必须给自己设截止时间：R2 写入超过 60 秒就放弃并抛错。
+
+#### 2.1.1 实测：Worker 的结局如何变成 SMTP 应答
+
+2026-10 在一个测试域上实测：直连 Cloudflare MX 投递，记录 DATA 结束时的应答。
+
+| Worker 的结局 | 发件方收到 | 含义 |
+|---|---|---|
+| 正常返回 | `250 2.0.0 Ok` | 收下 |
+| 同步抛错 / `await` 之后抛错 | `421 4.3.0 Upstream error` | **临时失败，发件方会重投** |
+| `setReject(reason)` | `555 5.7.1 <reason>` | 永久失败，发件方退信 |
+| 一直不返回 | 约 311 秒后 Worker 被取消，Cloudflare **再调用一次**；第二次也被取消后（约 622 秒）回 `421 4.3.0` | 已超过 RFC 5321 建议的 10 分钟 DATA 超时，多数发件方在此之前已自行超时、按临时失败重投 |
+
+由此定下的规则：
+
+- **失败就抛错，不需要 `forward()` 兜底**：抛错得到的是 421，发件方按标准会重投
+- **永远不用 `setReject()`**：它让发件方退信，等于把信丢了。任何失败都应该是临时失败
+- **截止时间是必需的**：不设的话，挂住的 R2 写入会让连接悬空十分钟，
+  而且 Worker 可能在发件方放弃之后才写完，造成一份没人知道的重复。超时就抛错，换一个明确的 421
+- **同一次投递可能跑两次 Worker**：被取消后 Cloudflare 会自行重试一次，第一次可能已经写了一半。
+  Worker 的写入因此必须能承受重复——每次调用用新 id，重复由 Go 侧的重投去重收拾（§4.1）
+- **一笔事务多个收件人时**，Worker 按 `RCPT TO` 各调用一次、并行执行，
+  **任一调用抛错，整笔事务回 421**，发件方会对所有收件人重投——已经成功的那几路会收到第二份。
+  所以重投去重不是边角情况，而是常规路径（§4.1）
+- **新建的路由规则约 30–60 秒后才生效**，此前对该地址回 `550 5.1.1`（永久失败）。
+  catch-all 规则建好后不再涉及；但给新域接入时，要先建规则、确认生效，再把 MX 指过来
+- `wrangler email routing rules update … catch-all` 只接受 forward / drop；
+  catch-all 指向 Worker 要在 wrangler 配置里用 `*@<zone>` 路由声明，或在 dashboard 设置
 
 **Go 侧的提交点**是一个事务：写 `raw_objects` + `deliveries`（信封从标记或 metadata 读）。
 事务提交后才删除 `pending/<id>`。reconcile 按标记的状态处理：
@@ -65,11 +95,8 @@
 | 有 | 无，标记 ≥ 15 分钟 | Worker 在第 2 步失败并已抛错，这封由发件方重投、会换新 id。记一条 `orphan_marker` 事件后删标记；短时间内频繁出现就告警 |
 | 无 | 有，库里没有 | 不应出现（标记只在入库后删）。每周一次全量扫 `raw/` 与 `raw_objects` 对账兜底，信封从 metadata 恢复 |
 
-注意 Email Worker 每次调用只有**一个** `RCPT TO`：同一封信发给同域两个前缀，
+Email Worker 每次调用只有**一个** `RCPT TO`：同一封信发给同域两个前缀，
 Worker 会被调用两次、产生两份 raw，由 §4.1 的折叠合并成一条 message、两条 delivery。
-
-**机器在 NAT 后面**：用 `cloudflared` tunnel 暴露 ingest 和 WebUI；
-WebUI 前面挂 Cloudflare Access，ingest 端点靠 HMAC + 时间戳防重放。
 
 ---
 
@@ -113,10 +140,8 @@ WebUI 前面挂 Cloudflare Access，ingest 端点靠 HMAC + 时间戳防重放�
    （折叠键 `(message_id, body_hash)` + 同路径 raw sha256 去重，见 §4.1；Email Worker 可能重投）;
    Worker 侧只要 raw 写成功就算收下，自建服务离线数天也只是延迟入库。
    提交顺序、信封存放和 reconcile 规则见 §2.1，只有那一套，不留备选。
-   「Worker 抛错 → Cloudflare 让发件方重投」是这条原则的基石，但**官方文档没有写**
-   （文档只说明 `setReject()` 给发件方永久错误）。M0 的第一个实验就是在 Worker 里故意抛错，
-   看发件方拿到的是 4xx 还是静默丢弃；若是后者，Worker 在 R2 写失败时必须
-   `message.forward()` 到一个备用地址兜底。实验结论写回本条
+   「Worker 抛错 → Cloudflare 让发件方重投」是这条原则的基石。官方文档没有写，
+   已实测确认：抛错得到 `421 4.3.0`，发件方会重投；`setReject()` 得到 `555`，发件方退信（§2.1.1）
 
 6. **出口是状态机，不是 fire-and-forget**
    `outbox(held → queued → sending → sent | partial | unknown | failed(n) → dead)`，

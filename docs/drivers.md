@@ -87,7 +87,7 @@ type Expunger interface { Expunge(ctx, []string) error }
 而由 Go 侧 ingest 按账户配置的可信接收方提取：
 
 - 每个账户配 `trusted_authserv_id`（Cloudflare Email Routing 的、`mx.google.com`、工作邮箱服务器的），
-  具体取值是 M0 / M3.5 接入时的实测项
+  外部账户的取值是 M3.5 接入时的实测项
 - 只采信**最上面一条**、且 authserv-id 匹配的 `Authentication-Results`；其余一律忽略
 - 二次 SPF 判定（§3.3、`ix64/spf`）需要的发信方 IP 与 HELO，只从可信接收方自己加的那一行
   `Received`（`by` 是可信主机的最上面一条；它下面的都是发件方一侧写的，不可信）里取；
@@ -96,6 +96,22 @@ type Expunger interface { Expunge(ctx, []string) error }
   宁可没有判断，也不要基于伪造输入的判断
 
 这些都是头部解析，在 Go 侧做，不违反「driver 不解析 MIME」。
+
+**Cloudflare Email Routing 的实测（2026-10）**：它在原件最上面依次加上下面这些头，
+都在发件人自己写的任何头之上，所以「从上往下取第一条」就是它加的那一条：
+
+| 头 | 内容 |
+|---|---|
+| `Received` | `from <HELO> (<发信方 IP>) by cloudflare-email.net (cloudflare) id <事务 id> for <RCPT>; <时间>` |
+| `ARC-Seal` / `ARC-Message-Signature` / `ARC-Authentication-Results` | `i=1`，`d=cloudflare-email.net` |
+| `Received-SPF` | 含 `client-ip`、`helo`、`envelope-from`——二次 SPF 判定需要的三样都在 |
+| `Authentication-Results` | authserv-id 为 `mx.cloudflare.net`；含 dmarc、helo 与 mailfrom 两次 spf、`smtp.remote-ip` |
+| `X-CF-SpamH-Score` | 垃圾评分，刻度无文档（§4.3） |
+
+所以 Cloudflare 账户的配置是：`trusted_authserv_id = mx.cloudflare.net`，
+可信 `Received` 的 `by` 是 `cloudflare-email.net`（两者不是同一个名字）。
+`Received` 里的事务 id 在同一笔事务的各个收件人之间相同，发件方重投时会变，
+所以它能关联「同一次投递的几路」，不能用来识别重投（§4.1）。
 
 ### 10.2 发：SMTP 是通用货币，所以只需要两个 driver
 
