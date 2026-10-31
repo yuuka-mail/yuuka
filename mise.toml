@@ -1,0 +1,23 @@
+# Toolchain and tasks. A fresh clone needs only: mise install && mise run check
+# Machine-local settings and secrets (e.g. a Cloudflare API token) go in
+# mise.local.toml, which is gitignored.
+
+[tools]
+go = "1.27.3"
+golangci-lint = "2.15.0"
+
+[tasks.fmt]
+description = "Format Go code in place"
+run = "golangci-lint fmt"
+
+[tasks.lint]
+description = "Lint, vet and check formatting"
+run = "golangci-lint run"
+
+[tasks.test]
+description = "Run Go tests with the race detector"
+run = "go test -race ./..."
+
+[tasks.check]
+description = "Everything CI runs; must pass before a change is done"
+depends = ["lint", "test"]

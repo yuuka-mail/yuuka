@@ -103,16 +103,25 @@
 
 ## 怎样算做完
 
-1. 能构建，能通过检查和测试（命令见下）
+1. `mise run check` 通过——它和 CI 跑的是同一条命令
 2. 改动涉及的设计章节已同步
 3. UI 改动已截图自查
 4. 你自己 review 过一遍 diff：有没有多余的抽象、遗留的调试代码、没必要的依赖
 
-当前可用的检查（工具链落地后这一节随之更新）：
+工具链由 [`mise.toml`](mise.toml) 固定版本，任务也定义在那里：
 
 ```bash
-go build ./... && go vet ./... && go test ./...
+mise install        # 首次：装好固定版本的 Go、golangci-lint
+mise run check      # lint（含 vet 与格式检查）+ go test -race
+mise run fmt        # 就地格式化
 ```
+
+- 不要绕过 mise 直接用系统里别的版本；需要新工具时加进 `mise.toml` 并固定版本。
+  只被 `go generate` 调用的 Go 工具（sqlc、tygo 等）用 `go.mod` 的 `tool` 指令固定
+- lint 规则在 [`.golangci.yml`](.golangci.yml)。`//nolint` 必须指明 linter 并写理由
+- 本机配置和凭据（如 Cloudflare token）放 gitignore 的 `mise.local.toml`，
+  或仓库外的文件由它加载，不进被跟踪的文件
+- 新的检查（Worker 测试、前端检查等）随对应代码一起加进 `check`，不提前加
 
 ## 提交
 

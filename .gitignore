@@ -19,3 +19,7 @@ node_modules/
 
 # 私有部署笔记与快照
 /local/
+
+# mise 本机配置（凭据等）
+mise.local.toml
+.mise.local.toml
