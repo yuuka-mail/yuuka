@@ -60,6 +60,14 @@ func (db *DB) readableAccount(v *auth.Viewer, col string) string {
 		` AND aa.principal_id = '` + v.PrincipalID + `' AND aa.can_read)`
 }
 
+// readsEveryAccount is the condition "v may read every account". It
+// decides what is left of an object that is gone (a thread emptied by
+// rethreading): nothing says any more which account it was in, so it is
+// v's only if every account is.
+func (db *DB) readsEveryAccount(v *auth.Viewer) string {
+	return `NOT EXISTS (SELECT 1 FROM accounts ea WHERE NOT ` + db.readableAccount(v, "ea.id") + `)`
+}
+
 // visibleDelivery is the condition on a delivery aliased d.
 func (db *DB) visibleDelivery(v *auth.Viewer, d string) string {
 	return db.readableAccount(v, d+".account_id")

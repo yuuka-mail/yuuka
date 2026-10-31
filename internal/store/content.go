@@ -223,9 +223,21 @@ func (w *writer) change(kind, id string) {
 	}
 }
 
+// flush appends the collected changes to the log. It is the only
+// statement that writes changes (TestOneWayIntoChanges), and it takes
+// contentLock itself before the rows draw their seq: the lock is then
+// held from the moment a seq is drawn until the transaction has
+// committed, so seqs become visible in order and a reader of Changes
+// never moves its cursor past one that commits later (§8.6). Writers
+// take the lock earlier anyway, for their own reasons; taking it again
+// is free, and makes the order of the log independent of their
+// remembering to.
 func (w *writer) flush(ctx context.Context) error {
 	if len(w.changes) == 0 {
 		return nil
+	}
+	if _, err := w.tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, contentLock); err != nil {
+		return fmt.Errorf("log changes: %w", err)
 	}
 	kinds := make([]string, len(w.changes))
 	ids := make([]string, len(w.changes))

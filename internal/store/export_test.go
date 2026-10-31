@@ -14,3 +14,20 @@ func (db *DB) EnforceAccountAccess() { db.enforceAccountAccess = true }
 func (db *DB) MigrateTo(ctx context.Context, target int) (from, to int, err error) {
 	return db.migrateTo(ctx, target)
 }
+
+// HoldChange logs a change of kind/id through the writer every change
+// goes through, without taking contentLock first, and leaves its
+// transaction open until commit is called: a writer that commits late.
+func (db *DB) HoldChange(ctx context.Context, kind, id string) (commit func() error, err error) {
+	tx, err := db.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	w := writer{tx: tx}
+	w.change(kind, id)
+	if err := w.flush(ctx); err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, err
+	}
+	return func() error { return tx.Commit(ctx) }, nil
+}

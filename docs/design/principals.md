@@ -436,7 +436,7 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 | 线程 | `n`、`participants`、`first_at` / `last_at`、`snippet` 都按可见消息**现算**；`threads` 表里存的聚合值只服务不受限的视图 |
 | `list_prefixes` / 统计 | 只在可见投递上聚合 |
 | 前缀详情 / 泄漏检测（§3.3） | 观测到的发件域、泄漏 / 仿冒计数和列出的信都只来自可见投递：看不见的账户里谁在发信也是头部 |
-| SSE / `changes` / JMAP `queryChanges` | 目标不可见的事件跳过，游标照常前进 |
+| `changes`（[`Changes`](../../internal/store/changes.go)，REST `/changes`、`changes_since`）/ 以后的 SSE、JMAP `queryChanges` | 目标不可见的事件跳过，游标照常前进；可见与否按目标对象自己的规则（§8.6），已消失的对象只给能看到全部的主体 |
 | `actions` / `proposals` | 审计日志只给 human 会话；agent 只看自己发起的 |
 | 提案（`Proposals`、`ProposalByID`，REST `/proposals`、`list_proposals`） | 人看全部，agent / service 只看自己提的；关于某封信的只在那封信可见时可见。理由和引用会引原文，可能是读者看不到的信 |
 | 标注来源（`MessageAnnotations`，`GET /messages/{id}/annotations`） | 消息可见才可取；它是审计日志的一部分，agent / service 只看自己的 action 写的那几行 |
@@ -448,7 +448,8 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 测试上用一个「含受限账户」的固定夹具，表驱动地把上表每条读路径跑一遍，断言没有泄漏。
 新增读路径就是往这张表加一行。store 层的这张表是
 [`TestVisibility`](../../internal/store/sent_test.go)：过滤在 M2 默认关着，测试里打开，
-用可读、不可读两个账户下的收信和 Sent 副本跑列表、搜索、详情、线程和前缀视图。
+用可读、不可读两个账户下的收信和 Sent 副本跑列表、搜索、详情、线程和前缀视图；
+变更日志在同一个夹具上对每条变化断言「列出 ⟺ 目标对象自己的读路径可见」。
 REST 层的 [`TestACL`](../../internal/api/api_test.go) 管的是另一半：它遍历路由表（§5.1），每个端点要认证、要 scope、把认证出的主体交给 store；
 只有人能调的端点（决定提案、管理规则、`outbox.resolve`）另断言持有全部 scope 的 agent 得到 403，且请求到不了 store。
 规则本身是运维者的配置，读它不带 Viewer；能读的只有人，这由端点保证。
@@ -462,10 +463,12 @@ TestACL 对草稿类端点另断言：别的 agent 即使持有全部 scope，�
 草稿行另有一条 M2 规则（[`drafts.go`](../../internal/store/drafts.go) 的 `visibleDraft`，唯一的一处）：
 human 看全部，其他主体只看自己写的。草稿是没发出去的字，常常是替人写的，比信件收得更窄。
 
-**随 M3.5 再定的两件事**（M2 不过滤读路径，所以现在不必定）：
+草稿和 outbox 的变更事件（`changes` 的 `draft`、`outbox` 两类）随 M3 的游标拉取定下了：
+和读这两样对象本身是同一个条件——草稿按 `visibleDraft`（作者和人），outbox 按发信身份所属账户。
+变更只是「去读一下」的提示，比对象本身收得更窄或更宽都会让两边对不上。
 
-- 草稿和 outbox 的变更事件（`changes` 的 `draft`、`outbox` 两类）对谁可见：
-  按发信身份所属账户、按提交者（`drafts.principal_id`、`outbox.submitted_by`），还是两者之一
+**随 M3.5 再定的一件事**（M2 不过滤读路径，所以现在不必定）：
+
 - agent 没有某账户的 `account_access` 时，能不能看到它自己以该账户下的身份发出的信。
   §4.6 的规则目前只按账户算，答案是不能
 

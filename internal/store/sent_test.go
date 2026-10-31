@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
@@ -445,6 +446,39 @@ func TestVisibility(t *testing.T) {
 		ulid.New(time.Now()), agent.ID, msgs["in-closed"]); err != nil {
 		t.Fatal(err)
 	}
+	// The change log (§8.6) holds what the writers log above; the
+	// outbox rows and drafts here are written with plain SQL, so their
+	// changes are logged as their writers would. A draft of the agent's
+	// and one of the operator's, and what is left of objects that are
+	// gone: a thread emptied by rethreading and a deleted draft, nothing
+	// but their ids.
+	logChange := func(kind, id string) {
+		commit, err := db.HoldChange(ctx, kind, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var outboxIDs []string
+	if err := pool.QueryRow(ctx, `SELECT array_agg(id ORDER BY id) FROM outbox`).Scan(&outboxIDs); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range outboxIDs {
+		logChange("outbox", id)
+	}
+	for _, author := range []string{agent.ID, systemID} {
+		id := ulid.New(tick())
+		if _, err := pool.Exec(ctx, `INSERT INTO drafts (id, principal_id, identity_id, from_addr, body_md)
+			VALUES ($1, $2, $3, 'me@example.com', 'draft')`, id, author, mine); err != nil {
+			t.Fatal(err)
+		}
+		logChange("draft", id)
+	}
+	goneThread, goneDraft := ulid.New(tick()), ulid.New(tick())
+	logChange("thread", goneThread)
+	logChange("draft", goneDraft)
 	ownProposals := map[*auth.Viewer][]string{
 		everyone:   {"both", "both", "in-closed", "in-closed", "in-open", "in-open", "leak-closed", "sent-closed", "sent-open", "sent-open"},
 		restricted: {"both", "in-open", "sent-open"},
@@ -776,6 +810,79 @@ func TestVisibility(t *testing.T) {
 				if seen := slices.ContainsFunc(rows, func(r store.OutboxEntry) bool { return r.ID == id }); seen != (err == nil) ||
 					err != nil && !errors.Is(err, store.ErrNotFound) {
 					t.Errorf("OutboxByID %s: %v", id, err)
+				}
+			}
+
+			// The change log (§8.6) lists a change exactly when its
+			// object is visible through that object's own read.
+			type entry struct{ kind, id string }
+			got := map[entry]bool{}
+			var since int64
+			for {
+				p, err := db.Changes(ctx, v, store.ChangeQuery{Since: &since, Limit: 500})
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, c := range p.Changes {
+					got[entry{c.Kind, c.ID}] = true
+				}
+				if since = p.Cursor; !p.More {
+					break
+				}
+			}
+			logged, err := pool.Query(ctx, `SELECT DISTINCT kind, target_id FROM changes`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var e entry
+			var kinds []string
+			_, err = pgx.ForEachRow(logged, []any{&e.kind, &e.id}, func() error {
+				var visible bool
+				switch e.kind {
+				case "message", "flag":
+					_, err = db.MessageByID(ctx, v, e.id)
+					visible = err == nil
+				case "delivery":
+					var m string
+					if err := pool.QueryRow(ctx, `SELECT message_id FROM deliveries WHERE id = $1`, e.id).Scan(&m); err != nil {
+						return err
+					}
+					d, err := db.MessageByID(ctx, v, m)
+					visible = err == nil && slices.ContainsFunc(d.Deliveries, func(f store.DeliveryFact) bool { return f.ID == e.id })
+				case "thread":
+					_, err = db.ThreadByID(ctx, v, e.id)
+					visible = err == nil || e.id == goneThread && v == everyone
+				case "prefix":
+					visible = true
+				case "proposal":
+					_, err = db.ProposalByID(ctx, v, e.id)
+					visible = err == nil
+				case "draft":
+					_, err = db.DraftByID(ctx, v, e.id)
+					visible = err == nil || e.id == goneDraft && v == everyone
+				case "outbox":
+					_, err = db.OutboxByID(ctx, v, e.id)
+					visible = err == nil
+				default:
+					return fmt.Errorf("no visibility check for kind %s", e.kind)
+				}
+				if got[e] != visible {
+					t.Errorf("Changes lists %s %s: %v, its read: %v", e.kind, e.id, got[e], visible)
+				}
+				delete(got, e)
+				kinds = append(kinds, e.kind)
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != 0 {
+				t.Errorf("Changes lists what is not in the log: %v", got)
+			}
+			// The fixture covers every kind it can reach without a rule.
+			for _, k := range []string{"message", "delivery", "thread", "flag", "prefix", "proposal", "draft", "outbox"} {
+				if !slices.Contains(kinds, k) {
+					t.Errorf("no %s change in the fixture", k)
 				}
 			}
 		})

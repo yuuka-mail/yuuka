@@ -72,11 +72,15 @@ type Draft struct {
 // identity's account as well?) open; it goes here and nowhere else.
 // Every draft query passes the viewer's principal id as $1.
 func visibleDraft(v *auth.Viewer) string {
-	if v.PrincipalKind == sendpolicy.KindHuman {
+	if seesEveryDraft(v) {
 		return "$1::text IS NOT NULL" // $1 must appear for its type
 	}
 	return "dr.principal_id = $1"
 }
+
+// seesEveryDraft: v sees all drafts. It alone sees what is left of a
+// deleted one (its change, §8.6): who wrote it is gone with the row.
+func seesEveryDraft(v *auth.Viewer) bool { return v.PrincipalKind == sendpolicy.KindHuman }
 
 const draftCols = `dr.id, dr.principal_id, ap.kind, ap.name, dr.identity_id, dr.from_addr, coalesce(dr.in_reply_to_id, ''),
 	dr.to_addrs, dr.cc_addrs, dr.bcc_addrs, dr.subject, coalesce(dr.body_md, ''), coalesce(dr.raw_id, ''),
@@ -260,16 +264,12 @@ func draftAction(v *auth.Viewer, tool string, d Draft, at time.Time) Action {
 	return Action{ID: ulid.New(at), Actor: v.PrincipalID, CredentialID: v.CredentialID, Tool: tool, At: at, Args: args}
 }
 
-// logDraftChange appends a 'draft' change. It takes the content lock so
-// that changes.seq stays in commit order with the content writers.
+// logDraftChange appends a 'draft' change; flush takes the content lock
+// that keeps changes.seq in commit order.
 func logDraftChange(ctx context.Context, tx pgx.Tx, id string) error {
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, contentLock); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `INSERT INTO changes (kind, target_id) VALUES ('draft', $1)`, id); err != nil {
-		return fmt.Errorf("log change: %w", err)
-	}
-	return nil
+	w := writer{tx: tx}
+	w.change("draft", id)
+	return w.flush(ctx)
 }
 
 // CreateDraft stores a new draft written by v at time at and returns it.
