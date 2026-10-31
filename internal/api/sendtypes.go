@@ -36,7 +36,7 @@ type DraftBody struct {
 	Subject      string   `json:"subject,omitempty"`
 	BodyMarkdown string   `json:"body_markdown,omitempty" jsonschema:"the body as Markdown; the identity's signature is added when it is sent"`
 	InReplyTo    string   `json:"in_reply_to,omitempty" jsonschema:"the id of the message this replies to"`
-	Cites        []Cite   `json:"cites,omitempty"`
+	Cites        []Cite   `json:"cites,omitempty" jsonschema:"the passages the draft relies on, which the review checks; at most 32, each quote at most 1000 characters"`
 }
 
 // CreateDraftParams are the parameters of POST /api/v1/drafts.

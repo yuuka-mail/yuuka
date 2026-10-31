@@ -814,7 +814,8 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Cite"
-            }
+            },
+            "description": "the passages the draft relies on, which the review checks; at most 32, each quote at most 1000 characters"
           }
         },
         "additionalProperties": false

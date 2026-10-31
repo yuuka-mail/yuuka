@@ -71,10 +71,9 @@ func (a *API) draftOf(ctx context.Context, v *auth.Viewer, b DraftBody, from str
 	if cites == nil {
 		cites = []Cite{}
 	}
-	for _, c := range cites {
-		if _, _, err := agentview.ParseURI(c.URI); err != nil {
-			return store.Draft{}, openapi.Errorf(http.StatusBadRequest, openapi.CodeInvalidBody, "cites: %v", err)
-		}
+	// Bounded as a proposal's or a note's: the review reads them.
+	if err := agentview.CheckCites(citesIn(cites)); err != nil {
+		return store.Draft{}, openapi.Errorf(http.StatusBadRequest, openapi.CodeInvalidBody, "%v", err)
 	}
 	raw, err := json.Marshal(cites)
 	if err != nil {

@@ -106,7 +106,7 @@ type DraftInput struct {
 	Subject      string   `json:"subject,omitempty"`
 	BodyMarkdown string   `json:"body_markdown,omitempty" jsonschema:"the body as Markdown; the identity's signature is added when it is sent"`
 	InReplyTo    string   `json:"in_reply_to,omitempty" jsonschema:"yuuka://message/<id> of the message this replies to"`
-	Cites        []Cite   `json:"cites,omitempty" jsonschema:"the passages the draft relies on; whoever reviews the draft checks them"`
+	Cites        []Cite   `json:"cites,omitempty" jsonschema:"the passages the draft relies on; whoever reviews the draft checks them; at most 32, each quote at most 1000 characters"`
 }
 
 // auditArgs names the draft's addressing, never its text: the audit log
@@ -185,10 +185,13 @@ func (s *Server) draftOf(ctx context.Context, v *auth.Viewer, in DraftInput, fro
 	if cites == nil {
 		cites = []Cite{}
 	}
-	for _, c := range cites {
-		if _, _, err := agentview.ParseURI(c.URI); err != nil {
-			return store.Draft{}, refuse("cites: %v", err)
-		}
+	// Bounded as a proposal's or a note's: the review reads them.
+	checked := make([]store.Cite, len(cites))
+	for i, c := range cites {
+		checked[i] = store.Cite{URI: c.URI, Quote: c.Quote}
+	}
+	if err := agentview.CheckCites(checked); err != nil {
+		return store.Draft{}, refuse("%v", err)
 	}
 	raw, err := json.Marshal(cites)
 	if err != nil {

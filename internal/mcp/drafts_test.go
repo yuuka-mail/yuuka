@@ -156,6 +156,21 @@ func TestDraftTools(t *testing.T) {
 			t.Errorf("%s: %+v, want %q", args, r, want)
 		}
 	}
+	// Cites are bounded as a proposal's or a note's (agentview.CheckCites),
+	// on update as on create.
+	long := []map[string]any{{"uri": uri, "quote": strings.Repeat("q", agentview.MaxQuoteChars+1)}}
+	if r := callTool(t, cs, "update_draft", map[string]any{"draft_id": d.DraftID, "cites": long}); !r.isError ||
+		!strings.Contains(r.text, "cites[0].quote") {
+		t.Errorf("update_draft with a long quote: %+v", r)
+	}
+	many := make([]map[string]any, agentview.MaxCites+1)
+	for i := range many {
+		many[i] = map[string]any{"uri": uri}
+	}
+	if r := callTool(t, cs, "create_draft", map[string]any{"from": "arisu@example.com", "cites": many}); !r.isError ||
+		!strings.Contains(r.text, "at most 32") {
+		t.Errorf("create_draft with too many cites: %+v", r)
+	}
 
 	// draft:create is the scope of every write tool.
 	readOnly := e.client(e.viewer(auth.MessageRead, auth.SubmissionSend))

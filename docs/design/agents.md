@@ -369,7 +369,7 @@ M2 的写工具（[`internal/mcp/drafts.go`](../../internal/mcp/drafts.go)），
   `*@zone` 身份要知道具体用哪个前缀）。不给 `from` 时，回复默认用原信进来的那个地址（`ReplyIdentities`，§9.3），
   新线程则必须给。`update_draft` 整体替换内容，不给 `from` 就保留原来的；只能改自己写的、还没进 outbox 的草稿
   （`visibleDraft`，§13.8：别的 agent 的草稿和不存在的一样）。结果里附上 `list_identities` 的那个预览，
-  agent 写完就知道交上去会怎样。审计只记地址、收件人个数和 cites 个数，不记主题和正文：审计日志不是信的副本
+  agent 写完就知道交上去会怎样。审计只记地址、收件人个数和 cites 个数，不记主题和正文：审计日志不是信的副本。`cites` 和提案、笔记共用 `agentview.CheckCites` 的上限（最多 32 处、摘录最多 1000 字符），它们是 §8.9 审核的输入
 - `submit_draft(draft_id)`：经 [`internal/submit`](../../internal/submit/submit.go) 的 `SubmitDraft`，
   和 REST、SMTP 提交口是同一个入口。结果是 `queued`（带 outbox id）或 `held`（`hold_reason` + `hold_detail`），
   两种都是成功；描述和返回文本都写明「停在草稿是正常结果，不要换条路再发」。

@@ -2994,6 +2994,7 @@ export interface components {
             body_markdown?: string;
             /** @description the id of the message this replies to */
             in_reply_to?: string;
+            /** @description the passages the draft relies on, which the review checks; at most 32, each quote at most 1000 characters */
             cites?: components["schemas"]["Cite"][];
         };
         DraftPage: {

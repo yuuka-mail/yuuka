@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/agentview"
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/store"
@@ -177,6 +178,7 @@ func TestDraftProblems(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	agent := h.token(auth.MessageRead, auth.DraftCreate, auth.SubmissionSend)
+	missingCite := ulid.New(time.Now())
 	for body, code := range map[string]openapi.Code{
 		`{"to":["bob@example.net"]}`:                                                openapi.CodeInvalidBody, // no from, not a reply
 		`{"from":"me@example.org"}`:                                                 openapi.CodeNoIdentity,
@@ -187,6 +189,9 @@ func TestDraftProblems(t *testing.T) {
 		`{"from":"arisu@example.com","in_reply_to":"` + ulid.New(time.Now()) + `"}`: openapi.CodeInvalidBody,
 		`{"in_reply_to":"` + ulid.New(time.Now()) + `"}`:                            openapi.CodeInvalidBody,
 		`{"from":"arisu@example.com","html":"<b>"}`:                                 openapi.CodeInvalidBody,
+		// Bounded as a proposal's or a note's cites (agentview.CheckCites).
+		`{"from":"arisu@example.com","cites":[` + strings.Repeat(`{"uri":"yuuka://message/`+missingCite+`"},`, agentview.MaxCites) +
+			`{"uri":"yuuka://message/` + missingCite + `"}]}`: openapi.CodeInvalidBody,
 	} {
 		w := h.post("/api/v1/drafts", body, agent)
 		if w.Code == http.StatusCreated || problemOf(t, w).Code != code {
@@ -213,6 +218,10 @@ func TestDraftProblems(t *testing.T) {
 
 	// Update replaces every field; an absent from keeps the draft's.
 	d := decode[Draft](t, h.post("/api/v1/drafts", `{"from":"arisu@example.com","to":["bob@example.net"],"subject":"One"}`, agent))
+	if w := h.do(http.MethodPut, "/api/v1/drafts/"+d.ID, `{"cites":[{"uri":"yuuka://message/`+missingCite+`","quote":"`+
+		strings.Repeat("q", agentview.MaxQuoteChars+1)+`"}]}`, agent); w.Code != http.StatusBadRequest || problemOf(t, w).Code != openapi.CodeInvalidBody {
+		t.Errorf("update with a long quote: %d %s", w.Code, w.Body.String())
+	}
 	w := h.do(http.MethodPut, "/api/v1/drafts/"+d.ID, `{"cc":["carol@example.org"],"subject":"Two"}`, agent)
 	u := decode[Draft](t, w)
 	if w.Code != http.StatusOK || u.From != "arisu@example.com" || len(u.To) != 0 || u.Cc[0] != "carol@example.org" || u.Subject != "Two" {
