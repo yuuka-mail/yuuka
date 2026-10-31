@@ -52,8 +52,10 @@
 // The webhook is served at POST /ingest/cloudflare (HMAC, §2.2); the login
 // endpoints under /auth/ (see internal/authn); the REST API under /api/v1/
 // (see internal/api); MCP over streamable HTTP at /mcp, bearer token only
-// (see internal/mcp); the WebUI at / (see web). Migrations are applied on
-// start.
+// (see internal/mcp); the WebUI at / (see web); an unauthenticated
+// GET /healthz for a reverse proxy's health check (see health.go). The
+// route list in serve says how each authenticates. Migrations are applied
+// on start.
 package main
 
 import (
@@ -346,27 +348,16 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	mux := http.NewServeMux()
-	// The webhook authenticates by HMAC (§2.2), never by session.
-	mux.Handle("POST /ingest/cloudflare", &ingest.Handler{Secrets: a.cfg.WebhookSecrets, Ingester: a.in, Log: log})
-	// Agents authenticate by bearer token only, never by the WebUI's
-	// session cookie (§13.7), so this does not depend on YUUKA_WEB_ORIGIN.
-	mux.Handle("/mcp", a.mcp().Handler(authn.NewBearer(a.db, log, nil)))
-	if a.cfg.Web.Origin != "" {
-		svc, err := authn.New(authn.Config{DB: a.db, Origin: a.cfg.Web.Origin, RPID: a.cfg.Web.RPID, Alerter: a.alerter, Log: log})
-		if err != nil {
-			return err
-		}
-		mux.Handle("/auth/", svc.Handler())
-		mux.Handle("/api/", api.New(a.db, a.in, log).Handler(svc))
-		// The page shell needs no session; it fetches /auth/session.
-		mux.Handle("/", web.Handler())
-	} else {
+	rs, err := a.routes(log)
+	if err != nil {
+		return err
+	}
+	if a.cfg.Web.Origin == "" {
 		log.Info("YUUKA_WEB_ORIGIN not set; WebUI and REST API are off")
 	}
 	srv := &http.Server{
 		Addr:              a.cfg.Listen,
-		Handler:           mux,
+		Handler:           newMux(rs),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      2 * time.Minute, // one ingest may fetch 25 MiB from R2
@@ -396,6 +387,59 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	err = srv.Shutdown(shutdownCtx)
 	<-loopDone
 	return err
+}
+
+// route is one top-level endpoint of serve and how it authenticates
+// (§13.7). The inventory test walks this list, so an endpoint without
+// authentication is a listed decision rather than an accident.
+type route struct {
+	pattern string
+	auth    string
+	handler http.Handler
+}
+
+// How the endpoints authenticate; see route.
+const (
+	authHMAC     = "hmac"           // the Email Worker's webhook signature (§2.2)
+	authBearer   = "bearer"         // agent and service tokens only
+	authPasskey  = "passkey"        // the login endpoints, which issue the session
+	authSession  = "session|bearer" // the REST API
+	authNoShell  = "none: static"   // the WebUI page shell; its data comes from /api/
+	authNoHealth = "none: health"   // GET /healthz; health.go says why
+)
+
+func (a *app) routes(log *slog.Logger) ([]route, error) {
+	rs := []route{
+		// Regardless of YUUKA_WEB_ORIGIN: a proxy in front of an
+		// ingest-only serve needs it as much as one in front of the WebUI.
+		{"GET /healthz", authNoHealth, newHealth(a.pool.Ping)},
+		// The webhook authenticates by HMAC (§2.2), never by session.
+		{"POST /ingest/cloudflare", authHMAC, &ingest.Handler{Secrets: a.cfg.WebhookSecrets, Ingester: a.in, Log: log}},
+		// Agents authenticate by bearer token only, never by the WebUI's
+		// session cookie (§13.7), so this does not depend on YUUKA_WEB_ORIGIN.
+		{"/mcp", authBearer, a.mcp().Handler(authn.NewBearer(a.db, log, nil))},
+	}
+	if a.cfg.Web.Origin == "" {
+		return rs, nil
+	}
+	svc, err := authn.New(authn.Config{DB: a.db, Origin: a.cfg.Web.Origin, RPID: a.cfg.Web.RPID, Alerter: a.alerter, Log: log})
+	if err != nil {
+		return nil, err
+	}
+	return append(rs,
+		route{"/auth/", authPasskey, svc.Handler()},
+		route{"/api/", authSession, api.New(a.db, a.in, log).Handler(svc)},
+		// The page shell needs no session; it fetches /auth/session.
+		route{"/", authNoShell, web.Handler()},
+	), nil
+}
+
+func newMux(rs []route) *http.ServeMux {
+	mux := http.NewServeMux()
+	for _, rt := range rs {
+		mux.Handle(rt.pattern, rt.handler)
+	}
+	return mux
 }
 
 // background runs reconcile every interval and the full scan at start and
