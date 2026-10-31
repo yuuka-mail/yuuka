@@ -113,3 +113,41 @@ iframe 里是原信自己的 HTML，我们无法在其中挂稳定 id。所以 a
 - **M2**：iframe 阅读 + Markdown 撰写 + 回复引用 + 身份选择器（默认取自 delivery）
 - **M3**：提案卡片 + 规则编辑 + 前缀泄漏视图
 - **M4**：PWA + IndexedDB 离线
+
+### 12.7 M1 的落法
+
+M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里没写死、实现时定下的几处：
+
+- **REST 只读、按路由声明 scope**。`/api/v1/` 下五个端点：`messages`（列表，过滤 prefix / class /
+  降级，`(received_at, id)` 键集游标）、`messages/{id}`、`threads/{id}`、`prefixes`（聚合计数）、
+  `search`。前四个和搜索要 `message:read`，`prefixes` 要 `prefix:read`；`messages/{id}` 里的
+  投递事实（信封、认证结果）另要 `delivery:read`，没有就不给。路由和 scope 写在一张表里，
+  ACL 测试遍历这张表，漏一条测试就失败。列表用键集而不是 offset，是因为新信到达时 offset 分页会重复或跳行
+- **类型由 `tygo` 生成**，覆盖 `internal/api/types.go` 和 `internal/authn/wire.go`
+  （`/auth/` 的响应体），`mise run web:check` 先 `go generate` 再类型检查，Go 侧改了字段 TS 立刻报错
+- **页面壳不需要会话**。`go:embed` 的 `index.html` 对任何非文件路径都返回（`no-store`），
+  哈希命名的 `assets/` 缓存一年；壳加载后再同源 `fetch /auth/session`，401 就原地显示登录，
+  URL 不变，所以从 TG 链接点进来、登录后直接落在那封信上。视图状态全部在 query string 里
+  （`prefix` `class` `dg` `q` `m`），不引路由库
+- **`web/dist/` 只跟踪 `.gitkeep`**，让新克隆不先构建前端也能编译 Go；这样的二进制对页面请求回 503
+  并提示 `mise run web:build`。代价是 Vite 不能清空输出目录，改为构建前只删 `dist/assets`
+- **CSP** 是 `default-src 'none'` 加 self 的脚本、样式、图片、连接，`frame-ancestors 'none'`。
+  M2 加 iframe 时在这里开 `frame-src`
+- **登录页不链接恢复入口**（§13.7：恢复码不出现在日常登录路径上）；`/recover` 换到令牌后直接跳
+  `/enroll#<token>`。`/enroll` 读完片段立刻从地址栏抹掉；没有令牌但有会话时，它变成「再加一把 passkey」
+- **系统声音与 agent 声音**（§12.5）落成 `--system-*` / `--agent-*` 两组 token 和一个
+  `Voice` 组件：颜色、标记形状（方 / 圆）、署名都不同。M1 只有系统在说：阅读区的认证结果、降级原因、
+  隔离原因、接收时间是 yuuka 的事实陈述，与信头自称的 `Date` 分开显示
+- **阅读区 M1 先显示解析字段和纯文本 `body_text`**，不是 §12.1 说的结构化视图——结构化视图
+  （`internal/agentview`）与它并行实现。换入点只有两个文件：`web/src/mail/reading-data.ts`（取数）
+  和 `reading-body.tsx`（渲染）
+- **shadcn 选 Base UI 作底层**（`components.json` 的 `base-nova`），只拷了 Button / Input / Badge /
+  ToggleGroup / Skeleton / Separator；三栏、列表、阅读区按 §12.3 自己写
+- **lint 用 oxlint 而不是 ESLint**：仓库固定 TypeScript 7（与 Worker 一致），typescript-eslint
+  还不支持它；oxlint 不依赖 TS 的 JS API，一个依赖就带齐 React hooks 规则。typescript-eslint
+  支持 TS 7 之后可以换回去，规则集不变
+- **开发**：`mise run web:dev` 在 `localhost:31473` 起 Vite，把 `/api`、`/auth` 代理到
+  `YUUKA_DEV_API`（默认 `127.0.0.1:31480`）；那个 `yuuka serve` 的 `YUUKA_WEB_ORIGIN` 要设成
+  `http://localhost:31473`，WebAuthn 和跨源检查才认。`go run ./internal/devseed/cmd` 把合成语料
+  和生成的变体灌进开发库；`npm run screenshots`（`web/scripts/screenshots.mjs`）用 Chrome 的虚拟
+  认证器走完注册和登录，截亮、暗、窄屏三套图
