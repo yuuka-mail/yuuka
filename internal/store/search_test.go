@@ -13,6 +13,7 @@ import (
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/authres"
+	"github.com/yuuka-mail/yuuka/internal/classify"
 	"github.com/yuuka-mail/yuuka/internal/contenthash"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
 	"github.com/yuuka-mail/yuuka/internal/store"
@@ -157,5 +158,59 @@ func TestSearchRefusesNilViewer(t *testing.T) {
 	db, _ := storetest.New(t)
 	if _, err := db.Search(t.Context(), nil, store.SearchQuery{}); err == nil {
 		t.Fatal("search with a nil viewer succeeded")
+	}
+}
+
+func TestSearchFilters(t *testing.T) {
+	t.Parallel()
+	db, pool := load(t)
+	v := &auth.Viewer{PrincipalKind: "agent", PrincipalName: "arisu"}
+	all, err := db.Search(t.Context(), v, store.SearchQuery{IncludeDowngraded: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Move the newest message to another prefix.
+	newest := all.Hits[0]
+	for _, q := range []string{
+		`INSERT INTO prefixes (zone, prefix, first_seen, last_seen, state) VALUES ('example.com', 'b', now(), now(), 1)`,
+		`UPDATE deliveries SET prefix = 'b' WHERE message_id = '` + newest.ID + `'`,
+	} {
+		if _, err := pool.Exec(t.Context(), q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	human := classify.Human
+	cases := []struct {
+		name string
+		q    store.SearchQuery
+		want func(store.SearchHit) bool
+	}{
+		{"prefix", store.SearchQuery{Prefix: "b"}, func(h store.SearchHit) bool { return h.ID == newest.ID }},
+		{"prefix and zone", store.SearchQuery{Prefix: "b", Zone: "example.com"}, func(h store.SearchHit) bool { return h.ID == newest.ID }},
+		{"other zone", store.SearchQuery{Prefix: "b", Zone: "example.net"}, func(store.SearchHit) bool { return false }},
+		{"class", store.SearchQuery{Class: &human}, func(h store.SearchHit) bool { return h.Class == classify.Human && !h.Downgraded }},
+		{"since", store.SearchQuery{Since: newest.ReceivedAt, IncludeDowngraded: true}, func(h store.SearchHit) bool { return !h.ReceivedAt.Before(newest.ReceivedAt) }},
+	}
+	for _, c := range cases {
+		res, err := db.Search(t.Context(), v, c.q)
+		if err != nil {
+			t.Fatalf("%s: %v", c.name, err)
+		}
+		want := 0
+		for _, h := range all.Hits {
+			if c.q.IncludeDowngraded || !h.Downgraded {
+				if c.want(h) {
+					want++
+				}
+			}
+		}
+		if res.Total != want || len(res.Hits) != want {
+			t.Errorf("%s: total %d hits %d, want %d", c.name, res.Total, len(res.Hits), want)
+		}
+		for _, h := range res.Hits {
+			if !c.want(h) {
+				t.Errorf("%s: unexpected hit %s %q", c.name, h.ID, h.Subject)
+			}
+		}
 	}
 }

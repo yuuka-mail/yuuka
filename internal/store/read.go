@@ -178,6 +178,10 @@ type DeliveryFact struct {
 	ReceivedAt   time.Time
 	// Auth is nil when it was never extracted (M0 deliveries).
 	Auth *authres.Auth
+	// Raw locates the raw message this delivery carried. Rendering reads
+	// the raw of a visible delivery only (§13.8: raw and auth come from
+	// the readable path).
+	Raw RawRef
 }
 
 // MessageDetail is one message with its parsed fields and deliveries.
@@ -194,7 +198,10 @@ type MessageDetail struct {
 
 // MessageByID returns message id as v sees it. An id merged away by a
 // content-hash change resolves to its survivor (§4.2), whose id the
-// result carries. ErrNotFound if it does not exist or is not visible.
+// result carries. ErrNotFound if it does not exist or is not visible,
+// including when none of its deliveries is: a message is readable through
+// a visible delivery or not at all (§13.8). Deliveries come earliest
+// first.
 func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (MessageDetail, error) {
 	if err := needViewer(v, "message"); err != nil {
 		return MessageDetail{}, err
@@ -223,8 +230,10 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 			return err
 		}
 		rows, err = tx.Query(ctx, `
-			SELECT d.id, d.zone, d.prefix, p.state, d.envelope_from, d.envelope_to, d.received_at, d.auth
+			SELECT d.id, d.zone, d.prefix, p.state, d.envelope_from, d.envelope_to, d.received_at, d.auth,
+				`+rawRefCols+`
 			FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
+			JOIN raw_objects r ON r.id = d.raw_id
 			WHERE d.message_id = $1 AND `+visibleDelivery(v)+`
 			ORDER BY d.received_at, d.id`, d.ID)
 		if err != nil {
@@ -232,10 +241,18 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 		}
 		d.Deliveries, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (DeliveryFact, error) {
 			var f DeliveryFact
-			err := r.Scan(&f.ID, &f.Zone, &f.Prefix, &f.PrefixState, &f.EnvelopeFrom, &f.EnvelopeTo, &f.ReceivedAt, &f.Auth)
+			raw := &f.Raw
+			err := r.Scan(&f.ID, &f.Zone, &f.Prefix, &f.PrefixState, &f.EnvelopeFrom, &f.EnvelopeTo, &f.ReceivedAt, &f.Auth,
+				&raw.DeliveryID, &raw.RawID, &raw.R2Key, &raw.LocalPath, &raw.ContentHash, &raw.Zone, &raw.Prefix, &raw.ReceivedAt)
 			return f, err
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		if len(d.Deliveries) == 0 {
+			return ErrNotFound
+		}
+		return nil
 	})
 	if err != nil {
 		return MessageDetail{}, fmt.Errorf("message %s: %w", id, err)
@@ -290,12 +307,17 @@ func (db *DB) ThreadByID(ctx context.Context, v *auth.Viewer, id string) (Thread
 // PrefixStat is one (zone, prefix) of the registry with what was
 // delivered to it, the aggregation view of §3.3.
 type PrefixStat struct {
-	Zone      string
-	Prefix    string
-	State     int // PrefixClaimed or PrefixDiscovered
-	Label     string
-	FirstSeen time.Time
-	LastSeen  time.Time
+	Zone   string
+	Prefix string
+	State  int // PrefixClaimed or PrefixDiscovered
+	// Label, Note and ExpectedDomains are the operator's.
+	Label           string
+	Note            string
+	ExpectedDomains []string
+	FirstSeen       time.Time
+	LastSeen        time.Time
+	LeakSuspect     bool
+	Active          bool
 	// Messages counts the distinct visible messages delivered here;
 	// Downgraded how many of them the §4.3 downgrade hides from the
 	// default views (judged over all their visible deliveries).
@@ -303,19 +325,34 @@ type PrefixStat struct {
 	Downgraded int
 }
 
+// PrefixQuery narrows PrefixStats.
+type PrefixQuery struct {
+	// LeakSuspect, when set, keeps only prefixes with that flag.
+	LeakSuspect *bool
+	// Limit caps the prefixes returned, most recently seen first; 0
+	// returns all of them.
+	Limit int
+}
+
 // PrefixSummary is the aggregation view: the prefixes and the distinct
-// totals over all of them (a message sent to two prefixes counts once).
+// totals over all visible mail (a message sent to two prefixes counts
+// once). The totals do not depend on the query; Total does.
 type PrefixSummary struct {
 	Messages   int
 	Downgraded int
-	Prefixes   []PrefixStat
+	// Total is how many prefixes matched before Limit.
+	Total    int
+	Prefixes []PrefixStat
 }
 
-// PrefixStats returns every prefix with its counts, most recently used
-// first, and the totals.
-func (db *DB) PrefixStats(ctx context.Context, v *auth.Viewer) (PrefixSummary, error) {
+// PrefixStats returns the prefixes q selects with their counts, most
+// recently used first, and the totals.
+func (db *DB) PrefixStats(ctx context.Context, v *auth.Viewer, q PrefixQuery) (PrefixSummary, error) {
 	if err := needViewer(v, "prefixes"); err != nil {
 		return PrefixSummary{}, err
+	}
+	if q.Limit < 0 {
+		return PrefixSummary{}, errors.New("prefixes: negative limit")
 	}
 	// md: each visible message once, with its downgrade over all its
 	// visible deliveries.
@@ -325,26 +362,39 @@ func (db *DB) PrefixStats(ctx context.Context, v *auth.Viewer) (PrefixSummary, e
 			WHERE d.message_id IS NOT NULL AND ` + visibleDelivery(v) + `
 			GROUP BY d.message_id
 		)`
+	// The filter is a nullable parameter so that both statements share
+	// it; a NULL limit is no limit.
+	const where = `WHERE ($1::boolean IS NULL OR p.leak_suspect = $1)`
+	var limit *int
+	if q.Limit > 0 {
+		limit = &q.Limit
+	}
 	var out PrefixSummary
 	err := pgx.BeginTxFunc(ctx, db.pool, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, md+` SELECT count(*), count(*) FILTER (WHERE downgraded) FROM md`).Scan(&out.Messages, &out.Downgraded)
+		err := tx.QueryRow(ctx, md+` SELECT count(*), count(*) FILTER (WHERE downgraded),
+				(SELECT count(*) FROM prefixes p `+where+`) FROM md`, q.LeakSuspect).
+			Scan(&out.Messages, &out.Downgraded, &out.Total)
 		if err != nil {
 			return err
 		}
 		rows, err := tx.Query(ctx, md+`
-			SELECT p.zone, p.prefix, p.state, coalesce(p.label, ''), p.first_seen, p.last_seen,
+			SELECT p.zone, p.prefix, p.state, coalesce(p.label, ''), coalesce(p.note, ''), p.expected_domains,
+				p.first_seen, p.last_seen, p.leak_suspect, p.active,
 				count(DISTINCT md.message_id), count(DISTINCT md.message_id) FILTER (WHERE md.downgraded)
 			FROM prefixes p
 			LEFT JOIN deliveries d ON d.zone = p.zone AND d.prefix = p.prefix AND `+visibleDelivery(v)+`
 			LEFT JOIN md ON md.message_id = d.message_id
+			`+where+`
 			GROUP BY p.zone, p.prefix
-			ORDER BY p.last_seen DESC, p.zone, p.prefix`)
+			ORDER BY p.last_seen DESC, p.zone, p.prefix
+			LIMIT $2`, q.LeakSuspect, limit)
 		if err != nil {
 			return err
 		}
 		out.Prefixes, err = pgx.CollectRows(rows, func(r pgx.CollectableRow) (PrefixStat, error) {
 			var p PrefixStat
-			err := r.Scan(&p.Zone, &p.Prefix, &p.State, &p.Label, &p.FirstSeen, &p.LastSeen, &p.Messages, &p.Downgraded)
+			err := r.Scan(&p.Zone, &p.Prefix, &p.State, &p.Label, &p.Note, &p.ExpectedDomains,
+				&p.FirstSeen, &p.LastSeen, &p.LeakSuspect, &p.Active, &p.Messages, &p.Downgraded)
 			return p, err
 		})
 		return err

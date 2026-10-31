@@ -274,6 +274,42 @@ func TestSelectBudget(t *testing.T) {
 	}
 }
 
+// A continuation runs on into the later parts; a bare part anchor stays
+// in its part.
+func TestSelectAcrossParts(t *testing.T) {
+	raw := "From: a@example.net\r\nSubject: two\r\nMIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/mixed; boundary=b\r\n\r\n" +
+		"--b\r\nContent-Type: text/plain\r\n\r\none\r\n\r\ntwo\r\n" +
+		"--b\r\nContent-Type: text/plain\r\n\r\nthree\r\n--b--\r\n"
+	full := Build(Input{ID: testID, Raw: []byte(raw)})
+	if len(full.Content.Parts) != 2 {
+		t.Fatalf("parts: %+v", full.Content.Parts)
+	}
+	from, _ := Select(full, LevelPart, Anchor{Part: "1", Para: 2})
+	if got := blocksOf(from); len(got) != 2 || got[0].Text() != "two" || got[1].Text() != "three" {
+		t.Errorf("continuation: %+v", got)
+	}
+	only, _ := Select(full, LevelPart, Anchor{Part: "1"})
+	if got := blocksOf(only); len(got) != 2 || got[1].Text() != "two" {
+		t.Errorf("one part: %+v", got)
+	}
+}
+
+func TestWithholdDelivery(t *testing.T) {
+	in := input(t, "phish-dmarc-fail")
+	in.Downgraded = true // as the store computes it from dmarc=fail
+	in.WithholdDelivery = true
+	v := Build(in)
+	f := v.Facts
+	if !f.Auth.Withheld || f.Auth.Verified || f.Auth.DMARC != "" || f.Auth.FromDomain != "bank.example.com" ||
+		len(f.DeliveredTo) != 0 || !f.Downgraded {
+		t.Errorf("facts = %+v", f)
+	}
+	if text := v.Text(); strings.Contains(text, "dmarc=fail") || strings.Contains(text, "inbox@example.com") || !strings.Contains(text, "warning: downgraded") {
+		t.Errorf("text:\n%s", text)
+	}
+}
+
 func TestParseURI(t *testing.T) {
 	for in, want := range map[string]Anchor{
 		"yuuka://message/" + testID:                      {},

@@ -91,7 +91,7 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 		Name: "get_message",
 		Description: "Read one message as structured text with stable anchors. level=snippet (default) gives " +
 			"facts and a snippet, sections a table of contents, part the text of the anchored part from the " +
-			"anchored paragraph on. Needs message:read.",
+			"anchored paragraph on. Needs message:read; delivery facts (recipients, SPF/DKIM/DMARC) also need delivery:read.",
 		Annotations: readOnly,
 	}, tool(s, viewerOf, "get_message", auth.MessageRead, s.getMessage))
 	sdk.AddTool(srv, &sdk.Tool{

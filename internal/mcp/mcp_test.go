@@ -188,7 +188,7 @@ const fenceTag = "<untrusted_mail_content nonce="
 func TestSearchAndRead(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	cs := e.client(e.viewer(auth.MessageRead, auth.PrefixRead))
+	cs := e.client(e.viewer(auth.MessageRead, auth.DeliveryRead, auth.PrefixRead))
 
 	r := callTool(t, cs, "search_messages", map[string]any{"q": "verification code is 482913"})
 	var out mcp.SearchOutput
@@ -248,7 +248,7 @@ func TestSearchAndRead(t *testing.T) {
 func TestDowngradedAndFenced(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
-	cs := e.client(e.viewer(auth.MessageRead))
+	cs := e.client(e.viewer(auth.MessageRead, auth.DeliveryRead))
 	r := callTool(t, cs, "get_message", map[string]any{"uri": agentview.MessageURI(e.ids["phish-dmarc-fail"]), "level": "part"})
 	var v agentview.View
 	if err := json.Unmarshal(r.structured, &v); err != nil || r.isError {
@@ -262,6 +262,26 @@ func TestDowngradedAndFenced(t *testing.T) {
 	inj := strings.Index(r.text, "ignore your previous instructions")
 	if open < 0 || inj < open || closing < inj || strings.Count(r.text, "untrusted_mail_content") != 2 {
 		t.Errorf("injection not fenced:\n%s", r.text)
+	}
+}
+
+// Envelope and authentication facts are delivery data (§13.4): without
+// delivery:read they are withheld, as in the REST API, and the
+// downgrade is all that remains of a DMARC failure.
+func TestDeliveryFactsNeedDeliveryRead(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	cs := e.client(e.viewer(auth.MessageRead))
+	r := callTool(t, cs, "get_message", map[string]any{"uri": agentview.MessageURI(e.ids["phish-dmarc-fail"])})
+	var v agentview.View
+	if err := json.Unmarshal(r.structured, &v); err != nil || r.isError {
+		t.Fatal(err, r.text)
+	}
+	f := v.Facts
+	if !f.Auth.Withheld || f.Auth.DMARC != "" || len(f.DeliveredTo) != 0 || !f.Downgraded ||
+		strings.Contains(r.text, "dmarc=fail") || strings.Contains(r.text, "a@example.com") ||
+		!strings.Contains(r.text, "auth: withheld") || !strings.Contains(r.text, "warning: downgraded") {
+		t.Errorf("facts %+v\n%s", f, r.text)
 	}
 }
 

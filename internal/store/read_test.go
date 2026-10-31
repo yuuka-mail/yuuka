@@ -168,8 +168,18 @@ func TestMessageByID(t *testing.T) {
 	if d.InReplyTo != "orig-1@example.com" || d.BodyText == "" || d.Date == nil || len(d.Deliveries) != 1 {
 		t.Fatalf("detail %+v", d)
 	}
-	if dl := d.Deliveries[0]; dl.Prefix != "a" || dl.PrefixState != store.PrefixClaimed || dl.Auth == nil {
+	if dl := d.Deliveries[0]; dl.Prefix != "a" || dl.PrefixState != store.PrefixClaimed || dl.Auth == nil ||
+		dl.EnvelopeTo != "a@example.com" || dl.Raw.R2Key == "" || dl.Raw.DeliveryID != dl.ID {
 		t.Errorf("delivery %+v", dl)
+	}
+	// The trusted receiver's verdict comes through as stored.
+	i = slices.IndexFunc(all, func(m store.MessageSummary) bool { return m.Subject == "Your verification code is 482913" })
+	otp, err := db.MessageByID(t.Context(), operator, all[i].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := otp.Deliveries[0].Auth; a == nil || !a.Trusted || a.DMARC != "pass" {
+		t.Errorf("otp auth %+v", a)
 	}
 
 	// An alias resolves to its survivor.
@@ -202,7 +212,7 @@ func TestPrefixStats(t *testing.T) {
 	db, _ := load(t)
 	deliver(t, db, "plain-otp.eml", nil, "shop", time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC))
 	deliver(t, db, "plain-otp.eml", shipped, "shop", time.Date(2026, 11, 1, 0, 0, 1, 0, time.UTC))
-	sum, err := db.PrefixStats(t.Context(), operator)
+	sum, err := db.PrefixStats(t.Context(), operator, store.PrefixQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,8 +233,38 @@ func TestPrefixStats(t *testing.T) {
 	if s := got["shop"]; s.State != store.PrefixDiscovered || s.Messages != 2 || s.Downgraded != 1 {
 		t.Errorf("shop: %+v", s)
 	}
-	if ps[0].Prefix != "shop" {
-		t.Errorf("most recent first: %q", ps[0].Prefix)
+	if ps[0].Prefix != "shop" || sum.Total != 2 || len(ps) != 2 {
+		t.Errorf("most recent first: %q of %d", ps[0].Prefix, sum.Total)
+	}
+}
+
+func TestPrefixStatsQuery(t *testing.T) {
+	t.Parallel()
+	db, pool := load(t)
+	at := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := pool.Exec(t.Context(), `INSERT INTO prefixes (zone, prefix, first_seen, last_seen, leak_suspect, note, expected_domains)
+		VALUES ('example.com', 'leaky', $1, $1, true, 'gave it to a shop', '{shop.example.net}')`, at); err != nil {
+		t.Fatal(err)
+	}
+	yes := true
+	leaks, err := db.PrefixStats(t.Context(), operator, store.PrefixQuery{LeakSuspect: &yes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leaks.Total != 1 || len(leaks.Prefixes) != 1 {
+		t.Fatalf("leaks %+v", leaks)
+	}
+	if l := leaks.Prefixes[0]; l.Prefix != "leaky" || !l.LeakSuspect || l.Messages != 0 || l.State != store.PrefixDiscovered ||
+		l.Note != "gave it to a shop" || !slices.Equal(l.ExpectedDomains, []string{"shop.example.net"}) || !l.Active {
+		t.Errorf("leaky %+v", l)
+	}
+	// The totals count all visible mail whatever the filter.
+	if leaks.Messages != 19 {
+		t.Errorf("totals %d, want 19", leaks.Messages)
+	}
+	one, err := db.PrefixStats(t.Context(), operator, store.PrefixQuery{Limit: 1})
+	if err != nil || one.Total != 2 || len(one.Prefixes) != 1 || one.Prefixes[0].Prefix != "leaky" {
+		t.Errorf("limit 1: %+v %v", one, err)
 	}
 }
 
@@ -239,7 +279,7 @@ func TestReadsRefuseNilViewer(t *testing.T) {
 		"ListMessages": func() error { _, err := db.ListMessages(t.Context(), nil, store.MessageQuery{}); return err },
 		"MessageByID":  func() error { _, err := db.MessageByID(t.Context(), nil, id); return err },
 		"ThreadByID":   func() error { _, err := db.ThreadByID(t.Context(), nil, id); return err },
-		"PrefixStats":  func() error { _, err := db.PrefixStats(t.Context(), nil); return err },
+		"PrefixStats":  func() error { _, err := db.PrefixStats(t.Context(), nil, store.PrefixQuery{}); return err },
 	}
 	for name, read := range reads {
 		if err := read(); err == nil || errors.Is(err, store.ErrNotFound) {

@@ -58,7 +58,13 @@ M1 的落法（`internal/agentview`），以及设计里没写死、实现时定
   DKIM 任一签名 pass 即 pass；没有可信接收方的结论就是 `unverified (原因)`，其余一概不填。
   可信接收方报 `dmarc=fail` 的信，不论前缀状态都在视图里标 `downgraded` 并带警告（§8.3）
 - `level=part` 一次最多给 32K 字符，超出时 `more` 给出下一块的锚点；带 `para` 的锚点
-  在 `part` 级别表示「从这一块开始」，所以核对一个引用时返回的第一块就是被引的那块
+  在 `part` 级别表示「从这一块开始」，所以核对一个引用时返回的第一块就是被引的那块。
+  它一直读到信的末尾、跨过后面的部分，这样顺着 `more` 能读完整封信；只写 `part/<section>`
+  的锚点才只给那一部分
+- **投递事实要 `delivery:read`**（§13.4），和 REST 的 `messages/{id}` 同一条线：没有它，
+  `facts.delivered_to` 为空，`facts.auth` 只剩 `withheld` 和 From 头的域名，
+  spf / dkim / dmarc 的结论和随之而来的警告都不给；store 算出的 `downgraded`（已含 dmarc=fail）照给。
+  视图由 `agentview.InputOf` 从 store 的 `MessageDetail` 组装，MCP 和 REST 共用这一处，两边不会对不上
 - `view_version` 和 `parser_version` 任一变化都可能让段落号漂移（§4.2），这就是 `cites` 存原文摘录的原因
 
 ### 8.2 能力分级，在 API 层强制
@@ -179,7 +185,8 @@ M1 的落法（`internal/mcp`）：
   `search_messages` 比上面的签名多一个 `include_downgraded`：§4.3 的降级默认把未认领前缀和
   dmarc=fail 的信藏起来，agent 查某个新前缀时需要显式打开；返回的命中上照样标 `downgraded`
 - 每次调用：取调用方的 Viewer → 查 scope（不足则记 `auth.deny` 并返回工具错误）→
-  经 store 的 Viewer 读函数读 → 记一条 `actions`（`tool = mcp.<名字>`，`args` 是入参，
+  经 store 的 Viewer 读函数读（和 REST 是同一组：`Search`、`MessageByID`、`PrefixStats`，
+  可见性只在 `visibleMessage` / `visibleDelivery` 里算，§13.8）→ 记一条 `actions`（`tool = mcp.<名字>`，`args` 是入参，
   `result` 只记计数和 URI，不记信件内容）。读也记，因为「昨天 agent 看了什么」同样是 §8.8 要回答的问题
 - 结果同时给 `structuredContent`（§8.1 的 JSON 树 / 命中列表）和一段文本（给模型读，
   发件人写的部分在不可信边界里）。工具不声明 output schema：视图的 schema 很长，

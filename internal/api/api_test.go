@@ -57,9 +57,9 @@ func (s *spy) ThreadByID(ctx context.Context, v *auth.Viewer, id string) (store.
 	return s.DB.ThreadByID(ctx, v, id)
 }
 
-func (s *spy) PrefixStats(ctx context.Context, v *auth.Viewer) (store.PrefixSummary, error) {
+func (s *spy) PrefixStats(ctx context.Context, v *auth.Viewer, q store.PrefixQuery) (store.PrefixSummary, error) {
 	s.saw("PrefixStats", v)
-	return s.DB.PrefixStats(ctx, v)
+	return s.DB.PrefixStats(ctx, v, q)
 }
 
 func (s *spy) Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (store.SearchResult, error) {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -164,28 +163,18 @@ func (s *Server) getMessage(ctx context.Context, v *auth.Viewer, in GetInput) (r
 	if err != nil {
 		return result{}, refuse("%v", err)
 	}
-	m, err := s.db.Message(ctx, v, id)
+	m, err := s.db.MessageByID(ctx, v, id)
 	if errors.Is(err, store.ErrNotFound) {
 		return result{}, refuse("no message %s", agentview.MessageURI(id))
 	}
 	if err != nil {
 		return result{}, err
 	}
-	first := m.Deliveries[0]
-	raw, err := s.raw.ReadRaw(ctx, first.Raw)
+	raw, err := s.raw.ReadRaw(ctx, m.Deliveries[0].Raw)
 	if err != nil {
 		return result{}, err
 	}
-	var to []string
-	for _, d := range m.Deliveries {
-		if !slices.Contains(to, d.EnvelopeTo) {
-			to = append(to, d.EnvelopeTo)
-		}
-	}
-	full := agentview.Build(agentview.Input{
-		ID: m.ID, Raw: raw, ReceivedAt: m.ReceivedAt, DeliveredTo: to,
-		Class: m.Class.String(), Downgraded: m.Downgraded, Auth: first.Auth,
-	})
+	full := agentview.Build(agentview.InputOf(v, m, raw))
 	view, err := agentview.Select(full, level, anchor)
 	if errors.Is(err, agentview.ErrNoAnchor) {
 		return result{}, refuse("%s has no %s", full.URI, anchor)
@@ -228,15 +217,24 @@ type Prefix struct {
 	Messages        int       `json:"messages"`
 }
 
+const (
+	defaultPrefixes = 200
+	maxPrefixes     = 1000
+)
+
 func (s *Server) listPrefixes(ctx context.Context, v *auth.Viewer, in PrefixesInput) (result, error) {
-	list, err := s.db.Prefixes(ctx, v, store.PrefixQuery{LeakSuspect: in.LeakSuspect, Limit: in.Limit})
+	limit := defaultPrefixes
+	if in.Limit > 0 {
+		limit = min(in.Limit, maxPrefixes)
+	}
+	list, err := s.db.PrefixStats(ctx, v, store.PrefixQuery{LeakSuspect: in.LeakSuspect, Limit: limit})
 	if err != nil {
 		return result{}, err
 	}
 	out := PrefixesOutput{Total: list.Total, Prefixes: make([]Prefix, len(list.Prefixes))}
 	for i, p := range list.Prefixes {
 		out.Prefixes[i] = Prefix{
-			Address: p.Prefix + "@" + p.Zone, Claimed: p.Claimed, Label: p.Label, Note: p.Note,
+			Address: p.Prefix + "@" + p.Zone, Claimed: p.State == store.PrefixClaimed, Label: p.Label, Note: p.Note,
 			ExpectedDomains: p.ExpectedDomains, FirstSeen: p.FirstSeen.UTC(), LastSeen: p.LastSeen.UTC(),
 			LeakSuspect: p.LeakSuspect, Inactive: !p.Active, Messages: p.Messages,
 		}

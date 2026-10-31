@@ -89,6 +89,10 @@ type Input struct {
 	Downgraded bool
 	// Auth is the authentication facts of the delivery the view is for.
 	Auth authres.Auth
+	// WithholdDelivery is set when the viewer may read the message but
+	// not its delivery facts (delivery:read, §13.4): DeliveredTo and Auth
+	// are then ignored and the view says they were withheld.
+	WithholdDelivery bool
 }
 
 // View is the structured view of one message.
@@ -122,7 +126,10 @@ type Facts struct {
 // Authentication-Results counts (§10.1.1); without it the message is
 // unverified and nothing else is filled in.
 type Auth struct {
-	Verified bool   `json:"verified"`
+	Verified bool `json:"verified"`
+	// Withheld is set when the viewer lacks delivery:read; nothing but
+	// FromDomain is filled in then.
+	Withheld bool   `json:"withheld,omitempty"`
 	SPF      string `json:"spf,omitempty"`
 	DKIM     string `json:"dkim,omitempty"`
 	DMARC    string `json:"dmarc,omitempty"`
@@ -280,10 +287,17 @@ func Build(in Input) View {
 	}
 	v.Content.Snippet = snippet(r.parts)
 
+	f := &v.Facts
+	if in.WithholdDelivery {
+		f.DeliveredTo = []string{}
+		f.Auth = Auth{Withheld: true, FromDomain: f.Auth.FromDomain, Line: "withheld (needs delivery:read)"}
+	}
 	// §8.3: mail that failed DMARC is downgraded and marked whatever the
 	// prefix state says.
-	f := &v.Facts
 	switch {
+	case f.Auth.Withheld:
+		// The store's downgrade, which already counts a DMARC failure,
+		// is all this viewer learns.
 	case !f.Auth.Verified:
 		f.Warnings = append(f.Warnings, "unverified: no result from the trusted receiver, so the sender is unproven")
 	case f.Auth.DMARC == "fail":
@@ -412,8 +426,9 @@ var ErrNoAnchor = errors.New("anchor does not exist in this message")
 //   - LevelSnippet: facts, header fields, snippet and attachments.
 //   - LevelSections: plus the sections, of one part if a is in one.
 //   - LevelPart: plus the blocks of the part a names (all parts if a is
-//     empty), starting at a's block if it names one, up to MaxChars.
-//     Content.More is the anchor to continue from.
+//     empty), up to MaxChars. An anchor that names a block starts there
+//     and runs on through the later parts, so that Content.More, the
+//     anchor to continue from, continues the whole message.
 func Select(full View, level Level, a Anchor) (View, error) {
 	v := full
 	v.Level = level
@@ -424,7 +439,11 @@ func Select(full View, level Level, a Anchor) (View, error) {
 		if i < 0 || a.Para > len(parts[i].Blocks) {
 			return View{}, ErrNoAnchor
 		}
-		parts = parts[i : i+1]
+		if a.Para > 0 {
+			parts = parts[i:]
+		} else {
+			parts = parts[i : i+1]
+		}
 	}
 	c.Parts, c.Sections = nil, nil
 	switch level {
