@@ -343,7 +343,7 @@ func serve(ctx context.Context, log *slog.Logger) error {
 			return err
 		}
 		mux.Handle("/auth/", svc.Handler())
-		mux.Handle("/api/", api.New(a.db, log).Handler(svc))
+		mux.Handle("/api/", api.New(a.db, a.in, log).Handler(svc))
 		// The page shell needs no session; it fetches /auth/session.
 		mux.Handle("/", web.Handler())
 	} else {

@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/agentview"
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/classify"
@@ -36,6 +37,11 @@ type Store interface {
 	Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (store.SearchResult, error)
 }
 
+// RawReader loads the raw message of a delivery (ingest.Ingester).
+type RawReader interface {
+	ReadRaw(ctx context.Context, ref store.RawRef) ([]byte, error)
+}
+
 // Guard authenticates a request and checks its scopes before h runs with
 // the viewer in the context (authn.Service.Require).
 type Guard interface {
@@ -45,15 +51,17 @@ type Guard interface {
 // API is the REST handler.
 type API struct {
 	db  Store
+	raw RawReader
 	log *slog.Logger
 }
 
-// New returns the API over db.
-func New(db Store, log *slog.Logger) *API {
+// New returns the API over db, reading raw messages for the structured
+// view through raw.
+func New(db Store, raw RawReader, log *slog.Logger) *API {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &API{db: db, log: log}
+	return &API{db: db, raw: raw, log: log}
 }
 
 // route is one endpoint and the scopes it requires. The ACL test walks
@@ -67,6 +75,7 @@ type route struct {
 var routes = []route{
 	{"GET /api/v1/messages", []auth.Scope{auth.MessageRead}, (*API).listMessages},
 	{"GET /api/v1/messages/{id}", []auth.Scope{auth.MessageRead}, (*API).message},
+	{"GET /api/v1/messages/{id}/view", []auth.Scope{auth.MessageRead}, (*API).messageView},
 	{"GET /api/v1/threads/{id}", []auth.Scope{auth.MessageRead}, (*API).thread},
 	{"GET /api/v1/prefixes", []auth.Scope{auth.PrefixRead}, (*API).prefixes},
 	{"GET /api/v1/search", []auth.Scope{auth.MessageRead}, (*API).search},
@@ -264,6 +273,50 @@ func (a *API) message(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// messageView is the structured view of §8.1 that the reading pane
+// renders (§12.1), the same tree get_message gives agents. level is
+// snippet, sections or part (the default); anchor is a fragment such as
+// part/1/para/3. Delivery facts in it need delivery:read, as above.
+func (a *API) messageView(w http.ResponseWriter, r *http.Request, v *auth.Viewer) {
+	p := r.URL.Query()
+	level := agentview.LevelPart
+	if s := p.Get("level"); s != "" {
+		var err error
+		if level, err = agentview.ParseLevel(s); err != nil {
+			writeError(w, http.StatusBadRequest, "level: want snippet, sections or part")
+			return
+		}
+	}
+	var anchor agentview.Anchor
+	if s := p.Get("anchor"); s != "" {
+		var err error
+		if anchor, err = agentview.ParseAnchor(s); err != nil {
+			writeError(w, http.StatusBadRequest, "anchor: want part/<section>[/para/<n>]")
+			return
+		}
+	}
+	d, err := a.db.MessageByID(r.Context(), v, r.PathValue("id"))
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	raw, err := a.raw.ReadRaw(r.Context(), d.Deliveries[0].Raw)
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	view, err := agentview.Select(agentview.Build(agentview.InputOf(v, d, raw)), level, anchor)
+	if errors.Is(err, agentview.ErrNoAnchor) {
+		writeError(w, http.StatusNotFound, "anchor: not in this message")
+		return
+	}
+	if err != nil {
+		a.fail(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, view)
 }
 
 func authOf(a *authres.Auth) *Auth {

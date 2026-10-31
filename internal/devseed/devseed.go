@@ -1,7 +1,9 @@
 // Package devseed fills a development database with the synthetic corpus
 // of testdata/eml, so the WebUI has realistic content to show. It is not
 // part of yuuka: nothing in cmd/ imports it, and it writes straight into
-// the content tables the way ingest would, without any raw store.
+// the content tables the way ingest would. The raw messages go into a
+// local raw directory only if one is given; the structured view reads
+// them from there.
 //
 //	go run ./internal/devseed/cmd -n 2000
 //
@@ -24,6 +26,7 @@ import (
 
 	"github.com/yuuka-mail/yuuka/internal/authres"
 	"github.com/yuuka-mail/yuuka/internal/contenthash"
+	"github.com/yuuka-mail/yuuka/internal/localraw"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
@@ -68,6 +71,9 @@ type Options struct {
 	Now time.Time
 	// Seed makes the generated spread reproducible.
 	Seed uint64
+	// RawDir, if set, receives every raw message at its local path, as
+	// YUUKA_DATA_DIR does in yuuka serve.
+	RawDir string
 }
 
 var (
@@ -113,7 +119,7 @@ func Load(ctx context.Context, db *store.DB, pool *pgxpool.Pool, o Options) (int
 		// Variants of a reply would all join the conversation below.
 		raw = replyLines.ReplaceAll(raw, []byte("X-Seed-Was-$1:"))
 		at := o.Now.Add(-time.Duration(rng.Int64N(int64(90 * 24 * time.Hour))))
-		if err := deliver(ctx, db, raw, variantPrefixes[rng.IntN(len(variantPrefixes))], at); err != nil {
+		if err := deliver(ctx, db, o.RawDir, raw, variantPrefixes[rng.IntN(len(variantPrefixes))], at); err != nil {
 			return n, err
 		}
 		n++
@@ -137,7 +143,7 @@ func Load(ctx context.Context, db *store.DB, pool *pgxpool.Pool, o Options) (int
 				"Friday works. Noon at the usual place?", "Noon it is. I'll book a table for two."), 0},
 		}
 		for _, t := range turns {
-			if err := deliver(ctx, db, []byte(t.r.Replace(string(reply))), "alice", o.Now.Add(t.at)); err != nil {
+			if err := deliver(ctx, db, o.RawDir, []byte(t.r.Replace(string(reply))), "alice", o.Now.Add(t.at)); err != nil {
 				return n, err
 			}
 			n++
@@ -149,7 +155,7 @@ func Load(ctx context.Context, db *store.DB, pool *pgxpool.Pool, o Options) (int
 		if m := toLine.FindSubmatch(raw); m != nil {
 			prefix = strings.ToLower(string(m[1]))
 		}
-		if err := deliver(ctx, db, raw, prefix, o.Now.Add(-time.Duration(len(corpus)-i)*time.Minute)); err != nil {
+		if err := deliver(ctx, db, o.RawDir, raw, prefix, o.Now.Add(-time.Duration(len(corpus)-i)*time.Minute)); err != nil {
 			return n, fmt.Errorf("%s: %w", files[i], err)
 		}
 		n++
@@ -157,9 +163,14 @@ func Load(ctx context.Context, db *store.DB, pool *pgxpool.Pool, o Options) (int
 	return n, nil
 }
 
-func deliver(ctx context.Context, db *store.DB, raw []byte, prefix string, at time.Time) error {
+func deliver(ctx context.Context, db *store.DB, rawDir string, raw []byte, prefix string, at time.Time) error {
 	id := ulid.New(at)
 	key := fmt.Sprintf("raw/%s/%s.eml", at.UTC().Format("2006/01"), id)
+	if rawDir != "" {
+		if err := (localraw.Dir{Root: rawDir}).Put(key, raw); err != nil {
+			return err
+		}
+	}
 	in := store.Ingest{
 		RawID: id, R2Key: key, LocalPath: key, Size: int64(len(raw)), SHA256: sha256.Sum256(raw),
 		ContentHash: contenthash.V1(raw), ReceivedAt: at, DeliveryID: id, Account: "devseed",

@@ -13,9 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/agentview"
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/authn"
 	"github.com/yuuka-mail/yuuka/internal/devseed"
+	"github.com/yuuka-mail/yuuka/internal/localraw"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
@@ -67,6 +69,13 @@ func (s *spy) Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (
 	return s.DB.Search(ctx, v, q)
 }
 
+// localRaw reads raw messages the way ingest does without R2.
+type localRaw struct{ localraw.Dir }
+
+func (l localRaw) ReadRaw(_ context.Context, ref store.RawRef) ([]byte, error) {
+	return l.Get(ref.LocalPath)
+}
+
 type harness struct {
 	t     *testing.T
 	db    *store.DB
@@ -79,7 +88,10 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	db, pool := storetest.New(t)
-	if _, err := devseed.Load(t.Context(), db, pool, devseed.Options{Dir: "../../testdata/eml", Variants: 20, Now: time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)}); err != nil {
+	raws := t.TempDir()
+	if _, err := devseed.Load(t.Context(), db, pool, devseed.Options{
+		Dir: "../../testdata/eml", Variants: 20, Now: time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC), RawDir: raws,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -92,7 +104,7 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	sp := &spy{DB: db, calls: map[string][]*auth.Viewer{}}
-	return &harness{t: t, db: db, spy: sp, svc: svc, agent: agent, h: New(sp, quiet).Handler(svc)}
+	return &harness{t: t, db: db, spy: sp, svc: svc, agent: agent, h: New(sp, localRaw{localraw.Dir{Root: raws}}, quiet).Handler(svc)}
 }
 
 // token issues a bearer token for agent:arisu with exactly scopes.
@@ -146,6 +158,7 @@ func TestACL(t *testing.T) {
 	}{
 		{"GET /api/v1/messages", "/api/v1/messages?prefix=github@example.com", []auth.Scope{auth.MessageRead}, "ListMessages"},
 		{"GET /api/v1/messages/{id}", "/api/v1/messages/" + msg.ID, []auth.Scope{auth.MessageRead}, "MessageByID"},
+		{"GET /api/v1/messages/{id}/view", "/api/v1/messages/" + msg.ID + "/view?level=sections", []auth.Scope{auth.MessageRead}, "MessageByID"},
 		{"GET /api/v1/threads/{id}", "/api/v1/threads/" + msg.ThreadID, []auth.Scope{auth.MessageRead}, "ThreadByID"},
 		{"GET /api/v1/prefixes", "/api/v1/prefixes", []auth.Scope{auth.PrefixRead}, "PrefixStats"},
 		{"GET /api/v1/search", "/api/v1/search?q=verification", []auth.Scope{auth.MessageRead}, "Search"},
@@ -213,6 +226,53 @@ func TestDeliveriesNeedDeliveryRead(t *testing.T) {
 	}
 	if m := decode[Message](t, h.get(path, h.token(auth.MessageRead, auth.DeliveryRead))); len(m.Deliveries) == 0 {
 		t.Error("with delivery:read: no deliveries")
+	}
+}
+
+// The structured view is the tree get_message gives agents, with the same
+// rule for delivery facts as the message endpoint.
+func TestMessageView(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	read := h.token(auth.MessageRead)
+	res := decode[SearchResult](t, h.get("/api/v1/search?downgraded=include&q=confirm+your+account", read))
+	i := slices.IndexFunc(res.Hits, func(m MessageSummary) bool { return m.Subject == "Urgent: confirm your account" })
+	if i < 0 {
+		t.Fatalf("no DMARC-fail phish in %+v", res)
+	}
+	path := "/api/v1/messages/" + res.Hits[i].ID + "/view"
+
+	v := decode[agentview.View](t, h.get(path, h.token(auth.MessageRead, auth.DeliveryRead)))
+	f := v.Facts
+	if v.Level != agentview.LevelPart || len(v.Content.Parts) == 0 || f.Auth.DMARC != "fail" ||
+		len(f.DeliveredTo) != 1 || !f.Downgraded || len(f.Warnings) == 0 {
+		t.Errorf("with delivery:read: %+v", v)
+	}
+	v = decode[agentview.View](t, h.get(path, read))
+	if f := v.Facts; !f.Auth.Withheld || f.Auth.DMARC != "" || len(f.DeliveredTo) != 0 || !f.Downgraded {
+		t.Errorf("without delivery:read: %+v", f)
+	}
+	anchor := v.Content.Parts[0].Blocks[1].Anchor
+	from := decode[agentview.View](t, h.get(path+"?anchor="+anchor, read))
+	if from.Content.Parts[0].Blocks[0].Anchor != anchor {
+		t.Errorf("from %s: %+v", anchor, from.Content.Parts[0].Blocks[0])
+	}
+	sec := decode[agentview.View](t, h.get(path+"?level=sections", read))
+	if sec.Content.Parts != nil || len(sec.Content.Sections) == 0 {
+		t.Errorf("sections: %+v", sec.Content)
+	}
+	for q, code := range map[string]int{
+		"?level=all":              http.StatusBadRequest,
+		"?anchor=para/1":          http.StatusBadRequest,
+		"?anchor=part/9":          http.StatusNotFound,
+		"?anchor=part/1/para/999": http.StatusNotFound,
+	} {
+		if w := h.get(path+q, read); w.Code != code {
+			t.Errorf("%s: %d %s", q, w.Code, w.Body.String())
+		}
+	}
+	if w := h.get("/api/v1/messages/"+ulid.New(time.Now())+"/view", read); w.Code != http.StatusNotFound {
+		t.Errorf("missing message: %d", w.Code)
 	}
 }
 

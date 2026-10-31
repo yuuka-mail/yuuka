@@ -118,13 +118,15 @@ iframe 里是原信自己的 HTML，我们无法在其中挂稳定 id。所以 a
 
 M1 的 WebUI（`web/`）和它读的 REST（`internal/api`），以及设计里没写死、实现时定下的几处：
 
-- **REST 只读、按路由声明 scope**。`/api/v1/` 下五个端点：`messages`（列表，过滤 prefix / class /
-  降级，`(received_at, id)` 键集游标）、`messages/{id}`、`threads/{id}`、`prefixes`（聚合计数）、
-  `search`。前四个和搜索要 `message:read`，`prefixes` 要 `prefix:read`；`messages/{id}` 里的
-  投递事实（信封、认证结果）另要 `delivery:read`，没有就不给。路由和 scope 写在一张表里，
+- **REST 只读、按路由声明 scope**。`/api/v1/` 下六个端点：`messages`（列表，过滤 prefix / class /
+  降级，`(received_at, id)` 键集游标）、`messages/{id}`、`messages/{id}/view`（§8.1 的结构化视图，
+  `level=snippet|sections|part`，默认 `part`；`anchor=part/<section>[/para/<n>]`，不带 `#`）、
+  `threads/{id}`、`prefixes`（聚合计数）、`search`。`prefixes` 要 `prefix:read`，其余要 `message:read`；
+  `messages/{id}` 里的投递事实（信封、认证结果）另要 `delivery:read`，没有就不给，
+  `view` 里的 `facts.delivered_to` 和 `facts.auth` 同理（标 `withheld`，§8.1）。路由和 scope 写在一张表里，
   ACL 测试遍历这张表，漏一条测试就失败。列表用键集而不是 offset，是因为新信到达时 offset 分页会重复或跳行
 - **类型由 `tygo` 生成**，覆盖 `internal/api/types.go` 和 `internal/authn/wire.go`
-  （`/auth/` 的响应体），`mise run web:check` 先 `go generate` 再类型检查，Go 侧改了字段 TS 立刻报错
+  （`/auth/` 的响应体）以及 `internal/agentview/types.go`（结构化视图），`mise run web:check` 先 `go generate` 再类型检查，Go 侧改了字段 TS 立刻报错
 - **页面壳不需要会话**。`go:embed` 的 `index.html` 对任何非文件路径都返回（`no-store`），
   哈希命名的 `assets/` 缓存一年；壳加载后再同源 `fetch /auth/session`，401 就原地显示登录，
   URL 不变，所以从 TG 链接点进来、登录后直接落在那封信上。视图状态全部在 query string 里

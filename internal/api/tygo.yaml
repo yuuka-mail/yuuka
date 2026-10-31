@@ -8,6 +8,11 @@ packages:
     output_path: ../../web/src/api/types.gen.ts
     preserve_comments: types
     enum_style: union
+  - path: github.com/yuuka-mail/yuuka/internal/agentview
+    include_files: [types.go]
+    output_path: ../../web/src/api/agentview.gen.ts
+    preserve_comments: types
+    enum_style: union
   - path: github.com/yuuka-mail/yuuka/internal/authn
     include_files: [wire.go]
     output_path: ../../web/src/api/auth.gen.ts
