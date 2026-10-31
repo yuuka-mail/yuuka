@@ -75,6 +75,10 @@
 //	YUUKA_TRUSTED_AUTHSERV_ID           authserv-id of the account's trusted receiver (default "mx.cloudflare.net")
 //	YUUKA_TELEGRAM_BOT_TOKEN            Telegram bot token (optional; set together with the chat id)
 //	YUUKA_TELEGRAM_CHAT_ID              Telegram chat id
+//	YUUKA_TELEGRAM_OPERATOR_ID          numeric Telegram user id whose presses of the recall button on
+//	                                    held mail count (optional; set together with the next one, and
+//	                                    the chat id must then be numeric). serve then long-polls the bot
+//	YUUKA_TELEGRAM_OPERATOR             human:<name> a recall from Telegram is recorded as
 //	YUUKA_RECONCILE_INTERVAL            pending/ reconcile period for serve (default 5m)
 //	YUUKA_WEB_ORIGIN                    WebUI origin as the browser sees it, e.g. https://mail.example.com;
 //	                                    enables the WebUI, its login and the REST API (required by admin enroll)
@@ -295,8 +299,10 @@ type app struct {
 	pool    *pgxpool.Pool
 	db      *store.DB
 	in      *ingest.Ingester
-	alerter authn.Alerter   // nil without Telegram
-	outbox  *outbox.Service // serve only; see openOutbox
+	alerter authn.Alerter // nil without Telegram
+	// cards are the review tier's Telegram cards; nil without Telegram.
+	cards  *notify.Cards
+	outbox *outbox.Service // serve only; see openOutbox
 	// submit is the only way mail enters the outbox (§8.9): the SMTP
 	// submission port, REST and MCP go through it. serve only.
 	submit *submit.Service
@@ -323,7 +329,11 @@ func (a *app) openOutbox(log *slog.Logger) error {
 		PollInterval: a.cfg.Outbox.PollInterval,
 		Log:          log,
 	})
-	a.submit = submit.New(submit.Config{DB: a.db, Outbox: a.outbox, Log: log})
+	sc := submit.Config{DB: a.db, Outbox: a.outbox, Log: log}
+	if a.cards != nil {
+		sc.Notifier = a.cards
+	}
+	a.submit = submit.New(sc)
 	return nil
 }
 
@@ -338,9 +348,11 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 	}
 	var notifier ingest.Notifier
 	var alerter authn.Alerter
+	var cards *notify.Cards
 	if cfg.TelegramToken != "" {
 		tg := &notify.Telegram{Token: cfg.TelegramToken, ChatID: cfg.TelegramChat, Client: &http.Client{Timeout: 15 * time.Second}}
 		notifier, alerter = tg, tg
+		cards = &notify.Cards{TG: tg, Origin: cfg.Web.Origin, Recall: cfg.TelegramOperatorID != 0}
 	}
 	in := ingest.New(ingest.Config{
 		Raw:      r2.NewRawBucket(cfg.Raw),
@@ -354,7 +366,7 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 		TrustedAuthservID: cfg.TrustedAuthservID,
 		Log:               log,
 	})
-	return &app{cfg: cfg, pool: pool, db: db, in: in, alerter: alerter}, nil
+	return &app{cfg: cfg, pool: pool, db: db, in: in, alerter: alerter, cards: cards}, nil
 }
 
 func (a *app) mcp() *mcp.Server {
@@ -479,6 +491,11 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	if err := a.openOutbox(log); err != nil {
 		return err
 	}
+	defer a.submit.Wait()
+	poller, err := a.recallPoller(ctx, log)
+	if err != nil {
+		return err
+	}
 	rs, err := a.routes(log)
 	if err != nil {
 		return err
@@ -520,6 +537,16 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		defer close(outboxDone)
 		a.outbox.Run(ctx)
 	}()
+	// The recall button of held mail, by long polling: nothing listens
+	// for Telegram, so nothing is exposed for it (§13.7).
+	pollDone := make(chan struct{})
+	go func() {
+		defer close(pollDone)
+		if poller != nil {
+			log.Info("telegram: answering the recall button of held mail", "operator", a.cfg.TelegramOperator)
+			poller.Run(ctx)
+		}
+	}()
 
 	errc := make(chan error, 1)
 	go func() {
@@ -544,6 +571,7 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	err = errors.Join(failed, srv.Shutdown(shutdownCtx), <-subDone)
 	<-loopDone
 	<-outboxDone
+	<-pollDone
 	return err
 }
 

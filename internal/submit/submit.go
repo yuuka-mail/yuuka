@@ -22,10 +22,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/mail"
+	"sync"
 	"time"
 
 	"github.com/yuuka-mail/yuuka/internal/auth"
 	"github.com/yuuka-mail/yuuka/internal/compose"
+	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/outbox"
 	"github.com/yuuka-mail/yuuka/internal/sendpolicy"
 	"github.com/yuuka-mail/yuuka/internal/store"
@@ -53,14 +55,31 @@ const (
 
 // Result is where a submission went.
 type Result struct {
-	// Queued: an outbox row was created.
-	Queued   bool
-	OutboxID string // when Queued
-	// DraftID is the draft it stopped at, when not Queued.
+	// Queued: an outbox row was created in queued, to be sent.
+	Queued bool
+	// OutboxID is the outbox row: queued, or held when Held.
+	OutboxID string
+	// Held: the review passed and the row waits HoldSeconds in held for
+	// a recall (§8.9). Queued is false; HoldReason is review and Detail
+	// says when it goes out, so a caller that knows only Queued and
+	// HoldReason still tells it apart from mail that went out.
+	Held        bool
+	HoldSeconds int
+	// DraftID is the draft it stopped at when not Queued, or for held
+	// mail the draft it goes back to if withdrawn.
 	DraftID string
 	// HoldReason is sendpolicy's hold reason, when not Queued.
 	HoldReason string
 	Detail     string
+}
+
+// heldResult is the Result of mail held for review as outbox row id.
+func heldResult(id, draftID string, d sendpolicy.Decision) Result {
+	return Result{
+		OutboxID: id, Held: true, HoldSeconds: d.HoldSeconds, DraftID: draftID,
+		HoldReason: string(sendpolicy.HoldReview),
+		Detail:     fmt.Sprintf("passed the review; held %d seconds for a recall, then sent", d.HoldSeconds),
+	}
 }
 
 // Config holds a Service's dependencies.
@@ -72,12 +91,25 @@ type Config struct {
 	Log    *slog.Logger
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
+	// Notifier tells a person about mail the review tier held or
+	// escalated (§8.4); nil sends nothing. Its cards go out after the
+	// commit, in the background: a slow or failed card never delays the
+	// submission, and never extends a recall window.
+	Notifier Notifier
+}
+
+// Notifier sends the review tier's cards; notify.Cards is one.
+type Notifier interface {
+	Held(ctx context.Context, c notify.HeldCard) error
+	Escalated(ctx context.Context, c notify.EscalatedCard) error
 }
 
 // Service submits mail.
 type Service struct {
 	cfg Config
 	log *slog.Logger
+	// cards are the review cards being sent (Wait).
+	cards sync.WaitGroup
 }
 
 // New returns a Service.
@@ -153,7 +185,11 @@ func (s *Service) SubmitRaw(ctx context.Context, v *auth.Viewer, mailFrom string
 		return Result{}, fmt.Errorf("submit: %w", err)
 	}
 
-	sub := store.Submission{FromAddr: fromAddr, Recipients: rcpts, InReplyToID: replyTo, Now: now}
+	// The review reads the parts and the subject, which normalizing
+	// does not change: it rewrites only header fields the checks do not
+	// read (From, Sender, Bcc, Date, Message-ID, Auto-Submitted).
+	content := readOutgoing(m.data, nil)
+	sub := store.Submission{FromAddr: fromAddr, Recipients: rcpts, InReplyToID: replyTo, Now: now, Content: &content.review}
 	var res Result
 	var rejected error
 	err = s.cfg.DB.WithDecision(ctx, v, sub, func(ctx context.Context, p *store.PolicyTx) error {
@@ -176,34 +212,45 @@ func (s *Service) SubmitRaw(ctx context.Context, v *auth.Viewer, mailFrom string
 		}
 		out := m.normalize(n)
 		recipients := m.recipients(rcpts)
+		dr := store.Draft{FromAddr: f.FromAddr, InReplyToID: replyTo, Subject: m.subject}
+		for _, r := range recipients {
+			switch r.Kind {
+			case store.RecipientTo:
+				dr.To = append(dr.To, r.Addr)
+			case store.RecipientCc:
+				dr.Cc = append(dr.Cc, r.Addr)
+			default:
+				dr.Bcc = append(dr.Bcc, r.Addr)
+			}
+		}
 		result := map[string]any{}
-		if d.Queue {
+		switch {
+		case d.Held:
+			// A held row needs a draft to go back to: the submission's,
+			// backed by the same sent copy, made with the row.
+			q, err := s.cfg.Outbox.Enqueue(ctx, p, outbox.Submission{Raw: out, Recipients: recipients, HeldDraft: &dr})
+			if err != nil {
+				return err
+			}
+			res, result["outbox_id"] = heldResult(q.OutboxID, q.DraftID, d), q.OutboxID
+			s.afterHeld(p, v, dr, content, res)
+		case d.Queue:
 			q, err := s.cfg.Outbox.Enqueue(ctx, p, outbox.Submission{Raw: out, Recipients: recipients})
 			if err != nil {
 				return err
 			}
 			res, result["outbox_id"] = Result{Queued: true, OutboxID: q.OutboxID}, q.OutboxID
-		} else {
+		default:
 			sr, err := s.cfg.Outbox.StoreSent(ctx, out)
 			if err != nil {
 				return err
-			}
-			dr := store.Draft{FromAddr: f.FromAddr, InReplyToID: replyTo, Subject: m.subject}
-			for _, r := range recipients {
-				switch r.Kind {
-				case store.RecipientTo:
-					dr.To = append(dr.To, r.Addr)
-				case store.RecipientCc:
-					dr.Cc = append(dr.Cc, r.Addr)
-				default:
-					dr.Bcc = append(dr.Bcc, r.Addr)
-				}
 			}
 			if dr, err = p.CreateDraft(ctx, dr, &sr, out, now); err != nil {
 				return err
 			}
 			res = Result{DraftID: dr.ID, HoldReason: string(d.HoldReason), Detail: d.Detail}
 			result["draft_id"] = dr.ID
+			s.afterEscalated(p, v, dr, d)
 		}
 		return p.Audit(ctx, toolRaw, args, result, now)
 	})
@@ -308,9 +355,19 @@ func (s *Service) submitDraft(ctx context.Context, v *auth.Viewer, id string) (R
 		sub.Recipients = append(sub.Recipients, r.Addr)
 	}
 	args := map[string]any{"draft_id": id, "identity_id": d.IdentityID, "from": d.FromAddr, "recipients": sub.Recipients}
+	var content *outgoing
 	if d.PrincipalID != v.PrincipalID {
 		sub.DraftAuthorID = d.PrincipalID
 		args["author"] = d.PrincipalID
+	} else {
+		// Only the author's own submission can meet the review; a
+		// person confirming is the review. The draft is read again
+		// under its lock below and must not have changed, so what is
+		// reviewed here is what is queued.
+		if content, err = s.preview(ctx, d, now); err != nil {
+			return Result{}, fmt.Errorf("submit draft %s: %w", id, err)
+		}
+		sub.Content = &content.review
 	}
 
 	var res Result
@@ -329,6 +386,7 @@ func (s *Service) submitDraft(ctx context.Context, v *auth.Viewer, id string) (R
 				return err
 			}
 			res = Result{DraftID: id, HoldReason: string(dec.HoldReason), Detail: dec.Detail}
+			s.afterEscalated(p, v, d, dec)
 		} else {
 			var q outbox.Enqueued
 			if d.RawID != "" {
@@ -340,6 +398,10 @@ func (s *Service) submitDraft(ctx context.Context, v *auth.Viewer, id string) (R
 				return err
 			}
 			res, result["outbox_id"] = Result{Queued: true, OutboxID: q.OutboxID}, q.OutboxID
+			if dec.Held {
+				res = heldResult(q.OutboxID, id, dec)
+				s.afterHeld(p, v, d, content, res)
+			}
 		}
 		return p.Audit(ctx, toolDraft, args, result, now)
 	})
@@ -429,6 +491,11 @@ func addresses(addrs []string) []compose.Address {
 }
 
 func (s *Service) logResult(kind string, v *auth.Viewer, r Result) {
+	if r.Held {
+		s.log.Info("submission held for review", "kind", kind, "principal", v.String(), "outbox", r.OutboxID,
+			"hold_seconds", r.HoldSeconds)
+		return
+	}
 	if r.Queued {
 		s.log.Info("submission queued", "kind", kind, "principal", v.String(), "outbox", r.OutboxID)
 		return

@@ -59,7 +59,7 @@ func (s *Service) worker(ctx context.Context) {
 		if did && err == nil {
 			continue
 		}
-		t := time.NewTimer(s.cfg.PollInterval)
+		t := time.NewTimer(s.idle())
 		select {
 		case <-ctx.Done():
 		case <-s.wake:
@@ -69,8 +69,10 @@ func (s *Service) worker(ctx context.Context) {
 	}
 }
 
-// step claims one due row and sends it. It reports whether it found one.
+// step releases the held mail whose recall window has ended, then
+// claims one due row and sends it. It reports whether it found one.
 func (s *Service) step(ctx context.Context) (bool, error) {
+	s.promote(ctx)
 	c, err := s.cfg.DB.ClaimOutbox(ctx, s.cfg.Owner, s.available(), s.cfg.Lease)
 	if err != nil || c == nil {
 		return false, err
@@ -79,6 +81,46 @@ func (s *Service) step(ctx context.Context) (bool, error) {
 	s.Wake()
 	s.attempt(ctx, c)
 	return true, nil
+}
+
+// promote releases held rows whose window has ended (store.PromoteHeld)
+// and notes when the next window ends, so an idle worker wakes for it
+// rather than up to a poll interval later.
+func (s *Service) promote(ctx context.Context) {
+	rel, next, err := s.cfg.DB.PromoteHeld(ctx)
+	for _, r := range rel {
+		if r.State == store.OutboxQueued {
+			s.log.Info("recall window ended; released", "outbox", r.OutboxID)
+		} else {
+			s.log.Warn("recall window ended on a suspended grant or a disabled identity or submitter; withdrawn to its draft",
+				"outbox", r.OutboxID, "draft", r.DraftID, "reason", r.Reason)
+		}
+	}
+	if err != nil {
+		if ctx.Err() == nil {
+			s.log.Error("promote held", "err", err)
+		}
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nextHold = time.Time{}
+	if next >= 0 {
+		s.nextHold = s.cfg.Now().Add(next)
+	}
+}
+
+// idle is how long an idle worker waits: the poll interval, or until the
+// next recall window ends if that is sooner.
+func (s *Service) idle() time.Duration {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	wait := s.cfg.PollInterval
+	if !s.nextHold.IsZero() {
+		// A moment past the end: the window is the database's clock.
+		wait = min(wait, max(s.nextHold.Sub(s.cfg.Now())+100*time.Millisecond, 0))
+	}
+	return wait
 }
 
 // housekeep recovers attempts whose executor is gone and parks rows whose

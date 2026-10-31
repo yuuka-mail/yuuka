@@ -46,8 +46,8 @@ yuuka token issue --kind smtp --principal service:monitoring --label alertmanage
 | 回复 | 含义 | 客户端该做什么 |
 |---|---|---|
 | `250 2.0.0 Queued as <id>` | 进了发件队列，会发出 | 无 |
-| `250 2.0.0 Held for review as <id>: <原因>` | 停下等审核 | 无，等人处理 |
-| `250 2.0.0 Kept as draft <id>: <原因>` | 停在草稿 | 无，等人处理 |
+| `250 2.0.0 Held for review as <id>: <说明>` | 审核通过，扣留在撤回窗口里（`review` 档），到期发出；人可以在窗口里撤回 | 无 |
+| `250 2.0.0 Kept as draft <id>: <原因>` | 停在草稿，包括被审核拦下的（原因 `review`） | 无，等人处理 |
 | `550 5.7.1 <原因>` | 拒收：没有地址对得上 `From`、授权是 `none`，或违反上面的规则 | 修配置；重试没用 |
 | `451 4.3.0` | yuuka 内部暂时出错 | 客户端照常稍后重试 |
 | `552 5.3.4` / `452 4.5.3` | 超过大小 / 收件人上限 | 拆小 |

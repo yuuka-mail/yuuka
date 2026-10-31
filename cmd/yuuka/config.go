@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,11 +26,16 @@ type config struct {
 	TrustedAuthservID string
 	TelegramToken     string
 	TelegramChat      string
-	ReconcileInterval time.Duration
-	Web               webConfig
-	Proxies           clientip.Proxies
-	Outbox            outboxConfig
-	Submission        submissionConfig
+	// TelegramOperatorID and TelegramOperator turn on the recall button of
+	// held mail (§8.4): the Telegram user whose presses count, and the
+	// human principal (kind:name) a recall is recorded as.
+	TelegramOperatorID int64
+	TelegramOperator   string
+	ReconcileInterval  time.Duration
+	Web                webConfig
+	Proxies            clientip.Proxies
+	Outbox             outboxConfig
+	Submission         submissionConfig
 }
 
 // webConfig is the WebUI login, shared by serve and admin. An empty
@@ -127,6 +133,9 @@ func loadConfig(getenv func(string) string, needSecrets bool) (config, error) {
 	if (c.TelegramToken == "") != (c.TelegramChat == "") {
 		errs = append(errs, errors.New("set both YUUKA_TELEGRAM_BOT_TOKEN and YUUKA_TELEGRAM_CHAT_ID, or neither"))
 	}
+	if err := loadTelegramOperator(getenv, &c); err != nil {
+		errs = append(errs, err)
+	}
 	interval, err := time.ParseDuration(def("YUUKA_RECONCILE_INTERVAL", "5m"))
 	if err != nil || interval <= 0 {
 		errs = append(errs, fmt.Errorf("YUUKA_RECONCILE_INTERVAL: want a positive duration like 5m"))
@@ -159,4 +168,32 @@ func loadConfig(getenv func(string) string, needSecrets bool) (config, error) {
 		}
 	}
 	return c, errors.Join(errs...)
+}
+
+// loadTelegramOperator reads who may press the recall button of held
+// mail: both variables or neither, and only with the bot configured. The
+// chat must then be a numeric id, which is what a press is checked
+// against.
+func loadTelegramOperator(getenv func(string) string, c *config) error {
+	id, who := getenv("YUUKA_TELEGRAM_OPERATOR_ID"), getenv("YUUKA_TELEGRAM_OPERATOR")
+	switch {
+	case id == "" && who == "":
+		return nil
+	case id == "" || who == "":
+		return errors.New("set both YUUKA_TELEGRAM_OPERATOR_ID and YUUKA_TELEGRAM_OPERATOR, or neither")
+	case c.TelegramToken == "":
+		return errors.New("YUUKA_TELEGRAM_OPERATOR_ID needs YUUKA_TELEGRAM_BOT_TOKEN and YUUKA_TELEGRAM_CHAT_ID")
+	}
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || n <= 0 {
+		return errors.New("YUUKA_TELEGRAM_OPERATOR_ID: want the operator's numeric Telegram user id")
+	}
+	if _, err := strconv.ParseInt(c.TelegramChat, 10, 64); err != nil {
+		return errors.New("YUUKA_TELEGRAM_CHAT_ID: want a numeric chat id when YUUKA_TELEGRAM_OPERATOR_ID is set")
+	}
+	if kind, _, err := parsePrincipal(who); err != nil || kind != "human" {
+		return errors.New("YUUKA_TELEGRAM_OPERATOR: want human:<name>, the person a recall is recorded as")
+	}
+	c.TelegramOperatorID, c.TelegramOperator = n, who
+	return nil
 }

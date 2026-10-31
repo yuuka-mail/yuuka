@@ -101,7 +101,7 @@ func TestIdentityAndGrant(t *testing.T) {
 		t.Errorf("resumed grant: %q", out)
 	}
 	_, notes, err = e.run("grant", "set", "--identity", "arisu@example.com", "--principal", "agent:arisu", "--policy", "review")
-	if err != nil || !strings.Contains(notes, "stays a draft") {
+	if err != nil || !strings.Contains(notes, "recall window") {
 		t.Errorf("review note: %q %v", notes, err)
 	}
 	if _, _, args := e.lastAction("grant.set"); args["policy"] != "review" || args["identity"] != "arisu@example.com" || args["via"] != "cli" {

@@ -116,7 +116,7 @@ func (h *host) grantSet(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("grant set", flag.ContinueOnError)
 	identity := fs.String("identity", "", "the identity as yuuka identity ls shows it, e.g. a@example.com or *@example.com")
 	principal := fs.String("principal", "", "who may send as it: human:<name>, agent:<name> or service:<name>")
-	policy := fs.String("policy", "", "none, draft, review (M2: held as a draft) or auto; a new grant starts at none")
+	policy := fs.String("policy", "", "none, draft, review (checked, then held for a recall window) or auto; a new grant starts at none")
 	scope := fs.String("recipients", "", "thread (replies to the thread's participants), allowlist or any; a new grant starts at thread")
 	allow := fs.String("allow", "", "comma-separated addresses and domains for --recipients allowlist; replaces the list, empty clears it")
 	var g store.Grant
@@ -205,7 +205,8 @@ func (h *host) grantSet(ctx context.Context, args []string) error {
 		return err
 	}
 	if cur.Policy == sendpolicy.Review {
-		h.note("review: until the automatic review exists (M3), every submission under it stays a draft for a human to confirm.")
+		h.note("review: mail the checks pass is held for the recall window, then sent; mail they escalate stays a draft. " +
+			"Two recalls by a person within a day suspend the grant.")
 	}
 	if cur.RecipientScope == sendpolicy.ScopeAllowlist && len(cur.Allowlist) == 0 {
 		h.note("recipients allowlist with an empty --allow admits nobody.")
@@ -237,7 +238,7 @@ func describeGrant(g store.Grant, kind string) string {
 	case g.HoldSeconds != nil && (g.Policy == sendpolicy.Review || *g.HoldSeconds > 0):
 		s += fmt.Sprintf(", hold %ds", *g.HoldSeconds)
 	case g.Policy == sendpolicy.Review:
-		s += fmt.Sprintf(", hold %ds (default)", sendpolicy.DefaultHoldSeconds)
+		s += fmt.Sprintf(", hold %ds (default)", sendpolicy.EffectiveHoldSeconds(nil))
 	}
 	if g.SuspendedAt != nil {
 		s += ", SUSPENDED since " + stamp(g.SuspendedAt)

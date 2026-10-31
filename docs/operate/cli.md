@@ -90,16 +90,19 @@ yuuka grant rm --identity alerts@example.com --principal service:monitoring
 |---|---|
 | `none` | 拒绝 |
 | `draft` | 停在草稿，等人在 WebUI 里确认发送 |
-| `review` | 停下等审核；自动审核还没有实现，目前等于 `draft` |
+| `review` | 先过审核（首次联系、验证码和登录链接外泄、跨线程引用、陌生链接域、读不了的附件）：拦下的停在草稿；通过的扣留一个撤回窗口，到期发出 |
 | `auto` | 直接发出，受收件人范围和限额约束 |
 
 `--recipients` 是能发给谁：`thread`（只能回复线程里已有的人）、`allowlist`（`--allow` 里列的地址和域，整体替换，给空值清空）、`any`。
 
 限额：`--max-per-hour`、`--max-per-day`、`--max-new-recipients-per-day`，给数字或 `default`。
 默认值按主体类型：人不限；service 每小时 30、每天 200、每天 5 个新收件人；agent 每小时 10、每天 50、每天 5 个新收件人。
-超出档位或限额的信不会被拒绝，而是停在草稿等人看。`--hold-seconds` 是 `review` 档的撤回窗口，给秒数、`0`（不设窗口）或 `default`（600 秒），自动审核上线后才生效。
+超出档位或限额的信不会被拒绝，而是停在草稿等人看。`--hold-seconds` 是 `review` 档的撤回窗口，给秒数、`0`（不设窗口）或 `default`（600 秒）。
+窗口里的信在 WebUI 或 Telegram 卡片上可以撤回（[Telegram 怎么配](config.md#通知)），撤回后回到草稿。
 
-`--suspend` 立即停用一条授权，之后每次提交都停在草稿；`--resume` 解除。
+`--suspend` 立即停用一条授权，之后每次提交都停在草稿；`--resume` 解除。它也是紧急开关：
+已经扣留在撤回窗口里的信到期时不会发出，而是退回草稿。一条授权的信一天内被人撤回两次，yuuka 会自动暂停它，
+同样用 `--resume` 恢复。
 
 几条要知道的：
 

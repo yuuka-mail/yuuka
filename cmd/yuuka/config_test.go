@@ -84,3 +84,41 @@ func TestLoadAdminConfig(t *testing.T) {
 		t.Error("admin accepted without YUUKA_WEB_ORIGIN")
 	}
 }
+
+// The recall button needs both operator variables, the bot, a numeric
+// chat and a human principal.
+func TestTelegramOperatorConfig(t *testing.T) {
+	bot := map[string]string{"YUUKA_TELEGRAM_BOT_TOKEN": "t", "YUUKA_TELEGRAM_CHAT_ID": "-1001"}
+	with := func(m map[string]string) map[string]string {
+		out := map[string]string{}
+		for k, v := range bot {
+			out[k] = v
+		}
+		for k, v := range m {
+			out[k] = v
+		}
+		return out
+	}
+	c, err := loadConfig(env(with(map[string]string{"YUUKA_TELEGRAM_OPERATOR_ID": "12345", "YUUKA_TELEGRAM_OPERATOR": "human:operator"})), true)
+	if err != nil || c.TelegramOperatorID != 12345 || c.TelegramOperator != "human:operator" {
+		t.Fatalf("%+v %v", c, err)
+	}
+	if c, err := loadConfig(env(bot), true); err != nil || c.TelegramOperatorID != 0 {
+		t.Errorf("bot without operator: %v", err)
+	}
+	for name, over := range map[string]map[string]string{
+		"id alone":       with(map[string]string{"YUUKA_TELEGRAM_OPERATOR_ID": "12345"}),
+		"operator alone": with(map[string]string{"YUUKA_TELEGRAM_OPERATOR": "human:operator"}),
+		"no bot":         {"YUUKA_TELEGRAM_OPERATOR_ID": "12345", "YUUKA_TELEGRAM_OPERATOR": "human:operator"},
+		"not a number":   with(map[string]string{"YUUKA_TELEGRAM_OPERATOR_ID": "@me", "YUUKA_TELEGRAM_OPERATOR": "human:operator"}),
+		"chat by name": with(map[string]string{
+			"YUUKA_TELEGRAM_CHAT_ID":     "@channel",
+			"YUUKA_TELEGRAM_OPERATOR_ID": "12345", "YUUKA_TELEGRAM_OPERATOR": "human:operator",
+		}),
+		"an agent": with(map[string]string{"YUUKA_TELEGRAM_OPERATOR_ID": "12345", "YUUKA_TELEGRAM_OPERATOR": "agent:arisu"}),
+	} {
+		if _, err := loadConfig(env(over), true); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}

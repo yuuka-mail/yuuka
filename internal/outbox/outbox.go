@@ -137,6 +137,8 @@ type Service struct {
 
 	mu     sync.Mutex
 	paused map[string]pause
+	// nextHold is when the earliest recall window ends; zero for none.
+	nextHold time.Time
 }
 
 type pause struct {
@@ -211,12 +213,18 @@ type Submission struct {
 	// differ only in case are one recipient, the first spelling wins
 	// (§4.6). They must be the ones the decision was made for.
 	Recipients []store.OutboxRecipient
+	// HeldDraft, for an SMTP submission the review held (no DraftID), is
+	// the draft to create with the row, backed by the sent copy: what a
+	// withdrawal returns to (store.NewOutbox.HeldDraft).
+	HeldDraft *store.Draft
 }
 
 // Enqueued names what Enqueue created.
 type Enqueued struct {
 	OutboxID string
 	RawID    string
+	// DraftID is the draft created for HeldDraft, "" otherwise.
+	DraftID string
 }
 
 // ErrUnconfigured is returned when an identity names a transport this
@@ -267,10 +275,13 @@ func (s *Service) Enqueue(ctx context.Context, p *store.PolicyTx, sub Submission
 	}
 	e := Enqueued{OutboxID: ulid.New(s.cfg.Now()), RawID: sr.ID}
 	err = p.Enqueue(ctx, store.NewOutbox{
-		ID: e.OutboxID, DraftID: sub.DraftID, Raw: sr, Message: raw, Recipients: sub.Recipients,
+		ID: e.OutboxID, DraftID: sub.DraftID, Raw: sr, Message: raw, Recipients: sub.Recipients, HeldDraft: sub.HeldDraft,
 	})
 	if err != nil {
 		return Enqueued{}, err
+	}
+	if sub.HeldDraft != nil {
+		e.DraftID = sub.HeldDraft.ID
 	}
 	p.AfterCommit(func(ctx context.Context) {
 		s.Wake()

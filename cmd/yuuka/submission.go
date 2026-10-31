@@ -128,7 +128,13 @@ func (p submitPort) SubmitRaw(ctx context.Context, v *auth.Viewer, mailFrom stri
 	if errors.Is(err, submit.ErrRejected) || errors.Is(err, submit.ErrNoIdentity) {
 		err = fmt.Errorf("%w: %w", smtpd.ErrRefused, err)
 	}
-	return smtpd.Result(r), err
+	out := smtpd.Result{Queued: r.Queued, OutboxID: r.OutboxID, DraftID: r.DraftID, HoldReason: r.HoldReason, Detail: r.Detail}
+	if r.Held {
+		// "Held for review as <id>" says the reason; the detail says when
+		// it goes out.
+		out.DraftID, out.HoldReason = "", ""
+	}
+	return out, err
 }
 
 // startSubmission opens the submission port and serves it in the

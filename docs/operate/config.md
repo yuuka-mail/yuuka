@@ -58,6 +58,17 @@ Compose 自己的 `.env`（镜像、密码、备份策略）见 [deploy/README.m
 |---|---|---|
 | `YUUKA_TELEGRAM_BOT_TOKEN` | 空 | 新信推一行摘要到 Telegram。和下一项一起设或都不设 |
 | `YUUKA_TELEGRAM_CHAT_ID` | 空 | |
+| `YUUKA_TELEGRAM_OPERATOR_ID` | 空 | 运维者的 Telegram 数字用户 ID。设了它，`review` 档扣留中的信的卡片带「撤回」按钮，只认这个人在上面那个 chat 里按的。和下一项一起设或都不设，且 chat ID 必须是数字 |
+| `YUUKA_TELEGRAM_OPERATOR` | 空 | `human:<name>`：Telegram 上的撤回以这个人记入审计（`via: telegram`，没有凭据），必须是已有的、没停用的人 |
+
+配了 bot，`review` 档的信被扣留或被升级为草稿时都会推一张卡片，内容由系统从发件行渲染：
+发信身份、收件人、提交者、主题、附件、正文开头三行（这几行会经过 Telegram 的服务器）。
+卡片发不出去只记日志，撤回窗口照常计时，不会因此延长。
+
+撤回按钮靠长轮询（`getUpdates`）收回调：yuuka 不开任何入站端点，也不需要 webhook 密钥。
+同一个 bot 设过 webhook、或者另一个进程也在轮询它时，Telegram 会拒绝（409），日志里会说；
+用 `deleteWebhook` 去掉 webhook，或者给 yuuka 单独一个 bot。卡片上没有任何能发信的按钮，
+Telegram 账号被盗最多能把信撤回。
 
 ## HTTP：WebUI、REST、MCP
 

@@ -299,3 +299,8 @@ func cutRunes(s string, n int, tail bool) string {
 	}
 	return string(r[:n])
 }
+
+// HTMLToText is the text a reader sees of an HTML document, as search
+// and snippets read it: what the review tier of outgoing mail (§8.9)
+// checks besides the markup itself.
+func HTMLToText(s string) string { return htmlToText(s) }
