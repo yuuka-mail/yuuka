@@ -336,7 +336,7 @@ func (s *Service) registerFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.alertf(r.Context(), "a new passkey was registered for human:%s (via %s). If this was not you, revoke it and run `yuuka admin enroll`.", u.p.Name, via)
-	writeJSON(w, http.StatusCreated, map[string]string{"passkey_id": pk.ID})
+	writeJSON(w, http.StatusCreated, RegisterResult{PasskeyID: pk.ID})
 }
 
 func (s *Service) loginBegin(w http.ResponseWriter, r *http.Request) {
@@ -424,7 +424,7 @@ func (s *Service) loginFinish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	setCookie(w, SessionCookie, sec.Text, int(SessionTTL/time.Second))
-	writeJSON(w, http.StatusOK, map[string]any{"principal": "human:" + u.p.Name, "expires_at": expires})
+	writeJSON(w, http.StatusOK, LoginResult{Principal: "human:" + u.p.Name, ExpiresAt: expires})
 }
 
 // protocolReason keeps the audit log readable: the library's details say
@@ -481,7 +481,7 @@ func (s *Service) recover(w http.ResponseWriter, r *http.Request) {
 	}
 	left, _ := s.db.UnusedRecoveryCodes(r.Context(), principal)
 	s.alertf(r.Context(), "a recovery code was used from %s; %d left. If this was not you, run `yuuka admin enroll` on the host to rotate them.", remoteHost(r), left)
-	writeJSON(w, http.StatusOK, map[string]any{"enrollment_token": tok.Text, "expires_at": expires})
+	writeJSON(w, http.StatusOK, RecoveryGrant{EnrollmentToken: tok.Text, ExpiresAt: expires})
 }
 
 func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
@@ -505,10 +505,8 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) session(w http.ResponseWriter, r *http.Request) {
 	v, _ := auth.ViewerFrom(r.Context())
-	writeJSON(w, http.StatusOK, map[string]any{
-		"principal":       v.String(),
-		"credential_id":   v.CredentialID,
-		"credential_kind": v.CredentialKind,
-		"scopes":          v.Scopes,
+	writeJSON(w, http.StatusOK, SessionInfo{
+		Principal: v.String(), CredentialID: v.CredentialID, CredentialKind: v.CredentialKind,
+		Scopes: auth.Strings(v.Scopes),
 	})
 }
