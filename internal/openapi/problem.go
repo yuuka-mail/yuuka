@@ -41,7 +41,10 @@ const (
 	// CodeInvalidRule: a rule or a proposal does not validate (§8.5);
 	// Problem.Path says where.
 	CodeInvalidRule Code = "invalid_rule"
-	CodeInternal    Code = "internal"
+	// CodeCursorExpired: a change cursor this log did not issue, or no
+	// longer can continue from (§8.6); start again without one.
+	CodeCursorExpired Code = "cursor_expired"
+	CodeInternal      Code = "internal"
 )
 
 // Enum lists every code: the schema says which codes exist.
@@ -49,7 +52,7 @@ func (Code) Enum() []string {
 	return []string{
 		"invalid_param", "invalid_body", "unsupported_type", "body_too_large", "not_found",
 		"unauthenticated", "scope_required", "forbidden", "conflict", "not_verified", "ceremony_expired", "rate_limited",
-		"undecodable", "unavailable", "no_identity", "submission_rejected", "invalid_rule", "internal",
+		"undecodable", "unavailable", "no_identity", "submission_rejected", "invalid_rule", "cursor_expired", "internal",
 	}
 }
 

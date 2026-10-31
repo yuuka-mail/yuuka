@@ -329,6 +329,67 @@
         ],
         "additionalProperties": false
       },
+      "Change": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ChangeKind"
+          },
+          "id": {
+            "type": "string"
+          },
+          "message_id": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "at"
+        ],
+        "additionalProperties": false
+      },
+      "ChangeKind": {
+        "type": "string",
+        "enum": [
+          "message",
+          "delivery",
+          "thread",
+          "flag",
+          "prefix",
+          "proposal",
+          "draft",
+          "outbox",
+          "rule"
+        ]
+      },
+      "ChangePage": {
+        "type": "object",
+        "properties": {
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Change"
+            }
+          },
+          "cursor": {
+            "type": "string"
+          },
+          "more": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "changes",
+          "cursor",
+          "more"
+        ],
+        "additionalProperties": false
+      },
       "Cite": {
         "type": "object",
         "properties": {
@@ -374,6 +435,7 @@
           "no_identity",
           "submission_rejected",
           "invalid_rule",
+          "cursor_expired",
           "internal"
         ]
       },
@@ -2859,6 +2921,78 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UndoResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/changes": {
+      "get": {
+        "summary": "List what changed after a cursor, old mail included, in commit order (§8.6)",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "description": "cursor of the previous call; absent starts from now, with no changes",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kinds",
+            "in": "query",
+            "description": "only these kinds; absent is every kind the credential's scopes cover",
+            "style": "form",
+            "explode": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ChangeKind"
+              }
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 100,
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChangePage"
                 }
               }
             }

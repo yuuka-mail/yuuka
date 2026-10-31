@@ -51,6 +51,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List what changed after a cursor, old mail included, in commit order (§8.6) */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description cursor of the previous call; absent starts from now, with no changes */
+                    since?: string;
+                    /** @description only these kinds; absent is every kind the credential's scopes cover */
+                    kinds?: components["schemas"]["ChangeKind"][];
+                    limit?: number;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChangePage"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/drafts": {
         parameters: {
             query?: never;
@@ -2215,6 +2266,20 @@ export interface components {
             spans?: components["schemas"]["Span"][];
             lines?: number;
         };
+        Change: {
+            kind: components["schemas"]["ChangeKind"];
+            id: string;
+            message_id?: string;
+            /** Format: date-time */
+            at: string;
+        };
+        /** @enum {string} */
+        ChangeKind: "message" | "delivery" | "thread" | "flag" | "prefix" | "proposal" | "draft" | "outbox" | "rule";
+        ChangePage: {
+            changes: components["schemas"]["Change"][];
+            cursor: string;
+            more: boolean;
+        };
         Cite: {
             /** @description yuuka://message/<id>, optionally with #part/<section>/para/<n> */
             uri: string;
@@ -2224,7 +2289,7 @@ export interface components {
         /** @enum {string} */
         Class: "unknown" | "machine" | "human";
         /** @enum {string} */
-        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "invalid_rule" | "internal";
+        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "invalid_rule" | "cursor_expired" | "internal";
         Content: {
             notice: string;
             from: components["schemas"]["Address"];

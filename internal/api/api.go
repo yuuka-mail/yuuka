@@ -42,6 +42,7 @@ type Store interface {
 	PrefixStats(ctx context.Context, v *auth.Viewer, q store.PrefixQuery) (store.PrefixSummary, error)
 	PrefixByAddress(ctx context.Context, v *auth.Viewer, zone, prefix string, limit int) (store.PrefixDetail, error)
 	Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (store.SearchResult, error)
+	Changes(ctx context.Context, v *auth.Viewer, q store.ChangeQuery) (store.ChangePage, error)
 	// RecordAction appends to the audit log (attachment downloads).
 	RecordAction(ctx context.Context, a store.Action) error
 
@@ -157,6 +158,10 @@ var routes = []route{
 	jsonRoute(http.MethodGet, "/api/v1/prefixes/{address}", "Get a prefix with its leak check and the latest mail that leaked or spoofed",
 		[]auth.Scope{auth.PrefixRead, auth.MessageRead}, (*API).prefix),
 	jsonRoute(http.MethodGet, "/api/v1/search", "Search messages, newest first", read, (*API).search),
+	// Following the log of an object kind needs that kind's scopes too
+	// (agentview.ChangeKind.Scopes), checked by the handler.
+	jsonRoute(http.MethodGet, "/api/v1/changes", "List what changed after a cursor, old mail included, in commit order (§8.6)",
+		read, (*API).changes),
 	jsonRoute(http.MethodGet, "/api/v1/messages/{id}/reply-identities", "List the identities a reply defaults to, best first",
 		[]auth.Scope{auth.MessageRead, auth.DraftCreate}, (*API).replyIdentities),
 	jsonRoute(http.MethodGet, "/api/v1/identities", "List the identities the viewer may send as, and how it would go",
@@ -312,6 +317,7 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 		{store.ErrDuplicate, http.StatusConflict, openapi.CodeConflict, "the same proposal is pending already"},
 		{store.ErrTooManyProposals, http.StatusTooManyRequests, openapi.CodeRateLimited, "too many pending proposals; withdraw some or wait for a decision"},
 		{store.ErrRuleChanged, http.StatusConflict, openapi.CodeConflict, ""},
+		{store.ErrCursorExpired, http.StatusGone, openapi.CodeCursorExpired, "the cursor cannot be continued; start again without since and reread what you hold"},
 	} {
 		if errors.Is(err, m.err) {
 			detail := m.detail

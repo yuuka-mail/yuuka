@@ -87,6 +87,11 @@ func (s *spy) Search(ctx context.Context, v *auth.Viewer, q store.SearchQuery) (
 	return s.DB.Search(ctx, v, q)
 }
 
+func (s *spy) Changes(ctx context.Context, v *auth.Viewer, q store.ChangeQuery) (store.ChangePage, error) {
+	s.saw("Changes", v)
+	return s.DB.Changes(ctx, v, q)
+}
+
 func (s *spy) DraftByID(ctx context.Context, v *auth.Viewer, id string) (store.Draft, error) {
 	s.saw("DraftByID", v)
 	return s.DB.DraftByID(ctx, v, id)
@@ -496,6 +501,7 @@ func TestACL(t *testing.T) {
 		"GET /api/v1/prefixes":                         {path: "/api/v1/prefixes", reads: []string{"PrefixStats"}},
 		"GET /api/v1/prefixes/{address}":               {path: "/api/v1/prefixes/github@example.com", reads: []string{"PrefixByAddress"}},
 		"GET /api/v1/search":                           {path: "/api/v1/search?q=verification", reads: []string{"Search"}},
+		"GET /api/v1/changes":                          {path: "/api/v1/changes?kinds=message,flag", reads: []string{"Changes"}},
 		"GET /api/v1/messages/{id}/reply-identities": {
 			path: "/api/v1/messages/" + msg.ID + "/reply-identities", reads: []string{"ReplyIdentities", "Standings"},
 		},
