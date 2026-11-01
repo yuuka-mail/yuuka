@@ -734,9 +734,9 @@ CLI 只能记 `system` 加 `host_user`（§13.7）。信任根之外的动作值
 | 去掉备用、停用出口 | CLI 或 WebUI | 人的会话 |
 | 新增或启用渠道、轮换 bot token、发起或确认绑定 | CLI 或 WebUI | 再验证 |
 | 撤销绑定、停用渠道、订阅或退订自己绑定的事件 | CLI 或 WebUI | 人的会话 |
-| 拉取账户：`account add`；`set` 改任何去向或给新密码；`resume`（M3.5） | CLI 或 WebUI | 再验证 |
+| 拉取账户：`account add`；`set` 改任何去向、地址或预设，或给新密码；`resume`（M3.5） | CLI 或 WebUI | 再验证 |
 | 拉取账户：改 `trusted_authserv_id`，包括清空（M3.5） | CLI 或 WebUI | 再验证 |
-| 拉取账户：加文件夹、扩大回填、调高大小上限或日预算、缩短轮询间隔（M3.5） | CLI 或 WebUI | 再验证；只往小里改的是收紧，人的会话即可 |
+| 拉取账户：加文件夹（含缺省与显式列表互换）、扩大回填、调高大小上限或日预算、缩短轮询间隔（M3.5） | CLI 或 WebUI | 再验证；只往小里改的是收紧，人的会话即可 |
 | 拉取账户：`access` 给一个主体可读、`default_read` 改成可读、`--default` 而默认是可读（M3.5） | CLI 或 WebUI | 再验证 |
 | 拉取账户：`access` 给一个主体不可读、默认改成不可读、`pause`、`rm`（M3.5） | CLI 或 WebUI | 人的会话 |
 | 拉取账户：`test`、`sync`（M3.5） | CLI 或 WebUI | 人的会话；不改配置 |

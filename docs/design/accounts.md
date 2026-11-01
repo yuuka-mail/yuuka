@@ -127,7 +127,9 @@ M2 发信时要按 identity 选出口、按 `identity_grants` 放行，这两张
 
 #### M3.5 已定的形状
 
-存储一步已落地（[0019](../../internal/store/migrations/0019_pull_accounts.sql)，取舍见 §4）；命令、同步和读信时的账户标注未实现。
+存储一步已落地（[0019](../../internal/store/migrations/0019_pull_accounts.sql)，取舍见 §4），命令也已落地
+（[`cmd/yuuka/account.go`](../../cmd/yuuka/account.go)，检查、封装、审计参数和放宽判定在 [`internal/manage/accounts.go`](../../internal/manage/accounts.go)）；
+同步和读信时的账户标注未实现。
 这里写它们为什么是这样：
 
 - **来源放在 `account_sources`**（IMAP 主机、端口、用户名、认证方式、机密引用、可信接收方、文件夹、大小上限、回填、预算、轮询间隔），
@@ -161,6 +163,22 @@ yuuka account access <名字> ...       # 谁能读这个账户：给一个主�
 - 叫 `access` 而不复用 `grant`：`grant` 已经是发信授权（§13.5），混在一起，读命令的人会以为给了发信权
 - `sync` 不在 CLI 进程里拉信，理由见 §10.1.3
 - 密码只从文件或标准输入读，不接受参数值（§17.6）
+
+命令落地时定下的几处：
+
+- **放宽判定写在 `manage` 一处**（`SourceWidens`、`AccessWidens`、`DefaultReadWidens`），CLI 和以后的 REST 按同一个结果要再验证、推告警。
+  §13.10 的表随之补了三条，都按放宽算：改地址（决定信落在哪个前缀、回信找哪个身份）、改预设（决定缺省拉哪些文件夹），
+  文件夹从缺省改成显式列表或反过来（缺省里有什么是服务器说了算，比不出大小）
+- **`access` 按生效值判定**：之前读不到、之后读得到才是放宽；把已有的值再写一遍不推告警。
+  账户的默认值用单独的 `--default-read yes|no` 改，不和单个主体的 `--default` 共用写法：漏写 `--principal` 不该把账户交给所有人
+- **加账户的人要指名**：CLI 以 `system` 记审计（§13.7），没有「加它的人」这个主体，所以 `add --read` 列出起初能读的主体，缺省是库里唯一的人
+- **认领和加账户不在一个事务里**：认领走前缀自己的 `SetPrefixState`（记 `prefix.claim`，带账户名）。认领失败时账户已经在了，命令提示 `prefix claim`；
+  `rm` 不取消认领，因为信还在、还读得到
+- **单封上限缺省 32MiB，也不能更大**：原件读回内存的上限是 [`r2.MaxObjectSize`](../../internal/r2/r2.go)，更大的存得下却再也解析不了，
+  所以宁可只取头部（§4.4）
+- **Gmail 预设不填 `trusted_authserv_id`**：值没实测（§10.1.5）。空是安全的缺省（全部「未验证」），实测后由运维者用 `set` 填，命令提示改它要 `reparse` 才影响已有的信
+- **`set` 不能换预设**：预设决定代码里 Gmail 的那几处差异和缺省文件夹，换预设等于换一个邮箱，`rm` 再 `add`
+- **`test` 选文件夹的规则**在 `manage.SyncFolders`；登录时服务器提供 `AUTH=PLAIN` 就用它，否则 `LOGIN`
 
 **推迟的，和理由**：
 

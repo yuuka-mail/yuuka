@@ -23,6 +23,41 @@
   是你的地址就 `yuuka prefix claim`
 - **从备份恢复之后少了信**：备份时刻之后到达的信还在 R2 里，`yuuka reconcile --full` 把每个原件和库对一遍，补回来
 
+## 外部邮箱的信没进来
+
+```bash
+yuuka account ls
+```
+
+- **STATE 是 `paused`**：有人 `yuuka account pause` 了它，`yuuka account resume` 恢复
+- **STATE 是 `paused: login refused`**：见[下一节](#外部邮箱停了paused-login-refused)
+- **SECRET 是 `locked`**：`serve` 没有 KEK，所有外部邮箱都不拉，Cloudflare 收信不受影响。远端还留着信，挂回 KEK 重启 `serve` 就接着拉
+  （[第三方机密](secrets.md#挂载)）
+- **文件夹一行是 `not synced yet`、LAST-ROUND 一直不动**：`serve` 没在跑，或者连不上服务器（看日志）。`yuuka account test` 从主机上试一次连接和登录
+- **FAILED 不是 0**：这几封信一直取不下来，被跳过了，其余的照常。`yuuka account sync <名字> --retry-failed` 让 `serve` 再取一次
+- **回填很慢**：按日预算走，Gmail 缺省每天 2GiB；碰到服务器的下载上限也会停到第二天。`--daily-budget` 可以调，但调过 Gmail 自己的上限没有用
+- **信在，但有一封只有头部**：它比 `--max-message-size` 大，正文留在远端
+
+## 外部邮箱停了（paused: login refused）
+
+服务器拒绝了这个账户的密码。yuuka 不重试，直接暂停：用错的密码反复登录会让 Gmail 账户被临时锁住
+（[为什么](../design/drivers.md#1013-imap-拉取的一轮提交顺序与不丢信)）。常见原因：
+
+- app password 被撤销了，或者 Google 账户改了密码（改密码会让所有 app password 失效）
+- 关掉了两步验证：app password 随之失效
+- Workspace 管理员关掉了 app password，或者要求用安全密钥登录
+- 换了用户名或服务器之后给错了密码
+
+处理：在 Google 账户里生成一个新的 app password，然后
+
+```bash
+yuuka account set gmail --password-file -
+yuuka account test gmail
+```
+
+给了新密码，暂停自动解除，不用 `resume`。密码没变、只是想再试一次（比如服务器当时出了故障）才用 `yuuka account resume gmail`，
+它用同一个密码登录。`test` 失败时会带上服务器的原话，有时它说明了原因
+
 ## 信解析得不对
 
 解析失败的信不会丢：原件保留，信被隔离。修了解析器（升级到新版本）之后重新解析：

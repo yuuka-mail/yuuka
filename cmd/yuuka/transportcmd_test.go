@@ -56,6 +56,8 @@ func (e *hostEnv) runIn(in io.Reader, cmd string, args ...string) (string, strin
 		err = h.secretCmd(e.t.Context(), args)
 	case "identity":
 		err = h.identityCmd(e.t.Context(), args)
+	case "account":
+		err = h.accountCmd(e.t.Context(), args)
 	default:
 		e.t.Fatalf("no command %s", cmd)
 	}

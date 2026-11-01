@@ -104,11 +104,11 @@ yuuka secret check
 yuuka secret rewrap
 ```
 
-- `ls` 列出库里每一条第三方机密：id、类型、属于谁（OWNER，如 `transport cloudflare`、`channel telegram`）、audience（它只能交给哪个目的地）、
+- `ls` 列出库里每一条第三方机密：id、类型、属于谁（OWNER，如 `transport cloudflare`、`channel telegram`、`account gmail`）、audience（它只能交给哪个目的地）、
   包装器、钥匙引用（KEY）、加密时间。不需要 KEK
 - `check` 逐条按「属于谁」重算目的地再解密，只报结果，不打印任何机密。RESULT 是 `ok`、
   `locked`（解不开它的钥匙没配：没设 `YUUKA_KEK_FILE`，或者旧 KEK 文件拿掉得太早）、
-  `audience mismatch`（出口的去向在加密之后被改过，没经过 `transport set`：重新 `set` 一次密码）、
+  `audience mismatch`（出口或外部邮箱的去向在加密之后被改过，没经过 `transport set` 或 `account set`：重新 `set` 一次密码）、
   `tampered`（密文对不上：被改过或损坏，当作安全事件查），以及少见的 `wrong kind`、`no owner`（库被绕过 yuuka 改过）。有任何一条不是 `ok` 时命令以非零退出
 - `rewrap` 把每条机密的数据钥匙改用当前的 KEK 重新包装，密文本身不动；已经在当前 KEK 下的跳过。
   每改一条记一条审计（`secret.rewrap`，带新旧钥匙引用），改了任何一条就给管理员推一条安全告警。换 KEK 的步骤见[第三方机密](secrets.md#换-kek)
@@ -178,6 +178,75 @@ token 不管带什么 scope 都进不来（[为什么](../design/secrets.md#176-
 - **没有 KEK 时**每页顶上有一条横幅：收信照常，带密码的出口把信留在队列里，渠道不运行。
   这时设置页照样能看；要设密码、加渠道、测试、绑定的操作回 `503`，表单会说明。把 KEK 挂回去重启 `serve` 就好
   （[第三方机密](secrets.md)）
+
+## 外部邮箱
+
+yuuka 可以用 IMAP 把一个外部邮箱（现在是 Gmail，用 app password）拉进来，和 catch-all 收到的信放在同一个收件箱里。
+每个外部邮箱是一个**拉取账户**：IMAP 服务器、登录名和密码、拉哪些文件夹、回填多远、每天最多下载多少。
+密码和出口的一样用 KEK 加密存在库里。拉信的是 `serve`；命令只管配置，从不自己拉信
+（[为什么](../design/accounts.md#95-落地顺序)）。Gmail 的准备步骤、可信接收方和「登录被拒」见[外部邮箱](accounts.md)。
+
+```bash
+yuuka account add gmail --imap --preset gmail --address me@example.com --password-file - \
+  [--username U] [--trusted-authserv-id ID] [--backfill all|none|<天数>] [--mailboxes A,B] \
+  [--max-message-size 32MiB] [--daily-budget 2GiB|0] [--poll 60s] [--read human:<operator>,agent:arisu]
+yuuka account add work --imap --host imap.example.com [--port 993] --address me@example.com --password-file /path/to/password
+yuuka account set gmail [--address A] [--username U] [--password-file PATH|-] [--host H] [--port P] \
+  [--trusted-authserv-id ID] [--backfill B] [--mailboxes A,B] [--max-message-size S] [--daily-budget S] [--poll D]
+yuuka account ls [--all]
+yuuka account test gmail
+yuuka account sync gmail [--retry-failed]
+yuuka account pause gmail
+yuuka account resume gmail
+yuuka account rm gmail
+yuuka account access gmail
+yuuka account access gmail --principal agent:arisu --read | --no-read | --default
+yuuka account access gmail --default-read yes|no
+```
+
+- `add`：`--imap` 必填（现在只有这一种）。`--preset gmail` 填好 `--host imap.gmail.com`、只拉 `\All`（Gmail 的「所有邮件」）、
+  每天最多下载 2GiB；不用预设时 `--host` 必填。`--port` 缺省 993，只做隐式 TLS。`--username` 缺省就是 `--address`。
+  **密码只从文件或标准输入读**，和出口一样拒绝写在参数里的密码；要 `YUUKA_KEK_FILE`
+- `--address` 是这个邮箱自己的地址：拉来的信都投递到它，回信时按它找发信地址。`add` 同时**认领**这个地址（[前缀](#前缀)），
+  否则它的每一封信都会像发到 `discovered` 前缀的信一样被降级。已经认领过的不变
+- **谁能读**：拉取账户默认谁都不能读，除了 `--read` 列出的主体（逗号分隔，必须已经存在）；不写时是库里唯一的那个人。
+  之后用 `access` 改。Cloudflare 账户默认人人可读。主机上的命令和评分器以 `system` 身份读，不受这一条限制
+- `--trusted-authserv-id`：只信这个接收方写的 `Authentication-Results`（和 Cloudflare 的 `YUUKA_TRUSTED_AUTHSERV_ID` 同一件事）。
+  **缺省为空**：这个账户的信一律「未验证」，泄漏、仿冒判定不报，`dmarc=fail` 也不降级。
+  Gmail 该填什么见[外部邮箱](accounts.md#可信接收方)
+- `--backfill`：第一次同步往回拉多远。`all`（缺省）全部，从新到旧按日预算慢慢拉；`none` 只拉加账户之后的新信；数字是往回多少天
+- `--mailboxes`：要拉的文件夹，逗号分隔，按显示的名字写（`ls` 和 `test` 里看到的）。缺省时 Gmail 拉 `\All`，
+  其他服务器拉除了垃圾邮件、已删除、草稿之外的全部。`set --mailboxes ''` 回到缺省
+- `--max-message-size`：比它大的信只取头部，正文留在远端，界面上标出来。缺省也是上限：32MiB
+- `--daily-budget`：每天最多下载的字节数，`0` 不限；碰到服务器自己的下载上限时也停到第二天。`--poll`：多久看一次有没有新信，10 秒到 24 小时
+- `set` 只改给出的参数，先读再按读到的版本写，中间有人改过就报错、什么都不写。
+  **换了去向（主机、端口、用户名）就要重新给密码**；给了 `--password-file` 就换新密码，因登录被拒而暂停的也随之恢复。
+  改 `--address` 会认领新地址，旧地址保持认领。改 `--trusted-authserv-id` 只对之后拉来的信生效，已有的信要 `yuuka reparse` 才重算，命令会提示。
+  不能改预设
+- `ls` 列出全部账户（含 Cloudflare 账户）：STATE 是 `enabled`、`paused`（`pause` 暂停的）、`paused: login refused`
+  （服务器拒绝了密码，见[排障](troubleshooting.md#外部邮箱停了paused-login-refused)）、`removed`（`ls --all` 才列）；
+  SECRET 是 `ok` 或 `locked`；DEFAULT-READ 是没有单独设置的主体能不能读。下面一张表是每个文件夹的进度：
+  CATCH-UP 追新追到哪个 UID（`of` 后面是服务器上最新的），BACKFILL 回填到哪了（`not started`、`down to UID n`、`done`），
+  FAILED 是一直取不下来、被跳过的信数，DRAFTS-SKIPPED 是没收的草稿数，NOTE 写着 UIDVALIDITY 变了、正在重新对账这类情况。
+  从不显示密码或它的哈希
+- `test` 用库里的配置连一次：TLS、登录、列文件夹、对每个要拉的文件夹问一次 `STATUS`，然后断开，**不取信**、不改远端任何东西，也不记审计。
+  列出每个文件夹的信数、`UIDNEXT`、`UIDVALIDITY`；配置里的文件夹服务器上没有，或者 Gmail 预设连到的不是 Gmail，都报错。
+  要解开密码，所以也要 `YUUKA_KEK_FILE`。注意密码错了它也算一次失败的登录
+- `sync` 请 `serve` 马上跑一轮，`--retry-failed` 同时把 FAILED 的信再取一次。它只在库里留一个请求，**正在运行的 `serve` 才会去拉**；
+  账户暂停着时请求等到 `resume`
+- `pause` 暂停拉取，`resume` 恢复。因登录被拒而暂停的，`resume` 会用同一个密码再登录：密码换过的话用 `set --password-file` 而不是 `resume`
+- `rm` 停用账户、抹掉密码；账户、拉来的信和原件都留着，地址保持认领，名字不能再用
+- `access 名字` 列出谁能读：`(default)` 一行是没有单独设置的主体，下面每行是一个主体的设置。
+  `--principal` 加 `--read`、`--no-read` 给这个主体单独设置（`agent:` 和 `service:` 不存在时自动创建），`--default` 去掉它的设置、回到默认。
+  `--default-read yes|no` 改默认。任何账户都能用，包括 Cloudflare 账户（比如不让某个 agent 读它）
+
+每次 `add`、`set`、`resume`、`pause`、`rm`、`access` 记一条审计（`account.add`、`account.set`、`account.resume`、`account.pause`、
+`account.rm`、`account.access`），参数是账户名、地址、主机、端口、用户名、authserv-id、audience，有新密码时加它的 id、包装器和钥匙引用，
+从不含密码或它的哈希。`set` 和 `access` 还记下这次放宽了什么（`widens`）。认领地址另记一条 `prefix.claim`。
+放宽的会给管理员推一条安全告警（要 `YUUKA_KEK_FILE`，没有时命令会说没发出去）：`add`、`resume`、`access` 让一个主体或默认变成可读，
+以及 `set` 换去向、换密码、改地址、改 `--trusted-authserv-id`（清空也算），或者让拉进来的信变多
+（加文件夹、回填更远、调大单封上限或日预算、缩短轮询间隔）。只往小里改的、`pause`、`rm`、`--no-read` 是收紧，不推
+（[为什么](../design/principals.md#1310-管理面收紧一步完成放宽先再验-passkey)）。
 
 ## 发信地址与授权
 

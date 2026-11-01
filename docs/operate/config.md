@@ -17,6 +17,7 @@ Compose 自己的 `.env`（镜像、密码、备份策略）见 [deploy/README.m
 | `yuuka admin enroll` | 数据库、`YUUKA_WEB_ORIGIN` |
 | `yuuka prefix` / `token` / `outbox` / `identity` / `grant` | 只要数据库 |
 | `yuuka channel` | 数据库；`add`、`test` 还要 `YUUKA_KEK_FILE`，`bind` 有它时才能回复 chat、推安全告警 |
+| `yuuka account` | 数据库；加密或解开密码的（`add`、带 `--password-file` 的 `set`、`test`）还要 `YUUKA_KEK_FILE`，有它时放宽的改动才推安全告警，`ls` 有它时才能报出密码 `ok` |
 | `yuuka transport` / `secret` | 数据库；写入或解开密码的（`transport add` / `set` / `test`、`secret check` / `rewrap`）还要 `YUUKA_KEK_FILE`，轮换期间加 `YUUKA_KEK_PREVIOUS_FILES` |
 | `yuuka triage status` / `report` | 数据库、`YUUKA_TRIAGE_*` |
 | `yuuka triage rescore` | 数据库、R2、`YUUKA_DATA_DIR`、`YUUKA_TRIAGE_*` |

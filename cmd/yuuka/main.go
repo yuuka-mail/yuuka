@@ -225,7 +225,7 @@ func main() {
 }
 
 func usage() error {
-	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka identity add|set|ls|rm | yuuka transport add|set|ls|rm|test | yuuka secret ls|check|rewrap | yuuka grant set|ls|rm | yuuka rule ls|show|add|set|rm|apply|revert | yuuka channel add|ls|rm|test|bind|unbind|subscribe|unsubscribe | yuuka triage status|rescore|report | yuuka mcp --stdio | yuuka version")
+	return errors.New("usage: yuuka migrate | yuuka serve | yuuka reconcile [--full] | yuuka reparse [--since T] | yuuka admin enroll [--name NAME] [--ttl 15m] | yuuka prefix ls|claim|unclaim | yuuka token issue|ls|revoke | yuuka outbox ls|resolve | yuuka identity add|set|ls|rm | yuuka transport add|set|ls|rm|test | yuuka secret ls|check|rewrap | yuuka grant set|ls|rm | yuuka rule ls|show|add|set|rm|apply|revert | yuuka channel add|ls|rm|test|bind|unbind|subscribe|unsubscribe | yuuka account add|set|ls|test|sync|pause|resume|rm|access | yuuka triage status|rescore|report | yuuka mcp --stdio | yuuka version")
 }
 
 func run(args []string, log *slog.Logger) error {
@@ -311,6 +311,8 @@ func run(args []string, log *slog.Logger) error {
 		return withHost(ctx, func(h *host) error { return h.ruleCmd(ctx, args[1:]) })
 	case "channel":
 		return withHost(ctx, func(h *host) error { return h.channelCmd(ctx, args[1:]) })
+	case "account":
+		return withHost(ctx, func(h *host) error { return h.accountCmd(ctx, args[1:]) })
 	case "triage":
 		return triageCmd(ctx, log, args[1:])
 	}

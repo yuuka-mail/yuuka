@@ -6,8 +6,9 @@
 |---|---|
 | [cloudflare.md](cloudflare.md) | R2 的 bucket 与令牌、Email Worker、发信出口 |
 | [config.md](config.md) | 全部环境变量 |
-| [cli.md](cli.md) | 管理命令：登录、前缀、出口与第三方机密、发信地址与授权、凭据、发件队列、分诊评分、维护 |
+| [cli.md](cli.md) | 管理命令：登录、前缀、出口与第三方机密、通知渠道、外部邮箱、发信地址与授权、凭据、发件队列、分诊评分、维护 |
 | [secrets.md](secrets.md) | KEK：生成、挂载、从环境变量里的出口升级、轮换 |
+| [accounts.md](accounts.md) | 外部邮箱：接上 Gmail、可信接收方、谁能读、登录被拒 |
 | [submission.md](submission.md) | SMTP 提交口的暴露范围与 TLS |
 | [troubleshooting.md](troubleshooting.md) | 按现象排障 |
 
@@ -22,4 +23,5 @@
 5. 认领你在用的前缀（[前缀](cli.md#前缀)）
 6. 要发信：onboard Email Sending、生成并挂载 KEK、建出口、建发信地址（[Email Sending](cloudflare.md#email-sending发信)、
    [第三方机密](secrets.md)、[出口](cli.md#出口与第三方机密)、[发信地址与授权](cli.md#发信地址与授权)）
-7. 让 agent 和其他服务接入（[接入文档](../integrate/README.md)）
+7. 要把外部邮箱（Gmail）也拉进来：挂好 KEK 之后 `yuuka account add`（[外部邮箱](accounts.md)）
+8. 让 agent 和其他服务接入（[接入文档](../integrate/README.md)）
