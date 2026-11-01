@@ -29,7 +29,10 @@ import (
 func load(t *testing.T) (*store.DB, *pgxpool.Pool) {
 	t.Helper()
 	db, pool := storetest.New(t)
-	if _, err := pool.Exec(t.Context(), `INSERT INTO prefixes (zone, prefix, first_seen, last_seen, state) VALUES ('example.com', 'a', now(), now(), 1)`); err != nil {
+	// Claimed when the corpus arrives, not at the wall clock: tests deliver
+	// "later" mail at fixed times, which now() overtakes.
+	if _, err := pool.Exec(t.Context(), `INSERT INTO prefixes (zone, prefix, first_seen, last_seen, state)
+		VALUES ('example.com', 'a', '2026-10-31T00:00:00Z', '2026-10-31T00:00:00Z', 1)`); err != nil {
 		t.Fatal(err)
 	}
 	files, _ := filepath.Glob("../../testdata/eml/*.eml")
