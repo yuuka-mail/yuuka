@@ -37,7 +37,7 @@
 下面这些一旦落地就很难改，或者改错的代价是丢信、越权。动它们之前先说明意图和理由，
 得到确认再改。每条后面是理由，遇到条文没覆盖的情况按理由推。
 
-- **原始 MIME 不可变，重建边界按表划清**（§3.1、§4.2）。`raw/YYYY/MM/<ulid>.eml`（收到的）和 `sent/YYYY/MM/<ulid>.eml`（发出的）写一次永不改，Go 对 raw bucket 的写只允许条件写 `sent/`（§2.2）；
+- **原始 MIME 不可变，重建边界按表划清**（§3.1、§4.2）。`raw/YYYY/MM/<ulid>.eml`（收到的）、`sent/YYYY/MM/<ulid>.eml`（发出的）和 `pull/YYYY/MM/<ulid>.eml`（从外部邮箱拉来的）写一次永不改，Go 对 raw bucket 的写只允许条件写 `sent/` 和 `pull/`（§2.2）；
   从内容派生的表都要能 `reparse` 重建，不要引入「只存在于派生表里」的邮件内容。
   反过来，人和系统的决定（`message_state`、投递事实、卸载状态、规则、授权……）不能放进派生表，
   `reparse` 也绝不能碰它们。message id 跨 reparse 稳定。
