@@ -464,9 +464,11 @@ func SourcePassword(ctx context.Context, st SecretReader, sealer *secret.Sealer,
 
 // SyncFolders picks, from a LIST, the folders a source syncs (§10.1): its
 // configured mailboxes by their UTF-8 names; without any, \All for the
-// Gmail preset, and otherwise every selectable folder but \Junk, \Trash
-// and \Drafts. missing names the configured folders the LIST lacks, or
-// \All when a Gmail mailbox has none.
+// Gmail preset, and otherwise every selectable folder but \Junk, \Trash,
+// \Drafts and the virtual \All and \Flagged: those hold messages that
+// are also in other folders, and under location keys each copy would be
+// pulled again as another delivery. missing names the configured folders
+// the LIST lacks, or \All when a Gmail mailbox has none.
 func SyncFolders(c store.SourceConfig, boxes []imap.Mailbox) (sync []imap.Mailbox, missing []string) {
 	switch {
 	case c.Mailboxes != nil:
@@ -486,7 +488,7 @@ func SyncFolders(c store.SourceConfig, boxes []imap.Mailbox) (sync []imap.Mailbo
 		sync = append(sync, boxes[i])
 	default:
 		for _, m := range boxes {
-			if m.Selectable() && !m.HasAttr(`\Junk`) && !m.HasAttr(`\Trash`) && !m.HasAttr(`\Drafts`) {
+			if m.Selectable() && !slices.ContainsFunc([]string{`\Junk`, `\Trash`, `\Drafts`, `\All`, `\Flagged`}, m.HasAttr) {
 				sync = append(sync, m)
 			}
 		}

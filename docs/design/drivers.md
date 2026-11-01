@@ -131,7 +131,7 @@ type Expunger interface {
   delivery，**原地改写**它的定位和 `source_key`，而不是插入新行（步骤见 §10.1.3）。
 - **Gmail 走 IMAP 时只同步 All Mail**：按 SPECIAL-USE 的 `\All`（RFC 6154）找，不写死 `[Gmail]/All Mail`——
   文件夹名随界面语言变。label 用 `X-GM-LABELS` 取，存进 `deliveries.remote_labels`（拉取时的快照）。否则同一封信在 INBOX 和 All Mail 里各算一次投递。
-  All Mail 不含 Spam 和 Trash、含不含草稿，都待实测（§10.1.5）。其他服务器默认同步所有可选的文件夹，去掉 `\Junk`、`\Trash`、`\Drafts`，可按来源配置
+  All Mail 不含 Spam 和 Trash、含不含草稿，都待实测（§10.1.5）。其他服务器默认同步所有可选的文件夹，去掉 `\Junk`、`\Trash`、`\Drafts`，以及虚拟的 `\All`、`\Flagged`（它们的信也在别的文件夹里，`loc:` 键按文件夹算，同步它们会让每封信多一份投递），可按来源配置
 - **Gmail 的 `\Sent` 照常入库、从不推送**。经 `smtp.gmail.com` 或别的客户端发出的信都会出现在 All Mail 里：它是这个邮箱里的事实，
   在别的客户端里发的信也只有这样才进得来。经我们自己的出口发出的那份多半和 Sent 副本折叠（§4.6）。推送一律不发：那是自己写的信
 - **带 `\Draft` 标志的信不入库，只计数**，计数写进同步状态，`account ls` 和界面看得见。这是整个系统里**唯一看到了但不收的信**。

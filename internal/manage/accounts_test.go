@@ -126,6 +126,7 @@ func TestSyncFolders(t *testing.T) {
 		{Name: "[Gmail]/Spam", Attrs: []string{`\Junk`}},
 		{Name: "[Gmail]/Trash", Attrs: []string{`\Trash`}},
 		{Name: "[Gmail]/Drafts", Attrs: []string{`\Drafts`}},
+		{Name: "[Gmail]/Starred", Attrs: []string{`\Flagged`}},
 		{Name: "Re&AOc-us"}, // Reçus
 	}
 	names := func(ms []imap.Mailbox) []string {
@@ -140,7 +141,7 @@ func TestSyncFolders(t *testing.T) {
 		t.Errorf("gmail: %v, missing %v", names(got), missing)
 	}
 	got, missing = SyncFolders(store.SourceConfig{}, boxes)
-	if !slices.Equal(names(got), []string{"INBOX", "[Gmail]/All Mail", "Re&AOc-us"}) || missing != nil {
+	if !slices.Equal(names(got), []string{"INBOX", "Re&AOc-us"}) || missing != nil {
 		t.Errorf("default: %v, missing %v", names(got), missing)
 	}
 	got, missing = SyncFolders(store.SourceConfig{Mailboxes: []string{"Reçus", "Gone", "[Gmail]"}}, boxes)
