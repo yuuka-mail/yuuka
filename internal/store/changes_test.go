@@ -36,6 +36,11 @@ func TestOneWayIntoChanges(t *testing.T) {
 	var inserts []string
 	fset := token.NewFileSet()
 	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if errors.Is(err, fs.ErrNotExist) {
+			// Generated directories (web/src/paraglide) are rewritten
+			// while `mise run check` runs the tests beside web:check.
+			return nil
+		}
 		if err != nil {
 			return err
 		}
