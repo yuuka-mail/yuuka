@@ -152,6 +152,14 @@ func TestSentCopyIsAMessage(t *testing.T) {
 	if n := count(t, pool, `SELECT count(*) FROM deliveries`); n != 0 {
 		t.Fatalf("%d deliveries for a sent copy", n)
 	}
+	// What a pulled copy of it folds into is ours: never notified.
+	if own, err := db.FromOutbox(t.Context(), f.MessageID); err != nil || !own {
+		t.Errorf("FromOutbox = %v, %v", own, err)
+	}
+	other := inbound(t, db, storetest.Account(t, db), "bob", letter("bob@example.net", "me@example.com", "Re", "", "Yes"), at)
+	if own, err := db.FromOutbox(t.Context(), other); err != nil || own {
+		t.Errorf("FromOutbox of received mail = %v, %v", own, err)
+	}
 	var canonical string
 	var received time.Time
 	if err := pool.QueryRow(t.Context(), `SELECT canonical_raw_id, received_at FROM messages WHERE id = $1`, f.MessageID).

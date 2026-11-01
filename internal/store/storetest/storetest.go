@@ -37,7 +37,7 @@ const (
 // New returns a migrated DB in a fresh schema plus its pool for direct
 // queries, both connected as AppRole. It skips the test when EnvURL is
 // unset.
-func New(t *testing.T) (*store.DB, *pgxpool.Pool) {
+func New(t testing.TB) (*store.DB, *pgxpool.Pool) {
 	t.Helper()
 	ownerURL, appURL := URLs(t)
 	ctx := context.Background()
@@ -60,7 +60,7 @@ func New(t *testing.T) (*store.DB, *pgxpool.Pool) {
 
 // URLs creates a fresh, empty schema and returns connection URLs to it as
 // OwnerRole and as AppRole. It skips the test when EnvURL is unset.
-func URLs(t *testing.T) (ownerURL, appURL string) {
+func URLs(t testing.TB) (ownerURL, appURL string) {
 	t.Helper()
 	base := os.Getenv(EnvURL)
 	if base == "" {

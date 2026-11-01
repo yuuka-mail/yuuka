@@ -129,7 +129,7 @@ M2 发信时要按 identity 选出口、按 `identity_grants` 放行，这两张
 
 存储一步已落地（[0019](../../internal/store/migrations/0019_pull_accounts.sql)，取舍见 §4），命令也已落地
 （[`cmd/yuuka/account.go`](../../cmd/yuuka/account.go)，检查、封装、审计参数和放宽判定在 [`internal/manage/accounts.go`](../../internal/manage/accounts.go)）；
-同步和读信时的账户标注未实现。
+同步引擎也已落地（[`internal/pull`](../../internal/pull/pull.go)，§10.1.3）；读信时的账户标注未实现。
 这里写它们为什么是这样：
 
 - **来源放在 `account_sources`**（IMAP 主机、端口、用户名、认证方式、机密引用、可信接收方、文件夹、大小上限、回填、预算、轮询间隔），

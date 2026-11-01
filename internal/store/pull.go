@@ -955,6 +955,41 @@ func (db *DB) KnownSourceKeys(ctx context.Context, accountID string, keys []stri
 	return out, nil
 }
 
+// PulledUIDs returns the UIDs of the deliveries of account id located in
+// folder mailbox under uidvalidity, ascending: what the weekly
+// reconciliation compares with the server's list (§10.1.3).
+func (db *DB) PulledUIDs(ctx context.Context, accountID, mailbox string, uidvalidity uint32) ([]uint32, error) {
+	rows, err := db.pool.Query(ctx, `SELECT remote_uid FROM deliveries
+		WHERE account_id = $1 AND remote_mailbox = $2 AND remote_uidvalidity = $3
+		ORDER BY remote_uid`, accountID, mailbox, int64(uidvalidity))
+	if err != nil {
+		return nil, fmt.Errorf("pulled UIDs of %s: %w", mailbox, err)
+	}
+	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (uint32, error) {
+		var uid int64
+		err := r.Scan(&uid)
+		return uint32(uid), err //nolint:gosec // the column holds IMAP's 32-bit UIDs
+	})
+	if err != nil {
+		return nil, fmt.Errorf("pulled UIDs of %s: %w", mailbox, err)
+	}
+	return out, nil
+}
+
+// FromOutbox reports whether message id is mail we sent: a sent copy
+// that an outbox row points at folds into it (§4.6). A pulled delivery
+// of our own mail, which Gmail keeps when its SMTP sent it, is never
+// notified (§10.1.4).
+func (db *DB) FromOutbox(ctx context.Context, id string) (bool, error) {
+	var ok bool
+	err := db.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM messages m JOIN raw_objects sr ON sr.content_hash = m.content_hash
+		WHERE m.id = $1 AND `+isSentCopy+`)`, id).Scan(&ok)
+	if err != nil {
+		return false, fmt.Errorf("from outbox %s: %w", id, err)
+	}
+	return ok, nil
+}
+
 // RescanMatches returns the deliveries of account id still located in
 // folder mailbox under the old uidvalidity whose raw has sha256 sum: the
 // candidates a location-keyed rescan rewrites in place (§10.1.3).
