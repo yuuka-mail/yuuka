@@ -53,8 +53,11 @@ type Config struct {
 	// Account is the name of the Cloudflare account (YUUKA_ACCOUNT). Its
 	// accounts row is created on first use; see store.EnsureCloudflareAccount.
 	Account string
-	// TrustedAuthservID is the authserv-id of the account's trusted
-	// receiver (§10.1.1); empty means no authentication facts are taken.
+	// TrustedAuthservID is the authserv-id of the Cloudflare account's
+	// trusted receiver (§10.1.1, §17.8); empty means no authentication
+	// facts are taken. It applies to every account without a pull
+	// source; a pull account's deliveries are read with its own
+	// (account_sources.trusted_authserv_id), on ingest and on reparse.
 	TrustedAuthservID string
 	// Notifier is optional.
 	Notifier Notifier
@@ -157,14 +160,14 @@ func (in *Ingester) commit(ctx context.Context, m contract.Marker, body []byte) 
 	// mail is downgraded (§4.3) could not be decided.
 	f, err := in.fold(ctx, store.RawRef{
 		DeliveryID: rec.DeliveryID, RawID: rec.RawID, R2Key: rec.R2Key, LocalPath: rec.LocalPath,
-		ContentHash: rec.ContentHash[:], Zone: zone, Prefix: prefix, ReceivedAt: rec.ReceivedAt,
-	}, body)
+		ContentHash: rec.ContentHash[:], Zone: zone, Prefix: prefix, ReceivedAt: rec.ReceivedAt, AccountID: account,
+	}, body, false)
 	if err != nil {
 		in.cfg.Log.Error("content step failed; left for the backlog pass", "id", m.ID, "err", err)
 		return out, nil
 	}
 	if f.Notify {
-		in.notify(ctx, notify.Mail{
+		in.Notify(ctx, notify.Mail{
 			MessageID: f.MessageID, DeliveryID: rec.DeliveryID, Text: notify.Summary(zone, prefix, body), Silent: f.Silent,
 		})
 	}
@@ -187,9 +190,10 @@ func (in *Ingester) account(ctx context.Context) (string, error) {
 	return in.accountID, nil
 }
 
-// notify runs best effort in the background: it never blocks or fails
-// the ingest that triggered it.
-func (in *Ingester) notify(ctx context.Context, m notify.Mail) {
+// Notify tells the Notifier of m, best effort and in the background: it
+// never blocks or fails the ingest that triggered it. The pull engine
+// sends its notifications through it too, under the same bound.
+func (in *Ingester) Notify(ctx context.Context, m notify.Mail) {
 	if in.cfg.Notifier == nil {
 		return
 	}

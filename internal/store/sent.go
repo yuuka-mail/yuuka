@@ -21,9 +21,9 @@ import (
 // from send facts, never from outbox.state.
 
 // sentRawCols are the RawRef columns of a sent copy raw sr. A sent copy
-// has no delivery, zone or prefix; ReceivedAt is raw_objects.received_at,
+// has no delivery, zone, prefix or account; ReceivedAt is raw_objects.received_at,
 // the time the bytes were stored before the outbox row was created.
-const sentRawCols = `'', sr.id, sr.r2_key, sr.local_path, sr.content_hash, '', '', sr.received_at`
+const sentRawCols = `'', sr.id, sr.r2_key, sr.local_path, sr.content_hash, '', '', sr.received_at, ''`
 
 // isSentCopy is true for a raw sr that an outbox row points at. A raw that
 // only a draft points at (an SMTP submission held before the outbox) is

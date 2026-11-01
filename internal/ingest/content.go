@@ -13,17 +13,26 @@ import (
 )
 
 // fold runs the content step for one committed delivery: parse, extract
-// the trusted auth facts, and fold into messages (§4.1).
-func (in *Ingester) fold(ctx context.Context, ref store.RawRef, raw []byte) (store.Folded, error) {
+// the trusted auth facts with the delivery's account's authserv-id, and
+// fold into messages (§4.1). A new message is queued for scoring
+// (NewMessage) when it came from push; pulled mail only when
+// scorePulled, which the pull engine decides (§10.1.4): a backfill or
+// the backlog pass must not queue a mailbox's history.
+func (in *Ingester) fold(ctx context.Context, ref store.RawRef, raw []byte, scorePulled bool) (store.Folded, error) {
+	ids, err := in.authservIDs(ctx)
+	if err != nil {
+		return store.Folded{}, err
+	}
+	authserv, pulled := ids.of(ref.AccountID)
 	msg := mimeparse.Parse(raw)
-	f, err := in.cfg.DB.Fold(ctx, ref, msg, authres.Extract(raw, in.cfg.TrustedAuthservID))
+	f, err := in.cfg.DB.Fold(ctx, ref, msg, authres.Extract(raw, authserv))
 	if err == nil && f.NewMessage && msg.Problem != "" {
 		// The problem text may quote header bytes; the id is enough.
 		in.cfg.Log.Warn("quarantined: MIME could not be parsed cleanly", "raw", ref.RawID, "message", f.MessageID)
 	}
 	if err == nil && f.NewMessage {
 		in.addrsCapped(msg, ref.RawID, f.MessageID)
-		if in.cfg.NewMessage != nil {
+		if in.cfg.NewMessage != nil && (!pulled || scorePulled) {
 			in.cfg.NewMessage(f.MessageID)
 		}
 	}
@@ -33,6 +42,40 @@ func (in *Ingester) fold(ctx context.Context, ref store.RawRef, raw []byte) (sto
 		in.cfg.Log.Warn("rule failed closed", "rule", h.Rule, "message", f.MessageID, "err", h.Err)
 	}
 	return f, err
+}
+
+// FoldPulled runs the content step for a delivery the pull engine has
+// just committed (§10.1.3). score queues a new message for scoring; the
+// engine passes it only for new mail of an account the host lets be
+// scored (§10.1.4). Whether to notify is the engine's too: Folded.Notify
+// is the downgrade's answer, which it narrows.
+func (in *Ingester) FoldPulled(ctx context.Context, ref store.RawRef, raw []byte, score bool) (store.Folded, error) {
+	return in.fold(ctx, ref, raw, score)
+}
+
+// authservIDs is whose Authentication-Results each account trusts
+// (§10.1.1): a pull account's own value, the host's for the rest.
+type authservIDs struct {
+	pulled map[string]string
+	host   string
+}
+
+func (in *Ingester) authservIDs(ctx context.Context) (authservIDs, error) {
+	m, err := in.cfg.DB.TrustedAuthservIDs(ctx)
+	if err != nil {
+		return authservIDs{}, err
+	}
+	return authservIDs{pulled: m, host: in.cfg.TrustedAuthservID}, nil
+}
+
+// of returns the authserv-id for a delivery of account, and whether the
+// account is a pull account. Accounts without a source are Cloudflare
+// accounts, which take the host's (§17.8).
+func (a authservIDs) of(account string) (id string, pulled bool) {
+	if id, ok := a.pulled[account]; ok {
+		return id, true
+	}
+	return a.host, false
 }
 
 // ReadRaw returns the raw message of ref, preferring the local copy and
@@ -191,7 +234,7 @@ func (in *Ingester) processOne(ctx context.Context, ref store.RawRef) error {
 	if err != nil {
 		return err
 	}
-	_, err = in.fold(ctx, ref, raw)
+	_, err = in.fold(ctx, ref, raw, false)
 	return err
 }
 
@@ -252,6 +295,10 @@ func (in *Ingester) Reparse(ctx context.Context, since time.Time) (ReparseStats,
 }
 
 func (in *Ingester) rebuild(ctx context.Context, t store.ReparseTarget) (bool, error) {
+	ids, err := in.authservIDs(ctx)
+	if err != nil {
+		return false, err
+	}
 	auth := make(map[string]authres.Auth, len(t.Deliveries))
 	canonical := t.Canonical()
 	var msg mimeparse.Message
@@ -267,7 +314,10 @@ func (in *Ingester) rebuild(ctx context.Context, t store.ReparseTarget) (bool, e
 			return false, err
 		}
 		parse(d, raw)
-		auth[d.DeliveryID] = authres.Extract(raw, in.cfg.TrustedAuthservID)
+		// Each delivery with its own account's receiver (§10.1.1): the
+		// same content can arrive through Cloudflare and a pulled mailbox.
+		authserv, _ := ids.of(d.AccountID)
+		auth[d.DeliveryID] = authres.Extract(raw, authserv)
 	}
 	if canonical.DeliveryID == "" {
 		// Sent copies carry no auth facts, so only the canonical one is

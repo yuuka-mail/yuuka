@@ -38,7 +38,7 @@ const (
 const notDowngraded = `(p.state = 1 AND coalesce(d.auth->>'dmarc', '') <> 'fail')`
 
 // RawRef locates one delivery and its raw, or a sent copy (§4.6), which
-// has no delivery: then DeliveryID, Zone and Prefix are empty.
+// has no delivery: then DeliveryID, Zone, Prefix and AccountID are empty.
 type RawRef struct {
 	DeliveryID  string
 	RawID       string
@@ -48,13 +48,21 @@ type RawRef struct {
 	Zone        string
 	Prefix      string
 	ReceivedAt  time.Time
+	// AccountID is the delivery's account: its trusted authserv-id is the
+	// one the delivery's auth facts are read with (§10.1.1).
+	AccountID string
 }
 
-const rawRefCols = `d.id, d.raw_id, r.r2_key, r.local_path, r.content_hash, d.zone, d.prefix, d.received_at`
+const rawRefCols = `d.id, d.raw_id, r.r2_key, r.local_path, r.content_hash, d.zone, d.prefix, d.received_at, d.account_id`
+
+// rawRefTargets are the scan targets of rawRefCols (and sentRawCols).
+func rawRefTargets(r *RawRef) []any {
+	return []any{&r.DeliveryID, &r.RawID, &r.R2Key, &r.LocalPath, &r.ContentHash, &r.Zone, &r.Prefix, &r.ReceivedAt, &r.AccountID}
+}
 
 func scanRawRef(row pgx.Row) (RawRef, error) {
 	var r RawRef
-	err := row.Scan(&r.DeliveryID, &r.RawID, &r.R2Key, &r.LocalPath, &r.ContentHash, &r.Zone, &r.Prefix, &r.ReceivedAt)
+	err := row.Scan(rawRefTargets(&r)...)
 	return r, err
 }
 

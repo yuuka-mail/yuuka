@@ -88,17 +88,14 @@ func (db *DB) reparseTargets(ctx context.Context, pick string, args ...any) ([]R
 		SELECT m.id, `+sentRawCols+`, sr.id
 		FROM m JOIN raw_objects sr ON sr.content_hash = m.content_hash
 		WHERE `+isSentCopy+`
-		ORDER BY 1, 9, 10`, args...)
+		ORDER BY 1, 9, 11`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("reparse targets: %w", err)
 	}
 	var out []ReparseTarget
 	var mid, key string
 	var ref RawRef
-	_, err = pgx.ForEachRow(rows, []any{
-		&mid, &ref.DeliveryID, &ref.RawID, &ref.R2Key, &ref.LocalPath,
-		&ref.ContentHash, &ref.Zone, &ref.Prefix, &ref.ReceivedAt, &key,
-	}, func() error {
+	_, err = pgx.ForEachRow(rows, append(append([]any{&mid}, rawRefTargets(&ref)...), &key), func() error {
 		if len(out) == 0 || out[len(out)-1].MessageID != mid {
 			out = append(out, ReparseTarget{MessageID: mid})
 		}

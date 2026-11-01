@@ -155,8 +155,9 @@ type Expunger interface {
   所有信「未验证」。Gmail 预设建议填 `mx.google.com`，但它是不是 Gmail 交出来的原件里**最上面一条** `Authentication-Results`
   的 authserv-id 待实测（§10.1.5），测了再写进预设；工作邮箱逐个实测，测不出来就留空。预设只是 `account add` 时填的默认值，
   库里存的是值本身
-- **按投递所属的账户取**：内容步骤（折叠）和 reparse 都用这条投递的账户的值。今天它是一个进程级的值（`ingest.Config`），
-  拉取账户接入时改成按账户取，否则 reparse 会拿 Cloudflare 的 authserv-id 去读 Gmail 的信，结论全是「未验证」（§4.2）。
+- **按投递所属的账户取**：内容步骤（折叠）、补跑和 reparse 都用这条投递的账户的值
+  （[`ingest`](../../internal/ingest/content.go) 的 `authservIDs`）：有拉取来源的账户取 `account_sources` 上的，其余的是 Cloudflare 账户，取主机的。
+  同一份内容经 Cloudflare 和拉取的邮箱各进来一次时，两条投递各按自己的接收方判断；只用一个值，reparse 就会拿 Cloudflare 的 authserv-id 去读 Gmail 的信，结论全是「未验证」（§4.2）。
   改它只对之后入库的信生效，已有投递要 reparse；改它算放宽（§13.10），包括清空——清空让所有信「未验证」，看似收紧，
   却会让可信接收方报了 `dmarc=fail` 的信不再降级
 - 只采信**最上面一条**、且 authserv-id 匹配的 `Authentication-Results`；其余一律忽略

@@ -55,7 +55,7 @@ Compose 自己的 `.env`（镜像、密码、备份策略）见 [deploy/README.m
 | `YUUKA_WEBHOOK_SECRETS` | `serve` 必填 | Email Worker 的签名密钥，每个至少 32 字节；逗号分隔，换密钥期间写两个 |
 | `YUUKA_RECONCILE_INTERVAL` | `5m` | 多久扫一次投递标记，补进 webhook 漏掉的信 |
 | `YUUKA_ACCOUNT` | `cloudflare` | 这个 Cloudflare 账户在库里的名字，第一封信入库时建。去重按账户算，**上线后不要改**：改名等于开一个新账户 |
-| `YUUKA_TRUSTED_AUTHSERV_ID` | `mx.cloudflare.net` | 只信这个接收方写的 `Authentication-Results`，其余的视为发件人伪造 |
+| `YUUKA_TRUSTED_AUTHSERV_ID` | `mx.cloudflare.net` | 只信这个接收方写的 `Authentication-Results`，其余的视为发件人伪造。只管 Cloudflare 账户的信：拉取的外部邮箱各有自己的值，配在账户上，不读这一项 |
 
 ## 通知
 

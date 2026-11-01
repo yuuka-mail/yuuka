@@ -449,8 +449,8 @@ func setup(ctx context.Context, log *slog.Logger, needSecrets bool) (*app, error
 		DB:       db,
 		Account:  cfg.Account,
 		Notifier: a,
-		// Per account in the design (§10.1.1); process configuration while
-		// the Cloudflare account is the only one that receives.
+		// The Cloudflare account's (§17.8); pull accounts keep theirs in
+		// account_sources, read per delivery (§10.1.1).
 		TrustedAuthservID: cfg.TrustedAuthservID,
 		Log:               log,
 		NewMessage:        a.newMessage,
