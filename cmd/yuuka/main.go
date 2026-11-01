@@ -3,7 +3,8 @@
 // Usage:
 //
 //	yuuka migrate            apply pending database migrations, as the schema owner
-//	yuuka serve              webhook endpoint + periodic reconcile (+ WebUI and REST API)
+//	yuuka serve              webhook endpoint + periodic reconcile + pulling external mailboxes
+//	                         (+ WebUI and REST API)
 //	yuuka reconcile [--full] one reconcile pass; --full also scans raw/
 //	yuuka reparse [--since T] rebuild derived content of messages received
 //	                         at or after T (RFC 3339 or YYYY-MM-DD; default all)
@@ -61,6 +62,9 @@
 //	yuuka channel bind NAME | unbind|subscribe|unsubscribe BINDING ...
 //	                         notification channels, the chats bound to people,
 //	                         and what each receives (§17, §8.4); channel.go
+//	yuuka account add|set|ls|test|sync|pause|resume|rm|access NAME ...
+//	                         external mailboxes pulled over IMAP, their sources and
+//	                         who reads them (§9, §10.1.3); account.go. serve pulls them
 //	yuuka triage status      the scorer's configuration, how much mail it has
 //	                         scored, and whether it answers a probe (§15)
 //	yuuka triage rescore --since T
@@ -82,8 +86,9 @@
 //	                                    development; deployments give it to migrate alone. See db.go
 //	YUUKA_R2_ENDPOINT                   R2 S3 endpoint, https://<account id>.r2.cloudflarestorage.com (required)
 //	YUUKA_R2_RAW_BUCKET                 raw bucket name (required)
-//	YUUKA_R2_RAW_ACCESS_KEY_ID          object read & write token for the raw bucket; it writes only
-//	                                    create-only sent copies under sent/ (§2.2) (required)
+//	YUUKA_R2_RAW_ACCESS_KEY_ID          object read & write token for the raw bucket; it writes only,
+//	                                    create-only, sent copies under sent/ and pulled mail under
+//	                                    pull/ (§2.2) (required)
 //	YUUKA_R2_RAW_SECRET_ACCESS_KEY
 //	YUUKA_R2_PENDING_BUCKET             pending bucket name (required)
 //	YUUKA_R2_PENDING_ACCESS_KEY_ID      read-write token for the pending bucket (required)
@@ -202,6 +207,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/localraw"
 	"github.com/yuuka-mail/yuuka/internal/mcp"
 	"github.com/yuuka-mail/yuuka/internal/outbox"
+	"github.com/yuuka-mail/yuuka/internal/pull"
 	"github.com/yuuka-mail/yuuka/internal/r2"
 	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
@@ -669,6 +675,13 @@ func serve(ctx context.Context, log *slog.Logger) error {
 		defer close(outboxDone)
 		a.outbox.Run(ctx)
 	}()
+	// The external mailboxes (§10.1.3). Locked without a KEK, like the
+	// transports; the Cloudflare account is not affected.
+	pullDone := make(chan struct{})
+	go func() {
+		defer close(pullDone)
+		a.pullManager(log).Run(ctx)
+	}()
 	// The recall button of held mail and /start, by long polling:
 	// nothing listens for Telegram, so nothing is exposed for it (§13.7).
 	pollDone := make(chan struct{})
@@ -703,8 +716,22 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	<-loopDone
 	<-triageDone
 	<-outboxDone
+	<-pullDone
 	<-pollDone
 	return err
+}
+
+// pullManager is the engine that pulls the external mailboxes. Their new mail is
+// queued for scoring only when YUUKA_TRIAGE_ACCOUNTS names them.
+func (a *app) pullManager(log *slog.Logger) *pull.Manager {
+	var scored []string
+	if a.cfg.Triage.On() {
+		scored = a.cfg.Triage.Accounts
+	}
+	return pull.New(pull.Config{
+		DB: a.db, Raw: r2.NewRawBucket(a.cfg.Raw), Local: localraw.Dir{Root: a.cfg.DataDir},
+		Sealer: a.sealer, Content: a.in, TriageAccounts: scored, Log: log,
+	})
 }
 
 // startTriage runs the scorer when one is configured (§15.6), closing

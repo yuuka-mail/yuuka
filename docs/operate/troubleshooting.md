@@ -31,11 +31,14 @@ yuuka account ls
 
 - **STATE 是 `paused`**：有人 `yuuka account pause` 了它，`yuuka account resume` 恢复
 - **STATE 是 `paused: login refused`**：见[下一节](#外部邮箱停了paused-login-refused)
-- **SECRET 是 `locked`**：`serve` 没有 KEK，所有外部邮箱都不拉，Cloudflare 收信不受影响。远端还留着信，挂回 KEK 重启 `serve` 就接着拉
+- **SECRET 是 `locked`**：`serve` 没有 KEK，所有外部邮箱都不拉，Cloudflare 收信不受影响；`serve` 启动后日志里报一次 ERROR `external mailboxes are locked`。远端还留着信，挂回 KEK 重启 `serve` 就接着拉
   （[第三方机密](secrets.md#挂载)）
 - **文件夹一行是 `not synced yet`、LAST-ROUND 一直不动**：`serve` 没在跑，或者连不上服务器（看日志）。`yuuka account test` 从主机上试一次连接和登录
-- **FAILED 不是 0**：这几封信一直取不下来，被跳过了，其余的照常。`yuuka account sync <名字> --retry-failed` 让 `serve` 再取一次
-- **回填很慢**：按日预算走，Gmail 缺省每天 2GiB；碰到服务器的下载上限也会停到第二天。`--daily-budget` 可以调，但调过 Gmail 自己的上限没有用
+- **FAILED 不是 0**：这几封信取不下来（服务器拒绝、或者比它报的大得多）。每一轮重试一次，连续 5 次都不行就跳过、记下来，其余的照常；
+  在那之前，同一文件夹里排在它后面的新信照样进来，只是进度（CATCH-UP）停在它前面。
+  `yuuka account sync <名字> --retry-failed` 让 `serve` 再取一次已经跳过的
+- **回填很慢**：按日预算走，Gmail 缺省每天 2GiB，回填最多用其中九成，留一成给当天的新信；碰到服务器的下载上限也会停到第二天（按 UTC 算日子）。
+  `--daily-budget` 可以调，但调过 Gmail 自己的上限没有用
 - **信在，但有一封只有头部**：它比 `--max-message-size` 大，正文留在远端
 
 ## 外部邮箱停了（paused: login refused）

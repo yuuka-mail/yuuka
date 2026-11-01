@@ -9,7 +9,7 @@ Email Sending 发信。这一页按上线顺序写这三件事要配什么。yuu
 
 | bucket | 放什么 |
 |---|---|
-| raw | 收到的原件 `raw/YYYY/MM/<id>.eml`，以及 yuuka 发出的信的副本 `sent/YYYY/MM/<id>.eml`。写一次永不改 |
+| raw | 收到的原件 `raw/YYYY/MM/<id>.eml`、yuuka 发出的信的副本 `sent/YYYY/MM/<id>.eml`，以及从外部邮箱拉来的原件 `pull/YYYY/MM/<id>.eml`。写一次永不改 |
 | pending | Worker 留下的投递标记 `pending/<id>`，yuuka 入库后删掉 |
 
 Worker 通过绑定访问这两个 bucket，不需要令牌。yuuka 用两把 R2 API 令牌（S3 兼容的 Access Key ID / Secret），
@@ -17,19 +17,19 @@ Worker 通过绑定访问这两个 bucket，不需要令牌。yuuka 用两把 R2
 
 | 配置项前缀 | bucket | 权限 | yuuka 用它做什么 |
 |---|---|---|---|
-| `YUUKA_R2_RAW_` | raw | Object Read & Write | 读 Worker 写下的原件；只新建、从不覆盖 `sent/` 下的副本 |
+| `YUUKA_R2_RAW_` | raw | Object Read & Write | 读 Worker 写下的原件；只新建、从不覆盖 `sent/` 和 `pull/` 下的对象 |
 | `YUUKA_R2_PENDING_` | pending | Object Read & Write | 读、列、删投递标记 |
 
 S3 端点是 `https://<account id>.r2.cloudflarestorage.com`，写进 `YUUKA_R2_ENDPOINT`。
 
-raw 令牌要写权限，是因为发出的信也存在 raw bucket 的 `sent/` 下。R2 的令牌管不到前缀，
-所以「原件不可变」靠 yuuka 的代码守住：它只往 `sent/` 写、每次都是「不存在才写」，没有删除操作。
+raw 令牌要写权限，是因为发出的信和拉来的信也存在 raw bucket 的 `sent/`、`pull/` 下。R2 的令牌管不到前缀，
+所以「原件不可变」靠 yuuka 的代码守住：它只往这两个前缀写、每次都是「不存在才写」，没有删除操作。
 这把令牌泄露时，持有者能改写或删除原件，**只给 yuuka，按最敏感的凭据保管**。
-想在权限层面再加一道，可以给 raw bucket 的 `raw/`、`sent/` 前缀加 R2 bucket lock 规则（阻止删除和覆盖，不阻止新建）；
+想在权限层面再加一道，可以给 raw bucket 的 `raw/`、`sent/`、`pull/` 前缀加 R2 bucket lock 规则（阻止删除和覆盖，不阻止新建）；
 代价是保留期内谁都删不掉这些对象（[取舍](../design/architecture.md#22-worker--go-契约v1)）。
 
-早先的部署给 raw bucket 的是 Object Read only 令牌。只收信时它仍然够用；启用发信之前换成 Object Read & Write，
-否则发出的信的副本写不进去，信发不出去。
+早先的部署给 raw bucket 的是 Object Read only 令牌。只收信时它仍然够用；启用发信或接外部邮箱之前换成 Object Read & Write，
+否则发出的信的副本写不进去，信发不出去；拉来的信也存不下，外部邮箱的每一轮都失败重试（远端还留着信，换了令牌就接着拉）。
 
 ## Email Worker：收信
 
