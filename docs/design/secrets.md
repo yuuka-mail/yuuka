@@ -4,7 +4,7 @@
 
 ## 17. 第三方机密与渠道：进库加密，信任根留在主机
 
-> 状态：已定，部分实现。P1（[`internal/secret`](../../internal/secret/secret.go)）和 P2 已合入：
+> 状态：已定。P7（删掉环境变量里的出口和 Telegram）和 M3.5b 还没做，其余已合入。P1（[`internal/secret`](../../internal/secret/secret.go)）和 P2 已合入：
 > [0017](../../internal/store/migrations/0017_transports.sql) 建了机密、出口、身份的出口链，
 > 读写在 [`internal/store/transports.go`](../../internal/store/transports.go)。
 > WebUI 上的放宽动作依赖 §13.10 的当场再验证（0015）。分期见 §17.9。

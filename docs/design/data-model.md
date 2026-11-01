@@ -73,7 +73,7 @@
     而 `''` 在 0001 里是退信的 null sender，写空串会误导读者。`envelope_to` 仍非空，拉取投递写来源的地址，意思是「投到了这个邮箱」。
     远端定位三列和 `remote_state` 同时为空或同时非空，`remote_labels`、`remote_omitted` 只出现在拉取投递上，都是约束
   - 原草图里的 `deliveries.delivered_to`、`remote_flags` 不建：没有读者。Gmail 的别名靠 `Delivered-To` 区分、标志的同步都是以后的事
-  - 设计块之外多了几列，都是 §10.1 要求记下、又没有别处可放的：`source_mailboxes.drafts_skipped`（带 `\Draft` 的信只计数，§10.1），
+  - 原设计之外多了几列，都是 §10.1 要求记下、又没有别处可放的：`source_mailboxes.drafts_skipped`（带 `\Draft` 的信只计数，§10.1），
     和游标同一条语句加，所以每封只计一次；`account_sources.sync_requested_at` / `retry_requested_at`（`account sync` 只是请 `serve` 跑一轮，§10.1.3）；
     `budget_day` / `budget_used`（日预算跨 `serve` 重启仍然算数）。后三列是请求和计数，不是配置，改它们不动 `revision`
   - 游标的语义写在迁移里：`[coalesce(low_uid, high_uid + 1), high_uid]` 里的每个 UID 都已提交或记在 `pull_failures`。

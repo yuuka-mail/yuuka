@@ -21,7 +21,7 @@
 | 步 | 内容 | 依赖 | 触及的单向门 |
 |---|---|---|---|
 | P0（设计已合入，实测未做） | 设计：§2.2、§4、§5、§9、§10.1、§13.8、§17.8 和本表；用真实账户做 §10.1.5 的实测 | — | 文档本身不是，但它定下 `pull/`、`source_key` 的写法和可见性的默认 |
-| P1（已合入） | 迁移（§4 的设计块）和存储：`CommitPull`、游标 CAS、`pull_failures`、来源的配置与停用（机密 CAS 照出口）、`default_read` 并**打开过滤**（单独一个提交，带升级前后的对照测试）、`TestVisibility` 加拉取账户、锁顺序测试加账户锁 | P0 | 迁移、可见性 |
+| P1（已合入） | 迁移（[0019](../../internal/store/migrations/0019_pull_accounts.sql)）和存储：`CommitPull`、游标 CAS、`pull_failures`、来源的配置与停用（机密 CAS 照出口）、`default_read` 并**打开过滤**（单独一个提交，带升级前后的对照测试）、`TestVisibility` 加拉取账户、锁顺序测试加账户锁 | P0 | 迁移、可见性 |
 | P2（已合入） | `internal/imap`：词法、命令、SASL `PLAIN`、literal 上限、modified UTF-7；fuzz；`imapserver` 对手和录音 golden | P0 | 否 |
 | P3（已合入） | `pull/` 的 key：核对函数、带 `yuuka-pull` 的条件写、测试替身、本地副本接受 `pull/` | P0 | Go 对 raw bucket 的写（§2.2） |
 | P4（已合入） | 同步引擎（§10.1.3、§10.1.4）：管理协程、每账户 worker、advisory lock、一轮的全部步骤、回填、预算、退避、登录被拒即暂停、只有头部、失败表、每周对账、UIDVALIDITY 重映射；`fold` 和 reparse 按账户取可信接收方；推送和评分的抑制 | P1、P2、P3 | 不丢信 |

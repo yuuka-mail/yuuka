@@ -15,9 +15,11 @@ agent surface — runs on hardware you control.
 > **Status: pre-release.** Receiving and sending work end to end: the Cloudflare
 > Email Worker, ingest with redelivery dedupe, MIME parsing, threads and search, a
 > WebUI with passkey login and compose, an MCP surface for agents, an outbox with
-> crash recovery, per-identity send grants, and an SMTP submission port for other
-> services. The rule engine, zones and code extraction (M3) are next, and there are
-> no released images yet.
+> crash recovery, per-identity send grants, an SMTP submission port for other
+> services, the rule engine with zones and code extraction, decision-model triage,
+> and read-only IMAP pulling with password login. Pulling has not been measured
+> against real mailboxes yet; OAuth accounts (M3.5b) and archive offload (M3.6) come
+> after that, and there are no released images yet.
 
 ## Design highlights
 

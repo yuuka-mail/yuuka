@@ -56,7 +56,7 @@ per-user 配额、角色（role）层。权限只用扁平 scope 表达，不要
 
 `secret_hash` 只适用于 `session / token / smtp_password`——这三类只需校验。
 
-**`oauth` 类和 `secret_enc` 列保持不用**（已定，未实现，§17.4）。原来的设计让 M365 的 refresh token 作为 `oauth` 类凭据、
+**`oauth` 类和 `secret_enc` 列保持不用**（§17.4）。原来的设计让 M365 的 refresh token 作为 `oauth` 类凭据、
 加密存进 `secret_enc`。但这张表放的是别人用来向 yuuka 证明身份的凭据；外部账户的 token 是 yuuka 拿去向第三方证明身份的，
 属于那个账户和它的来源，不属于任何主体。放在一起，「吊销一个主体的凭据」和「断开一个外部账户」就纠缠在一起。
 所以 yuuka 的一切出站凭据（出口密码、bot token、IMAP 密码、OAuth token）都放进 §17 的 `secrets` 表；

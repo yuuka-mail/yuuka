@@ -58,8 +58,8 @@ yuuka 对网络只有两个要求：ingest 端点能被 Worker 访问到，WebUI
 怎么做到（端口映射、反向代理、隧道）是部署的事；认证不靠它们，每个端点由 yuuka 自己认证（§13.7）。
 唯一有意不认证的是给反向代理做健康检查的 `GET /healthz`，它只回答一位，理由和约束见 §13.7。
 
-**进程配置只放信任根**（已定，未实现，§17）。今天出口和 Telegram 也在环境变量里；多个自有域、多个外部邮箱之后，
-出口、身份的出口链、通知渠道和拉取账户的凭据要在运行时增删，它们进库，机密做信封加密：每条一把 DEK，DEK 由主机上的 KEK（以后可以是 Vault 或云 KMS）包住。留在主机的是这几样：
+**进程配置只放信任根**（§17）。多个自有域、多个外部邮箱之后，
+出口、身份的出口链、通知渠道和拉取账户的凭据要在运行时增删，所以它们进库（环境变量里的出口和 Telegram 只剩弃用期，§17.7），机密做信封加密：每条一把 DEK，DEK 由主机上的 KEK（以后可以是 Vault 或云 KMS）包住。留在主机的是这几样：
 
 - 数据库连接串：连上库之前就要用
 - KEK 文件（`YUUKA_KEK_FILE`），或配置了 Vault / KMS 时它的地址和访问凭据：密文的价值全在包装 DEK 的那把钥匙，和密文放在一起，加密就白做了
@@ -223,7 +223,7 @@ Object 级令牌不含这项权限（[Bucket locks](https://developers.cloudflar
 
 #### 拉取的原件：`pull/`（M3.5）
 
-> 状态：key、条件写和 metadata 已实现（[`internal/r2/pull.go`](../../internal/r2/pull.go)）；拉取本身还没有调用它（§10.1.3）。
+> 状态：已实现。key、条件写和 metadata 在 [`internal/r2/pull.go`](../../internal/r2/pull.go)，同步引擎每封信都经它写入（§10.1.3）。
 
 从外部邮箱拉下来的原件放进 raw bucket 的 `pull/` 前缀，由 Go 写、条件写，和 `sent/` 一样。
 这放宽了原来的「Go 对 raw bucket 只写 `sent/`」，考虑过的另一种做法是给它单开一个 bucket 和一把令牌：
@@ -452,7 +452,7 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 | SMTP submission 口（服务端，§13.6） | `github.com/emersion/go-smtp` 的 server 侧（带进 `github.com/emersion/go-sasl`） | 和已在用的 `go-message` 同一作者同一生态，维护多年，除 `go-sasl` 外没有依赖。自己写要处理 ESMTP 扩展、`DATA` 的点转义、`BDAT`、管线化和 SASL，全是协议细节而不是 yuuka 的逻辑。它不能关掉 `8BITMIME`、`CHUNKING` 的宣告，这对 yuuka 无害（§13.6）。只用协议部分：监听、TLS、PROXY protocol 由 `internal/mailnet` 做，认证、限速、审计在 yuuka 这边 |
 | PROXY protocol 解析（§13.6） | `github.com/pires/go-proxyproto` | 只依赖 `x/net`。起初自己写，换掉是因为它带着被广泛部署才学到的边角：客户端证书 TLV 的长度余量、LOCAL 下的非法 family、修过的远程 panic。只用 `Read` 解析一个头；监听、超时、只收 TCP 来源这些策略在 `internal/mailnet` |
 | Markdown 渲染（发信正文，§10.2.1） | `github.com/yuin/goldmark` | Go 生态的事实标准，CommonMark 合规，无传递依赖。用它的渲染钩子把样式内联进 HTML，不另引 CSS inliner |
-| **拉取**外部邮箱（M3.5） | 自己写的只读最小 IMAP 客户端 [`internal/imap`](../../internal/imap/)；`go-imap/v2` 的 `imapserver` 只在测试里当对手 | 起初选的是 `go-imap/v2` client。换掉，因为它拿不到我们必需的那部分：`FetchOptions` 是固定字段的结构体，没有发任意 fetch 项的口子，响应里出现不认识的项整条 `FETCH` 失败，所以 Gmail 的 `X-GM-MSGID` / `X-GM-LABELS` 和 OBJECTID 的 `EMAILID` 都取不到；上游明确把 Gmail 扩展划在范围外，加 `X-GM-LABELS` 的 PR 被关掉（2026-06）。没有稳定 id，Gmail 只能用定位做 `source_key`（单向门，§10.1），UIDVALIDITY 一变就要全量重下，M3.6 卸载也做不了按 id 核对。依赖三问里第三问本来分量最重，这次的事实是成熟实现拒绝了我们要的那一块；而要的是一个只读、不解析 MIME 的子集（词法、literal、`CAPABILITY` / `ID` / `LOGIN` / `AUTHENTICATE`、`LIST` / `STATUS` / `EXAMINE`、`UID SEARCH`、任意项的 `UID FETCH`、modified UTF-7），比当初选 go-smtp 的服务端协议面窄得多。补偿手撞怪癖的办法：词法器和整个客户端做 fuzz，`imapserver`（同一作者）作测试依赖进 `go.mod`、不进二进制，脚本化的会话录音做 golden；脱敏的真实服务器（Gmail、Dovecot、Exchange）会话录音还没有，随 §10.1.5 的实测补上。`go-sasl` 没有 `XOAUTH2`，M3.5b 自己写，二十行。先轮询，IDLE 以后再加。认证：M3.5 只做密码（Gmail 个人账户开两步验证后用 app password；它是否仍对个人账户开放待实测，§10.1.5）；OAuth 同意屏在 Testing 模式下 refresh token 7 天过期、转正式又要应用审核，个人项目的 Gmail 默认走 app password，OAuth 和 M365 留给 M3.5b（§17.8）。Gmail 以后可升级到 Gmail API（`history.list` 增量 + Pub/Sub push），`source_key` 已按它对齐（§10.1） |
+| **拉取**外部邮箱（M3.5） | 自己写的只读最小 IMAP 客户端 [`internal/imap`](../../internal/imap/)；`go-imap/v2` 的 `imapserver` 只在测试里当对手 | 起初选的是 `go-imap/v2` client。换掉，因为它拿不到我们必需的那部分：`FetchOptions` 是固定字段的结构体，没有发任意 fetch 项的口子，响应里出现不认识的项整条 `FETCH` 失败，所以 Gmail 的 `X-GM-MSGID` / `X-GM-LABELS` 和 OBJECTID 的 `EMAILID` 都取不到；上游明确把 Gmail 扩展划在范围外，加 `X-GM-LABELS` 的 PR 被关掉（2026-06）。没有稳定 id，Gmail 只能用定位做 `source_key`（单向门，§10.1），UIDVALIDITY 一变就要全量重下，M3.6 卸载也做不了按 id 核对。依赖三问里第三问本来分量最重，这次的事实是成熟实现拒绝了我们要的那一块；而要的是一个只读、不解析 MIME 的子集（词法、literal、`CAPABILITY` / `ID` / `LOGIN` / `AUTHENTICATE`、`LIST` / `STATUS` / `EXAMINE`、`UID SEARCH`、任意项的 `UID FETCH`、modified UTF-7），比当初选 go-smtp 的服务端协议面窄得多。补偿手撞怪癖的办法：词法器和整个客户端做 fuzz，`imapserver`（同一作者）作测试依赖进 `go.mod`、不进二进制，脚本化的会话录音做 golden；脱敏的真实服务器（Gmail、Dovecot、Exchange）会话录音还没有，随 §10.1.5 的实测补上。`go-sasl` 没有 `XOAUTH2`，客户端这一侧已经自己写了（[`AuthenticateXOAUTH2`](../../internal/imap/commands.go)），同步引擎到 M3.5b 才调用它。先轮询，IDLE 以后再加。认证：M3.5 只做密码（Gmail 个人账户开两步验证后用 app password；它是否仍对个人账户开放待实测，§10.1.5）；OAuth 同意屏在 Testing 模式下 refresh token 7 天过期、转正式又要应用审核，个人项目的 Gmail 默认走 app password，OAuth 和 M365 留给 M3.5b（§17.8）。Gmail 以后可升级到 Gmail API（`history.list` 增量 + Pub/Sub push），`source_key` 已按它对齐（§10.1） |
 | 以后要真 IMAP（服务端，M5） | `github.com/emersion/go-imap/v2` 的 server 侧（候选） | **因为后端常驻，IMAP 永远是可加的一层，不依赖 CF 的私测功能**。拉取不用它的 client 侧（上一行），不影响这个选择：网关是服务端，Gmail 扩展的问题不存在 |
 | JMAP | 自己实现子集 | 见下 |
 | HTTP | 标准库 `net/http` 的 `ServeMux` | Go 1.22 起自带方法与路径参数匹配，不需要路由库，也不需要框架 |
@@ -462,7 +462,7 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 | SPF | `ix64/spf` | 同作者的既有库，直接复用 |
 | WebAuthn（passkey 登录，§13.7） | `github.com/go-webauthn/webauthn` | duo-labs/webauthn 的延续，Go 里事实上的标准实现。自己写要带上 CBOR、COSE 密钥、authenticator data、各种 attestation 格式和 origin / RP ID 校验，上千行且全是安全关键代码。只用它的校验部分：仪式状态、存储、会话都在 yuuka 自己手里，换库不动表结构（§13.3） |
 | CSRF | 标准库 `http.CrossOriginProtection` | Go 1.25 起自带，不需要 token 型 CSRF 库 |
-| 第三方机密的静态加密（§17.2，未实现） | 信封加密，标准库 `crypto/hkdf` + AES-256-GCM：每条机密一把 DEK，`local` 包装器用 KEK 包 DEK | 不引 `x/crypto` 的 XChaCha20-Poly1305：每把 DEK 只封一次，KEK 包装的次数十年也离 96 位随机 nonce 的上限很远。Vault Transit、云 KMS 以后作为包装器接入，它们的 SDK 到那时再按依赖三问评估。格式由 `testdata/secret/` 的向量钉住 |
+| 第三方机密的静态加密（§17.2） | 信封加密，标准库 `crypto/hkdf` + AES-256-GCM：每条机密一把 DEK，`local` 包装器用 KEK 包 DEK | 不引 `x/crypto` 的 XChaCha20-Poly1305：每把 DEK 只封一次，KEK 包装的次数十年也离 96 位随机 nonce 的上限很远。Vault Transit、云 KMS 以后作为包装器接入，它们的 SDK 到那时再按依赖三问评估。格式由 `testdata/secret/` 的向量钉住 |
 | 旧字符集解码 | `golang.org/x/text` | 通知里的主题常是 GB2312/GBK 等旧编码，标准库的 `mime.WordDecoder` 只认 UTF-8 和 ISO-8859-1；pgx 本来就间接依赖它 |
 | R2（S3 API） | `aws-sdk-go-v2/service/s3` | Cloudflare 自己的 Go 示例用它，依赖全在 aws/smithy 内。**`RequestChecksumCalculation` 与 `ResponseChecksumValidation` 都设为 `WhenRequired`**：SDK 自 2025 年起默认附带的校验和 R2 不完全支持。R2 的 LIST 与 PUT/DELETE 强一致，reconcile 可以直接依赖列表结果 |
 

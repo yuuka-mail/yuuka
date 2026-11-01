@@ -27,11 +27,11 @@ accounts(kind, sync_policy, writeback_policy)
 - `metadata`：只存头部/摘要/索引，点开时实时拉正文，不落盘
 - `notify`：只做通知和提醒，不建索引
 
-**M3.5 先做的**（已定，未实现）：`kind=imap`，`sync_policy=full`，先接 Gmail（app password）；
-同一套代码覆盖支持隐式 TLS 和密码登录的其他 IMAP 服务器。`metadata` 是 M3.5 的最后一步，可以单独砍出去：
+**M3.5 做的**：`kind=imap`，`sync_policy=full`，先接 Gmail（app password）；
+同一套代码覆盖支持隐式 TLS 和密码登录的其他 IMAP 服务器。`metadata` 是 M3.5 的最后一步，还没做，可以单独砍出去：
 它要 `FetchBody` 的远端定位验证、每次取正文记 `actions`、`no-store`、agent 取正文要人授权（§4.4），
 是一整条新的读路径，`full` 跑稳之前不叠上去。`notify` 和它的 `notifications` 表在 M3.5 之后，目前没有用户。
-需要 OAuth 的账户（M365、走 OAuth 的 Gmail）在 M3.5b（§17.8）。表上的形状见 §4 的设计块。
+需要 OAuth 的账户（M365、走 OAuth 的 Gmail）在 M3.5b（§17.8）。表上的形状见 [0019](../../internal/store/migrations/0019_pull_accounts.sql)，取舍见 §4。
 
 **回写默认关闭**，单向拉取（M3.x 里 `writeback_policy` 只允许 `off`，回写本身不做）。开启后只允许 `read / archive / label` 三种，
 且本地 flag 单独一层——本地 UI 里的标注永远不会被远端覆盖掉。
@@ -123,7 +123,7 @@ M0、M1 只有一个 Cloudflare 账户，用进程配置的 `account_key` 代替
 M2 发信时要按 identity 选出口、按 `identity_grants` 放行，这两张表才有了真正的读者。
 0005 把每个 `account_key` 变成一个 `cf_catchall` 账户，`deliveries` 改用外键，幂等键改为 `(account_id, source_key)`。
 `YUUKA_ACCOUNT` 从此是这个账户的名字，ingest 第一次用到时建行（§4）。
-`accounts` 只建了 M2 读的列，kind 只有 `cf_catchall`，M2 的所有 identity 都属于这个账户。
+那时 `accounts` 只建了 M2 读的列，kind 只有 `cf_catchall`，所有 identity 都属于这个账户；拉取账户由 M3.5 的 0019 加上。
 
 §17 的出口和机密已经先于 M3.5 落地：拉取账户的密码要有地方存。
 

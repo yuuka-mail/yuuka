@@ -203,8 +203,8 @@ agent 做摘要和提取，人在手机上一点就完成审批/标注，确认�
 - **绑定**是渠道上属于某个 human 的一个目的地：一个 chat，加上「谁按的按钮算数」的 Telegram 用户 id（空 = 这个绑定上没有按钮）。
   只能经 `/start` 码加双向确认建立，可以单独撤销（§13.7）。绑定只属于 human：推送只发给人（§13.8）
 - **订阅**是绑定收哪些事件：`mail.new`（新信摘要）、`send.held`（扣留中的信，带撤回）、`send.escalated`（被审核升级为草稿）、
-  `grant.suspended`（授权被熔断）。只列今天已有发出方的；`send.trouble`、`proposal.pending`、M3.5 的 `account.trouble`
-  随发出它们的阶段加进约束
+  `grant.suspended`（授权被熔断）。只列今天已有发出方的；`send.trouble`、`proposal.pending`、`account.trouble`
+  随发出它们的代码加进约束。M3.5 落地时没有发 `account.trouble`：拉取的问题现在看 `account ls`、界面和日志（§10.1.3）
 
 两条不随订阅变的规则：
 
