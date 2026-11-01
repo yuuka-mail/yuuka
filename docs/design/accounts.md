@@ -98,15 +98,17 @@ identity → 出口必须是硬绑定：
 - 受合规约束的账户内容进 agent 上下文这件事本身要可审计：`actions` 日志里
   记下哪个 agent 读了哪个账户的什么（§8.8），这在合规上比技术上更要紧
 
-M3.5 落下的 agent 面（已定，未实现）：
+M3.5 落下的 agent 面（[`list_accounts`](../../internal/mcp/accounts.go)、[`/api/v1/accounts`](../../internal/api/accounts.go)、
+`account:`、视图里的 `facts.accounts`）：
 
-- **agent 永远碰不到来源的配置和凭据**：没有任何 MCP 工具读写 `account_sources`；REST 的账户管理端点只认人的会话（§13.10），
-  `TestACL` 断言持有全部 scope 的 token 拿到 403
+- **agent 永远碰不到来源的配置和凭据**：没有任何 MCP 工具读写 `account_sources`（`TestToolsReadAsTheViewer`，§13.8）；
+  REST 的账户管理端点只认人的会话（§13.10），`TestACL` 断言持有全部 scope 的 token 拿到 403
 - 新增的读路径都过 §13.8 的可见性，进 `TestVisibility` 的夹具：
   - 账户列表（MCP `list_accounts`、REST `GET /api/v1/accounts`）只列这个主体可读的账户，只给名字、种类、地址，
     不给主机、用户名、同步状态
   - 搜索加 `account:<名字>`（§16.3），默认仍跨账户
-  - agent 视图里的每条投递带账户名
+  - agent 视图里的每条投递带账户名。账户是投递事实（它说明信从哪个邮箱来），没有 `delivery:read` 时和收件人一起扣下；
+    只取了头部的信（§4.4）照样标出，那是内容不全，不是投递事实
 - 回填的信不推送、不评分（§10.1.4）；拉取账户评不评分由主机决定（`YUUKA_TRIAGE_ACCOUNTS`）
 
 ### 9.5 落地顺序
@@ -129,7 +131,8 @@ M2 发信时要按 identity 选出口、按 `identity_grants` 放行，这两张
 
 存储一步已落地（[0019](../../internal/store/migrations/0019_pull_accounts.sql)，取舍见 §4），命令也已落地
 （[`cmd/yuuka/account.go`](../../cmd/yuuka/account.go)，检查、封装、审计参数和放宽判定在 [`internal/manage/accounts.go`](../../internal/manage/accounts.go)）；
-同步引擎也已落地（[`internal/pull`](../../internal/pull/pull.go)，§10.1.3）；读信时的账户标注未实现。
+同步引擎也已落地（[`internal/pull`](../../internal/pull/pull.go)，§10.1.3）；WebUI 和 REST 的管理面
+（[`internal/api/accounts.go`](../../internal/api/accounts.go)，同样经 `internal/manage`）和读信时的账户标注也已落地。
 这里写它们为什么是这样：
 
 - **来源放在 `account_sources`**（IMAP 主机、端口、用户名、认证方式、机密引用、可信接收方、文件夹、大小上限、回填、预算、轮询间隔），

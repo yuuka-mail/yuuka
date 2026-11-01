@@ -27,6 +27,9 @@ func InputOf(v *auth.Viewer, m store.MessageDetail, raw []byte) Input {
 		if !slices.Contains(in.DeliveredTo, d.EnvelopeTo) {
 			in.DeliveredTo = append(in.DeliveredTo, d.EnvelopeTo)
 		}
+		if d.Account != "" && !slices.Contains(in.Accounts, d.Account) {
+			in.Accounts = append(in.Accounts, d.Account)
+		}
 		if d.Leak.Verdict != leak.None {
 			c := LeakCheck{To: d.Prefix + "@" + d.Zone, Verdict: LeakVerdict(d.Leak.Verdict), Domain: d.Leak.Domain}
 			if !slices.Contains(in.LeakChecks, c) {
@@ -40,10 +43,27 @@ func InputOf(v *auth.Viewer, m store.MessageDetail, raw []byte) Input {
 	if len(m.Deliveries) > 0 && m.Deliveries[0].Auth != nil {
 		in.Auth = *m.Deliveries[0].Auth
 	}
+	// raw is the first delivery's (store.MessageDetail.Raw): whether it
+	// is only a header is that delivery's.
+	if len(m.Deliveries) > 0 {
+		in.Omitted = OmittedOf(m.Deliveries[0].Omitted)
+	}
 	if o := m.Outgoing; o != nil {
 		in.Sent = &Sent{OutboxID: o.OutboxID, From: o.From, State: o.State}
 	}
 	return in
+}
+
+// OmittedOf is why a pulled delivery is only a header, "" for a whole
+// message.
+func OmittedOf(o store.Omitted) Omitted {
+	switch o {
+	case store.OmittedTooLarge:
+		return "too_large"
+	case store.OmittedUnfetchable:
+		return "unfetchable"
+	}
+	return ""
 }
 
 // TriageOf is the view of score s, nil for none. The score's input is

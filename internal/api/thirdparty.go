@@ -36,6 +36,9 @@ type Secrets struct {
 	// Probe connects to a transport without sending mail
 	// (transport.SMTP.Probe).
 	Probe func(ctx context.Context, cfg transport.Config) error
+	// ProbeSource logs in to a pull account's server without fetching
+	// mail; nil where nothing pulls.
+	ProbeSource SourceProber
 	// Channels sends test messages; nil without channels from the
 	// database.
 	Channels ChannelTester
@@ -162,6 +165,18 @@ func (a *API) secretsStatus(ctx context.Context, _ *auth.Viewer, _ struct{}) (Se
 		if st, ok := states[c.SecretID]; ok && owners[c.SecretID].Channel == c.Name {
 			out.Secrets = append(out.Secrets, ManagedSecret{
 				Owner:        SecretOwner{Kind: "channel", Name: c.Name, Destination: botName(c)},
+				SecretStatus: st,
+			})
+		}
+	}
+	srcs, err := a.db.Sources(ctx, true)
+	if err != nil {
+		return SecretsStatus{}, err
+	}
+	for _, s := range srcs {
+		if st, ok := states[s.SecretID]; ok && owners[s.SecretID].Account == s.AccountName {
+			out.Secrets = append(out.Secrets, ManagedSecret{
+				Owner:        SecretOwner{Kind: "account", Name: s.AccountName, Destination: manage.SourceDestination(s.SourceConfig)},
 				SecretStatus: st,
 			})
 		}

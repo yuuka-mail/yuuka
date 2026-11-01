@@ -546,11 +546,14 @@ REST 层的 [`TestACL`](../../internal/api/api_test.go) 管的是另一半：它
 
 反过来，store 里不带 `Viewer` 的方法不少：ingest 和 outbox 执行器用的（`Unprocessed`、`ClaimOutbox`、`RecoverAttempts`……），
 还有上面那些只给人的配置读写。它们的安全目前靠两条：调用方是系统批处理，或者端点只放人的会话。
-这两条都还只是约定，代码里没有一份清单。gofer 用一份文档列出每个不受 ACL 约束的方法和它唯一可信的调用方（§1.2）。
-本项目更想让测试来管：把这类方法列成一张表，测试断言 REST、MCP 的处理函数
-只经过表里登记为「人可调」的那些，新增一个不带 `Viewer` 的方法就要在表里写明谁能调。
-原定随 M3.5 打开过滤一起做；过滤打开时（P1）还没有新的 REST、MCP 处理函数，这张表随拉取账户的 REST 和 MCP（P6）一起建，
-`internal/store/pull.go` 里来源、游标、失败表的方法都不带 `Viewer`，是它的第一批条目。
+gofer 用一份文档列出每个不受 ACL 约束的方法和它唯一可信的调用方（§1.2）。本项目让测试来管（M3.5 P6 建）：
+REST 的 `Store` 接口里每个不带 `Viewer` 的方法都要在 [`unviewed`](../../internal/api/unviewed_test.go) 表里写明谁能调——
+人（只有人的会话能到的端点），或者端点的 scope 本身就代表这个决定（认领前缀、下载附件的审计记录）；
+新增一个不带 `Viewer` 的方法不登记，测试就不过。`TestACL` 再断言登记为「人」的方法只从只给人的端点调到。
+MCP 一侧更严：[`TestToolsReadAsTheViewer`](../../internal/mcp/unviewed_test.go) 读工具的源码，
+每个工具调到的 store 方法都要带 `Viewer`，例外只有记审计日志的 `RecordAction`。拉取账户的来源、密码和「谁能读哪个账户」
+都只有不带 `Viewer` 的方法，所以这条测试同时保证了没有工具碰得到它们（§9.4）。
+主机上的命令和系统批处理不过这两张表：它们本来就以 system 主体运行。
 
 发信授权读的事实也走同一个条件：回复的默认身份（`ReplyIdentities`）和线程参与者（`ReplyFacts`）
 只来自可见的投递、可见的消息和可见的 outbox 行，同在 `TestVisibility` 里。

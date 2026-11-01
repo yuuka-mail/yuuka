@@ -240,6 +240,16 @@ type Delivery struct {
 	EnvelopeFrom *string   `json:"envelope_from,omitempty"`
 	EnvelopeTo   string    `json:"envelope_to"`
 	ReceivedAt   time.Time `json:"received_at"`
+	// Account is the account it came through (§9.4), AccountKind that
+	// account's kind.
+	Account     string      `json:"account"`
+	AccountKind AccountKind `json:"account_kind"`
+	// Omitted is set when only the header was fetched from the mailbox
+	// it was pulled from (§4.4); the body is not here.
+	Omitted agentview.Omitted `json:"omitted,omitempty"`
+	// GmailLabels are the labels the pulled message had in Gmail when it
+	// was pulled; absent for other mail.
+	GmailLabels []string `json:"gmail_labels,omitempty"`
 	// Auth is absent for deliveries ingested before auth was extracted.
 	Auth *DeliveryAuth `json:"auth,omitempty"`
 	// Leak is the leak check of this delivery (§3 principle 3), judged

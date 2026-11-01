@@ -28,6 +28,9 @@ func (v View) Text() string {
 	if len(f.DeliveredTo) > 0 {
 		fmt.Fprintf(&b, "delivered to: %s\n", strings.Join(f.DeliveredTo, ", "))
 	}
+	if len(f.Accounts) > 0 {
+		fmt.Fprintf(&b, "account: %s\n", strings.Join(f.Accounts, ", "))
+	}
 	if s := f.Sent; s != nil {
 		fmt.Fprintf(&b, "sent: by this system as %s (outbox %s, state %s)\n", s.From, s.OutboxID, s.State)
 	}

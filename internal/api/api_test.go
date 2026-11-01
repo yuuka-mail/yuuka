@@ -551,7 +551,7 @@ func newHarness(t *testing.T) *harness {
 		t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, human: human, sub: sub, suspended: sus, local: local, alerts: alerts,
 		sealer: sealer, tg: tg, probes: probes,
 		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).WithSuspendNotifier(sus).WithTriage(laya, nil).
-			WithAlerter(alerts).WithSecrets(Secrets{Sealer: sealer, GetMe: tg.GetMe, Probe: probes.Probe, Channels: tg}).Handler(svc),
+			WithAlerter(alerts).WithSecrets(Secrets{Sealer: sealer, GetMe: tg.GetMe, Probe: probes.Probe, ProbeSource: probes.ProbeSource, Channels: tg}).Handler(svc),
 	}
 }
 
@@ -783,6 +783,25 @@ func TestACL(t *testing.T) {
 	chGone, chBind := h.channel("acl-gone", 9001), h.channel("acl-bind", 9002)
 	revocable2, subscribed := h.binding(h.human, chBind, "1001"), h.binding(h.human, chBind, "1002")
 	waiting, confirmable, declinable := h.bindCode(h.human, chBind, ""), h.bindCode(h.human, chBind, "1003"), h.bindCode(h.human, chBind, "")
+	// Pull accounts (§9.5): one to change, test, sync and set access
+	// on, one each to pause, resume and remove, and one readable by
+	// default to make unreadable.
+	pullEdit := h.pullAccount("acl-edit", "edit@example.net")
+	pullPause, pullGone := h.pullAccount("acl-pause", "pause@example.net"), h.pullAccount("acl-rm", "rm@example.net")
+	pullResume := h.pullAccount("acl-resume", "resume@example.net")
+	if err := h.db.PauseSource(t.Context(), "acl-resume", pullResume.Revision, store.PauseOperator, h.act("account.pause")); err != nil {
+		t.Fatal(err)
+	}
+	pullResume, err := h.db.SourceByName(t.Context(), "acl-resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.pullAccount("acl-default", "default@example.net")
+	if err := h.db.SetAccountDefaultRead(t.Context(), "acl-default", false, true, h.act("account.access")); err != nil {
+		t.Fatal(err)
+	}
+	accountReads := []string{"Accounts", "AccountAccess", "Secrets", "Transports", "Channels"}
+	withAccount := func(ops ...string) []string { return append(ops, accountReads...) }
 	// Scores (§15) on the mail the list below filters by them.
 	for _, m := range decode[MessagePage](t, h.get("/api/v1/messages?prefix=github@example.com", h.token(auth.MessageRead))).Messages {
 		h.score(m.ID, 0.1)
@@ -952,7 +971,7 @@ func TestACL(t *testing.T) {
 			path: "/api/v1/admin/identities", as: h.human, reads: []string{"Identities", "Accounts", "Transports"}, people: true, authority: true,
 		},
 		"POST /api/v1/admin/identities": {
-			method: http.MethodPost, path: "/api/v1/admin/identities", body: `{"address":"acl@example.org","owner":"agent:arisu","transport":"cf"}`,
+			method: http.MethodPost, path: "/api/v1/admin/identities", body: `{"address":"acl@example.org","owner":"agent:arisu","transport":"cf","account":"devseed"}`,
 			as: h.human, reads: []string{"Transports", "Accounts", "Grantee", "AddIdentity", "Identities"}, people: true, authority: true, widening: true,
 		},
 		"POST /api/v1/admin/identities/{id}/disable": {
@@ -1018,6 +1037,48 @@ func TestACL(t *testing.T) {
 			method: http.MethodPost, path: "/api/v1/admin/channels/acl-bind/test",
 			as: h.human, reads: []string{"ChannelByName"}, people: true, authority: true,
 		},
+		// Pull accounts and who reads accounts (§9.5, §13.8): a
+		// person's session; the routes that widen only sometimes ask
+		// for elevation in the handler, so they are called here with a
+		// change that tightens (TestAccountSettings has the widenings).
+		"GET /api/v1/admin/accounts": {
+			path: "/api/v1/admin/accounts", as: h.human, reads: accountReads, people: true, authority: true,
+		},
+		"PUT /api/v1/admin/accounts/{name}": {
+			method: http.MethodPut, path: "/api/v1/admin/accounts/acl-edit",
+			body: fmt.Sprintf(`{"revision":%d,"preset":"gmail","address":"edit@example.net","poll_seconds":300}`, pullEdit.Revision),
+			as:   h.human, reads: withAccount("SourceByName", "ConfigureSource"), people: true, authority: true,
+		},
+		"POST /api/v1/admin/accounts/{name}/pause": {
+			method: http.MethodPost, path: "/api/v1/admin/accounts/acl-pause/pause", body: fmt.Sprintf(`{"revision":%d}`, pullPause.Revision),
+			as: h.human, reads: withAccount("SourceByName", "PauseSource"), people: true, authority: true,
+		},
+		"POST /api/v1/admin/accounts/{name}/resume": {
+			method: http.MethodPost, path: "/api/v1/admin/accounts/acl-resume/resume", body: fmt.Sprintf(`{"revision":%d}`, pullResume.Revision),
+			as: h.human, reads: withAccount("SourceByName", "ResumeSource"), people: true, authority: true, widening: true,
+		},
+		"POST /api/v1/admin/accounts/{name}/disable": {
+			method: http.MethodPost, path: "/api/v1/admin/accounts/acl-rm/disable", body: fmt.Sprintf(`{"revision":%d}`, pullGone.Revision),
+			as: h.human, reads: withAccount("SourceByName", "DisableSource"), people: true, authority: true,
+		},
+		"POST /api/v1/admin/accounts/{name}/test": {
+			method: http.MethodPost, path: "/api/v1/admin/accounts/acl-edit/test",
+			as: h.human, reads: []string{"SourceByName", "Secret"}, people: true, authority: true,
+		},
+		"POST /api/v1/admin/accounts/{name}/sync": {
+			method: http.MethodPost, path: "/api/v1/admin/accounts/acl-edit/sync", body: `{}`,
+			as: h.human, reads: []string{"SourceByName", "RequestSync"}, people: true, authority: true,
+		},
+		"PUT /api/v1/admin/accounts/{name}/access/{principal}": {
+			method: http.MethodPut, path: "/api/v1/admin/accounts/acl-edit/access/agent:arisu", body: `{"access":"no_read"}`,
+			as: h.human, reads: withAccount("AccountByName", "SetAccountAccess"), people: true, authority: true,
+		},
+		"PUT /api/v1/admin/accounts/{name}/default-read": {
+			method: http.MethodPut, path: "/api/v1/admin/accounts/acl-default/default-read", body: `{"default_read":false}`,
+			as: h.human, reads: withAccount("AccountByName", "SetAccountDefaultRead"), people: true, authority: true,
+		},
+		// Which accounts the caller reads: any principal, as itself.
+		"GET /api/v1/accounts": {path: "/api/v1/accounts", reads: []string{"VisibleAccounts"}},
 		"GET /api/v1/bindings": {path: "/api/v1/bindings", as: h.human, reads: []string{"Bindings", "Channels"}, people: true, authority: true},
 		"POST /api/v1/bindings/{id}/revoke": {
 			method: http.MethodPost, path: "/api/v1/bindings/" + revocable2.ID + "/revoke",
@@ -1154,6 +1215,10 @@ func TestACL(t *testing.T) {
 		var ops []string
 		for op, vs := range calls {
 			ops = append(ops, op)
+			// A method that sees everything is a person's (unviewed).
+			if unviewed[op] == people && !row.people {
+				t.Errorf("%s: reaches %s, which takes no Viewer and is a person's, from a route others may call", pattern, op)
+			}
 			for _, v := range vs {
 				if v == configRead {
 					continue

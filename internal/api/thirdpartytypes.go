@@ -323,14 +323,15 @@ type BindConfirmParams struct {
 	Body BindConfirmBody `body:"json"`
 }
 
-// SecretOwner is what a sealed secret is for: the transport or channel
-// that uses it, and where it may be sent.
+// SecretOwner is what a sealed secret is for: the transport, channel or
+// pull account that uses it, and where it may be sent.
 type SecretOwner struct {
-	// Kind is transport or channel; Name the row's.
+	// Kind is transport, channel or account; Name the row's.
 	Kind string `json:"kind"`
 	Name string `json:"name"`
-	// Destination is where the secret may go: user@host:port, or the
-	// bot as @name (id).
+	// Destination is where the secret may go: user@host:port (a
+	// transport's SMTP server, a pull account's IMAP server), or the bot
+	// as @name (id).
 	Destination string `json:"destination"`
 }
 

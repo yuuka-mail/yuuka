@@ -4,6 +4,51 @@
  */
 
 export interface paths {
+    "/api/v1/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the accounts the caller may read, by name; search takes them as account:<name> */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AccountList"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/actions/{id}/undo": {
         parameters: {
             query?: never;
@@ -32,6 +77,454 @@ export interface paths {
                     };
                     content: {
                         "application/json": components["schemas"]["UndoResult"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List accounts with who may read them and, for pull accounts, their source, sync progress and failures, never a password; a person's session only */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AdminAccountList"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/accounts/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Add a pull account (revision 0) or replace its source's configuration; a person's session, elevated when it widens */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AccountBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ManagedAccount"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/accounts/{name}/access/{principal}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set whether a principal may read an account; a person's session, elevated when it lets the principal read more */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                    principal: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["AccessBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ManagedAccount"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/accounts/{name}/default-read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Set whether principals without a setting of their own may read an account; a person's session, elevated to make it readable */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["DefaultReadBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ManagedAccount"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/accounts/{name}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove a pull account's source: its password erased, its mail kept, its name never reused; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RevisionBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ManagedAccount"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/accounts/{name}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause pulling an account; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RevisionBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ManagedAccount"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/accounts/{name}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume pulling an account, logging in with its password again; an elevated session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RevisionBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ManagedAccount"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/accounts/{name}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ask the server to pull an account now, the failed messages too if asked; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["SyncBody"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/accounts/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Log in to a pull account's server and list what it would sync, fetching no mail; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AccountProbe"];
                     };
                 };
                 /** @description A problem */
@@ -3311,7 +3804,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description the query (§16): words and "phrases" that must all occur in subject, sender, recipients or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything */
+                    /** @description the query (§16): words and "phrases" that must all occur in subject, sender, recipients or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: account: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything */
                     q?: string;
                     downgraded?: "hide" | "include";
                     /** @description IANA time zone in which a date in q (after:2026-10-01) starts its day; UTC when absent */
@@ -3904,6 +4397,44 @@ export interface components {
             messages: components["schemas"]["MessageOutcomes"][];
             rule?: components["schemas"]["SavedRule"];
         };
+        AccessBody: {
+            access: components["schemas"]["AccessSetting"];
+        };
+        AccessEntry: {
+            principal: string;
+            can_read: boolean;
+        };
+        /** @enum {string} */
+        AccessSetting: "read" | "no_read" | "default";
+        AccountBody: {
+            revision: number;
+            preset?: components["schemas"]["SourcePreset"];
+            address: string;
+            host?: string;
+            port?: number;
+            username?: string;
+            password?: string;
+            trusted_authserv_id?: string;
+            mailboxes?: string[];
+            /** Format: date-time */
+            backfill_since?: string;
+            max_message_bytes?: number;
+            daily_byte_budget?: number;
+            poll_seconds?: number;
+        };
+        /** @enum {string} */
+        AccountKind: "cf_catchall" | "imap";
+        AccountList: {
+            accounts: components["schemas"]["ReadableAccount"][];
+        };
+        AccountProbe: {
+            ok: boolean;
+            login_refused?: boolean;
+            error?: string;
+            folders: components["schemas"]["ProbeFolder"][];
+            missing: string[];
+            problems: string[];
+        };
         Actor: {
             id: string;
             kind: string;
@@ -3912,6 +4443,10 @@ export interface components {
         Address: {
             name?: string;
             addr?: string;
+        };
+        AdminAccountList: {
+            accounts: components["schemas"]["ManagedAccount"][];
+            locked: boolean;
         };
         AnnotateBody: {
             actions: components["schemas"]["Annotation"][];
@@ -4095,6 +4630,9 @@ export interface components {
         CredentialList: {
             credentials: components["schemas"]["ManagedCredential"][];
         };
+        DefaultReadBody: {
+            default_read: boolean;
+        };
         Delivery: {
             id: string;
             zone: string;
@@ -4104,6 +4642,10 @@ export interface components {
             envelope_to: string;
             /** Format: date-time */
             received_at: string;
+            account: string;
+            account_kind: components["schemas"]["AccountKind"];
+            omitted?: components["schemas"]["Omitted"];
+            gmail_labels?: string[];
             auth?: components["schemas"]["DeliveryAuth"];
             leak?: components["schemas"]["LeakCheck"];
         };
@@ -4215,6 +4757,8 @@ export interface components {
             /** Format: date-time */
             received_at: string;
             delivered_to: string[];
+            accounts?: string[];
+            omitted?: components["schemas"]["Omitted"];
             class: components["schemas"]["Class"];
             sent?: components["schemas"]["Sent"];
             auth: components["schemas"]["Auth"];
@@ -4306,6 +4850,16 @@ export interface components {
             /** Format: date-time */
             expires_at: string;
         };
+        ManagedAccount: {
+            id: string;
+            name: string;
+            kind: components["schemas"]["AccountKind"];
+            default_read: boolean;
+            access: components["schemas"]["AccessEntry"][];
+            /** Format: date-time */
+            created_at: string;
+            source?: components["schemas"]["ManagedSource"];
+        };
         ManagedChannel: {
             id: string;
             name: string;
@@ -4368,6 +4922,31 @@ export interface components {
             sealed_at: string;
             state: components["schemas"]["SecretState"];
             reason?: components["schemas"]["LockReason"];
+        };
+        ManagedSource: {
+            state: components["schemas"]["SourceState"];
+            /** Format: date-time */
+            paused_at?: string;
+            address: string;
+            host: string;
+            port: number;
+            username: string;
+            preset?: components["schemas"]["SourcePreset"];
+            mailboxes?: string[];
+            trusted_authserv_id?: string;
+            max_message_bytes: number;
+            /** Format: date-time */
+            backfill_since?: string;
+            daily_byte_budget: number;
+            poll_seconds: number;
+            secret?: components["schemas"]["SecretStatus"];
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            disabled_at?: string;
+            folders: components["schemas"]["SourceFolder"][];
+            failures: components["schemas"]["PullFailureView"][];
         };
         ManagedTransport: {
             id: string;
@@ -4505,6 +5084,8 @@ export interface components {
             /** Format: date-time */
             delivered_at: string;
         };
+        /** @enum {string} */
+        Omitted: "too_large" | "unfetchable";
         OutboxCounts: {
             held: number;
             unknown: number;
@@ -4619,6 +5200,13 @@ export interface components {
             /** @description how many matching messages to return, default 10 */
             samples?: number;
         };
+        ProbeFolder: {
+            name: string;
+            special_use?: string;
+            messages: number;
+            uid_next: number;
+            uidvalidity: number;
+        };
         Problem: {
             title: string;
             status: number;
@@ -4697,6 +5285,22 @@ export interface components {
         };
         /** @enum {string} */
         ProposalState: "pending" | "accepted" | "rejected" | "withdrawn" | "expired";
+        PullFailureView: {
+            folder: string;
+            uid: number;
+            size: number;
+            detail: string;
+            attempts: number;
+            /** Format: date-time */
+            first_at: string;
+            /** Format: date-time */
+            last_at: string;
+        };
+        ReadableAccount: {
+            name: string;
+            kind: components["schemas"]["AccountKind"];
+            address?: string;
+        };
         Recipient: string | {
             /** @description a bare address */
             addr: string;
@@ -4986,6 +5590,23 @@ export interface components {
             /** Format: date-time */
             elevated_until?: string;
         };
+        SourceFolder: {
+            name: string;
+            special_use?: string;
+            uidvalidity: number;
+            high: number;
+            low: number;
+            uid_next: number;
+            messages: number;
+            rematching: boolean;
+            drafts_skipped: number;
+            /** Format: date-time */
+            last_round_at?: string;
+        };
+        /** @enum {string} */
+        SourcePreset: "gmail";
+        /** @enum {string} */
+        SourceState: "enabled" | "paused" | "login_refused" | "removed";
         Span: {
             text: string;
             href?: string;
@@ -5025,6 +5646,9 @@ export interface components {
             principal: components["schemas"]["Actor"];
             recalls: number;
             withdrawn: string[];
+        };
+        SyncBody: {
+            retry_failed?: boolean;
         };
         Thread: {
             id: string;

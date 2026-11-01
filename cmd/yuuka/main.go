@@ -203,8 +203,10 @@ import (
 
 	"github.com/yuuka-mail/yuuka/internal/api"
 	"github.com/yuuka-mail/yuuka/internal/authn"
+	"github.com/yuuka-mail/yuuka/internal/imap"
 	"github.com/yuuka-mail/yuuka/internal/ingest"
 	"github.com/yuuka-mail/yuuka/internal/localraw"
+	"github.com/yuuka-mail/yuuka/internal/manage"
 	"github.com/yuuka-mail/yuuka/internal/mcp"
 	"github.com/yuuka-mail/yuuka/internal/outbox"
 	"github.com/yuuka-mail/yuuka/internal/pull"
@@ -503,6 +505,11 @@ func (a *app) rest(log *slog.Logger) *api.API {
 				return err
 			}
 			return smtp.Probe(ctx)
+		},
+		ProbeSource: func(ctx context.Context, s store.Source, password string) (*manage.SourceProbe, error) {
+			ctx, cancel := context.WithTimeout(ctx, testTimeout)
+			defer cancel()
+			return manage.ProbeSource(ctx, imap.Config{}, s, password)
 		},
 		Channels: a.channels,
 	})

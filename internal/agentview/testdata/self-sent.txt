@@ -1,6 +1,7 @@
 yuuka message yuuka://message/01JC0000000000000000000000 (view v1, level part)
 received: 2026-10-31T12:00:00Z
 delivered to: inbox@example.com
+account: cf
 sent: by this system as me@example.com (outbox 01JC0000000000000000000001, state sent)
 class: unknown
 auth: spf=pass dkim=pass dmarc=pass from_domain=example.com

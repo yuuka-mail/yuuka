@@ -44,6 +44,13 @@ type View struct {
 	Content Content `json:"content"`
 }
 
+// Omitted says why only the header of pulled mail was fetched (§4.4):
+// too_large, larger than the source's limit; unfetchable, the server
+// would not return the body.
+type Omitted string
+
+func (Omitted) Enum() []string { return []string{"too_large", "unfetchable"} }
+
 // Facts are asserted by yuuka itself: they come from the store and from
 // the trusted receiver, never from what the sender wrote. Triage is
 // yuuka's record that a model said something, not yuuka saying it.
@@ -52,7 +59,15 @@ type Facts struct {
 	// or for mail it only sent, when the sent copy was submitted (§4.6).
 	ReceivedAt  time.Time `json:"received_at"`
 	DeliveredTo []string  `json:"delivered_to"`
-	Class       Class     `json:"class"`
+	// Accounts name the accounts the viewer's deliveries came through
+	// (§9.4): the Cloudflare catch-all, or a mailbox pulled over IMAP.
+	// Absent for mail only sent, and withheld with the other delivery
+	// facts.
+	Accounts []string `json:"accounts,omitempty"`
+	// Omitted is set when only the message's header was fetched from the
+	// mailbox it was pulled from (§4.4): its body is not here.
+	Omitted Omitted `json:"omitted,omitempty"`
+	Class   Class   `json:"class"`
 	// Sent is set when this system sent the message (§4.6), whether or
 	// not it also arrived here.
 	Sent *Sent `json:"sent,omitempty"`

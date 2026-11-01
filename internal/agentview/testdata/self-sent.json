@@ -7,6 +7,9 @@
     "delivered_to": [
       "inbox@example.com"
     ],
+    "accounts": [
+      "cf"
+    ],
     "class": "unknown",
     "sent": {
       "outbox_id": "01JC0000000000000000000001",

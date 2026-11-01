@@ -174,6 +174,8 @@ func (f *telegramFake) take() []string {
 type probeSpy struct {
 	mu   sync.Mutex
 	seen []transport.Config
+	// sources are the pull sources probed, as user:password.
+	sources []string
 }
 
 func (p *probeSpy) Probe(_ context.Context, cfg transport.Config) error {

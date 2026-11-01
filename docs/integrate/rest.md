@@ -61,14 +61,21 @@ WebUI 用的是浏览器会话，程序不要模仿它。
   消息列表的 `triage=<问题>:<选项>`（如 `phishing:yes`）和搜索 `q` 里的 `triage:phishing:yes` 按同一个定义过滤，不设阈值；问题或选项不在问题集里、
   或者没配评分器时回 `400 invalid_param`。`GET /api/v1/triage/report` 是 `yuuka triage report` 的同一份计数，只给人。
   这些都是模型的估计，展示时和系统事实分开
-- `/api/v1/admin/` 下的端点（凭据、身份、授权、出口、通知渠道、机密状态）和 `/api/v1/bindings`、`/api/v1/bind-codes`
+- **账户**：`GET /api/v1/accounts`（`message:read`）列出调用者能读的账户，只有名字、种类（`cf_catchall` / `imap`）和拉取账户的邮箱地址；
+  搜索 `q` 里的 `account:<名字>` 用的就是这些名字。消息详情的每条投递（`delivery:read`）带 `account` 和 `account_kind`；
+  从外部邮箱只取了头部的投递带 `omitted`（`too_large`：原件超过来源的大小上限；`unfetchable`：服务器不给正文），
+  这时 `body_text` 为空不代表信是空的。外部邮箱从哪拉、用什么用户名、同步进度只在下面的管理端点里
+- `/api/v1/admin/` 下的端点（凭据、身份、授权、出口、通知渠道、外部邮箱与谁能读哪个账户、机密状态）和 `/api/v1/bindings`、`/api/v1/bind-codes`
   只认人在 WebUI 里的会话：bearer token 即使带着 `admin` 和其他全部 scope
   也回 `403 forbidden`，程序用不了它们（[为什么](../design/principals.md#1310-管理面收紧一步完成放宽先再验-passkey)）。
   查看和收紧只要这种会话。会让某个主体能做更多的改动（签发凭据、加身份、`PUT /api/v1/admin/grants` 整行写授权，
-  以及会放宽的删授权、停用身份）还要求会话在 5 分钟内用 passkey 再验过一次，否则回 `403 elevation_required`；
+  以及会放宽的删授权、停用身份，加外部邮箱、给它新密码或新去处、让它多拉信、恢复拉取、让某个主体能读某个账户）
+  还要求会话在 5 分钟内用 passkey 再验过一次，否则回 `403 elevation_required`；
+  同一个端点上的改动可能放宽也可能收紧（`PUT /api/v1/admin/accounts/{name}`、`…/access/{principal}`、`…/default-read`），
+  只在这一次确实放宽时才要求；
   WebUI 收到它就弹 passkey（`/auth/passkey/elevate/begin`、`finish`）再重试。收紧端点遇到放宽回 `403 widening_requires_cli`，
   `detail` 写出在主机上做这件事的 `yuuka` 命令。每次放宽都推送告警。
-  要用第三方机密的写入（设出口密码、加渠道、测试、绑定）在服务没有钥匙时回 `503 secrets_locked`
+  要用第三方机密的写入（设出口或外部邮箱的密码、加渠道、测试、绑定）在服务没有钥匙时回 `503 secrets_locked`
 - 认领、取消认领前缀和改期望域只看 scope（`prefix:manage` 加 `prefix:read`），回答里带前缀现在的统计：
   认领与否、期望域都在读时现算，已收的信立刻按新决定显示
 - 创建回 `201` 和新对象，删除回 `204`。修改是 `PUT` 整体替换，没有 `PATCH`；只改一部分、且有方向限制的改动是一个动作，
@@ -77,9 +84,10 @@ WebUI 用的是浏览器会话，程序不要模仿它。
 - 多值参数逗号分隔，如 `class=human,unknown`。端点没有的查询参数回 `400 invalid_param`，不会被悄悄忽略
 - **搜索**（`GET /api/v1/search`）的条件全写在 `q` 里，写法见 [§16](../design/search.md)：空白分隔的项都要成立，
   `"短语"`、`-否定`、`a OR b`、括号分组；运算符有 `from:` `to:` `cc:` `bcc:` `subject:` `body:` `list:` `label:`
-  `deliveredto:` `class:` `is:archived|downgraded|sent` `has:attachment` `after:` `before:` `triage:`。
+  `deliveredto:` `account:` `class:` `is:archived|downgraded|sent` `has:attachment` `after:` `before:` `triage:`。
   不带运算符的词查主题、发件人、To / Cc 的名字和地址、正文；有 `delivery:read` 时还查自己发出的信的密送。
-  `to:` 是发件人写的收件人，`deliveredto:` 是 yuuka 实际收信的前缀。日期按 `tz`（IANA 时区名，默认 UTC）取当天零点，
+  `to:` 是发件人写的收件人，`deliveredto:` 是 yuuka 实际收信的前缀，`account:` 是信经哪个账户进来
+  （读不了的账户和不存在的一样查不到）。日期按 `tz`（IANA 时区名，默认 UTC）取当天零点，
   也可以写 RFC 3339 或 `-7d`、`-12h`、`-2w`。响应的 `query` 是规范化后的查询，`hints` 列出被当成文本、
   但像是拼错了运算符的项（如 `form:alice` → `from:`）。写错的值回 `400 invalid_param`，`detail` 带字符位置；
   JMAP 定义了、yuuka 还不支持的条件（`is:unread`、`header:`、`keyword:`、`minsize:`、`maxsize:`）回 `400 unsupported_filter`；

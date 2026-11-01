@@ -32,6 +32,161 @@
         ],
         "additionalProperties": false
       },
+      "AccessBody": {
+        "type": "object",
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/AccessSetting"
+          }
+        },
+        "required": [
+          "access"
+        ],
+        "additionalProperties": false
+      },
+      "AccessEntry": {
+        "type": "object",
+        "properties": {
+          "principal": {
+            "type": "string"
+          },
+          "can_read": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "principal",
+          "can_read"
+        ],
+        "additionalProperties": false
+      },
+      "AccessSetting": {
+        "type": "string",
+        "enum": [
+          "read",
+          "no_read",
+          "default"
+        ]
+      },
+      "AccountBody": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "preset": {
+            "$ref": "#/components/schemas/SourcePreset"
+          },
+          "address": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "maximum": 65535
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "trusted_authserv_id": {
+            "type": "string"
+          },
+          "mailboxes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "backfill_since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "max_message_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "daily_byte_budget": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "poll_seconds": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "revision",
+          "address"
+        ],
+        "additionalProperties": false
+      },
+      "AccountKind": {
+        "type": "string",
+        "enum": [
+          "cf_catchall",
+          "imap"
+        ]
+      },
+      "AccountList": {
+        "type": "object",
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ReadableAccount"
+            }
+          }
+        },
+        "required": [
+          "accounts"
+        ],
+        "additionalProperties": false
+      },
+      "AccountProbe": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "login_refused": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProbeFolder"
+            }
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "problems": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "ok",
+          "folders",
+          "missing",
+          "problems"
+        ],
+        "additionalProperties": false
+      },
       "Actor": {
         "type": "object",
         "properties": {
@@ -62,6 +217,25 @@
             "type": "string"
           }
         },
+        "additionalProperties": false
+      },
+      "AdminAccountList": {
+        "type": "object",
+        "properties": {
+          "accounts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedAccount"
+            }
+          },
+          "locked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "accounts",
+          "locked"
+        ],
         "additionalProperties": false
       },
       "AnnotateBody": {
@@ -805,6 +979,18 @@
         ],
         "additionalProperties": false
       },
+      "DefaultReadBody": {
+        "type": "object",
+        "properties": {
+          "default_read": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "default_read"
+        ],
+        "additionalProperties": false
+      },
       "Delivery": {
         "type": "object",
         "properties": {
@@ -830,6 +1016,21 @@
             "type": "string",
             "format": "date-time"
           },
+          "account": {
+            "type": "string"
+          },
+          "account_kind": {
+            "$ref": "#/components/schemas/AccountKind"
+          },
+          "omitted": {
+            "$ref": "#/components/schemas/Omitted"
+          },
+          "gmail_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
           "auth": {
             "$ref": "#/components/schemas/DeliveryAuth"
           },
@@ -843,7 +1044,9 @@
           "prefix",
           "prefix_claimed",
           "envelope_to",
-          "received_at"
+          "received_at",
+          "account",
+          "account_kind"
         ],
         "additionalProperties": false
       },
@@ -1253,6 +1456,15 @@
               "type": "string"
             }
           },
+          "accounts": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "omitted": {
+            "$ref": "#/components/schemas/Omitted"
+          },
           "class": {
             "$ref": "#/components/schemas/Class"
           },
@@ -1635,6 +1847,45 @@
         ],
         "additionalProperties": false
       },
+      "ManagedAccount": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AccountKind"
+          },
+          "default_read": {
+            "type": "boolean"
+          },
+          "access": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AccessEntry"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ManagedSource"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "default_read",
+          "access",
+          "created_at"
+        ],
+        "additionalProperties": false
+      },
       "ManagedChannel": {
         "type": "object",
         "properties": {
@@ -1854,6 +2105,96 @@
           "owner",
           "sealed_at",
           "state"
+        ],
+        "additionalProperties": false
+      },
+      "ManagedSource": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/SourceState"
+          },
+          "paused_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "address": {
+            "type": "string"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "username": {
+            "type": "string"
+          },
+          "preset": {
+            "$ref": "#/components/schemas/SourcePreset"
+          },
+          "mailboxes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "trusted_authserv_id": {
+            "type": "string"
+          },
+          "max_message_bytes": {
+            "type": "integer"
+          },
+          "backfill_since": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "daily_byte_budget": {
+            "type": "integer"
+          },
+          "poll_seconds": {
+            "type": "integer"
+          },
+          "secret": {
+            "$ref": "#/components/schemas/SecretStatus"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "disabled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "folders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SourceFolder"
+            }
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PullFailureView"
+            }
+          }
+        },
+        "required": [
+          "state",
+          "address",
+          "host",
+          "port",
+          "username",
+          "max_message_bytes",
+          "daily_byte_budget",
+          "poll_seconds",
+          "revision",
+          "created_at",
+          "folders",
+          "failures"
         ],
         "additionalProperties": false
       },
@@ -2376,6 +2717,13 @@
         ],
         "additionalProperties": false
       },
+      "Omitted": {
+        "type": "string",
+        "enum": [
+          "too_large",
+          "unfetchable"
+        ]
+      },
       "OutboxCounts": {
         "type": "object",
         "properties": {
@@ -2800,6 +3148,39 @@
         ],
         "additionalProperties": false
       },
+      "ProbeFolder": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "special_use": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "uid_next": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "uidvalidity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          }
+        },
+        "required": [
+          "name",
+          "messages",
+          "uid_next",
+          "uidvalidity"
+        ],
+        "additionalProperties": false
+      },
       "Problem": {
         "type": "object",
         "properties": {
@@ -3060,6 +3441,65 @@
           "withdrawn",
           "expired"
         ]
+      },
+      "PullFailureView": {
+        "type": "object",
+        "properties": {
+          "folder": {
+            "type": "string"
+          },
+          "uid": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "size": {
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "attempts": {
+            "type": "integer"
+          },
+          "first_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "folder",
+          "uid",
+          "size",
+          "detail",
+          "attempts",
+          "first_at",
+          "last_at"
+        ],
+        "additionalProperties": false
+      },
+      "ReadableAccount": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/AccountKind"
+          },
+          "address": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind"
+        ],
+        "additionalProperties": false
       },
       "Recipient": {
         "anyOf": [
@@ -4147,6 +4587,78 @@
         ],
         "additionalProperties": false
       },
+      "SourceFolder": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "special_use": {
+            "type": "string"
+          },
+          "uidvalidity": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "high": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "low": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "uid_next": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "messages": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "rematching": {
+            "type": "boolean"
+          },
+          "drafts_skipped": {
+            "type": "integer"
+          },
+          "last_round_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "name",
+          "uidvalidity",
+          "high",
+          "low",
+          "uid_next",
+          "messages",
+          "rematching",
+          "drafts_skipped"
+        ],
+        "additionalProperties": false
+      },
+      "SourcePreset": {
+        "type": "string",
+        "enum": [
+          "gmail"
+        ]
+      },
+      "SourceState": {
+        "type": "string",
+        "enum": [
+          "enabled",
+          "paused",
+          "login_refused",
+          "removed"
+        ]
+      },
       "Span": {
         "type": "object",
         "properties": {
@@ -4291,6 +4803,15 @@
           "recalls",
           "withdrawn"
         ],
+        "additionalProperties": false
+      },
+      "SyncBody": {
+        "type": "object",
+        "properties": {
+          "retry_failed": {
+            "type": "boolean"
+          }
+        },
         "additionalProperties": false
       },
       "Thread": {
@@ -4837,6 +5358,45 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/accounts": {
+      "get": {
+        "summary": "List the accounts the caller may read, by name; search takes them as account:\u003cname\u003e",
+        "security": [
+          {
+            "bearer": [
+              "message:read"
+            ]
+          },
+          {
+            "session": [
+              "message:read"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/actions/{id}/undo": {
       "post": {
         "summary": "Undo the annotations an action wrote; agents undo only their own",
@@ -4869,6 +5429,471 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/UndoResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/accounts": {
+      "get": {
+        "summary": "List accounts with who may read them and, for pull accounts, their source, sync progress and failures, never a password; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAccountList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/accounts/{name}": {
+      "put": {
+        "summary": "Add a pull account (revision 0) or replace its source's configuration; a person's session, elevated when it widens",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/accounts/{name}/access/{principal}": {
+      "put": {
+        "summary": "Set whether a principal may read an account; a person's session, elevated when it lets the principal read more",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          },
+          {
+            "name": "principal",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/accounts/{name}/default-read": {
+      "put": {
+        "summary": "Set whether principals without a setting of their own may read an account; a person's session, elevated to make it readable",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DefaultReadBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/accounts/{name}/disable": {
+      "post": {
+        "summary": "Remove a pull account's source: its password erased, its mail kept, its name never reused; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/accounts/{name}/pause": {
+      "post": {
+        "summary": "Pause pulling an account; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/accounts/{name}/resume": {
+      "post": {
+        "summary": "Resume pulling an account, logging in with its password again; an elevated session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedAccount"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/accounts/{name}/sync": {
+      "post": {
+        "summary": "Ask the server to pull an account now, the failed messages too if asked; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyncBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/accounts/{name}/test": {
+      "post": {
+        "summary": "Log in to a pull account's server and list what it would sync, fetching no mail; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountProbe"
                 }
               }
             }
@@ -8493,7 +9518,7 @@
           {
             "name": "q",
             "in": "query",
-            "description": "the query (§16): words and \"phrases\" that must all occur in subject, sender, recipients or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything",
+            "description": "the query (§16): words and \"phrases\" that must all occur in subject, sender, recipients or body; -x negates, a OR b, ( ) groups; operators from: to: cc: bcc: subject: body: list: label: deliveredto: account: class: is:archived|downgraded|sent has:attachment after: before: triage:; empty matches everything",
             "schema": {
               "type": "string"
             }

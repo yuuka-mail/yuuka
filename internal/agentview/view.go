@@ -75,8 +75,12 @@ type Input struct {
 	Raw        []byte
 	ReceivedAt time.Time
 	// DeliveredTo lists the envelope recipients of the viewer's
-	// deliveries of this message.
+	// deliveries of this message, Accounts the accounts they came
+	// through.
 	DeliveredTo []string
+	Accounts    []string
+	// Omitted is set when Raw is only the header (§4.4).
+	Omitted Omitted
 	// Class is the effective class (a human override wins).
 	Class Class
 	// Downgraded is the §4.3 minimal downgrade as the store computed it.
@@ -125,6 +129,8 @@ func Build(in Input) View {
 		Facts: Facts{
 			ReceivedAt:  in.ReceivedAt.UTC(),
 			DeliveredTo: in.DeliveredTo,
+			Accounts:    in.Accounts,
+			Omitted:     in.Omitted,
 			Class:       in.Class,
 			Sent:        in.Sent,
 			Auth:        authFacts(in.Auth, msg.FromAddr),
@@ -160,6 +166,7 @@ func Build(in Input) View {
 		// Whether a delivery exists is a delivery fact too, so mail we
 		// sent is withheld like any other.
 		f.DeliveredTo = []string{}
+		f.Accounts = nil
 		f.LeakChecks = nil
 		f.Auth = Auth{Withheld: true, FromDomain: f.Auth.FromDomain, Line: "withheld (needs delivery:read)"}
 	case in.Sent != nil && len(in.DeliveredTo) == 0:
@@ -195,6 +202,12 @@ func Build(in Input) View {
 	}
 	if msg.Problem != "" {
 		f.Warnings = append(f.Warnings, "quarantined: the MIME structure could not be parsed cleanly, content may be incomplete")
+	}
+	switch f.Omitted {
+	case "too_large":
+		f.Warnings = append(f.Warnings, "header only: the original was too large to fetch from the mailbox, so its body is not here")
+	case "unfetchable":
+		f.Warnings = append(f.Warnings, "header only: the mailbox would not return the body, so it is not here")
 	}
 	return v
 }

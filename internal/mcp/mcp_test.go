@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -25,6 +26,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/contenthash"
 	"github.com/yuuka-mail/yuuka/internal/mcp"
 	"github.com/yuuka-mail/yuuka/internal/mimeparse"
+	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
@@ -315,6 +317,65 @@ func TestListPrefixes(t *testing.T) {
 	}
 }
 
+// list_accounts names what the agent reads (§9.4, §13.8): a pull
+// account only once it may read it, with its address and never where
+// it is pulled from. search_messages' account: matches the same.
+func TestListAccounts(t *testing.T) {
+	t.Parallel()
+	e := newEnv(t)
+	ctx := t.Context()
+	at := time.Now()
+	act := func(tool string) store.Action {
+		return store.Action{ID: ulid.New(time.Now()), Actor: store.SystemPrincipalID, Tool: tool, At: at}
+	}
+	c := store.SourceConfig{
+		Address: "me@gmail.example.com", Host: "imap.example.com", Port: 993, Auth: store.SourceAuthPlain,
+		Username: "secret-user@example.com", Preset: store.PresetGmail, MaxMessageBytes: 1 << 20, PollSeconds: 60,
+	}
+	aud, _ := secret.IMAPS(c.Username, c.Host, c.Port)
+	if _, err := e.db.AddPullAccount(ctx, "gmail", c, secret.Record{
+		ID: ulid.New(at), Kind: store.SecretIMAPPassword, Audience: aud, Wrapper: "local", KeyRef: "0011223344556677",
+		WrappedDEK: []byte("wrapped"), Payload: []byte("pw"),
+	}, store.SystemPrincipalID, act("account.add")); err != nil {
+		t.Fatal(err)
+	}
+	cs := e.client(e.viewer(auth.MessageRead))
+	list := func() mcp.AccountsOutput {
+		t.Helper()
+		r := callTool(t, cs, "list_accounts", nil)
+		var out mcp.AccountsOutput
+		if err := json.Unmarshal(r.structured, &out); err != nil || r.isError {
+			t.Fatalf("%s %v", r.text, err)
+		}
+		if strings.Contains(r.text, "imap.example.com") || strings.Contains(r.text, "secret-user") {
+			t.Errorf("list_accounts names where mail is pulled from:\n%s", r.text)
+		}
+		return out
+	}
+	if got := list(); len(got.Accounts) != 1 || got.Accounts[0] != (mcp.Account{Name: "cf", Kind: store.AccountCloudflare}) {
+		t.Errorf("before access: %+v", got)
+	}
+	if r := callTool(t, cs, "search_messages", map[string]any{"q": "account:gmail"}); r.isError || !strings.HasPrefix(r.text, "0 of 0") {
+		t.Errorf("account:gmail without access: %s", r.text)
+	}
+	if err := e.db.SetAccountAccess(ctx, "gmail", e.agent.ID, false, nil, new(true), act("account.access")); err != nil {
+		t.Fatal(err)
+	}
+	if got := list(); len(got.Accounts) != 2 || got.Accounts[1] != (mcp.Account{Name: "gmail", Kind: store.AccountIMAP, Address: "me@gmail.example.com"}) {
+		t.Errorf("with access: %+v", got)
+	}
+	// The catch-all's mail is found by its name.
+	if r := callTool(t, cs, "search_messages", map[string]any{"q": "account:cf", "include_downgraded": true}); r.isError || strings.HasPrefix(r.text, "0 of") {
+		t.Errorf("account:cf: %s", r.text)
+	}
+	// get_message names the account of each delivery the agent sees.
+	r := callTool(t, e.client(e.viewer(auth.MessageRead, auth.DeliveryRead)), "get_message", map[string]any{"uri": agentview.MessageURI(e.ids["plain-otp"])})
+	var v agentview.View
+	if err := json.Unmarshal(r.structured, &v); err != nil || !slices.Equal(v.Facts.Accounts, []string{"cf"}) || !strings.Contains(r.text, "account: cf\n") {
+		t.Errorf("get_message accounts %v %v:\n%s", v.Facts.Accounts, err, r.text)
+	}
+}
+
 func TestScopes(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -451,7 +512,7 @@ func TestToolsWriteOnlyTheAuditLog(t *testing.T) {
 		}
 		names = append(names, tl.Name)
 	}
-	if strings.Join(names, ",") != "changes_since,get_message,list_identities,list_prefixes,list_proposals,search_messages" {
+	if strings.Join(names, ",") != "changes_since,get_message,list_accounts,list_identities,list_prefixes,list_proposals,search_messages" {
 		t.Fatalf("read-only tools = %v; a new tool needs its own write test", names)
 	}
 	// The draft tools write drafts (TestDraftTools), the annotation
@@ -476,6 +537,7 @@ func TestToolsWriteOnlyTheAuditLog(t *testing.T) {
 		{"get_message", map[string]any{"uri": uri, "level": "part"}},
 		{"get_message", map[string]any{"uri": "yuuka://message/bad"}},
 		{"list_prefixes", map[string]any{}},
+		{"list_accounts", map[string]any{}},
 		{"list_identities", map[string]any{}},
 		{"list_proposals", map[string]any{}},
 		// From the start of the log, so that it lists something.

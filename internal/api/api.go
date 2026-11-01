@@ -154,6 +154,25 @@ type Store interface {
 	Channels(ctx context.Context, all bool) ([]store.Channel, error)
 	// Pull sources own imap_password secrets (manage.Owners).
 	Sources(ctx context.Context, all bool) ([]store.Source, error)
+
+	// Accounts (§9.5, §13.8): which ones a viewer reads takes the
+	// viewer; the rest is configuration like the above, through the
+	// functions `yuuka account` calls.
+	VisibleAccounts(ctx context.Context, v *auth.Viewer) ([]store.VisibleAccount, error)
+	AccountByName(ctx context.Context, name string) (store.Account, error)
+	AccountAccess(ctx context.Context, name string) ([]store.AccessRow, error)
+	SetAccountAccess(ctx context.Context, name, principalID string, defaultRead bool, was, canRead *bool, a store.Action) error
+	SetAccountDefaultRead(ctx context.Context, name string, was, defaultRead bool, a store.Action) error
+	PrincipalByName(ctx context.Context, kind, name string) (store.Principal, error)
+	SourceByName(ctx context.Context, name string) (store.Source, error)
+	SourceMailboxes(ctx context.Context, accountID string) ([]store.Mailbox, error)
+	PullFailures(ctx context.Context, accountID string, all bool) ([]store.PullFailure, error)
+	AddPullAccount(ctx context.Context, name string, c store.SourceConfig, sealed secret.Record, reader string, a store.Action) (store.Source, error)
+	ConfigureSource(ctx context.Context, name string, c store.SourceConfig, revision int64, sealed *secret.Record, a store.Action) (store.Source, error)
+	DisableSource(ctx context.Context, name string, revision int64, a store.Action) error
+	PauseSource(ctx context.Context, name string, revision int64, reason string, a store.Action) error
+	ResumeSource(ctx context.Context, name string, revision int64, a store.Action) error
+	RequestSync(ctx context.Context, name string, retryFailed bool, at time.Time) error
 	ChannelByName(ctx context.Context, name string) (store.Channel, error)
 	ConfigureChannel(ctx context.Context, c store.ChannelConfig, revision int64, sealed *secret.Record, a store.Action) (store.Channel, error)
 	DisableChannel(ctx context.Context, name string, revision int64, a store.Action) error
@@ -310,6 +329,8 @@ var routes = []route{
 		"Withdraw held mail during its recall window, back to its draft (§8.9); agents and services only their own",
 		outboxWithdraw, (*API).withdrawOutbox),
 
+	jsonRoute(http.MethodGet, "/api/v1/accounts", "List the accounts the caller may read, by name; search takes them as account:<name>",
+		read, (*API).readableAccounts),
 	jsonRoute(http.MethodGet, "/api/v1/labels", "List the labels in use, with how many messages carry each", read, (*API).labels),
 	jsonRoute(http.MethodGet, "/api/v1/counts", "Count what waits in the outbox, proposals and drafts, as their lists would show it",
 		read, (*API).counts),
@@ -417,6 +438,35 @@ var routes = []route{
 	jsonRoute(http.MethodPost, "/api/v1/admin/channels/{name}/test",
 		"Send a test message to every binding of a channel; a person's session only",
 		admin, (*API).testChannel).authority(),
+	// Accounts (§9.5, §13.8): pull accounts' sources and who reads each
+	// account. A route whose change may widen or tighten asks for an
+	// elevated session in its handler, only when it widens.
+	jsonRoute(http.MethodGet, "/api/v1/admin/accounts",
+		"List accounts with who may read them and, for pull accounts, their source, sync progress and failures, never a password; a person's session only",
+		admin, (*API).adminAccounts).authority(),
+	jsonRoute(http.MethodPut, "/api/v1/admin/accounts/{name}",
+		"Add a pull account (revision 0) or replace its source's configuration; a person's session, elevated when it widens",
+		admin, (*API).configureAccount).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/accounts/{name}/pause", "Pause pulling an account; a person's session only",
+		admin, (*API).pauseAccount).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/accounts/{name}/resume",
+		"Resume pulling an account, logging in with its password again; an elevated session only",
+		admin, (*API).resumeAccount).widening(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/accounts/{name}/disable",
+		"Remove a pull account's source: its password erased, its mail kept, its name never reused; a person's session only",
+		admin, (*API).disableAccount).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/accounts/{name}/test",
+		"Log in to a pull account's server and list what it would sync, fetching no mail; a person's session only",
+		admin, (*API).testAccount).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/accounts/{name}/sync",
+		"Ask the server to pull an account now, the failed messages too if asked; a person's session only",
+		admin, (*API).syncAccount).authority(),
+	jsonRoute(http.MethodPut, "/api/v1/admin/accounts/{name}/access/{principal}",
+		"Set whether a principal may read an account; a person's session, elevated when it lets the principal read more",
+		admin, (*API).setAccountAccess).authority(),
+	jsonRoute(http.MethodPut, "/api/v1/admin/accounts/{name}/default-read",
+		"Set whether principals without a setting of their own may read an account; a person's session, elevated to make it readable",
+		admin, (*API).setAccountDefaultRead).authority(),
 	jsonRoute(http.MethodGet, "/api/v1/bindings", "List your own bindings and the channels a chat can be bound on; a person's session only",
 		admin, (*API).bindings).authority(),
 	jsonRoute(http.MethodPost, "/api/v1/bindings/{id}/revoke", "Revoke one of your bindings; a person's session only",
@@ -670,7 +720,8 @@ func (a *API) message(ctx context.Context, v *auth.Viewer, p IDParams) (Message,
 			out.Deliveries[i] = Delivery{
 				ID: f.ID, Zone: f.Zone, Prefix: f.Prefix, PrefixClaimed: f.PrefixState == store.PrefixClaimed,
 				EnvelopeFrom: f.EnvelopeFrom, EnvelopeTo: f.EnvelopeTo, ReceivedAt: f.ReceivedAt,
-				Auth: authOf(f.Auth),
+				Account: f.Account, AccountKind: accountKind(f.AccountKind), Omitted: agentview.OmittedOf(f.Omitted),
+				GmailLabels: f.RemoteLabels, Auth: authOf(f.Auth),
 			}
 			if f.Leak.Verdict != leak.None {
 				out.Deliveries[i].Leak = &agentview.LeakCheck{

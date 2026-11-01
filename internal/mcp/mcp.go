@@ -2,8 +2,10 @@
 // semantic tools over the same store, scopes and audit log as every other
 // shell (§8), never a projection of REST.
 //
-// Reading: search_messages, get_message, list_prefixes and
-// changes_since, which follows the change log (§8.6). Writing
+// Reading: search_messages, get_message, list_prefixes, list_accounts
+// and changes_since, which follows the change log (§8.6). No tool reads
+// or changes where a pull account's mail comes from or its password
+// (§9.4): that is a person's, in the WebUI or on the host. Writing
 // (M2): list_identities, create_draft, update_draft and submit_draft,
 // which decides through the submission core like every other path
 // (§8.9). Annotating (M3, §8.5): annotate, undo, propose and
@@ -109,7 +111,8 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 		Description: `Search mail. q: words and "phrases" that must all occur in subject, sender, recipients or body; -x, a OR b, (groups); ` +
 			`from: to: cc: bcc: subject: body: list: label: class:machine|human|unknown is:archived|sent|downgraded ` +
 			`has:attachment after:/before: (YYYY-MM-DD, RFC 3339, -7d) triage:phishing:yes (a model's leaning, not a verdict). ` +
-			`to: is what the sender wrote; deliveredto:shop@example.com is where yuuka received it. ` +
+			`to: is what the sender wrote; deliveredto:shop@example.com is where yuuka received it; account:<name> which account ` +
+			`(list_accounts) it came through. ` +
 			`The result says how q was read. Returns yuuka:// URIs with a snippet, newest first. Needs message:read; bcc: needs delivery:read.`,
 		Annotations: readOnly,
 	}, tool(s, viewerOf, "search_messages", auth.MessageRead, s.searchMessages))
@@ -130,6 +133,14 @@ func (s *Server) MCP(viewerOf ViewerFunc) *sdk.Server {
 			"counts and the operator's labels. Needs prefix:read.",
 		Annotations: readOnly,
 	}, tool(s, viewerOf, "list_prefixes", auth.PrefixRead, s.listPrefixes))
+	sdk.AddTool(srv, &sdk.Tool{
+		Name:        "list_accounts",
+		InputSchema: input[AccountsInput](),
+		Description: "List the accounts whose mail you may read: the catch-all of the deployment's own domains and the " +
+			"mailboxes yuuka pulls, by name, kind and address. Search is across all of them; account:<name> in " +
+			"search_messages limits it to one. Needs message:read.",
+		Annotations: readOnly,
+	}, tool(s, viewerOf, "list_accounts", auth.MessageRead, s.listAccounts))
 	sdk.AddTool(srv, &sdk.Tool{
 		Name:        "changes_since",
 		InputSchema: input[ChangesInput](),

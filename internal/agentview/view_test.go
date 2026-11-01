@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -345,6 +346,31 @@ func TestWithholdDelivery(t *testing.T) {
 	}
 }
 
+// The accounts the deliveries came through are delivery facts (§9.4):
+// shown, and withheld without delivery:read. Mail pulled header only
+// says its body is not there, whoever reads it (§4.4).
+func TestAccountsAndHeaderOnly(t *testing.T) {
+	in := input(t, "plain-otp")
+	in.Accounts = []string{"cf", "gmail"}
+	v := Build(in)
+	if !slices.Equal(v.Facts.Accounts, []string{"cf", "gmail"}) || !strings.Contains(v.Text(), "account: cf, gmail\n") {
+		t.Errorf("accounts %v, text:\n%s", v.Facts.Accounts, v.Text())
+	}
+	in.WithholdDelivery = true
+	if v := Build(in); v.Facts.Accounts != nil || strings.Contains(v.Text(), "gmail") {
+		t.Errorf("withheld: accounts %v, text:\n%s", v.Facts.Accounts, v.Text())
+	}
+
+	head := Input{ID: testID, Raw: []byte("From: a@example.net\r\nSubject: big\r\n\r\n"), Accounts: []string{"gmail"}, Omitted: "too_large"}
+	for _, withhold := range []bool{false, true} {
+		head.WithholdDelivery = withhold
+		v := Build(head)
+		if v.Facts.Omitted != "too_large" || !slices.ContainsFunc(v.Facts.Warnings, func(w string) bool { return strings.HasPrefix(w, "header only:") }) {
+			t.Errorf("header only (withheld %v): %+v", withhold, v.Facts)
+		}
+	}
+}
+
 // The store's leak verdicts are facts with a warning each, and delivery
 // facts like the rest: withheld without delivery:read.
 func TestLeakChecks(t *testing.T) {
@@ -449,7 +475,7 @@ func TestSentGolden(t *testing.T) {
 	selfAuth := authres.Extract(self, "mx.cloudflare.net")
 	for name, in := range map[string]Input{
 		"sent-only": InputOf(reader, sentDetail(), sentOnly),
-		"self-sent": InputOf(reader, sentDetail(store.DeliveryFact{EnvelopeTo: "inbox@example.com", Auth: &selfAuth}), self),
+		"self-sent": InputOf(reader, sentDetail(store.DeliveryFact{EnvelopeTo: "inbox@example.com", Account: "cf", Auth: &selfAuth}), self),
 	} {
 		t.Run(name, func(t *testing.T) {
 			v := Build(in)
