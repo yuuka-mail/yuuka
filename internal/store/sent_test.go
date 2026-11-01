@@ -409,6 +409,30 @@ func TestVisibility(t *testing.T) {
 		"Message-ID: <leak-closed@example.org>\r\nAuthentication-Results: mx.cloudflare.net; dmarc=pass header.from=example.org\r\n",
 		"hidden leak"), tick())
 
+	// A pull account (§9.5): not readable by default, as no pull account
+	// is, and the agent has no row for it, so only the viewer of
+	// everything reads its mail. Its one message was too large to fetch
+	// whole, so only its header is kept (§4.4).
+	pe := &pullEnv{t: t, db: db, pool: pool, op: systemID}
+	pulledSrc := pe.add("pulled", "me@pulled.example.net")
+	pe.mailbox(pulledSrc.AccountID, "All", store.KeyGmail, 1, 0)
+	pulledRaw := []byte("From: x@example.net\r\nTo: me@pulled.example.net\r\nSubject: in-pulled\r\n" +
+		"Message-ID: <in-pulled@example.net>\r\nDate: Sat, 31 Oct 2026 12:00:00 +0000\r\n" +
+		"MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n")
+	pp := pe.pull(pulledSrc.AccountID, store.GmailSourceKey(1), store.RemoteLocation{Mailbox: "All", UIDValidity: 1, UID: 1}, pulledRaw)
+	pp.ContentHash, pp.Omitted = nil, store.OmittedTooLarge
+	if _, err := db.CommitPull(ctx, pp); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := db.Fold(ctx, store.RawRef{
+		DeliveryID: pp.DeliveryID, RawID: pp.RawID, R2Key: pp.R2Key, LocalPath: pp.LocalPath,
+		Zone: pulledSrc.Zone(), Prefix: pulledSrc.Prefix(), ReceivedAt: pp.InternalDate, AccountID: pulledSrc.AccountID,
+	}, mimeparse.Parse(pulledRaw), authres.Extract(pulledRaw, pulledSrc.TrustedAuthservID)); err != nil {
+		t.Fatal(err)
+	} else {
+		msgs["in-pulled"] = f.MessageID
+	}
+
 	// in-open arrived on a claimed prefix, so its Cc is trusted (§8.9).
 	// The prefix was given to example.net, which in-open claims to be
 	// without proving it.
@@ -553,13 +577,15 @@ func TestVisibility(t *testing.T) {
 	logChange("thread", goneThread)
 	logChange("draft", goneDraft)
 	ownProposals := map[*auth.Viewer][]string{
-		everyone:   {"both", "both", "in-closed", "in-closed", "in-open", "in-open", "leak-closed", "sent-closed", "sent-open", "sent-open"},
+		everyone: {
+			"both", "both", "in-closed", "in-closed", "in-open", "in-open", "in-pulled", "leak-closed", "sent-closed", "sent-open", "sent-open",
+		},
 		restricted: {"both", "in-open", "sent-open"},
 		nobody:     {},
 	}
 
 	visibleTo := map[*auth.Viewer][]string{
-		everyone:   {"both", "in-closed", "in-open", "leak-closed", "sent-closed", "sent-open"},
+		everyone:   {"both", "in-closed", "in-open", "in-pulled", "leak-closed", "sent-closed", "sent-open"},
 		restricted: {"both", "in-open", "sent-open"},
 		nobody:     {},
 	}
@@ -594,9 +620,18 @@ func TestVisibility(t *testing.T) {
 			for _, a := range accts {
 				acctNames = append(acctNames, a.Name)
 			}
-			if wantAccts := map[*auth.Viewer][]string{everyone: {"cf", "closed"}, restricted: {"cf"}}[v]; err != nil ||
+			if wantAccts := map[*auth.Viewer][]string{everyone: {"cf", "closed", "pulled"}, restricted: {"cf"}}[v]; err != nil ||
 				!slices.Equal(acctNames, wantAccts) {
 				t.Errorf("VisibleAccounts %q %v, want %q", acctNames, err, wantAccts)
+			}
+			for _, a := range accts {
+				if want := map[string]store.VisibleAccount{
+					"cf":     {Name: "cf", Kind: store.AccountCloudflare},
+					"closed": {Name: "closed", Kind: store.AccountCloudflare},
+					"pulled": {Name: "pulled", Kind: store.AccountIMAP, Address: "me@pulled.example.net"},
+				}[a.Name]; a != want {
+					t.Errorf("VisibleAccounts: %+v, want %+v", a, want)
+				}
 			}
 
 			// The label filter, the label list, the annotation history
@@ -838,8 +873,10 @@ func TestVisibility(t *testing.T) {
 				return slices.DeleteFunc(slices.Clone(want), func(n string) bool { return slices.Contains(names, n) })
 			}
 			toB := hidden("both", "in-closed")
+			viaClosed := hidden("both", "in-closed", "leak-closed")
 			if v == restricted {
 				toB = []string{} // it sees both only as a sent copy
+				viaClosed = []string{}
 			}
 			withDelivery := *v
 			withDelivery.Scopes = []auth.Scope{auth.DeliveryRead}
@@ -848,12 +885,19 @@ func TestVisibility(t *testing.T) {
 				"-deliveredto:b":             except(toB...),
 				"deliveredto:a@example.com":  hidden("in-open", "leak-closed"),
 				"-deliveredto:a@example.com": except("in-open", "leak-closed"),
-				"is:sent":                    hidden("both", "sent-closed", "sent-open"),
-				"-is:sent":                   except("both", "sent-closed", "sent-open"),
-				"bcc:blind":                  hidden("sent-closed", "sent-open"),
-				"-bcc:blind":                 except("sent-closed", "sent-open"),
-				"bcc:blind@example.org":      hidden("sent-closed"),
-				`bcc:"blind reader"`:         hidden("sent-open"),
+				// An account v cannot read matches nothing, as one
+				// that does not exist; a sent copy has no delivery.
+				"account:closed":        viaClosed,
+				"-account:closed":       except(viaClosed...),
+				"account:pulled":        hidden("in-pulled"),
+				"account:cf":            hidden("in-open"),
+				"account:nope":          {},
+				"is:sent":               hidden("both", "sent-closed", "sent-open"),
+				"-is:sent":              except("both", "sent-closed", "sent-open"),
+				"bcc:blind":             hidden("sent-closed", "sent-open"),
+				"-bcc:blind":            except("sent-closed", "sent-open"),
+				"bcc:blind@example.org": hidden("sent-closed"),
+				`bcc:"blind reader"`:    hidden("sent-open"),
 				// text covers the Bcc too, only of visible outbox rows.
 				"blind":             hidden("sent-closed", "sent-open"),
 				"-blind":            except("sent-closed", "sent-open"),
@@ -904,6 +948,20 @@ func TestVisibility(t *testing.T) {
 				}
 				if err == nil && d.Raw.RawID == "" {
 					t.Errorf("MessageByID %s: no raw", n)
+				}
+				// Each visible delivery names its account (§9.4), and a
+				// pulled one why it is only a header (§4.4).
+				for _, f := range d.Deliveries {
+					want := map[string]store.DeliveryFact{
+						"in-open":     {Account: "cf", AccountKind: store.AccountCloudflare},
+						"in-closed":   {Account: "closed", AccountKind: store.AccountCloudflare},
+						"leak-closed": {Account: "closed", AccountKind: store.AccountCloudflare},
+						"both":        {Account: "closed", AccountKind: store.AccountCloudflare},
+						"in-pulled":   {Account: "pulled", AccountKind: store.AccountIMAP, Omitted: store.OmittedTooLarge},
+					}[n]
+					if f.Account != want.Account || f.AccountKind != want.AccountKind || f.Omitted != want.Omitted {
+						t.Errorf("MessageByID %s: delivery through %s (%s), omitted %d", n, f.Account, f.AccountKind, f.Omitted)
+					}
 				}
 			}
 			// The codes: the open one where in-open is visible, the
@@ -1019,7 +1077,7 @@ func TestVisibility(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantDelivered := 0
-			for _, n := range []string{"in-open", "in-closed", "both", "leak-closed"} {
+			for _, n := range []string{"in-open", "in-closed", "in-pulled", "both", "leak-closed"} {
 				if v == everyone || (v == restricted && n == "in-open") {
 					wantDelivered++
 				}

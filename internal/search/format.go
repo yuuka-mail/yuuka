@@ -91,7 +91,7 @@ func (w writer) unary(f *Filter) string {
 // textNames are the text form's names of the conditions with a value.
 var textNames = map[Field]string{
 	From: "from", To: "to", Cc: "cc", Bcc: "bcc", Subject: "subject", Body: "body", ListID: "list",
-	After: "after", Before: "before", DeliveredTo: "deliveredto", Label: "label", Class: "class", Triage: "triage",
+	After: "after", Before: "before", DeliveredTo: "deliveredto", Account: "account", Label: "label", Class: "class", Triage: "triage",
 }
 
 func (w writer) leaf(c Condition) string {
@@ -119,6 +119,8 @@ func (w writer) leaf(c Condition) string {
 			a += "@" + c.Zone
 		}
 		return "deliveredto:" + quoteValue(a)
+	case Account:
+		return "account:" + quoteValue(c.Name)
 	case Label:
 		return "label:" + quoteValue(c.Label)
 	case Class:

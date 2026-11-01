@@ -126,7 +126,7 @@ JMAP Filter JSON（M4）──解码──┘
 | `class` | `class:machine` / `human` / `unknown` | 生效的分类，人工改判优先 |
 | `listId` | `list:` | `list_id`，子串 |
 | `triage` | `triage:phishing:yes` | 现有的 `triage=` 过滤，语义不变（§15） |
-| `account` | `account:gmail` | 有一条**可见**投递属于这个名字的账户（M3.5，未实现）。对不可读的账户和不存在的账户结果一样是空（§13.8） |
+| `account` | `account:gmail` | 有一条**可见**投递属于这个名字的账户（M3.5），名字按 `yuuka account` 的写法精确匹配。对不可读的账户和不存在的账户结果一样是空（§13.8）；只有 Sent 副本的信没有投递，不算在任何账户下 |
 
 **`to:` 和 `deliveredto:` 是两回事，界面和工具描述都要讲清楚**：To 是发件人写的，可以伪造，
 密送的信和邮件列表的信里根本没有你的地址；投递是 yuuka 自己记下的事实（§9.1）。

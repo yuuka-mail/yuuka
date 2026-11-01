@@ -353,6 +353,16 @@ type DeliveryFact struct {
 	// discovered prefix, a prefix that expects nothing yet, or a DMARC
 	// failure that does not claim an expected sender (leak.Judge).
 	Leak leak.Judgement
+	// Account and AccountKind are the account it arrived through (§9.4):
+	// a Cloudflare catch-all, or a mailbox it was pulled from.
+	Account     string
+	AccountKind string
+	// Omitted says why a pulled delivery carried only the header
+	// (§4.4); 0 for a whole message.
+	Omitted Omitted
+	// RemoteLabels are Gmail's labels on the pulled message when it was
+	// pulled (X-GM-LABELS); nil when the server has none.
+	RemoteLabels []string
 	// Raw locates the raw message this delivery carried. Rendering reads
 	// the raw of a visible delivery only (§13.8: raw and auth come from
 	// the readable path).
@@ -422,9 +432,9 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 		}
 		rows, err = tx.Query(ctx, `
 			SELECT d.id, d.zone, d.prefix, p.state, d.envelope_from, d.envelope_to, d.received_at, d.auth,
-				`+judged+`, p.expected_domains, `+rawRefCols+`
+				`+judged+`, p.expected_domains, a.name, a.kind, coalesce(d.remote_omitted, 0), d.remote_labels, `+rawRefCols+`
 			FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
-			JOIN raw_objects r ON r.id = d.raw_id
+			JOIN raw_objects r ON r.id = d.raw_id JOIN accounts a ON a.id = d.account_id
 			WHERE d.message_id = $1 AND `+db.visibleDelivery(v, "d")+`
 			ORDER BY d.received_at, d.id`, d.ID)
 		if err != nil {
@@ -437,7 +447,7 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 			raw := &f.Raw
 			err := r.Scan(append([]any{
 				&f.ID, &f.Zone, &f.Prefix, &f.PrefixState, &f.EnvelopeFrom, &f.EnvelopeTo, &f.ReceivedAt, &f.Auth,
-				&isJudged, &expected,
+				&isJudged, &expected, &f.Account, &f.AccountKind, &f.Omitted, &f.RemoteLabels,
 			}, rawRefTargets(raw)...)...)
 			if isJudged {
 				f.Leak = leak.Judge(expected, leak.SenderOf(f.Auth, d.FromAddr))

@@ -193,6 +193,14 @@ func TestDefaultReadUpgrade(t *testing.T) {
 	if got := list(service); !slices.Equal(got, old) {
 		t.Errorf("the service lost mail with the agent: %v", got)
 	}
+	// account: (§16.3) finds a delivery through the account only where
+	// v reads it: nothing for the agent its row hides it from.
+	for v, want := range map[*auth.Viewer]int{agent: 0, service: 1, op: 1} {
+		res, err := db.Search(ctx, v, store.SearchQuery{Filter: storetest.Query(t, "account:cloudflare"), IncludeDowngraded: true})
+		if err != nil || res.Total != want {
+			t.Errorf("account:cloudflare as %s: %d, %v; want %d", v.PrincipalName, res.Total, err, want)
+		}
+	}
 	set("cloudflare", agent, nil)
 	if got := list(agent); !slices.Equal(got, old) {
 		t.Errorf("back to the default the agent sees %v", got)

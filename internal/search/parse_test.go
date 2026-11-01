@@ -36,6 +36,8 @@ func tree(f *Filter) string {
 			return fmt.Sprintf("%s=%s|%s", c.Field, c.Prefix, c.Zone)
 		case Label:
 			return fmt.Sprintf("%s=%q", c.Field, c.Label)
+		case Account:
+			return fmt.Sprintf("%s=%q", c.Field, c.Name)
 		case Class:
 			return fmt.Sprintf("%s=%s", c.Field, c.Class)
 		case Triage:
@@ -111,6 +113,9 @@ func TestParse(t *testing.T) {
 		{"label:Work", `label="Work"`, "label:Work"},
 		{"deliveredto:Shop", "deliveredTo=shop|", "deliveredto:shop"},
 		{"deliveredto:shop@Example.COM", "deliveredTo=shop|example.com", "deliveredto:shop@example.com"},
+		// An account is named exactly, as `yuuka account` names it.
+		{"ACCOUNT:gmail", `account="gmail"`, "account:gmail"},
+		{"-account:Work.Mail", `(NOT account="Work.Mail")`, "-account:Work.Mail"},
 		{
 			"is:archived IS:Downgraded is:sent has:Attachment", "(AND archived downgraded sent hasAttachment)",
 			"is:archived is:downgraded is:sent has:attachment",
@@ -297,7 +302,7 @@ func TestUses(t *testing.T) {
 func FuzzParse(f *testing.F) {
 	for _, s := range []string{
 		"", "invoice", `"foo bar" -baz`, "a b OR c", "(a OR b) -(c d)", "from:alice subject:\"x y\"",
-		"after:-7d before:2026-11-01", "deliveredto:shop@example.com label:\"带 空格\" is:archived",
+		"after:-7d before:2026-11-01", "deliveredto:shop@example.com label:\"带 空格\" is:archived", "account:gmail -account:x",
 		"Re:hello 10:30", `"unclosed \" \\`, "((((a))))", "-(-(-a))", "triage:phishing:yes class:human has:attachment",
 		"is:unread", "minsize:1", "a)b (c", "OR", "验证码　通知", "after:2026-10-01T08:00:00+08:00",
 	} {

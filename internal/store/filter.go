@@ -119,6 +119,11 @@ func (c *compiler) cond(k search.Condition) (string, error) {
 		return `m.has_attach`, nil
 	case search.DeliveredTo:
 		return c.db.deliveredTo(c.v, k.Prefix, k.Zone, c.arg), nil
+	case search.Account:
+		// Only visible deliveries count, so an account v cannot read
+		// matches nothing, as a name no account has.
+		return `EXISTS (SELECT 1 FROM deliveries d JOIN accounts fa ON fa.id = d.account_id
+			WHERE d.message_id = m.id AND fa.name = ` + c.arg(k.Name) + ` AND ` + c.db.visibleDelivery(c.v, "d") + `)`, nil
 	case search.Label:
 		return hasLabel(k.Label, c.arg), nil
 	case search.Archived:

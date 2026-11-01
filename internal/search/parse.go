@@ -50,7 +50,7 @@ type Query struct {
 // reserved ones are JMAP conditions this version does not support.
 var operators = []string{
 	"from", "to", "cc", "bcc", "subject", "body", "after", "before", "has", "is",
-	"deliveredto", "label", "class", "list", "triage",
+	"deliveredto", "account", "label", "class", "list", "triage",
 	"minsize", "maxsize", "header", "keyword",
 }
 
@@ -403,6 +403,10 @@ func (p *parser) condition(name, value string, start int) (Condition, error) {
 			return Condition{}, p.errorf(start, "deliveredto: takes a prefix or prefix@domain, not %q", value)
 		}
 		return Condition{Field: DeliveredTo, Prefix: prefix, Zone: zone}, nil
+	case "account":
+		// Exactly as named: a name that names no account the caller
+		// reads matches nothing, as one that names none at all (§13.8).
+		return Condition{Field: Account, Name: value}, nil
 	case "label":
 		return Condition{Field: Label, Label: value}, nil
 	case "class":

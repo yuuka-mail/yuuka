@@ -47,13 +47,15 @@ const (
 	HasAttachment Field = "hasAttachment"
 
 	DeliveredTo Field = "deliveredTo"
-	Label       Field = "label"
-	Archived    Field = "archived"
-	Downgraded  Field = "downgraded"
-	Sent        Field = "sent"
-	Class       Field = "class"
-	ListID      Field = "listId"
-	Triage      Field = "triage"
+	// Account: a visible delivery came through the account Name (§9.4).
+	Account    Field = "account"
+	Label      Field = "label"
+	Archived   Field = "archived"
+	Downgraded Field = "downgraded"
+	Sent       Field = "sent"
+	Class      Field = "class"
+	ListID     Field = "listId"
+	Triage     Field = "triage"
 )
 
 // Filter is a node of the tree: an operator over Args, or, when Op is
@@ -85,6 +87,8 @@ type Condition struct {
 	Prefix, Zone string
 	// Label is matched exactly, case-sensitively (§8.5).
 	Label string
+	// Name of Account, exactly as the account is named.
+	Name  string
 	Class classify.Class
 	// Question and Option of Triage, checked against the question set.
 	Question, Option string
