@@ -153,6 +153,24 @@ func TestPulledAuthserv(t *testing.T) {
 	if ok, dmarc := trusted(big.RawID); !ok || dmarc != "fail" {
 		t.Errorf("header-only: trusted %v dmarc %q", ok, dmarc)
 	}
+	// A multipart header without its body is not a broken message, and
+	// says enough to show an attachment.
+	mixed := []byte("From: x@example.net\r\nSubject: photos\r\nMIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/mixed; boundary=b\r\n\r\n")
+	photos := e.pull(t, account, 5, mixed, true)
+	f, err := e.in.FoldPulled(ctx, photos, mixed, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parseErr *string
+	var attach bool
+	if err := e.pool.QueryRow(ctx, `SELECT parse_error, has_attach FROM messages WHERE id = $1`, f.MessageID).
+		Scan(&parseErr, &attach); err != nil {
+		t.Fatal(err)
+	}
+	if parseErr != nil || !attach {
+		t.Errorf("header-only multipart: parse_error %v, has_attach %v", parseErr, attach)
+	}
 
 	// The backlog pass folds a pulled delivery with its account's value
 	// too, and does not queue it.

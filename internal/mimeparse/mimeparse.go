@@ -130,8 +130,21 @@ type Entity struct {
 	Children []Entity `json:"children,omitempty"`
 }
 
+// ParseHeader parses raw that is a header block only: a pulled message
+// too large to fetch whole (§4.4). The body is absent, not malformed, so
+// only the header can be a Problem; has_attach is inferred from the
+// top-level Content-Type.
+func ParseHeader(raw []byte) Message {
+	m, _ := parse(raw, false)
+	return m
+}
+
 // ParseTree parses raw like Parse and also returns its MIME tree.
 func ParseTree(raw []byte) (Message, Entity) {
+	return parse(raw, true)
+}
+
+func parse(raw []byte, body bool) (Message, Entity) {
 	var p parser
 	e, err := message.Read(bytes.NewReader(raw))
 	if err != nil && e == nil {
@@ -149,6 +162,13 @@ func ParseTree(raw []byte) (Message, Entity) {
 	// go-message hands back the undecoded body.
 	p.charset = e.Header.Get("Content-Type")
 	p.headers(mail.Header{Header: e.Header})
+	if !body {
+		mt := p.m.MediaType
+		p.m.HasAttach = mt == "multipart/mixed" ||
+			mt != "" && !strings.HasPrefix(mt, "text/") && !strings.HasPrefix(mt, "multipart/")
+		p.m.Problem = strings.Join(p.problems, "; ")
+		return p.m, Entity{}
+	}
 	root, _ := p.walk(e, 0, "")
 	var plain []string
 	for _, t := range root.texts() {

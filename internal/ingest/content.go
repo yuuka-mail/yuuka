@@ -24,7 +24,7 @@ func (in *Ingester) fold(ctx context.Context, ref store.RawRef, raw []byte, scor
 		return store.Folded{}, err
 	}
 	authserv, pulled := ids.of(ref.AccountID)
-	msg := mimeparse.Parse(raw)
+	msg := parseRaw(ref, raw)
 	f, err := in.cfg.DB.Fold(ctx, ref, msg, authres.Extract(raw, authserv))
 	if err == nil && f.NewMessage && msg.Problem != "" {
 		// The problem text may quote header bytes; the id is enough.
@@ -42,6 +42,15 @@ func (in *Ingester) fold(ctx context.Context, ref store.RawRef, raw []byte, scor
 		in.cfg.Log.Warn("rule failed closed", "rule", h.Rule, "message", f.MessageID, "err", h.Err)
 	}
 	return f, err
+}
+
+// parseRaw parses the raw of ref. A raw without a content hash is a header
+// block only (§4.4): its missing body must not quarantine it.
+func parseRaw(ref store.RawRef, raw []byte) mimeparse.Message {
+	if ref.ContentHash == nil {
+		return mimeparse.ParseHeader(raw)
+	}
+	return mimeparse.Parse(raw)
 }
 
 // FoldPulled runs the content step for a delivery the pull engine has
@@ -188,11 +197,12 @@ func (in *Ingester) ProcessBacklog(ctx context.Context) (BacklogStats, error) {
 	}
 	return st, backlogPass(ctx, in, &st, "message", in.cfg.DB.UnextractedMessages, messageID,
 		func(ctx context.Context, t store.ReparseTarget) error {
-			raw, err := in.ReadRaw(ctx, t.Canonical())
+			ref := t.Canonical()
+			raw, err := in.ReadRaw(ctx, ref)
 			if err != nil {
 				return err
 			}
-			_, err = in.cfg.DB.Reextract(ctx, t.MessageID, mimeparse.Parse(raw))
+			_, err = in.cfg.DB.Reextract(ctx, t.MessageID, parseRaw(ref, raw))
 			return err
 		})
 }
@@ -305,7 +315,7 @@ func (in *Ingester) rebuild(ctx context.Context, t store.ReparseTarget) (bool, e
 	parse := func(ref store.RawRef, raw []byte) {
 		// The content of the other sources is the same by the fold key.
 		if ref.RawID == canonical.RawID {
-			msg = mimeparse.Parse(raw)
+			msg = parseRaw(ref, raw)
 		}
 	}
 	for _, d := range t.Deliveries {
