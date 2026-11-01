@@ -152,6 +152,8 @@ type Store interface {
 	Secret(ctx context.Context, id string) (store.StoredSecret, error)
 	Secrets(ctx context.Context) ([]store.StoredSecret, error)
 	Channels(ctx context.Context, all bool) ([]store.Channel, error)
+	// Pull sources own imap_password secrets (manage.Owners).
+	Sources(ctx context.Context, all bool) ([]store.Source, error)
 	ChannelByName(ctx context.Context, name string) (store.Channel, error)
 	ConfigureChannel(ctx context.Context, c store.ChannelConfig, revision int64, sealed *secret.Record, a store.Action) (store.Channel, error)
 	DisableChannel(ctx context.Context, name string, revision int64, a store.Action) error

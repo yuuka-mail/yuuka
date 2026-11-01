@@ -1,6 +1,6 @@
 // Package manage holds the management actions on transports, channels,
-// bindings and their sealed secrets (§17.6) that both the host CLI and
-// the REST API perform. The checks, the sealing, what an action records
+// bindings, pull accounts and their sealed secrets (§17.6) that both the
+// host CLI and the REST API perform. The checks, the sealing, what an action records
 // and when a change counts as a widening are written once here; the
 // callers decide who is acting (Act), how to ask for what is missing and
 // how to say what happened.

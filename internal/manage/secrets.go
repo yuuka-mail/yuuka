@@ -14,12 +14,13 @@ import (
 // audience stored beside it, which is exactly what a database writer
 // controls (§17.2).
 type Owner struct {
-	// What names it for people: "transport cloudflare".
+	// What names it for people: "transport cloudflare", "account gmail".
 	What string
 	// Kind is the secrets.kind it must have.
 	Kind string
-	// Transport or Channel is the owning row's name; one of them is set.
-	Transport, Channel string
+	// Transport, Channel or Account is the owning row's name; one of them
+	// is set.
+	Transport, Channel, Account string
 	// Audience is recomputed from the owning row.
 	Audience func() (string, error)
 }
@@ -28,11 +29,12 @@ type Owner struct {
 type OwnerStore interface {
 	Transports(ctx context.Context, all bool) ([]store.Transport, error)
 	Channels(ctx context.Context, all bool) ([]store.Channel, error)
+	Sources(ctx context.Context, all bool) ([]store.Source, error)
 }
 
 // Owners maps secret ids to their owners. Every table that references
 // secrets contributes its rows here, and only here: a new owner kind
-// (M3.5's account sources) is one more block below, and listing,
+// (M3.5b's OAuth clients) is one more block below, and listing,
 // checking and rewrapping follow.
 func Owners(ctx context.Context, st OwnerStore) (map[string]Owner, error) {
 	out := map[string]Owner{}
@@ -60,6 +62,19 @@ func Owners(ctx context.Context, st OwnerStore) (map[string]Owner, error) {
 		out[c.SecretID] = Owner{
 			What: "channel " + c.Name, Kind: store.SecretTelegramBotToken, Channel: c.Name,
 			Audience: c.Audience, // telegram:bot<id>, from the row
+		}
+	}
+	srcs, err := st.Sources(ctx, true)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range srcs {
+		if s.SecretID == "" {
+			continue
+		}
+		out[s.SecretID] = Owner{
+			What: "account " + s.AccountName, Kind: store.SecretIMAPPassword, Account: s.AccountName,
+			Audience: s.Audience, // imaps://<username>@<host>:<port>, from the row
 		}
 	}
 	return out, nil
