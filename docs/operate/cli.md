@@ -63,6 +63,9 @@ DMARC 证实过的发件域和各自的信数（OBSERVED，不在期望里的前
 密码用 KEK 加密（[配置](config.md#第三方机密的加密钥匙)、[为什么](../design/secrets.md#17-第三方机密与渠道进库加密信任根留在主机)）。
 写密码的命令要读到 `YUUKA_KEK_FILE`；`ls` 和 `rm` 不需要。从环境变量里的出口升级上来、换 KEK，见[第三方机密](secrets.md)。
 
+WebUI 设置页的「出口」一节能做 `add`、`set`、`test`、`rm` 同样的事，发信地址一节的「出口链…」等于 `identity set --transports`，
+见[下文](#在-webui-里)。
+
 ```bash
 yuuka transport add cloudflare --host smtp.mx.cloudflare.net [--port 465] --username <用户名> \
   --password-file /path/to/password --caps cloudflare
@@ -112,6 +115,9 @@ yuuka secret rewrap
 
 ## 通知渠道
 
+WebUI 设置页的「通知渠道」一节能做 `add`、`test`、`rm`，「我的通知」一节给自己绑定 chat、改订阅、解除绑定，
+见[下文](#在-webui-里)。给别人绑定只能用下面的 `channel bind --principal`。
+
 通知渠道现在只有 Telegram：一个渠道就是一个 bot。渠道上的**绑定**是某个人的一个 chat（私聊或群），
 加上「谁按的按钮算数」；**订阅**是一个绑定收哪些事件。bot token 和出口密码一样用 KEK 加密存在库里
 （[为什么](../design/secrets.md#174-表的形状为什么是这样)）。从 `YUUKA_TELEGRAM_*` 升级上来见[第三方机密](secrets.md#telegram-从环境变量升级)。
@@ -149,6 +155,29 @@ yuuka channel rm tg
 每次 `add` 记 `channel.add`（bot id、用户名、audience、包装器、钥匙引用，从不含 token），
 `bind` 记 `channel.bind.begin` 和 `channel.bind.confirm`（chat、按钮用户），其余记 `channel.unbind`、`channel.subscribe`、
 `channel.unsubscribe`、`channel.rm`。`add`、`bind` 还会给管理员推一条安全告警；没有 `YUUKA_KEK_FILE` 时发不出去，命令会说
+
+### 在 WebUI 里
+
+出口、通知渠道和自己的绑定在 WebUI 的设置页里也能管，和上面的命令走同一组检查、记同样的审计
+（`actor` 是登录的人和他的会话，`via: api`，不是 `system`）。只有人在 WebUI 里的会话能用这几节，
+token 不管带什么 scope 都进不来（[为什么](../design/secrets.md#176-谁能改怎么改)）。
+
+- **会写机密或改变去向的操作先再验一次 passkey**：加出口、改出口（主机、端口、用户名、密码、caps 任何一样）、
+  重新配置占位或删掉过的出口、加渠道或换 token、发起和确认绑定、给发信地址的出口链加出口或换主出口。
+  验过之后 5 分钟内不再询问；每次都给管理员和相关的人推一条安全告警。
+  删出口、删渠道、解除绑定、改订阅、从出口链去掉备用只要登录着，第二次按下旁边写着代价
+- **密码和 token 只写不读**：输入框是密码框，提交之后不再显示，也没有任何地方读得回来。改出口时密码留空等于不改；
+  但换了主机、端口或用户名必须重新输入，表单会提示。机密只显示「已设、什么时候加密的、能不能解开」：
+  `opens`（可用），或上锁和原因——服务没有钥匙、加密它的那把钥匙没有加载、解不开需要重新设置。和 `secret check` 的结果对应
+- **版本**：每次改动带上页面读到的版本。两次之间有人（另一个页面，或主机上的命令）改过，提交回 `409`、什么都不写，刷新再改
+- **测试连接**和 `transport test` 一样只做 TLS、`EHLO`、`AUTH`，不发信；渠道的「发测试消息」发到它上面的每个绑定
+- **绑定自己的 chat**（「我的通知」→「绑定聊天」）：验过 passkey 后拿到一个链接（群用另一个），
+  在要收通知的 Telegram 账号里打开、按 Start。页面每两秒查一次，`serve` 的轮询者收到后显示 Telegram 报来的
+  名字、用户 id、chat id 和私聊还是群聊。确认是你才按「是我，绑定」（这一步也要在 passkey 窗口内），
+  不是就「不是我，拒绝」，码作废、什么都不绑。码 10 分钟有效。名字是发码的人自己起的，只当数据看
+- **没有 KEK 时**每页顶上有一条横幅：收信照常，带密码的出口把信留在队列里，渠道不运行。
+  这时设置页照样能看；要设密码、加渠道、测试、绑定的操作回 `503`，表单会说明。把 KEK 挂回去重启 `serve` 就好
+  （[第三方机密](secrets.md)）
 
 ## 发信地址与授权
 

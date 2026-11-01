@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { AppliedGrant } from "@/api/types";
+import type { AppliedGrant, ManagedTransport } from "@/api/types";
 
 import {
   grantBody,
@@ -14,6 +14,7 @@ import {
   tightenings,
   validCount,
 } from "./authority";
+import { chainWidens, destination, needsPassword, presetOf, transportForm } from "./thirdparty";
 
 const applied = (over: Partial<AppliedGrant> = {}): AppliedGrant => ({
   send_policy: "review",
@@ -118,5 +119,57 @@ describe("the whole-row grant form", () => {
     expect(validCount("12")).toBe(true);
     expect(validCount("-1")).toBe(false);
     expect(validCount("1.5")).toBe(false);
+  });
+});
+
+const transport = (over: Partial<ManagedTransport> = {}): ManagedTransport => ({
+  id: "t1",
+  name: "relay",
+  state: "configured",
+  host: "smtp.example.com",
+  port: 465,
+  username: "u",
+  caps: ["message-id", "return-path"],
+  secret: { sealed_at: "2026-11-01T00:00:00Z", state: "ok" },
+  revision: 3,
+  created_at: "2026-11-01T00:00:00Z",
+  used_by: [],
+  ...over,
+});
+
+describe("transports and channels", () => {
+  const t = transport;
+
+  it("names the caps presets", () => {
+    expect(presetOf([])).toBe("cloudflare");
+    expect(presetOf(["return-path", "message-id"])).toBe("standard");
+    expect(presetOf(["dkim"])).toBe("custom");
+  });
+
+  it("says where a transport goes, as its audience would", () => {
+    expect(destination({ host: "smtp.example.com", port: 465, username: "u" })).toBe(
+      "u@smtp.example.com:465",
+    );
+    expect(destination({ host: "2001:db8::1", port: 587 })).toBe("[2001:db8::1]:587");
+  });
+
+  it("asks for the password again when the transport moves", () => {
+    const f = transportForm(t());
+    expect(f.password).toBe("");
+    expect(needsPassword(t(), f)).toBe(false);
+    expect(needsPassword(t(), { ...f, host: "SMTP.example.com" })).toBe(false);
+    expect(needsPassword(t(), { ...f, host: "elsewhere.example.com" })).toBe(true);
+    expect(needsPassword(t(), { ...f, port: "587" })).toBe(true);
+    expect(needsPassword(t(), { ...f, username: "v" })).toBe(true);
+    expect(needsPassword(t(), { ...f, username: "" })).toBe(false);
+    expect(needsPassword(t({ state: "placeholder", secret: undefined }), f)).toBe(true);
+    expect(needsPassword(undefined, { ...f, password: "x" })).toBe(false);
+  });
+
+  it("widens a chain only where mail could go somewhere new", () => {
+    expect(chainWidens(["a", "b"], ["a"])).toBe(false);
+    expect(chainWidens(["a", "b", "c"], ["a", "c", "b"])).toBe(false);
+    expect(chainWidens(["a"], ["a", "b"])).toBe(true);
+    expect(chainWidens(["a", "b"], ["b"])).toBe(true);
   });
 });

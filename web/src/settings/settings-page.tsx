@@ -19,24 +19,32 @@ import { ProblemLine } from "@/send/marks";
 import { problem, type Abilities } from "@/send/outgoing";
 import { settingsSections, type SettingsSection, type View } from "@/mail/view";
 
+import { ChannelsSection } from "./channels";
 import { CredentialsSection } from "./credentials";
 import { GrantsSection } from "./grants";
 import { IdentitiesSection } from "./identities";
+import { NotificationsSection } from "./notifications";
+import { TransportsSection } from "./transports";
 import { TriageReportSection } from "./triage-report";
 
 // Settings (§12.12): the one page that does not follow a message,
 // entered from the account menu, never from the sidebar. It holds what
 // has no message of its own: rules, then who may do what (§13.10) —
-// credentials, identities and grants, which only a person's own session
-// with admin sees, to look at and tighten — and the scorer's report
-// (§15.5), which belongs to no one message either. Each section is
-// listed only when the session may see it.
+// credentials, identities and grants — and where mail and notifications
+// go (§17.6) — transports, channels and one's own notification chats —
+// which only a person's own session with admin sees, to look at and
+// tighten, and the scorer's report (§15.5), which belongs to no one
+// message either. Each section is listed only when the session may see
+// it.
 
 const sectionTitle: Record<SettingsSection, () => string> = {
   rules: m.settings_rules,
   credentials: m.settings_credentials,
   identities: m.settings_identities,
   grants: m.settings_grants,
+  transports: m.settings_transports,
+  channels: m.settings_channels,
+  notifications: m.settings_notifications,
   triage: m.settings_triage,
 };
 
@@ -110,6 +118,9 @@ export function SettingsPage({
         {section === "credentials" && <CredentialsSection />}
         {section === "identities" && <IdentitiesSection />}
         {section === "grants" && <GrantsSection />}
+        {section === "transports" && <TransportsSection />}
+        {section === "channels" && <ChannelsSection />}
+        {section === "notifications" && <NotificationsSection />}
         {section === "triage" && (
           <TriageReportSection
             onLean={(tr) =>

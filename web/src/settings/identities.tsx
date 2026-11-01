@@ -16,6 +16,8 @@ import { m } from "@/paraglide/messages.js";
 import { ProblemLine } from "@/send/marks";
 import { principal, problem } from "@/send/outgoing";
 
+import { chainWidens } from "./thirdparty";
+
 import {
   Dates,
   Field,
@@ -30,7 +32,8 @@ import {
 // Identities (§9.3, §13.10): the addresses yuuka sends as. Disabling one
 // is a tightening, except where the zone's *@zone pattern would take the
 // address over with its own owner and grants; that, and adding one, ask
-// for the passkey first.
+// for the passkey first. So does a transport chain (§10.2.2, §17.6) that
+// lets mail go anywhere new; taking a fallback away does not.
 
 const touched = ["/api/v1/admin/identities", "/api/v1/admin/grants", "/api/v1/identities"];
 
@@ -61,7 +64,7 @@ export function IdentitiesSection() {
       ) : (
         <ul aria-label={m.settings_identities()} className="flex flex-col border-t">
           {q.data.identities.map((i) => (
-            <IdentityRow key={i.id} i={i} />
+            <IdentityRow key={i.id} i={i} transports={q.data.transports} />
           ))}
         </ul>
       )}
@@ -196,8 +199,9 @@ function AddForm({ list, onAdded }: { list: IdentityAdminList; onAdded: () => vo
   );
 }
 
-function IdentityRow({ i }: { i: ManagedIdentity }) {
+function IdentityRow({ i, transports }: { i: ManagedIdentity; transports: string[] }) {
   const qc = useQueryClient();
+  const [chain, setChain] = useState(false);
   const off = !!i.disabled_at;
   const disable = async () => {
     await withElevation(() =>
@@ -219,12 +223,16 @@ function IdentityRow({ i }: { i: ManagedIdentity }) {
       <Dates
         items={[
           [m.identities_owner(), principal(i.owner)],
-          [m.identities_transport(), i.transport],
+          [m.identities_transport(), i.transports.join(" → ")],
           [m.credentials_created(), listTime(i.created_at)],
         ]}
       />
-      {!off && (
-        <div className="pt-0.5">
+      {!off && chain && <ChainEditor i={i} options={transports} onDone={() => setChain(false)} />}
+      {!off && !chain && (
+        <div className="flex flex-wrap items-start gap-2 pt-0.5">
+          <Button size="xs" variant="outline" onClick={() => setChain(true)}>
+            {m.chain_edit()}
+          </Button>
           <ConfirmButton
             label={m.identities_disable()}
             confirmLabel={m.identities_disable_confirm()}
@@ -238,5 +246,142 @@ function IdentityRow({ i }: { i: ManagedIdentity }) {
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * An identity's transport chain, primary first (§10.2.2): a fallback
+ * added, or another primary, lets its mail go somewhere new and asks for
+ * the passkey; taking one away, or reordering the fallbacks, does not.
+ */
+function ChainEditor({
+  i,
+  options,
+  onDone,
+}: {
+  i: ManagedIdentity;
+  options: string[];
+  onDone: () => void;
+}) {
+  const qc = useQueryClient();
+  const [chain, setChain] = useState<string[]>(i.transports);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<unknown>();
+  const widens = chainWidens(i.transports, chain);
+  const same = chain.join() === i.transports.join();
+  const spare = options.filter((t) => !chain.includes(t));
+  const move = (k: number, by: number) => {
+    const next = [...chain];
+    [next[k], next[k + by]] = [next[k + by] ?? "", next[k] ?? ""];
+    setChain(next);
+  };
+  const submit = async () => {
+    setBusy(true);
+    setErr(undefined);
+    try {
+      await withElevation(() =>
+        data(
+          api.PUT("/api/v1/admin/identities/{id}/transports", {
+            params: { path: { id: i.id } },
+            body: { transports: chain },
+          }),
+        ),
+      );
+      for (const k of touched) void qc.invalidateQueries({ queryKey: ["get", k] });
+      void qc.invalidateQueries({ queryKey: ["get", "/api/v1/admin/transports"] });
+      onDone();
+    } catch (e) {
+      setErr(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const body = (
+    <>
+      <ol className="flex flex-col gap-1">
+        {chain.map((t, k) => (
+          <li key={t} className="flex flex-wrap items-center gap-2">
+            <span className="w-16 text-meta text-muted-foreground">
+              {k === 0 ? m.chain_primary() : m.chain_fallback({ n: k })}
+            </span>
+            <span className="font-mono">{t}</span>
+            <span className="flex items-center gap-1">
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                aria-label={m.chain_up({ name: t })}
+                disabled={k === 0}
+                onClick={() => move(k, -1)}
+              >
+                ↑
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                aria-label={m.chain_down({ name: t })}
+                disabled={k === chain.length - 1}
+                onClick={() => move(k, 1)}
+              >
+                ↓
+              </Button>
+              <Button
+                type="button"
+                size="xs"
+                variant="ghost"
+                disabled={chain.length === 1}
+                onClick={() => setChain(chain.filter((x) => x !== t))}
+              >
+                {m.chain_remove()}
+              </Button>
+            </span>
+          </li>
+        ))}
+      </ol>
+      {spare.length > 0 && chain.length < 8 && (
+        <select
+          aria-label={m.chain_add()}
+          className={cn(selectClass, "self-start")}
+          value=""
+          onChange={(e) => e.target.value && setChain([...chain, e.target.value])}
+        >
+          <option value="">{m.chain_add()}</option>
+          {spare.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </select>
+      )}
+      <p className="text-muted-foreground">
+        {same ? m.chain_same() : widens ? m.chain_widens() : m.chain_narrows()}
+      </p>
+      <span className="flex flex-wrap items-center gap-2">
+        <Button type="submit" size="xs" disabled={same || busy}>
+          {m.chain_save()}
+        </Button>
+        <Button type="button" size="xs" variant="ghost" onClick={onDone}>
+          {m.rule_cancel()}
+        </Button>
+        {err !== undefined && <ProblemLine p={problem(err)} />}
+      </span>
+    </>
+  );
+  return widens ? (
+    <WideningForm legend={m.chain_legend({ address: i.address })} onSubmit={() => void submit()}>
+      {body}
+    </WideningForm>
+  ) : (
+    <form
+      className="flex flex-col gap-2 rounded-md border px-3 py-2.5 text-small"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void submit();
+      }}
+    >
+      <p className="font-medium">{m.chain_legend({ address: i.address })}</p>
+      {body}
+    </form>
   );
 }

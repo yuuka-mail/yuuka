@@ -56,14 +56,26 @@ export interface View {
 
 /**
  * The sections of the settings page: rules, then who may do what
- * (§13.10), then the scorer's report (§15.5).
+ * (§13.10), where mail and notifications go (§17.6), then the scorer's
+ * report (§15.5).
  */
-export type SettingsSection = "rules" | "credentials" | "identities" | "grants" | "triage";
+export type SettingsSection =
+  | "rules"
+  | "credentials"
+  | "identities"
+  | "grants"
+  | "transports"
+  | "channels"
+  | "notifications"
+  | "triage";
 export const settingsSections: readonly SettingsSection[] = [
   "rules",
   "credentials",
   "identities",
   "grants",
+  "transports",
+  "channels",
+  "notifications",
   "triage",
 ];
 

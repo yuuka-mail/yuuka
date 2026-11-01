@@ -94,6 +94,22 @@ export type GrantBody = S["GrantBody"];
 export type StoredGrant = S["StoredGrant"];
 export type Scope = S["Scope"];
 
+// Transports, channels, bindings and their sealed secrets (§17.6).
+export type SecretStatus = S["SecretStatus"];
+export type LockReason = S["LockReason"];
+export type SecretsStatus = S["SecretsStatus"];
+export type TransportCap = S["TransportCap"];
+export type ManagedTransport = S["ManagedTransport"];
+export type TransportList = S["TransportList"];
+export type TransportProbe = S["TransportProbe"];
+export type ManagedChannel = S["ManagedChannel"];
+export type ChannelList = S["ChannelList"];
+export type Event = S["Event"];
+export type MyBinding = S["MyBinding"];
+export type BindingList = S["BindingList"];
+export type BindStart = S["BindStart"];
+export type BindCodeView = S["BindCodeView"];
+
 // Annotations, rules and proposals (M3, §8.5). A rule's match is typed by
 // hand in rules/match.ts: the contract says only "object" because the
 // tree is recursive.

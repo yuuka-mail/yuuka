@@ -521,6 +521,7 @@ const problems: Partial<Record<Code, () => string>> = {
   invalid_rule: () => msg.problem_invalid_rule(),
   widening_requires_cli: () => msg.problem_widening(),
   elevation_required: () => msg.problem_elevation(),
+  secrets_locked: () => msg.problem_secrets_locked(),
 };
 
 // The codes whose detail names what is wrong (a field, an address), or
@@ -532,6 +533,7 @@ const specific = new Set<Code>([
   "submission_rejected",
   "invalid_rule",
   "widening_requires_cli",
+  "secrets_locked",
 ]);
 
 /**

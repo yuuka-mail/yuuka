@@ -26,6 +26,7 @@ import { OutboxList, parseOutboxFilter } from "@/send/outbox-list";
 import { OutboxPane } from "@/send/outbox-pane";
 import { abilities, outboxFilters, type OutboxFilter } from "@/send/outgoing";
 
+import { LockedBanner } from "@/settings/secret-state";
 import { SettingsPage, settingsFor } from "@/settings/settings-page";
 
 import { AccountMenu } from "./account-menu";
@@ -174,6 +175,10 @@ export function MailShell({ session }: { session: SessionInfo }) {
           }
         />
       </header>
+      <LockedBanner
+        enabled={can.authority}
+        onOpen={() => go({ settings: "transports", rule: undefined })}
+      />
 
       {view.settings ? (
         <SettingsPage

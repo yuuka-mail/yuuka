@@ -492,7 +492,14 @@ if (enrollURL) {
       }
       // Who may do what: look and tighten; the second press is shown, never made.
       if (admin) {
-        for (const section of ["credentials", "identities", "grants"]) {
+        for (const section of [
+          "credentials",
+          "identities",
+          "grants",
+          "transports",
+          "channels",
+          "notifications",
+        ]) {
           await s.goto(base + `/?settings=${section}`);
           await s.locator("main h2").waitFor();
           await shot(s, `settings-${section}-${tag}`);
@@ -657,7 +664,14 @@ if (enrollURL) {
           await shot(s, `prefix-facts-${tag}`);
         }
         if (admin) {
-          for (const section of ["credentials", "identities", "grants"]) {
+          for (const section of [
+            "credentials",
+            "identities",
+            "grants",
+            "transports",
+            "channels",
+            "notifications",
+          ]) {
             await s.goto(base + `/?settings=${section}`);
             await s.locator("main h2").waitFor();
             await shot(s, `settings-${section}-${tag}`);
