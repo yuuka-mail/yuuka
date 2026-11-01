@@ -24,7 +24,7 @@ func TestExtractionsFollowTheContent(t *testing.T) {
 	acct := storetest.Account(t, db)
 	at := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 	raw := letter("no-reply@example.net", "a@example.com", "Your verification code is 482913", "",
-		"Your verification code is 482913. It expires in 10 minutes.\r\n\r\nSign in: <https://example.net/login>")
+		"Your verification code is 482913. It expires in 10 minutes.\r\n\r\nSign in: <https://example.net/login?t=9f8e7d6c5b>")
 	id := inbound(t, db, acct, "a", raw, at)
 
 	v := &auth.Viewer{PrincipalID: store.SystemPrincipalID, PrincipalKind: "human", PrincipalName: "operator"}
@@ -45,7 +45,7 @@ func TestExtractionsFollowTheContent(t *testing.T) {
 	}
 	// The summary carries the best of each kind.
 	if len(d.Extracted) != 3 || d.Extracted[0].Kind != "otp" || d.Extracted[0].Value != "482913" ||
-		d.Extracted[1].Value != "https://example.net/login" || d.Extracted[2].ExpiresAt == nil {
+		d.Extracted[1].Value != "https://example.net/login?t=9f8e7d6c5b" || d.Extracted[2].ExpiresAt == nil {
 		t.Errorf("summary extractions %+v", d.Extracted)
 	}
 	// No trusted receiver in this letter: nothing proves the sender.

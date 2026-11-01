@@ -1,0 +1,14 @@
+[
+  {
+    "kind": "otp",
+    "value": "K4W8PZ2QXM",
+    "confidence": 90,
+    "source": "body"
+  },
+  {
+    "kind": "link",
+    "value": "https://app.example.com/auth/email/me@example.com/k4w8pz2qxm",
+    "confidence": 90,
+    "source": "html"
+  }
+]

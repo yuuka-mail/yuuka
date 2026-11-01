@@ -30,7 +30,10 @@ import (
 // with an older version (ingest.ProcessBacklog), so a better matcher
 // reaches old mail without a reparse. The class reads the extractor too
 // (internal/classify), and the same pass recomputes it.
-const Version = 1
+//
+// 2: Sign-in links need a token; a code may sit on the line below its
+// words.
+const Version = 2
 
 // Kind is extractions.kind. The list is closed by the table's CHECK.
 type Kind string

@@ -1,0 +1,33 @@
+Received: from mail.example.com (192.0.2.13)
+	by cloudflare-email.net (cloudflare) id letter-below-1 for <me@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.com header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.com;
+	spf=pass smtp.mailfrom=bounce@example.com;
+	arc=none smtp.remote-ip=192.0.2.13
+From: Example <login-3f2a9c@app.example.com>
+To: me@example.com
+Subject: Log in to Example
+Date: Sat, 31 Oct 2026 01:39:00 +0000
+Message-ID: <letter-below-1@app.example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b1"
+
+--b1
+Content-Type: text/plain; charset=utf-8
+
+To log in to Example, follow this link https://app.example.com/auth/email/me@example.com/k4w8pz2qxm.
+
+If you can't click on the link, you can also copy the verification code into your browser:
+
+K4W8PZ2QXM
+--b1
+Content-Type: text/html; charset=utf-8
+
+<p>Your login code for Example</p>
+<p><a href="https://app.example.com/auth/email/me@example.com/k4w8pz2qxm">Log in to Example</a></p>
+<p>This link and code will only be valid for the next 5 minutes. If the link does not work,
+<a href="https://example.com">Example</a> also takes the login verification code directly: K4W8PZ2QXM</p>
+<p><a href="https://example.com">Example Inc.</a></p>
+--b1--

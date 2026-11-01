@@ -1,0 +1,36 @@
+Received: from mail.example.com (192.0.2.13)
+	by cloudflare-email.net (cloudflare) id invoice-login-1 for <me@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.com header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.com;
+	spf=pass smtp.mailfrom=bounce@example.com;
+	arc=none smtp.remote-ip=192.0.2.13
+From: Example Billing <billing@example.com>
+To: me@example.com
+Subject: Example: New Invoice
+Date: Sat, 31 Oct 2026 01:39:00 +0000
+Message-ID: <invoice-login-1@example.com>
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="b2"
+
+--b2
+Content-Type: text/plain; charset=utf-8
+
+Invoice #20261101 for 31.00 USD has been issued.
+
+Your account currently has enough credit to cover this invoice.
+To view your billing statement, please log into your client panel:
+https://console.example.com/billing/?utm_medium=email&utm_source=new_invoice
+
+Thank you for choosing Example.
+--b2
+Content-Type: text/html; charset=utf-8
+
+<p><a href="https://console.example.com/billing/?utm_medium=email&amp;utm_source=general">Log In</a></p>
+<p>Invoice #20261101 for 31.00 USD has been issued.</p>
+<p>Your account currently has enough credit to cover this invoice.
+To view your billing statement, please <a href="https://console.example.com/billing/?utm_medium=email&amp;utm_source=new_invoice#history">log into your client panel</a>.</p>
+<p>Thank you for choosing <a href="https://example.com/?utm_medium=email">Example</a>.</p>
+<p>New sign-in from a device you don't know? <a href="https://help.example.com/en/wizard/HelpWithLogin">Reset your password now</a> · <a href="https://example.com/login">Sign in to Example</a></p>
+--b2--

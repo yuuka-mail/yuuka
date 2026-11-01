@@ -54,7 +54,11 @@ func Of(m mimeparse.Message, prefixes []string) Class {
 }
 
 // noreplyLocal matches the local parts of senders nobody answers.
-var noreplyLocal = regexp.MustCompile(`^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?|notifications?|alerts?|newsletters?)([-+._].*)?$`)
+// Payment processors send receipts from receipts@ (Stripe from
+// receipts+acct_…@ for every merchant) with no machine header. The
+// Feedback-ID they carry is no signal: Cloudflare's egress adds one to
+// people's mail too (§10.4).
+var noreplyLocal = regexp.MustCompile(`^(no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounces?|notifications?|alerts?|newsletters?|receipts?)([-+._].*)?$`)
 
 // machinePrefix is the receiving-prefix naming convention of §3 principle
 // 4: addresses handed out to services.

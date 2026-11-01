@@ -15,7 +15,9 @@ import (
 //
 //	95  a code word right before it ("verification code: 482913",
 //	    "验证码是 739201"), or right after ("482913 is your code")
-//	90  a code word earlier on the same line, ending in ":" or "is"
+//	90  a code word earlier on the same line, ending in ":" or "is", or
+//	    on the line before when it is alone on its own ("copy the
+//	    verification code into your browser:" and the code below)
 //	80  a code word within the window before it, alone on its line
 //	65  a code word within the window before it
 //	60  alone on its line in a message that names a code somewhere
@@ -23,10 +25,9 @@ import (
 // A weak word ("code", "PIN") scores 10 less: it also names promo codes
 // and confirmation numbers. Capitals-and-digits codes, which booking
 // references look like, are taken only after a strong word in the first
-// two tiers. A
-// number that belongs to a longer number, a date, a time, a sum or an
-// amount of some unit is never a candidate; one with an order, phone or
-// account word between it and the code word is dropped.
+// two tiers. A number that belongs to a longer number, a date, a time, a
+// sum or an amount of some unit is never a candidate; one with an order,
+// phone or account word between it and the code word is dropped.
 
 // strongCue names a one-time code in the languages mail to yuuka comes
 // in. \b is ASCII-only in RE2, so the non-Latin alternatives go without.
@@ -320,6 +321,8 @@ func score(s string, c candidate, cues []cue, negs []span, named bool) int {
 				n = weak(cu, 95)
 			case runes <= 50 && !strings.ContainsAny(gap, "\n.。!！?？;；") && sameLineGap.MatchString(gap):
 				n = weak(cu, 90)
+			case lineAbove(gap) && alone(s, c.span):
+				n = weak(cu, 90)
 			case runes <= window && !c.letters && !year && !negBetween(negs, cu.end, c.start):
 				n = weak(cu, 65)
 				if alone(s, c.span) {
@@ -348,6 +351,16 @@ func score(s string, c candidate, cues []cue, negs []span, named bool) int {
 		best -= 5 // four digits are a year, a PIN pad, a room...
 	}
 	return best
+}
+
+// lineAbove reports that gap, from a code word to a candidate, ends the
+// word's line the way the same-line tier wants and then holds only
+// blank lines: the code is set apart below the sentence that names it.
+func lineAbove(gap string) bool {
+	line, rest, ok := strings.Cut(gap, "\n")
+	return ok && utf8.RuneCountInString(line) <= 50 && !strings.ContainsAny(line, ".。!！?？;；") &&
+		sameLineGap.MatchString(strings.TrimRight(line, " \t\r")) &&
+		strings.Count(rest, "\n") <= 2 && strings.TrimSpace(rest) == ""
 }
 
 // negBetween reports a not-a-code word inside [from, to).

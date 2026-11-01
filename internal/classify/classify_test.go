@@ -33,22 +33,25 @@ func TestCorpus(t *testing.T) {
 
 		// The extraction corpus: a code or sign-in link the extractor is
 		// sure of makes a notification, whoever the sender claims to be.
-		"en-alnum-otp":       Machine, // verification code: H7K2QX
-		"en-reset-password":  Machine, // "Reset password" link
-		"en-unverified-otp":  Machine, // login code is 771204
-		"zh-gbk-otp":         Machine, // 动态码为 573920
-		"en-device-code":     Machine, // noreply sender
-		"en-html-otp":        Machine, // no-reply sender
-		"en-magic-link":      Machine, // List-Unsubscribe
-		"en-promo-code":      Machine, // List-Unsubscribe
-		"ja-otp":             Machine, // no-reply sender
-		"zh-subject-otp":     Machine, // noreply sender
-		"en-grouped-code":    Unknown, // "code to finish signing in", a line away: not sure enough
-		"en-booking":         Unknown, // a booking reference is no code
-		"en-invoice-account": Unknown,
-		"en-order-shipped":   Unknown,
-		"en-security-alert":  Unknown,
-		"zh-order-negative":  Unknown,
+		"en-alnum-otp":         Machine, // verification code: H7K2QX
+		"en-reset-password":    Machine, // "Reset password" link
+		"en-unverified-otp":    Machine, // login code is 771204
+		"zh-gbk-otp":           Machine, // 动态码为 573920
+		"en-device-code":       Machine, // noreply sender
+		"en-html-otp":          Machine, // no-reply sender
+		"en-magic-link":        Machine, // List-Unsubscribe
+		"en-promo-code":        Machine, // List-Unsubscribe
+		"ja-otp":               Machine, // no-reply sender
+		"zh-subject-otp":       Machine, // noreply sender
+		"en-grouped-code":      Unknown, // "code to finish signing in", a line away: not sure enough
+		"en-booking":           Unknown, // a booking reference is no code
+		"en-invoice-account":   Unknown,
+		"en-order-shipped":     Unknown,
+		"en-security-alert":    Unknown,
+		"zh-order-negative":    Unknown,
+		"en-letter-code-below": Machine, // verification code, a line below
+		"en-receipt":           Machine, // receipts+…@ sender
+		"en-invoice-login":     Unknown, // "Log In" to a page is no sign-in link
 	}
 	files, _ := filepath.Glob("../../testdata/*/*.eml")
 	for _, f := range files {
@@ -90,8 +93,12 @@ func TestSignals(t *testing.T) {
 		{"year is not a code", func(m *mimeparse.Message) { m.Subject = "plans for 2027" }, nil, Unknown},
 		{"letters and digits code", func(m *mimeparse.Message) { m.BodyText = "Your verification code is: H7K2QX" }, nil, Machine},
 		{"sign-in link", func(m *mimeparse.Message) {
-			m.Links = []mimeparse.Link{{Href: "https://example.org/login?t=1", Text: "Sign in"}}
+			m.Links = []mimeparse.Link{{Href: "https://example.org/login?t=4f9c2e81ab", Text: "Sign in"}}
 		}, nil, Machine},
+		{"a sign-in page", func(m *mimeparse.Message) {
+			m.Links = []mimeparse.Link{{Href: "https://example.org/login", Text: "Sign in"}}
+		}, nil, Unknown},
+		{"receipts sender", func(m *mimeparse.Message) { m.FromAddr = "receipts+acct_1A2b3C@example.net" }, nil, Machine},
 		{"a reply quoting a code", func(m *mimeparse.Message) {
 			m.InReplyTo = "x@example.org"
 			m.BodyText = "It worked, thanks.\n\n> Your verification code is 482913"

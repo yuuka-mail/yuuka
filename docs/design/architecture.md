@@ -360,6 +360,8 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
    `class` 字段 + 规则引擎，信号：`List-Unsubscribe`、`Auto-Submitted`、
    `Precedence: bulk`、`noreply` 类发件人、不是回信却带着提取器确信的验证码或登录链接、
    前缀命名约定（`svc-*` / `gh-*`）。
+   `Feedback-ID` 看着像群发平台的标记，但不算信号：Cloudflare 出口给人发的信也加（§10.4），
+   自托管用户的来信会被整批误判。支付平台的收据没有任何机器头，靠 `receipts@` 这类发件人认出来。
    「验证码模式」就是提取器本身（[`classify`](../../internal/classify/classify.go) 调 `extract`，置信度 ≥ 85，
    即码或链接紧挨着说明它的词）：分类和码位用同一个判断，不会出现「码位显示了码、信却在会话区」。
    只看不是回信的信——有 `In-Reply-To` / `References`、或主题带 `Re:` `Fwd:` 的信是人在说话，
@@ -370,6 +372,9 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
      提取器（[`internal/extract`](../../internal/extract/extract.go)）偏精确不偏召回：
      漏一个码，人看一眼主题就有；把订单号当成码摆出来，人就不再信这个位置。
      提取值是派生数据（`extractions`，§4），从不打开或抓取其中的链接。
+     登录链接必须带只属于这位读者的 token（ID、哈希、签名串）：人人点开都一样的「Log In」按钮、
+     页脚的「Sign in」是网页，不是凭据，按字面摆进码位就是误报。代价是 token 很短（字母数字混合不足 8 位、纯数字不足 6 位）的真链接会漏掉，
+     读者照样能在正文里点到。
    - 会话区：完整 MUA 语义——线程、引用、草稿、附件、多身份签名、可回复。
    分流错了可以一键改判并生成规则，规则是用户数据不是代码。
 

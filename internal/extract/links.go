@@ -16,6 +16,9 @@ import (
 // Unsubscribe, preference, help and "view in browser" links never are,
 // and neither is a link whose text names another host than it goes to:
 // that is the shape of phishing, and the reading pane flags it (§12.7).
+// Nor is a link without a token in it: a link that signs this reader in
+// is made for this reader, and one that is the same for everyone is a
+// page — the site's "Log in" button, the footer's "Sign in to Example".
 
 var (
 	linkWords = regexp.MustCompile(`(?i)\b(?:verify|verification|confirm|activate|activation|sign[ -]?in|log[ -]?in|reset|` +
@@ -75,7 +78,7 @@ func linkScore(c linkCandidate, aboutLinks bool) int {
 		return 0
 	}
 	where := u.EscapedPath() + "?" + u.RawQuery
-	if linkNot.MatchString(c.text) || linkNot.MatchString(where) || imagePath.MatchString(u.Path) {
+	if linkNot.MatchString(c.text) || linkNot.MatchString(where) || imagePath.MatchString(u.Path) || !hasToken(u) {
 		return 0
 	}
 	if m := claimedHost.FindStringSubmatch(c.text); m != nil {
@@ -106,6 +109,39 @@ func linkScore(c linkCandidate, aboutLinks bool) int {
 		return 65
 	}
 	return 0
+}
+
+// trackingParam names the query parameters mailers add to every link of
+// a campaign: their values say which mail, not which reader may sign in.
+var trackingParam = regexp.MustCompile(`(?i)^(?:utm_.*|mc_[ce]id|_hs.*|fbclid|gclid|ref|source|campaign)$`)
+
+// hasToken reports a path segment or query value that only this reader's
+// link would hold: six digits or more, or eight letters and digits or
+// more with both, the shape of an ID, a hash or a signed token.
+// "HelpWithLogin", "new_invoice" and 2026-11-01 are words and dates.
+func hasToken(u *url.URL) bool {
+	parts := strings.Split(u.EscapedPath(), "/")
+	for k, vs := range u.Query() {
+		if !trackingParam.MatchString(k) {
+			parts = append(parts, k)
+			parts = append(parts, vs...)
+		}
+	}
+	for _, p := range parts {
+		var letters, digits int
+		for i := 0; i < len(p); i++ {
+			switch {
+			case isDigit(p[i]):
+				digits++
+			case isAlnum(p[i]):
+				letters++
+			}
+		}
+		if digits >= 6 && digits == len(p) || digits > 0 && letters > 0 && letters+digits >= 8 {
+			return true
+		}
+	}
+	return false
 }
 
 // Host is the host a link goes to, lowercased, for showing next to it;

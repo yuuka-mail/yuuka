@@ -104,6 +104,7 @@ func TestCodes(t *testing.T) {
 		{"", "Your verification code for example.com is 305817", "305817@65"},
 		{"", "Your security code\n\nPlease enter it on the sign-in page.\n\n305817\n", "305817@80"},
 		{"Your sign-in code", "Hello,\n\nWe are glad you are here.\n\n305817\n", "305817@60"},
+		{"", "If you can't click on the link, copy the verification code into your browser:\n\nTR7Y9CZ7TD\n", "TR7Y9CZ7TD@90"},
 		{"", "Verification code: 594-216", "594216@95"},
 		{"", "Your code: 4829 1374", "48291374@85"},
 		{"", "Your OTP is H7K2QX", "H7K2QX@95"},
@@ -119,6 +120,9 @@ func TestCodes(t *testing.T) {
 		{"", "Your code expires at 10:30. Order total: $1299.", ""},
 		{"", "Use promo code SAVE20 or discount code 4420.", ""},
 		{"", "Confirmation code: K7QX2P", ""},
+		{"", "Confirmation code:\n\nK7QX2P\n", ""},
+		{"", "Your verification code was sent. Booking reference:\n\nK7QX2P\n", ""},
+		{"", "Use the security code from your app. Your ticket:\n\nK7QX2P 12\n", ""},
 		{"", "Your verification code: see the app. Order number 12345678.", ""},
 		{"", "验证码已发送。如有疑问请致电 95555。", ""},
 		{"", "验证码请勿告诉他人，客服电话 400-820-1234。", ""},
@@ -153,12 +157,13 @@ func TestLinks(t *testing.T) {
 		links         []mimeparse.Link
 		want          string
 	}{
-		{"", "", []mimeparse.Link{link("https://example.com/verify?t=1", "Verify email", "")}, "https://example.com/verify?t=1@90"},
-		{"", "", []mimeparse.Link{link("https://click.example.net/c?x=1", "Sign in", "")}, "https://click.example.net/c?x=1@85"},
-		{"", "", []mimeparse.Link{link("https://example.com/a", "here", "To confirm your address, click here:")}, "https://example.com/a@80"},
-		{"", "Click the link below to sign in:\nhttps://example.com/magic?token=abc.\n", nil, "https://example.com/magic?token=abc@85"},
-		{"Sign in to Example", "https://example.com/auth/cb?code=1", nil, "https://example.com/auth/cb?code=1@65"},
-		{"", "点击下方链接完成验证：https://example.cn/verify?t=1", nil, "https://example.cn/verify?t=1@85"},
+		{"", "", []mimeparse.Link{link("https://example.com/verify?t=8f3a91c2e7", "Verify email", "")}, "https://example.com/verify?t=8f3a91c2e7@90"},
+		{"", "", []mimeparse.Link{link("https://example.com/auth/email/alice@example.com/tr7y9cz7td", "Log in to Example", "")}, "https://example.com/auth/email/alice@example.com/tr7y9cz7td@90"},
+		{"", "", []mimeparse.Link{link("https://click.example.net/c/Q2xpY2s0MjE", "Sign in", "")}, "https://click.example.net/c/Q2xpY2s0MjE@85"},
+		{"", "", []mimeparse.Link{link("https://example.com/a/7Kq2mX9pZt", "here", "To confirm your address, click here:")}, "https://example.com/a/7Kq2mX9pZt@80"},
+		{"", "Click the link below to sign in:\nhttps://example.com/magic?token=d41d8cd98f00.\n", nil, "https://example.com/magic?token=d41d8cd98f00@85"},
+		{"Sign in to Example", "https://example.com/auth/cb?code=482913", nil, "https://example.com/auth/cb?code=482913@65"},
+		{"", "点击下方链接完成验证：https://example.cn/verify?t=x82kd03jq7", nil, "https://example.cn/verify?t=x82kd03jq7@85"},
 
 		{"", "", []mimeparse.Link{link("https://example.com/unsubscribe?u=1", "Unsubscribe", "Click here to verify")}, ""},
 		{"", "", []mimeparse.Link{link("https://evil.example.net/login", "https://bank.example.com/login", "Please confirm at")}, ""},
@@ -168,6 +173,12 @@ func TestLinks(t *testing.T) {
 		{"", "", []mimeparse.Link{link("https://example.com/shop", "Shop now", "Verify your taste")}, ""},
 		{"", "Read our blog: https://example.com/blog", nil, ""},
 		{"", "View this email in your browser: https://example.com/view/1", nil, ""},
+		// Pages that are the same for every reader: no token in them.
+		{"", "", []mimeparse.Link{link("https://example.com", "Example", "If you can't click on the link, copy the verification code into your browser:")}, ""},
+		{"", "", []mimeparse.Link{link("https://example.com/login", "Sign in to Example", "")}, ""},
+		{"", "", []mimeparse.Link{link("https://example.com/en/wizard/HelpWithLogin", "reset your password now", "If not, please")}, ""},
+		{"", "", []mimeparse.Link{link("https://console.example.com/billing/?utm_medium=email&utm_campaign=invoice2026", "Log In", "")}, ""},
+		{"Verify your email", "https://example.com/blog/2026-11-01/verify-your-email", nil, ""},
 	}
 	for _, c := range cases {
 		var got []string

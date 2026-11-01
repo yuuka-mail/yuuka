@@ -56,7 +56,7 @@ Subject: Your verification code
 Message-ID: <otp1@example.net>
 
 Your verification code is 740219.
-Sign in: https://login.example.net/verify?token=abc123
+Sign in: https://login.example.net/verify?token=abc123def456
 `, "github")
 	if _, err := e.pool.Exec(ctx, `UPDATE prefixes SET state = 1 WHERE zone = 'example.com' AND prefix = 'github'`); err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ Sign in: https://login.example.net/verify?token=abc123
 
 	// The code, spaced out, in the body; the link in an attachment.
 	f, d = e.reviewFacts(e.arisu, store.ReviewInput{Tokens: append(tokens("body", "it is 740 219"),
-		tokens("attachment 2 (a.txt)", "https://login.example.net/verify?token=abc123")...)}, "", now)
+		tokens("attachment 2 (a.txt)", "https://login.example.net/verify?token=abc123def456")...)}, "", now)
 	if len(f.Extracted) != 2 || d.Held || d.HoldReason != sendpolicy.HoldReview {
 		t.Fatalf("leak: %+v %+v", f.Extracted, d)
 	}

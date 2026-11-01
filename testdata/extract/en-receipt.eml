@@ -1,0 +1,31 @@
+Received: from mail.example.com (192.0.2.13)
+	by cloudflare-email.net (cloudflare) id receipt-1 for <me@example.com>;
+	Sat, 31 Oct 2026 01:41:38 +0000
+Authentication-Results: mx.cloudflare.net;
+	dkim=pass header.d=example.com header.s=s1 header.b=DDDD;
+	dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.com;
+	spf=pass smtp.mailfrom=bounce@example.com;
+	arc=none smtp.remote-ip=192.0.2.13
+From: Example Shop <receipts+acct_1Ab2Cd3Ef4@payments.example.net>
+To: me@example.com
+Subject: Your Example Shop receipt [#1377-3357]
+Date: Sat, 31 Oct 2026 01:39:00 +0000
+Message-ID: <receipt-1@payments.example.net>
+Reply-To: Example Shop <support@example.com>
+Feedback-ID: ::1.us-west-2.c2FtcGxl:AmazonSES
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+
+Receipt from Example Shop
+
+Amount paid: $8.00
+Date paid: Oct 31, 2026
+Payment method: Visa - 4242
+
+Receipt number: 1377-3357
+Invoice number: EX-20261031-0001
+
+SuperExample plan x 1      $8.00
+Total                      $8.00
+
+Questions? Contact us at support@example.com.
