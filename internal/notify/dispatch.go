@@ -227,6 +227,24 @@ func (d *Dispatcher) Suspended(ctx context.Context, c SuspendedCard) error {
 	}, func(tg *Telegram, b store.Binding) error { return d.cards(tg, b).Suspended(ctx, c) })
 }
 
+// AccountTrouble sends the card of a pull account in trouble
+// (account.trouble) to the bindings whose person may read the account. It
+// returns how many were reached: the sender retries only when none was,
+// or a retry would repeat the card to the ones that worked.
+func (d *Dispatcher) AccountTrouble(ctx context.Context, c TroubleCard) (int, error) {
+	n := 0
+	err := d.event(ctx, store.EventAccountTrouble, func(v *auth.Viewer) (bool, error) {
+		return d.cfg.DB.AccountReadable(ctx, v, c.AccountID)
+	}, func(tg *Telegram, b store.Binding) error {
+		err := d.cards(tg, b).AccountTrouble(ctx, c)
+		if err == nil {
+			n++
+		}
+		return err
+	})
+	return n, err
+}
+
 func found[T any](_ T, err error) (bool, error) {
 	if errors.Is(err, store.ErrNotFound) {
 		return false, nil

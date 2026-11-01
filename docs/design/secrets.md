@@ -288,7 +288,7 @@ WebUI（P6）落地时定下的几处：
 
 - **导入**：包装器可用（设了 KEK）、而环境变量里的某个出口在库里是占位或不存在时，`serve` 把它写进库（主机、端口、caps，密码从 `_PASSWORD_FILE` 读出后封装）。
   Telegram 的四个变量变成一个名为 `telegram` 的渠道，给 `YUUKA_TELEGRAM_OPERATOR` 指定的人（没设时给唯一的那个 human）建一条绑定，
-  设了用户 id 就带按钮，并订阅今天已有的四类事件。这是唯一不经双向确认就建的绑定：环境变量本身就是主机上的确认
+  设了用户 id 就带按钮，并订阅全部事件。这是唯一不经双向确认就建的绑定：环境变量本身就是主机上的确认
 - 导入以 `system` 记审计（`config.import`，`via: env`），幂等；几个进程同时启动时靠条件 upsert 保证只写一次。
   库里已经配置好的出口或渠道，环境变量被忽略并报 WARN；`rm` 过的出口同样不会被环境变量救回来。
   出口的导入在 [`cmd/yuuka/import.go`](../../cmd/yuuka/import.go)：条件 upsert 就是按读到的 revision 写（新行是 0），
@@ -318,7 +318,7 @@ WebUI（P6）落地时定下的几处：
 - **Gmail 的 app password 存两份**：IMAP 来源一份、SMTP 出口一份，同一个值两个 audience。这是「一条机密一个 audience」的直接后果，
   不为它破例：一条机密能交给两处，「这个密码可以交给谁」就不再是一个值，audience 也就不再能从一行重算
 - 拥有机密的表（[`manage.Owners`](../../internal/manage/secrets.go)）加来源一段，`secret ls` / `check` / `rewrap` 自动覆盖
-- 上锁时拉取 worker 不启动，Cloudflare 收信不受影响（§17.3、§10.1.3）。拉取本身不推告警，只有配置改动推，和出口一样
+- 上锁时拉取 worker 不启动，Cloudflare 收信不受影响（§17.3、§10.1.3）。拉取本身不推安全告警，只有配置改动推，和出口一样；账户停了走可订阅的 `account.trouble`（§10.1.3）
 - **每个拉取账户的 `trusted_authserv_id` 在库里**（`account_sources`），改它算放宽（§13.10）：它决定哪一条 `Authentication-Results` 被当成事实（§10.1.1）。
   Cloudflare 账户的那一个仍是 `YUUKA_TRUSTED_AUTHSERV_ID`，和收信快路径一起留在主机
 - `accounts.kind` 只加 `imap`；`smtp_only` 有用户时再加（§9.5）

@@ -85,6 +85,41 @@ type SuspendedCard struct {
 	Withdrawn  int
 }
 
+// TroubleKind is what is wrong with a pull account (§10.1.3).
+type TroubleKind int
+
+const (
+	// TroubleRefused: the server refused the login; the account is paused.
+	TroubleRefused TroubleKind = iota + 1
+	// TroubleFailures: messages could not be fetched and were passed over.
+	TroubleFailures
+	// TroubleStalled: rounds have been failing for a long time.
+	TroubleStalled
+	// TroubleBudget: the daily byte budget stopped new mail until tomorrow.
+	TroubleBudget
+	// TroubleLimit: the server's usage limit stopped pulling until tomorrow.
+	TroubleLimit
+	// TroubleLocked: the account's password cannot be opened.
+	TroubleLocked
+)
+
+// TroubleCard is a pull account in trouble. It holds numbers and words of
+// ours only: what the server said is untrusted input and stays in the
+// logs and the failure table (§10.1.3).
+type TroubleCard struct {
+	// AccountID decides who may see the card (§13.8); it is not shown.
+	AccountID string
+	Account   string
+	Kind      TroubleKind
+	// New and Open: TroubleFailures, how many since the last card and how
+	// many in all.
+	New, Open int
+	// For and Why: TroubleStalled, how long, and the class of the last
+	// error ("" when it was not the server's).
+	For time.Duration
+	Why string
+}
+
 // Excerpt lines and characters on a held card (§8.4: the start of the
 // body, so a person sees what goes out, not a summary of it).
 const (
@@ -147,6 +182,37 @@ func SuspendedText(c SuspendedCard) string {
 	return fmt.Sprintf("yuuka · grant suspended\n%s on %s: %d recalls by a person in 24 hours.\n"+
 		"%d other held message(s) went back to drafts. Everything it submits stays a draft until "+
 		"`yuuka grant set --resume`.", clean(c.Principal), clean(c.Identity), c.Recalls, c.Withdrawn)
+}
+
+// TroubleText renders c.
+func TroubleText(c TroubleCard) string {
+	a := clean(c.Account)
+	var what string
+	switch c.Kind {
+	case TroubleRefused:
+		what = fmt.Sprintf("the server refused the login. The account is paused and nothing is pulled until a person acts: "+
+			"`yuuka account set %s --password-file` with a new password, or `yuuka account resume %s` to try the same one.", a, a)
+	case TroubleFailures:
+		what = fmt.Sprintf("%d more message(s) could not be fetched and were passed over, %d in all. They stay on the server: "+
+			"`yuuka account sync %s --retry-failed` tries again.", c.New, c.Open, a)
+	case TroubleStalled:
+		last := "see serve's log"
+		if c.Why != "" {
+			last = "last error: " + clean(c.Why) + "; see serve's log"
+		}
+		what = fmt.Sprintf("no round has worked for %d hours (%s). The server keeps the mail, so it arrives late, not never.",
+			int(c.For.Hours()), last)
+	case TroubleBudget:
+		what = fmt.Sprintf("the daily byte budget is used up, so new mail waits until tomorrow (UTC). "+
+			"`yuuka account set %s --daily-budget` changes it.", a)
+	case TroubleLimit:
+		what = fmt.Sprintf("the server's usage limit was reached, so nothing is pulled until tomorrow (UTC). "+
+			"A lower `yuuka account set %s --daily-budget` stays under it.", a)
+	case TroubleLocked:
+		what = fmt.Sprintf("its password cannot be opened, so nothing is pulled. "+
+			"Set it again with `yuuka account set %s --password-file`.", a)
+	}
+	return fmt.Sprintf("yuuka · account trouble\n%s: %s", a, what)
 }
 
 func recipients(to, cc, bcc []Recipient) string {
@@ -250,6 +316,12 @@ func (c *Cards) Escalated(ctx context.Context, e EscalatedCard) error {
 // Suspended sends the card of a suspended grant.
 func (c *Cards) Suspended(ctx context.Context, s SuspendedCard) error {
 	_, err := c.TG.SendCard(ctx, SuspendedText(s), nil)
+	return err
+}
+
+// AccountTrouble sends the card of a pull account in trouble.
+func (c *Cards) AccountTrouble(ctx context.Context, t TroubleCard) error {
+	_, err := c.TG.SendCard(ctx, TroubleText(t), nil)
 	return err
 }
 

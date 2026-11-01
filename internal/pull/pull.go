@@ -51,6 +51,10 @@ type Config struct {
 	// (§17.3), in which nothing is pulled.
 	Sealer  *secret.Sealer
 	Content Content
+	// Trouble pushes account.trouble (§10.1.3); nil pushes nothing. It is
+	// nil when no notification is known to reach only who may read the
+	// account: the environment's one chat stands for no person (§13.8).
+	Trouble Notifier
 	// TriageAccounts are the accounts whose new mail is queued for
 	// scoring, by name (triage.Config.Accounts); a pull account is never
 	// scored unless named, so nil means none of them (§10.1.4).
@@ -87,6 +91,12 @@ type Config struct {
 	// RequestPoll is how often a waiting worker looks for
 	// `yuuka account sync` (5 s).
 	RequestPoll time.Duration
+	// TroublePoll is how often what is told of account.trouble is
+	// compared with the tables (1 min).
+	TroublePoll time.Duration
+	// StallAfter is how long rounds must keep failing before that is
+	// trouble (6 h).
+	StallAfter time.Duration
 }
 
 func (c *Config) defaults() {
@@ -101,6 +111,8 @@ func (c *Config) defaults() {
 	set(&c.ReconcileEvery, 7*24*time.Hour)
 	set(&c.BackfillSlice, 2*time.Minute)
 	set(&c.RequestPoll, 5*time.Second)
+	set(&c.TroublePoll, time.Minute)
+	set(&c.StallAfter, 6*time.Hour)
 	if c.Rounds <= 0 {
 		c.Rounds = 2
 	}
@@ -148,6 +160,14 @@ func (m *Manager) Run(ctx context.Context) {
 	if m.cfg.Sealer == nil {
 		m.locked(ctx)
 		return
+	}
+	if m.cfg.Trouble != nil {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			m.watchTrouble(ctx)
+		}()
+		defer func() { <-done }()
 	}
 	workers := map[string]*running{}
 	refused := map[string]time.Time{} // last ERROR for a source paused on a refused login

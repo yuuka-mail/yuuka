@@ -207,6 +207,7 @@
   "duration_h": "{n} h",
   "duration_min": "{n} min",
   "duration_s": "{n} s",
+  "event_account_trouble": "trouble with external mailboxes",
   "event_grant_suspended": "suspended grants",
   "event_mail_new": "new mail",
   "event_send_escalated": "submissions waiting for you",

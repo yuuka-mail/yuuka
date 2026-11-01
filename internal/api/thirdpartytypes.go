@@ -207,7 +207,7 @@ type ChannelTestResult struct {
 type Event string
 
 func (Event) Enum() []string {
-	return []string{"mail.new", "send.held", "send.escalated", "grant.suspended"}
+	return []string{"mail.new", "send.held", "send.escalated", "grant.suspended", "account.trouble"}
 }
 
 // MyBinding is one of the viewer's own bindings: a chat that receives

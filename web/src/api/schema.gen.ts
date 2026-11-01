@@ -4720,7 +4720,7 @@ export interface components {
             elevated_until: string;
         };
         /** @enum {string} */
-        Event: "mail.new" | "send.held" | "send.escalated" | "grant.suspended";
+        Event: "mail.new" | "send.held" | "send.escalated" | "grant.suspended" | "account.trouble";
         EventsBody: {
             events: components["schemas"]["Event"][];
         };

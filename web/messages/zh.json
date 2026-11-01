@@ -189,6 +189,7 @@
   "duration_h": "{n} 小时",
   "duration_min": "{n} 分钟",
   "duration_s": "{n} 秒",
+  "event_account_trouble": "外部邮箱出问题",
   "event_grant_suspended": "授权被暂停",
   "event_mail_new": "新邮件",
   "event_send_escalated": "待你处理的外发",

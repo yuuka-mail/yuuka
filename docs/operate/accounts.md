@@ -81,3 +81,22 @@ yuuka account access gmail --principal agent:arisu --read
 服务器拒绝了密码时，yuuka **不重试**，直接暂停这个账户：用错误的密码反复登录 Gmail 会让账户被临时锁住，
 重试只会更糟。`account ls` 的 STATE 显示 `paused: login refused`，`serve` 的日志每天报一次 ERROR，直到你处理。
 怎么处理见[排障](troubleshooting.md#外部邮箱停了paused-login-refused)。
+
+## 出问题时的通知
+
+订阅了 `account.trouble` 的绑定（[`yuuka channel`](cli.md#通知渠道) 或界面的「我的通知」），在下面这些情况收到一条通知。
+只发给读得到这个账户的人（[谁能读](#谁能读)）；通知里没有服务器的原话，细节看 `account ls` 和日志。
+
+| 通知说的 | 什么时候发 | 怎么办 |
+|---|---|---|
+| 服务器拒绝了登录，账户已暂停 | 每次暂停发一条，重启 `serve` 不会再发 | [排障](troubleshooting.md#外部邮箱停了paused-login-refused) |
+| 有几封信取不下来，已跳过 | 有新增时发，最多一天一条 | `yuuka account sync <名字> --retry-failed` |
+| 连续 6 小时没有一轮成功 | 每段故障一条，有一轮成功后才可能再发；重启 `serve` 后重新计时 | 看 `serve` 的日志和 `yuuka account test <名字>` |
+| 日字节预算用完，新信等到明天 | 每次撞上发一条，一天至多一条 | 调 `--daily-budget` |
+| 撞上服务器的限额，明天再拉 | 每次撞上发一条，一天至多一条 | 把 `--daily-budget` 调到限额以下 |
+| 密码解不开 | 每次启动 worker 发一条 | `yuuka account set <名字> --password-file` |
+
+- 问题解决后不会再来一条「恢复了」，看 `account ls`
+- 你自己 `pause` 的账户不发；回填用完它那份预算也不发，新信照样进来
+- 没有 `YUUKA_KEK_FILE` 时不发：bot token 同样解不开。还在用 `YUUKA_TELEGRAM_*` 那一个 chat 时也不发，它不对应任何一个人，算不出谁读得到这个账户
+- 升级时，四类事件全订了的绑定自动加上它，手工挑过事件的不动。升级前就已经暂停或跳过的，升级后补发一条

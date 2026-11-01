@@ -43,7 +43,7 @@ yuuka account ls
 
 ## 外部邮箱停了（paused: login refused）
 
-服务器拒绝了这个账户的密码。yuuka 不重试，直接暂停：用错的密码反复登录会让 Gmail 账户被临时锁住
+服务器拒绝了这个账户的密码（订阅了 [`account.trouble`](accounts.md#出问题时的通知) 的话会收到一条通知）。yuuka 不重试，直接暂停：用错的密码反复登录会让 Gmail 账户被临时锁住
 （[为什么](../design/drivers.md#1013-imap-拉取的一轮提交顺序与不丢信)）。常见原因：
 
 - app password 被撤销了，或者 Google 账户改了密码（改密码会让所有 app password 失效）

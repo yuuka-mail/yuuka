@@ -143,9 +143,9 @@ yuuka channel rm tg
   不是你本人（链接被别人先点了）就答 N，什么都不会绑，码作废。答 y 才建绑定：
   那个用户在这个 chat 里按的撤回按钮算作 `--principal` 那个人的，bot 在 chat 里回一句已绑定，
   同时向这个人的其他绑定和管理员推一条安全告警。`--principal` 缺省时用库里唯一的那个人，只能是人（`human:`）；
-  `--events` 缺省是全部四类；`--label` 缺省是 Telegram 报来的名字
+  `--events` 缺省是全部五类；`--label` 缺省是 Telegram 报来的名字
 - 事件：`mail.new`（新信摘要，只推这个人看得到的信）、`send.held`（扣留中的信，带撤回按钮）、`send.escalated`（被审核升级为草稿）、
-  `grant.suspended`（授权被熔断）。`security`（新 passkey、恢复码、放宽、机密被篡改……）不能订阅也不能退订，
+  `grant.suspended`（授权被熔断）、`account.trouble`（外部邮箱出了故障，只推这个人读得到的账户，见[外部邮箱](accounts.md#出问题时的通知)）。`security`（新 passkey、恢复码、放宽、机密被篡改……）不能订阅也不能退订，
   总是发给每个管理员（现在是每个启用中的人）和事情有关的那个人的全部绑定
 - `test` 往渠道的每个绑定（或 `--binding` 指定的一个）发一条测试消息，要 `YUUKA_KEK_FILE`
 - `unbind` 立即生效：下一条通知就不再发过去，那个 chat 里已有卡片上的按钮也不再算数

@@ -846,6 +846,11 @@ func TestVisibility(t *testing.T) {
 					t.Errorf("IdentityMailVisible %s: %v %v", identity, ok, err)
 				}
 			}
+			for account, wantRead := range map[string]bool{open: v != nobody, closed: v == everyone, pulledSrc.AccountID: v == everyone} {
+				if ok, err := db.AccountReadable(ctx, v, account); err != nil || ok != wantRead {
+					t.Errorf("AccountReadable %s: %v %v", account, ok, err)
+				}
+			}
 
 			res, err := db.Search(ctx, v, store.SearchQuery{Filter: storetest.Query(t, "body"), IncludeDowngraded: true})
 			if err != nil {

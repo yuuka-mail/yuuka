@@ -1285,6 +1285,69 @@ func (db *DB) PullFailures(ctx context.Context, accountID string, all bool) ([]P
 	return out, nil
 }
 
+// ---------------------------------------------------------------------------
+// Trouble
+
+// SourceTrouble is what the account.trouble pushes that survive a restart
+// are decided from (§10.1.3), for one enabled source.
+type SourceTrouble struct {
+	AccountID   string
+	AccountName string
+	// Refused is the paused_at of an auth_failed pause not told of yet.
+	Refused *time.Time
+	// Failures is how many open failures the cursor has passed;
+	// FailuresTold how many it had when last told of, at FailuresToldAt.
+	Failures       int
+	FailuresTold   int
+	FailuresToldAt *time.Time
+}
+
+// SourceTroubles reads every enabled source's SourceTrouble. A failure
+// counts once it has maxAttempts attempts: before that it is still being
+// retried and the cursor waits for it.
+func (db *DB) SourceTroubles(ctx context.Context, maxAttempts int) ([]SourceTrouble, error) {
+	rows, err := db.pool.Query(ctx, `
+		SELECT s.account_id, a.name,
+			CASE WHEN s.pause_reason = 'auth_failed' AND s.refused_told_at IS DISTINCT FROM s.paused_at THEN s.paused_at END,
+			(SELECT count(*) FROM pull_failures f WHERE f.account_id = s.account_id AND f.resolved_at IS NULL AND f.attempts >= $1),
+			s.failures_told, s.failures_told_at
+		FROM `+sourceFrom+`
+		WHERE s.disabled_at IS NULL
+		ORDER BY a.name`, maxAttempts)
+	if err != nil {
+		return nil, fmt.Errorf("source troubles: %w", err)
+	}
+	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (SourceTrouble, error) {
+		var t SourceTrouble
+		err := r.Scan(&t.AccountID, &t.AccountName, &t.Refused, &t.Failures, &t.FailuresTold, &t.FailuresToldAt)
+		return t, err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("source troubles: %w", err)
+	}
+	return out, nil
+}
+
+// RecordRefusalTold records that the pause of account id at pausedAt has
+// been told of.
+func (db *DB) RecordRefusalTold(ctx context.Context, accountID string, pausedAt time.Time) error {
+	if _, err := db.pool.Exec(ctx, `UPDATE account_sources SET refused_told_at = $2 WHERE account_id = $1`, accountID, pausedAt); err != nil {
+		return fmt.Errorf("record refusal told of %s: %w", accountID, err)
+	}
+	return nil
+}
+
+// RecordFailuresTold records that n failures of account id have been told
+// of, at told; a nil told only lowers the count and keeps the time, which
+// is what limits the pushes to one a day.
+func (db *DB) RecordFailuresTold(ctx context.Context, accountID string, n int, told *time.Time) error {
+	if _, err := db.pool.Exec(ctx, `UPDATE account_sources SET failures_told = $2, failures_told_at = coalesce($3, failures_told_at)
+		WHERE account_id = $1`, accountID, n, told); err != nil {
+		return fmt.Errorf("record failures told of %s: %w", accountID, err)
+	}
+	return nil
+}
+
 func nullableInt(n int64) any {
 	if n == 0 {
 		return nil

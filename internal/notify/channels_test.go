@@ -269,6 +269,70 @@ func TestDispatcherEvents(t *testing.T) {
 	}
 }
 
+// account.trouble goes only to who may read the account (§13.8): a pull
+// account has no default readers, so a person subscribed who has no row
+// hears nothing of it, not even that it exists.
+func TestDispatcherAccountTrouble(t *testing.T) {
+	t.Parallel()
+	f := newChannelFixture(t)
+	ctx := t.Context()
+	c, token := f.channel("tg", 1001)
+	alice, bob, carol := f.human("alice"), f.human("bob"), f.human("carol")
+	f.bind(c, alice, "11", "1", store.EventAccountTrouble)
+	f.bind(c, bob, "22", "2", store.EventAccountTrouble)
+	f.bind(c, carol, "33", "3", store.EventMailNew)
+
+	cfg := store.SourceConfig{
+		Address: "me@example.com", Host: "imap.example.com", Port: 993, Auth: "plain", Username: "me",
+		MaxMessageBytes: 1 << 20, PollSeconds: 60,
+	}
+	aud, err := secret.IMAPS(cfg.Username, cfg.Host, cfg.Port)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealed, err := f.sealer.Seal(ctx, ulid.New(time.Now()), store.SecretIMAPPassword, aud, []byte("password"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := f.db.AddPullAccount(ctx, "gmail", cfg, sealed, alice, f.action("account.add"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := f.dispatcher(f.sealer)
+	card := TroubleCard{AccountID: src.AccountID, Account: "gmail", Kind: TroubleRefused}
+	n, err := d.AccountTrouble(ctx, card)
+	if err != nil || n != 1 {
+		t.Fatalf("reached %d, %v", n, err)
+	}
+	if got := f.api.sent(token, "11"); len(got) != 1 || !strings.Contains(got[0], "gmail") {
+		t.Errorf("the reader got %q", got)
+	}
+	if got := f.api.sent(token, "22"); len(got) != 0 {
+		t.Errorf("subscribed but cannot read the account: got %q", got)
+	}
+	if got := f.api.sent(token, "33"); len(got) != 0 {
+		t.Errorf("not subscribed: got %q", got)
+	}
+
+	// A row lets bob read it, and so hear of it.
+	canRead := true
+	if err := f.db.SetAccountAccess(ctx, "gmail", bob, false, nil, &canRead, f.action("account.access")); err != nil {
+		t.Fatal(err)
+	}
+	if n, err := d.AccountTrouble(ctx, card); err != nil || n != 2 {
+		t.Fatalf("reached %d, %v", n, err)
+	}
+	if got := f.api.sent(token, "22"); len(got) != 1 {
+		t.Errorf("bob, now a reader, got %q", got)
+	}
+
+	// Locked: nothing is sent, nothing fails, nobody was reached.
+	if n, err := f.dispatcher(nil).AccountTrouble(ctx, card); err != nil || n != 0 {
+		t.Errorf("locked: reached %d, %v", n, err)
+	}
+}
+
 // security reaches every administrator and the subject, never through
 // the binding left out, and regardless of subscriptions. A token that
 // fails to authenticate locks its channel and raises an alert on the

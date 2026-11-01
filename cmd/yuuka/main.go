@@ -387,6 +387,9 @@ type app struct {
 	// channels sends test messages through the channels in the
 	// database; serve only, nil while they do not run.
 	channels api.ChannelTester
+	// trouble pushes account.trouble; only the dispatcher can tell who
+	// may read an account, so nil with the environment's chat.
+	trouble pull.Notifier
 }
 
 // newMessage queues a message the content step created for scoring.
@@ -737,7 +740,7 @@ func (a *app) pullManager(log *slog.Logger) *pull.Manager {
 	}
 	return pull.New(pull.Config{
 		DB: a.db, Raw: r2.NewRawBucket(a.cfg.Raw), Local: localraw.Dir{Root: a.cfg.DataDir},
-		Sealer: a.sealer, Content: a.in, TriageAccounts: scored, Log: log,
+		Sealer: a.sealer, Content: a.in, Trouble: a.trouble, TriageAccounts: scored, Log: log,
 	})
 }
 

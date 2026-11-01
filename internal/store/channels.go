@@ -43,11 +43,12 @@ const (
 	EventSendHeld       = "send.held"
 	EventSendEscalated  = "send.escalated"
 	EventGrantSuspended = "grant.suspended"
+	EventAccountTrouble = "account.trouble"
 )
 
 // Events is every subscribable event, in the order of §8.4. security is
 // not one: it goes to administrators and the person it is about, always.
-var Events = []string{EventMailNew, EventSendHeld, EventSendEscalated, EventGrantSuspended}
+var Events = []string{EventMailNew, EventSendHeld, EventSendEscalated, EventGrantSuspended, EventAccountTrouble}
 
 // BindCodeTTL is how long a bind code is good for: the /start and the
 // confirmation both within it (§13.7).
@@ -959,6 +960,22 @@ func (db *DB) IdentityMailVisible(ctx context.Context, v *auth.Viewer, id string
 		id).Scan(&ok)
 	if err != nil {
 		return false, fmt.Errorf("identity %s visible: %w", id, err)
+	}
+	return ok, nil
+}
+
+// AccountReadable reports whether v may read account id. A card about
+// the account itself (account.trouble) follows this: that a mailbox
+// exists and stopped is about the account, so it goes to who may read it.
+func (db *DB) AccountReadable(ctx context.Context, v *auth.Viewer, id string) (bool, error) {
+	if err := needViewer(v, "account readable"); err != nil {
+		return false, err
+	}
+	var ok bool
+	err := db.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM accounts a WHERE a.id = $1 AND `+db.readableAccount(v, "a.id")+`)`,
+		id).Scan(&ok)
+	if err != nil {
+		return false, fmt.Errorf("account %s readable: %w", id, err)
 	}
 	return ok, nil
 }

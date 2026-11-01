@@ -90,7 +90,7 @@ bot token 用 KEK 加密（[`yuuka channel`](cli.md#通知渠道)）。步骤和
 1. 挂好 KEK、设 `YUUKA_KEK_FILE`，四个 Telegram 变量先**留着**，`docker compose up -d`
 2. `serve` 启动时把它们导入一次：一个叫 `telegram` 的渠道（先用 `getMe` 问 Telegram 拿 bot 的用户名，连不上 Telegram 时只缺用户名，照样导入），
    一条绑定：chat 是 `YUUKA_TELEGRAM_CHAT_ID`，属于 `YUUKA_TELEGRAM_OPERATOR` 指定的人（没设时是库里唯一的那个人），
-   设了 `YUUKA_TELEGRAM_OPERATOR_ID` 时这个用户的撤回按钮算数，订阅全部四类事件，也就是以前那个 chat 收到的。
+   设了 `YUUKA_TELEGRAM_OPERATOR_ID` 时这个用户的撤回按钮算数，订阅全部事件，包括以前那个 chat 收到的。
    日志里有 `imported YUUKA_TELEGRAM_* as channel telegram`，审计记一条 `config.import`（`via: env`）。
    这是唯一不经过 `/start` 确认的绑定：环境变量本身就是主机上的确认。之后每次启动都不再导入，几个 `serve` 同时启动也只导入一次
    - 导入不了时（库里有好几个人又没设 `YUUKA_TELEGRAM_OPERATOR`，或者还一个人都没有）日志会说为什么，变量照旧工作；

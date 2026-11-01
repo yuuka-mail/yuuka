@@ -187,8 +187,8 @@ agent 做摘要和提取，人在手机上一点就完成审批/标注，确认�
 
 - `mail.new` 的可见性按**这次投递**算，不按信算（[`store.DeliveryVisible`](../../internal/store/channels.go)）：
   摘要里有前缀，同一封信可能经另一个账户的投递对这个人可见，而这次的前缀对他是隐藏的。
-  扣留卡片按 outbox 行（`OutboxByID`），升级卡片按草稿（`DraftByID`），熔断卡片按身份所在账户（`IdentityMailVisible`）；
-  四条都在 ACL 测试表里
+  扣留卡片按 outbox 行（`OutboxByID`），升级卡片按草稿（`DraftByID`），熔断卡片按身份所在账户（`IdentityMailVisible`），
+  拉取故障按账户本身（`AccountReadable`）；五条都在 ACL 测试表里
 - 撤回按钮只在设了按钮用户的绑定上出现；撤回以绑定的人记入审计，`args` 带 `via: telegram`、Telegram 用户 id 和 `binding_id`
 - `security` 告警的收件人在 [`store.SecurityBindings`](../../internal/store/channels.go) 里算：启用中的人（今天的管理员）加当事人，
   去掉调用方指定的那条（刚建的绑定）。登录、WebUI 放宽的告警（`authn.Alerter`）还不带当事人，发给全部管理员：
@@ -203,8 +203,8 @@ agent 做摘要和提取，人在手机上一点就完成审批/标注，确认�
 - **绑定**是渠道上属于某个 human 的一个目的地：一个 chat，加上「谁按的按钮算数」的 Telegram 用户 id（空 = 这个绑定上没有按钮）。
   只能经 `/start` 码加双向确认建立，可以单独撤销（§13.7）。绑定只属于 human：推送只发给人（§13.8）
 - **订阅**是绑定收哪些事件：`mail.new`（新信摘要）、`send.held`（扣留中的信，带撤回）、`send.escalated`（被审核升级为草稿）、
-  `grant.suspended`（授权被熔断）。只列今天已有发出方的；`send.trouble`、`proposal.pending`、`account.trouble`
-  随发出它们的代码加进约束。M3.5 落地时没有发 `account.trouble`：拉取的问题现在看 `account ls`、界面和日志（§10.1.3）
+  `grant.suspended`（授权被熔断）、`account.trouble`（拉取账户出了故障，什么算故障、多久发一次见 §10.1.3）。
+  只列今天已有发出方的；`send.trouble`、`proposal.pending` 随发出它们的代码加进约束
 
 两条不随订阅变的规则：
 
@@ -219,6 +219,9 @@ agent 做摘要和提取，人在手机上一点就完成审批/标注，确认�
 - **`mail.new` 是一条读路径**：摘要带着发件人和主题，所以只在这封信对绑定的那个人可见时才推，
   用 §13.8 同一个可见性函数，进 ACL 测试表。今天 human 看得到全部，这条不改变什么；它防的是以后有了受限的人。
   规则定的推送级别（§8.5）仍全局生效：规则说不推的信，谁订阅了都不推
+- **`account.trouble` 同样是读路径**：卡片说出了账户的名字和它停了，所以只发给读得到这个账户的人。
+  拉取账户默认谁都读不了（§13.8），接进来一个邮箱不会顺带告诉别人它的存在。
+  环境变量那一个 chat 不代表任何一个人，算不出这件事，所以它收不到这个事件
 
 分发器对每个事件现查绑定和订阅（§17.5），卡片发给每个订阅了的绑定；撤回按钮只出现在设了按钮用户的绑定上。
 撤回之后，别的绑定上那张卡的按钮还在，按了得到「已撤回」——不记录每次推送，换来的是不必维护一张推送投递表（§17.10）。

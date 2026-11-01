@@ -66,6 +66,45 @@ func TestMigrateChannels(t *testing.T) {
 	}
 }
 
+// 0020 adds account.trouble to the bindings that took every event, and
+// leaves one narrowed by hand as it is. Pauses and failures older than it
+// count as not told of yet: they never had their push.
+func TestMigrateAccountTrouble(t *testing.T) {
+	t.Parallel()
+	ownerURL, _ := storetest.URLs(t)
+	pool, err := pgxpool.New(t.Context(), ownerURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	ctx := t.Context()
+	db := store.New(pool)
+	if _, to, err := db.MigrateTo(ctx, 19); err != nil || to != 19 {
+		t.Fatalf("migrate to 19: %d, %v", to, err)
+	}
+	e := &channelEnv{t: t, db: db, pool: pool}
+	op := e.human("operator")
+	c := e.channel("tg", 1001)
+	every := []string{store.EventMailNew, store.EventSendHeld, store.EventSendEscalated, store.EventGrantSuspended}
+	all, narrowed := e.bind(c, op, "1", "1", every), e.bind(c, op, "2", "2", every[:1])
+	if _, err := pool.Exec(ctx, `INSERT INTO notification_subscriptions (binding_id, event) VALUES ($1, 'account.trouble')`, all.ID); err == nil {
+		t.Error("0019 accepted account.trouble")
+	}
+	if _, to, err := db.Migrate(ctx); err != nil || to < 20 {
+		t.Fatalf("migrate: %d, %v", to, err)
+	}
+	got, err := db.SubscribedBindings(ctx, store.EventAccountTrouble)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{all.ID}; !slices.Equal(ids(got), want) {
+		t.Errorf("subscribed %v, want %v, not %s", ids(got), want, narrowed.ID)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO notification_subscriptions (binding_id, event) VALUES ($1, 'security')`, all.ID); err == nil {
+		t.Error("security subscribed")
+	}
+}
+
 type channelEnv struct {
 	t    *testing.T
 	db   *store.DB

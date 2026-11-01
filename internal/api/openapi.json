@@ -1309,7 +1309,8 @@
           "mail.new",
           "send.held",
           "send.escalated",
-          "grant.suspended"
+          "grant.suspended",
+          "account.trouble"
         ]
       },
       "EventsBody": {

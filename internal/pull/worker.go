@@ -9,6 +9,7 @@ import (
 
 	"github.com/yuuka-mail/yuuka/internal/imap"
 	"github.com/yuuka-mail/yuuka/internal/manage"
+	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
@@ -34,6 +35,16 @@ type worker struct {
 	reconciled map[string]time.Time
 	// scored: this account's new mail is queued for scoring.
 	scored bool
+	// failingSince is when rounds started failing, zero after one that
+	// worked, with the last failure's kind; stallTold: that was pushed.
+	// In memory like reconciled: a restart starts the wait over, which
+	// costs at most one repeat per StallAfter.
+	failingSince time.Time
+	failingKind  imap.ErrorKind
+	stallTold    bool
+	// stopped is the card of a limit that stopped this round, pushed once
+	// the round has given back its connection and its slot.
+	stopped *notify.TroubleCard
 }
 
 // errBudget: the day's budget is spent; errBackfillBudget: the share of
@@ -58,6 +69,7 @@ func (w *worker) run(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		w.tellRound(ctx)
 		req, ok := w.wait(ctx, wait)
 		if !ok {
 			return
@@ -91,6 +103,7 @@ func (w *worker) open(ctx context.Context) bool {
 	}
 	w.log.Error("pull: account locked, its password cannot be opened; set it again with `yuuka account set --password-file`",
 		"wrapper", w.src.Secret.Wrapper, "key_ref", w.src.Secret.KeyRef, "err", err)
+	w.cfg.tell(ctx, notify.TroubleCard{AccountID: w.src.AccountID, Account: w.src.AccountName, Kind: notify.TroubleLocked})
 	<-ctx.Done()
 	return false
 }
@@ -184,7 +197,7 @@ func (w *worker) round(ctx context.Context, retry bool) time.Duration {
 	if err != nil {
 		return w.trouble(ctx, err, poll)
 	}
-	w.backoff = 0
+	w.worked()
 	if more {
 		// Backfill left: the next round catches up first, then goes on.
 		return min(poll, time.Second)
@@ -233,6 +246,7 @@ func (w *worker) trouble(ctx context.Context, err error, poll time.Duration) tim
 	case errors.Is(err, errBudget):
 		w.until = nextDay(w.cfg.Now())
 		w.log.Info("pull: daily byte budget used up; resuming tomorrow (UTC)", "budget", w.src.DailyByteBudget)
+		w.limited(notify.TroubleBudget)
 		return w.until.Sub(w.cfg.Now())
 	case kind(err) == imap.KindAuth:
 		w.refused(ctx)
@@ -243,9 +257,14 @@ func (w *worker) trouble(ctx context.Context, err error, poll time.Duration) tim
 		// a cap on connections, which backing off is enough for.
 		w.until = nextDay(w.cfg.Now())
 		w.log.Warn("pull: the server's usage limit was reached; resuming tomorrow (UTC)", "err", describe(err))
+		w.limited(notify.TroubleLimit)
 		return w.until.Sub(w.cfg.Now())
 	}
 	w.log.Warn("pull: round failed", "err", describe(err))
+	if w.failingSince.IsZero() {
+		w.failingSince = w.cfg.Now()
+	}
+	w.failingKind = kind(err)
 	return w.failed()
 }
 

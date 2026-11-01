@@ -120,7 +120,13 @@ export function secretState(s: SecretStatus): { ok: boolean; text: string } {
 }
 
 /** Every event a binding can receive, in the order of §8.4. */
-export const allEvents: Event[] = ["mail.new", "send.held", "send.escalated", "grant.suspended"];
+export const allEvents: Event[] = [
+  "mail.new",
+  "send.held",
+  "send.escalated",
+  "grant.suspended",
+  "account.trouble",
+];
 
 export function eventLabel(e: Event): string {
   switch (e) {
@@ -132,6 +138,8 @@ export function eventLabel(e: Event): string {
       return m.event_send_escalated();
     case "grant.suspended":
       return m.event_grant_suspended();
+    case "account.trouble":
+      return m.event_account_trouble();
   }
 }
 
