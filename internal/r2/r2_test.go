@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -84,7 +86,7 @@ func TestRawBucketPutSent(t *testing.T) {
 	if err := raw.PutSent(ctx, key, []byte("other bytes")); !errors.Is(err, r2.ErrExists) {
 		t.Fatalf("second put: %v", err)
 	}
-	if got := string(f.objects["/b/"+key]); got != string(body) {
+	if got := string(f.objects["/b/"+key].body); got != string(body) {
 		t.Fatalf("stored object replaced: %q", got)
 	}
 
@@ -115,10 +117,16 @@ func TestRawBucketPutSent(t *testing.T) {
 // sends: path-style addressing, no default checksums, pagination, and
 // PUT with S3's conditional semantics (without If-None-Match it overwrites,
 // as S3 and R2 do, so a test can tell the header is what protects a key).
+// A stored object is served back with its x-amz-meta-* headers.
 type fakeS3 struct {
 	mu      sync.Mutex
 	reqs    []*http.Request
-	objects map[string][]byte
+	objects map[string]fakeObject
+}
+
+type fakeObject struct {
+	body []byte
+	meta http.Header
 }
 
 func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -138,7 +146,13 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			_, _ = fmt.Fprint(w, `<Error><Code>PreconditionFailed</Code><Message>At least one of the pre-conditions you specified did not hold</Message></Error>`)
 			return
 		}
-		f.objects[r.URL.Path] = body
+		meta := http.Header{}
+		for h, v := range r.Header {
+			if strings.HasPrefix(strings.ToLower(h), "x-amz-meta-") {
+				meta[h] = v
+			}
+		}
+		f.objects[r.URL.Path] = fakeObject{body, meta}
 		w.Header().Set("ETag", `"x"`)
 	case r.Method == http.MethodGet && r.URL.Query().Get("list-type") == "2":
 		w.Header().Set("Content-Type", "application/xml")
@@ -153,6 +167,11 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Amz-Meta-Yuuka-Marker", "eyJ2IjoxfQ")
 		w.Header().Set("Content-Length", "5")
 		_, _ = fmt.Fprint(w, "hello")
+	case r.Method == http.MethodGet && f.objects[r.URL.Path].body != nil:
+		o := f.objects[r.URL.Path]
+		maps.Copy(w.Header(), o.meta)
+		w.Header().Set("Content-Length", strconv.Itoa(len(o.body)))
+		_, _ = w.Write(o.body)
 	case r.Method == http.MethodGet:
 		w.Header().Set("Content-Type", "application/xml")
 		w.WriteHeader(http.StatusNotFound)
@@ -166,7 +185,7 @@ func (f *fakeS3) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func setup(t *testing.T) (*fakeS3, r2.Config) {
 	t.Helper()
-	f := &fakeS3{objects: map[string][]byte{}}
+	f := &fakeS3{objects: map[string]fakeObject{}}
 	srv := httptest.NewServer(f)
 	t.Cleanup(srv.Close)
 	return f, r2.Config{Endpoint: srv.URL, Bucket: "b", AccessKeyID: "k", SecretAccessKey: "s"}

@@ -1,14 +1,16 @@
 // Package r2 reads and manages the two Cloudflare R2 buckets of the ingest
 // contract (§2.2) through the S3 API.
 //
-// The raw bucket holds two kinds of immutable MIME: raw/ (inbound, written
-// by the Worker) and sent/ (every byte string yuuka composed or normalized
-// for sending; whether it went out is outbox state, §4.6). Go's token for
-// it can write, because of sent/, so immutability is kept here rather than
-// by the token (§2.2): RawBucket has no delete, and its one write, PutSent,
-// refuses any key that is not a sent copy key before a request is made and
-// is create-only (If-None-Match: *), so even a bug that names an existing
-// key cannot replace it. The pending bucket has its own credentials.
+// The raw bucket holds three kinds of immutable MIME: raw/ (inbound, written
+// by the Worker), sent/ (every byte string yuuka composed or normalized for
+// sending; whether it went out is outbox state, §4.6) and pull/ (mail
+// fetched from an external mailbox, §10.1). Go's token for it can write,
+// because of sent/ and pull/, so immutability is kept here rather than by
+// the token (§2.2): RawBucket has no delete, and its two writes, PutSent
+// and PutPull, refuse any key that is not a sent or pull key of the exact
+// shape before a request is made and are create-only (If-None-Match: *),
+// so even a bug that names an existing key cannot replace it. The pending
+// bucket has its own credentials.
 package r2
 
 import (
@@ -53,20 +55,24 @@ func SentKey(submittedAt time.Time, id string) string {
 }
 
 // CheckSentKey accepts exactly the keys SentKey produces for a valid ULID.
-// It is the only thing between Go's writable raw bucket token and raw/, so
-// it checks the whole shape rather than the prefix.
+// With CheckPullKey it is the only thing between Go's writable raw bucket
+// token and raw/, so it checks the whole shape rather than the prefix.
 func CheckSentKey(key string) error {
-	parts := strings.Split(key, "/")
-	ok := len(parts) == 4 && parts[0] == "sent" &&
-		digitsInRange(parts[1], 4, 1, 9999) && digitsInRange(parts[2], 2, 1, 12)
-	if ok {
-		id, eml := strings.CutSuffix(parts[3], ".eml")
-		ok = eml && ulid.Valid(id)
-	}
-	if !ok {
+	if !keyShape(key, "sent") {
 		return fmt.Errorf("r2: %q is not a sent copy key", key)
 	}
 	return nil
+}
+
+// keyShape reports whether key is exactly <prefix>/YYYY/MM/<ULID>.eml.
+func keyShape(key, prefix string) bool {
+	parts := strings.Split(key, "/")
+	if len(parts) != 4 || parts[0] != prefix ||
+		!digitsInRange(parts[1], 4, 1, 9999) || !digitsInRange(parts[2], 2, 1, 12) {
+		return false
+	}
+	id, eml := strings.CutSuffix(parts[3], ".eml")
+	return eml && ulid.Valid(id)
 }
 
 // digitsInRange reports whether s is exactly n decimal digits in [lo, hi].
@@ -180,12 +186,12 @@ func isPreconditionFailed(err error) bool {
 	return errors.As(err, &ae) && ae.ErrorCode() == "PreconditionFailed"
 }
 
-// RawBucket reads raw/ and sent/ objects and creates sent/ objects. It has
-// no way to overwrite or delete anything.
+// RawBucket reads raw/, sent/ and pull/ objects and creates sent/ and pull/
+// objects. It has no way to overwrite or delete anything.
 type RawBucket struct{ b bucket }
 
 // NewRawBucket returns a client for the raw bucket. Its token needs object
-// read and write; the write is for sent copies only (§2.2).
+// read and write; the write is for sent copies and pulled mail only (§2.2).
 func NewRawBucket(c Config) *RawBucket {
 	return &RawBucket{bucket{newClient(c), c.Bucket}}
 }
@@ -207,6 +213,15 @@ func (r *RawBucket) PutSent(ctx context.Context, key string, body []byte) error 
 	if err := CheckSentKey(key); err != nil {
 		return err
 	}
+	return r.create(ctx, key, body, nil)
+}
+
+// create is the raw bucket's only PutObject. It checks the key again, so a
+// write method added later cannot reach raw/ by forgetting its own check.
+func (r *RawBucket) create(ctx context.Context, key string, body []byte, meta map[string]string) error {
+	if CheckSentKey(key) != nil && CheckPullKey(key) != nil {
+		return fmt.Errorf("r2: refusing to write %q to the raw bucket", key)
+	}
 	if len(body) > MaxObjectSize {
 		// Get could not read it back.
 		return fmt.Errorf("put %s/%s: larger than %d bytes", r.b.name, key, MaxObjectSize)
@@ -217,6 +232,7 @@ func (r *RawBucket) PutSent(ctx context.Context, key string, body []byte) error 
 		Body:          bytes.NewReader(body),
 		ContentLength: aws.Int64(int64(len(body))),
 		IfNoneMatch:   aws.String("*"),
+		Metadata:      meta,
 	})
 	if err != nil {
 		if isPreconditionFailed(err) {

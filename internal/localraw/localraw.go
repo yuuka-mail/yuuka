@@ -1,7 +1,8 @@
 // Package localraw keeps the local copy of raw MIME next to R2 (§3
-// principle 1): the same raw/YYYY/MM/<id>.eml (received) or
-// sent/YYYY/MM/<id>.eml (sent) key under a data directory, written once and
-// never overwritten.
+// principle 1): the same raw/YYYY/MM/<id>.eml (received),
+// sent/YYYY/MM/<id>.eml (sent) or pull/YYYY/MM/<id>.eml (pulled from an
+// external mailbox) key under a data directory, written once and never
+// overwritten.
 package localraw
 
 import (
@@ -20,10 +21,10 @@ type Dir struct {
 	Root string
 }
 
-// Path returns the file path for key, rejecting keys outside raw/ and sent/
-// and keys that could escape Root.
+// Path returns the file path for key, rejecting keys outside raw/, sent/
+// and pull/ and keys that could escape Root.
 func (d Dir) Path(key string) (string, error) {
-	known := strings.HasPrefix(key, "raw/") || strings.HasPrefix(key, "sent/")
+	known := strings.HasPrefix(key, "raw/") || strings.HasPrefix(key, "sent/") || strings.HasPrefix(key, "pull/")
 	if !known || !filepath.IsLocal(key) || filepath.ToSlash(filepath.Clean(key)) != key {
 		return "", fmt.Errorf("localraw: refusing key %q", key)
 	}
@@ -34,7 +35,7 @@ func (d Dir) Path(key string) (string, error) {
 // hard link that fails if the target exists), so a crash never leaves a
 // partial file at key and a second writer can never replace the first.
 // If key already exists with the same bytes, Put succeeds; with different
-// bytes it fails, because both kinds of copy are immutable and that means
+// bytes it fails, because every kind of copy is immutable and that means
 // corruption.
 func (d Dir) Put(key string, data []byte) error {
 	path, err := d.Path(key)

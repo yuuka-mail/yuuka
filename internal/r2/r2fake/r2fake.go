@@ -2,6 +2,7 @@
 package r2fake
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"iter"
@@ -25,7 +26,7 @@ func New() *Bucket { return &Bucket{objects: map[string]r2.Object{}} }
 
 // Put stores a copy of body under key, replacing what is there. It is a
 // seeding helper for tests, standing in for the Worker; code under test
-// writes through PutSent.
+// writes through PutSent and PutPull.
 func (b *Bucket) Put(key string, body []byte, meta map[string]string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -50,6 +51,35 @@ func (b *Bucket) PutSent(_ context.Context, key string, body []byte) error {
 		return fmt.Errorf("put %s: %w", key, r2.ErrExists)
 	}
 	b.objects[key] = r2.Object{Body: slices.Clone(body), Metadata: map[string]string{}}
+	return nil
+}
+
+// PutPull behaves like r2.RawBucket.PutPull: only keys that pass
+// r2.CheckPullKey, create-only, and a taken key succeeds only if it holds
+// exactly body and meta.
+func (b *Bucket) PutPull(_ context.Context, key string, body []byte, meta r2.PullMeta) error {
+	if err := r2.CheckPullKey(key); err != nil {
+		return err
+	}
+	v, err := meta.Encode()
+	if err != nil {
+		return err
+	}
+	if len(body) > r2.MaxObjectSize {
+		return fmt.Errorf("put %s: larger than %d bytes", key, r2.MaxObjectSize)
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.Err != nil {
+		return b.Err
+	}
+	if o, ok := b.objects[key]; ok {
+		if !bytes.Equal(o.Body, body) || o.Metadata[r2.PullMetadataKey] != v {
+			return fmt.Errorf("put %s: already exists with different content or metadata", key)
+		}
+		return nil
+	}
+	b.objects[key] = r2.Object{Body: slices.Clone(body), Metadata: map[string]string{r2.PullMetadataKey: v}}
 	return nil
 }
 

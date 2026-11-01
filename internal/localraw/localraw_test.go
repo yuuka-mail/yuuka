@@ -7,7 +7,7 @@ import (
 )
 
 func TestPut(t *testing.T) {
-	for _, prefix := range []string{"raw", "sent"} {
+	for _, prefix := range []string{"raw", "sent", "pull"} {
 		t.Run(prefix, func(t *testing.T) {
 			d := Dir{Root: t.TempDir()}
 			key := prefix + "/2026/10/01M67SX66B38NKRKAYDXR834N3.eml"
@@ -40,6 +40,7 @@ func TestPathRejectsEscapes(t *testing.T) {
 	for _, k := range []string{
 		"../x", "raw/../../x", "/raw/x", "pending/x", "raw//x", "raw/./x",
 		"sent/../raw/x", "sent/../../x", "/sent/x", "sent//x", "sent/./x", "sentx/y", "rawx/y", "x/sent/y",
+		"pull/../raw/x", "pull/../../x", "/pull/x", "pull//x", "pull/./x", "pullx/y", "x/pull/y", "Pull/x",
 	} {
 		if _, err := d.Path(k); err == nil {
 			t.Errorf("Path(%q) accepted", k)
