@@ -149,6 +149,21 @@ if (enrollURL) {
   };
   // The attachment list, which links each file as a plain download.
   const invoice = await find("Invoice attached", "Invoice and logo");
+  // Mail of the first pull account, if the database has one (§9.5).
+  const pullAccount = (
+    await p.evaluate(async () => (await fetch("/api/v1/accounts")).json())
+  ).accounts.find((a) => a.kind === "imap")?.name;
+  const pulled = pullAccount
+    ? (
+        await p.evaluate(
+          async (q) =>
+            (
+              await fetch(`/api/v1/search?downgraded=include&limit=2&q=${encodeURIComponent(q)}`)
+            ).json(),
+          `account:${pullAccount}`,
+        )
+      ).hits.map((h) => h.id)
+    : [];
   const prefixes = await p.evaluate(async () => (await fetch("/api/v1/prefixes")).json());
   const discovered = prefixes.prefixes.find((x) => !x.claimed)?.address;
   // Sending (§12.10), from whatever the database has: none of it is
@@ -276,6 +291,12 @@ if (enrollURL) {
         await s.goto(base + `/?m=${invoice}`);
         await s.getByRole("link", { name: /invoice\.pdf/i }).waitFor();
         await shot(s, `reading-attachments-${tag}`);
+      }
+      // Mail pulled from a mailbox (§9.5), header only or whole.
+      for (const [i, id] of pulled.entries()) {
+        await s.goto(base + `/?m=${id}`);
+        await s.getByText("pulled from").first().waitFor();
+        await shot(s, `reading-pulled-${i + 1}-${tag}`);
       }
       if (readings["reply-html"]) {
         await s.goto(base + `/?m=${readings["reply-html"]}&a=part/1.2/para/4`);
@@ -496,6 +517,7 @@ if (enrollURL) {
           "credentials",
           "identities",
           "grants",
+          "accounts",
           "transports",
           "channels",
           "notifications",
@@ -504,6 +526,11 @@ if (enrollURL) {
           await s.locator("main h2").waitFor();
           await shot(s, `settings-${section}-${tag}`);
         }
+        // The form a mailbox is added with; nothing is submitted.
+        await s.goto(base + "/?settings=accounts");
+        await s.getByRole("button", { name: "Add mailbox" }).click();
+        await s.getByText("Add a mailbox to pull").waitFor();
+        await shot(s, `settings-accounts-add-${tag}`);
         if (await s.getByRole("button", { name: "Tighten…" }).count()) {
           await s.getByRole("button", { name: "Tighten…" }).first().click();
           await s.getByRole("radio").first().check();
@@ -668,6 +695,7 @@ if (enrollURL) {
             "credentials",
             "identities",
             "grants",
+            "accounts",
             "transports",
             "channels",
             "notifications",

@@ -110,6 +110,18 @@ export type BindingList = S["BindingList"];
 export type BindStart = S["BindStart"];
 export type BindCodeView = S["BindCodeView"];
 
+// Accounts: pull accounts' sources and who reads each account (§9.5, §13.8).
+export type AccountKind = S["AccountKind"];
+export type ManagedAccount = S["ManagedAccount"];
+export type ManagedSource = S["ManagedSource"];
+export type SourceState = S["SourceState"];
+export type SourceFolder = S["SourceFolder"];
+export type PullFailureView = S["PullFailureView"];
+export type AccountBody = S["AccountBody"];
+export type AccountProbe = S["AccountProbe"];
+export type AccessEntry = S["AccessEntry"];
+export type AccessSetting = S["AccessSetting"];
+
 // Annotations, rules and proposals (M3, §8.5). A rule's match is typed by
 // hand in rules/match.ts: the contract says only "object" because the
 // tree is recursive.

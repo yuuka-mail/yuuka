@@ -26,7 +26,7 @@ import { AnnotateBar } from "./annotate";
 
 import { shownExtraction } from "./extracted";
 import { ExtractedLine } from "./extracted-line";
-import { isQuiet, sentState, systemFacts, warnings, type Tone } from "./facts";
+import { isQuiet, pulledFrom, sentState, systemFacts, warnings, type Tone } from "./facts";
 import { ReadingBody } from "./reading-body";
 import { TriageBox } from "./triage-box";
 import { MessageNotes } from "./notes";
@@ -155,6 +155,15 @@ function Reading({
             <Badge key={r} variant="outline" className="font-mono font-normal">
               {r}
             </Badge>
+          ))}
+          {/* Pulled from a mailbox (§9.5): which one, next to where it was delivered. */}
+          {pulledFrom(m).map((p) => (
+            <span key={p.account} className="inline-flex items-center gap-1">
+              {msg.reading_pulled_from()}
+              <Badge variant="secondary" className="font-mono font-normal">
+                {p.account}
+              </Badge>
+            </span>
           ))}
           {m.date && (
             <span className="ml-auto">{msg.reading_dated({ when: fullTime(m.date) })}</span>

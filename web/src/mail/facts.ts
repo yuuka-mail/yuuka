@@ -87,12 +87,51 @@ export function strippedText(s: Stripped): string {
   return out.join(", ");
 }
 
+/** A mailbox a message was pulled from (§9.5), with Gmail's labels on it when pulled. */
+export interface Pulled {
+  account: string;
+  labels: string[];
+}
+
+/**
+ * The pull accounts m's visible deliveries came through, once each. Mail
+ * of the catch-all says nothing here: it is where all mail came from
+ * before there were other accounts, and naming it on every message is
+ * noise. Empty without delivery:read, which the deliveries need.
+ */
+export function pulledFrom(m: Message): Pulled[] {
+  const out: Pulled[] = [];
+  for (const d of m.deliveries ?? []) {
+    if (d.account_kind !== "imap") continue;
+    const seen = out.find((p) => p.account === d.account);
+    const labels = d.gmail_labels ?? [];
+    if (seen) seen.labels = [...new Set([...seen.labels, ...labels])];
+    else out.push({ account: d.account, labels });
+  }
+  return out;
+}
+
 /** The rows of the facts box; f is undefined until the view has loaded. */
 export function systemFacts(m: Message, f: Facts | undefined): Fact[] {
   const facts: Fact[] = [];
   if (m.parse_error)
     facts.push({ label: msg.facts_parse_error(), parts: [{ text: m.parse_error, tone: "bad" }] });
   if (f?.sent) facts.push({ label: msg.facts_sent(), parts: sentParts(f.sent) });
+  for (const p of pulledFrom(m))
+    facts.push({
+      label: msg.facts_pulled(),
+      parts: [
+        { text: p.account, tone: "plain" },
+        ...(p.labels.length
+          ? [
+              {
+                text: msg.facts_gmail_labels({ labels: p.labels.join(", ") }),
+                tone: "plain" as const,
+              },
+            ]
+          : []),
+      ],
+    });
   if (f) facts.push({ label: msg.facts_auth(), parts: authParts(f.auth) });
   if (f?.leak_checks?.length)
     facts.push({ label: msg.facts_prefix(), parts: f.leak_checks.flatMap(leakParts) });
@@ -164,6 +203,16 @@ export function warnings(m: Message, f: Facts | undefined): Warning[] {
       text: msg.facts_warn_quarantined_text(),
       tone: "bad",
     });
+  // Pulled header only (§4.4): an empty body here is not an empty letter.
+  if (f.omitted)
+    out.push({
+      key: msg.facts_warn_header_only(),
+      text:
+        f.omitted === "too_large"
+          ? msg.facts_warn_header_only_too_large()
+          : msg.facts_warn_header_only_unfetchable(),
+      tone: "warn",
+    });
   for (const w of f.warnings ?? []) {
     const i = w.indexOf(": ");
     const key = i > 0 ? w.slice(0, i) : w;
@@ -180,6 +229,7 @@ const saidAbove = new Set([
   "leak",
   "downgraded",
   "quarantined",
+  "header only",
 ]);
 
 /**

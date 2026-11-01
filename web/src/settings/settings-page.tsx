@@ -19,6 +19,7 @@ import { ProblemLine } from "@/send/marks";
 import { problem, type Abilities } from "@/send/outgoing";
 import { settingsSections, type SettingsSection, type View } from "@/mail/view";
 
+import { AccountsSection } from "./accounts";
 import { ChannelsSection } from "./channels";
 import { CredentialsSection } from "./credentials";
 import { GrantsSection } from "./grants";
@@ -42,6 +43,7 @@ const sectionTitle: Record<SettingsSection, () => string> = {
   credentials: m.settings_credentials,
   identities: m.settings_identities,
   grants: m.settings_grants,
+  accounts: m.settings_accounts,
   transports: m.settings_transports,
   channels: m.settings_channels,
   notifications: m.settings_notifications,
@@ -118,6 +120,7 @@ export function SettingsPage({
         {section === "credentials" && <CredentialsSection />}
         {section === "identities" && <IdentitiesSection />}
         {section === "grants" && <GrantsSection />}
+        {section === "accounts" && <AccountsSection />}
         {section === "transports" && <TransportsSection />}
         {section === "channels" && <ChannelsSection />}
         {section === "notifications" && <NotificationsSection />}

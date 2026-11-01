@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Message, MessageSummary, View } from "@/api/types";
 
 import { openable, shownExtraction, timeLeft } from "./extracted";
-import { isQuiet, leakParts, strippedText, warnings } from "./facts";
+import { isQuiet, leakParts, pulledFrom, strippedText, warnings } from "./facts";
 import { claimedHost, linkTarget } from "./links";
 import { attachmentHref, merge } from "./reading-data";
 import { closeComposer, parseView, viewHref } from "./view";
@@ -68,6 +68,33 @@ describe("facts", () => {
         stripped: {},
       } as View["facts"]).map((x) => x.key),
     ).toEqual(["quarantined"]);
+  });
+  it("says pulled mail's header only, in the UI's words", () => {
+    const w = warnings(received, {
+      auth: passed,
+      stripped: {},
+      omitted: "too_large",
+      warnings: ["header only: the server's words"],
+    } as View["facts"]);
+    expect(w).toEqual([
+      {
+        key: "header only",
+        text: "the original was too large to fetch from the mailbox, so its body is not here",
+        tone: "warn",
+      },
+    ]);
+  });
+  it("names the mailboxes mail was pulled from, not the catch-all", () => {
+    const d = { account_kind: "imap", account: "gmail" } as const;
+    const m = {
+      deliveries: [
+        { account_kind: "cf_catchall", account: "cf" },
+        { ...d, gmail_labels: ["\\Inbox"] },
+        { ...d, gmail_labels: ["\\Inbox", "Work"] },
+      ],
+    } as Message;
+    expect(pulledFrom(m)).toEqual([{ account: "gmail", labels: ["\\Inbox", "Work"] }]);
+    expect(pulledFrom(received)).toEqual([]);
   });
   it("treats a spoof as an error and a leak as a caution", () => {
     const w = warnings(received, {

@@ -6,6 +6,11 @@ OAuth（Gmail OAuth、Microsoft 365）还没有。命令的参数见[管理命�
 
 前提：已经挂好 KEK（[第三方机密](secrets.md)），`serve` 在跑。
 
+下面用主机上的命令演示。同样的事也能在 WebUI 里做：设置 →「外部邮箱」可以接入、编辑、测试、立即同步、暂停、恢复、移除邮箱，
+看每个文件夹追新和回填到了哪里、哪几封没取到，以及设置每个账户（catch-all 也在这一页）谁能读。
+那里的改动和命令记同样的审计、推同样的告警；接入邮箱、给新密码或新服务器、让它多拉信、恢复、让某个主体能读，
+都要先用 passkey 再验一次，只收窄的改动不用。密码只能写不能读，页面上只显示它封存的时间和能不能打开。
+
 ## Gmail
 
 1. **打开两步验证**：Google 账户 → 安全性 → 两步验证。没有两步验证就没有 app password。
@@ -65,8 +70,11 @@ yuuka account set gmail --trusted-authserv-id mx.google.com
 yuuka account access gmail --principal agent:arisu --read
 ```
 
-`yuuka account access gmail` 列出现在谁能读。agent 能读一个账户，就能在列表、搜索和线程里看到它的全部信；
-它永远看不到这个账户的服务器、登录名和密码。
+`yuuka account access gmail` 列出现在谁能读。agent 能读一个账户，就能在列表、搜索和线程里看到它的全部信，
+`list_accounts` 里有这个账户的名字和地址，搜索时可以用 `account:gmail` 只查它；
+它永远看不到这个账户的服务器、登录名、同步进度和密码。
+
+只取了头部的信（比来源的大小上限大，`--max-message-size`）在读信界面标「只有头部」，正文不在 yuuka 里。
 
 ## 登录被拒
 
