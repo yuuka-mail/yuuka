@@ -159,15 +159,26 @@ func (db *DB) AccountAccess(ctx context.Context, name string) ([]AccessRow, erro
 
 // SetAccountAccess writes principal's row for account name and records
 // a: canRead true or false overrides the account's default either way;
-// nil deletes the row, so the default applies again. Whether this widens
-// or tightens (§13.10) is the caller's to decide, against AccountAccess
-// and the account's DefaultRead. ErrNotFound if the account or the
-// principal does not exist.
-func (db *DB) SetAccountAccess(ctx context.Context, name, principalID string, canRead *bool, a Action) error {
+// nil deletes the row, so the default applies again.
+//
+// Whether this widens or tightens (§13.10) is the caller's to decide,
+// from the account's default and the principal's row as it read them.
+// defaultRead and was are those, and the write is made only while both
+// still hold (ErrStale otherwise): a change made in between cannot turn
+// a write decided as a tightening into an unannounced widening. The
+// account row is locked for the check, which orders this with
+// SetAccountDefaultRead and every other access write to the account.
+// ErrNotFound if the account or the principal does not exist.
+func (db *DB) SetAccountAccess(ctx context.Context, name, principalID string, defaultRead bool, was, canRead *bool, a Action) error {
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
 		var accountID string
+		var curDefault bool
 		var one int
-		if err := tx.QueryRow(ctx, `SELECT id FROM accounts WHERE name = $1`, name).Scan(&accountID); errors.Is(err, pgx.ErrNoRows) {
+		// NO KEY UPDATE waits for SetAccountDefaultRead and the other
+		// access writes, never for a delivery that references the
+		// account (FOR KEY SHARE).
+		if err := tx.QueryRow(ctx, `SELECT id, default_read FROM accounts WHERE name = $1 FOR NO KEY UPDATE`, name).
+			Scan(&accountID, &curDefault); errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		} else if err != nil {
 			return err
@@ -176,6 +187,14 @@ func (db *DB) SetAccountAccess(ctx context.Context, name, principalID string, ca
 			return fmt.Errorf("principal %s: %w", principalID, ErrNotFound)
 		} else if err != nil {
 			return err
+		}
+		var cur *bool
+		if err := tx.QueryRow(ctx, `SELECT can_read FROM account_access WHERE account_id = $1 AND principal_id = $2`,
+			accountID, principalID).Scan(&cur); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if curDefault != defaultRead || !sameRow(cur, was) {
+			return fmt.Errorf("default %v and row %s, read as %v and %s: %w", curDefault, rowText(cur), defaultRead, rowText(was), ErrStale)
 		}
 		var err error
 		if canRead == nil {
@@ -197,16 +216,32 @@ func (db *DB) SetAccountAccess(ctx context.Context, name, principalID string, ca
 	return nil
 }
 
+func sameRow(a, b *bool) bool { return a == nil && b == nil || a != nil && b != nil && *a == *b }
+
+func rowText(r *bool) string {
+	if r == nil {
+		return "none"
+	}
+	return fmt.Sprint(*r)
+}
+
 // SetAccountDefaultRead sets whether principals without a row may read
-// account name (§13.8), and records a. ErrNotFound if it does not exist.
-func (db *DB) SetAccountDefaultRead(ctx context.Context, name string, defaultRead bool, a Action) error {
+// account name (§13.8), and records a, while its default is still was,
+// as the caller read it (ErrStale otherwise; see SetAccountAccess).
+// ErrNotFound if it does not exist.
+func (db *DB) SetAccountDefaultRead(ctx context.Context, name string, was, defaultRead bool, a Action) error {
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
-		tag, err := tx.Exec(ctx, `UPDATE accounts SET default_read = $2 WHERE name = $1`, name, defaultRead)
-		if err != nil {
+		var cur bool
+		if err := tx.QueryRow(ctx, `SELECT default_read FROM accounts WHERE name = $1 FOR NO KEY UPDATE`, name).Scan(&cur); errors.Is(err, pgx.ErrNoRows) {
+			return ErrNotFound
+		} else if err != nil {
 			return err
 		}
-		if tag.RowsAffected() == 0 {
-			return ErrNotFound
+		if cur != was {
+			return fmt.Errorf("default %v, read as %v: %w", cur, was, ErrStale)
+		}
+		if _, err := tx.Exec(ctx, `UPDATE accounts SET default_read = $2 WHERE name = $1`, name, defaultRead); err != nil {
+			return err
 		}
 		return insertAction(ctx, tx, a)
 	})

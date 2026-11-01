@@ -382,8 +382,8 @@ func DefaultReadWidens(was, to bool) bool { return !was && to }
 
 // AccessStore is what changing who reads an account needs.
 type AccessStore interface {
-	SetAccountAccess(ctx context.Context, name, principalID string, canRead *bool, a store.Action) error
-	SetAccountDefaultRead(ctx context.Context, name string, defaultRead bool, a store.Action) error
+	SetAccountAccess(ctx context.Context, name, principalID string, defaultRead bool, was, canRead *bool, a store.Action) error
+	SetAccountDefaultRead(ctx context.Context, name string, was, defaultRead bool, a store.Action) error
 }
 
 // RowOf is p's row among rows, nil when it has none.
@@ -398,9 +398,11 @@ func RowOf(rows []store.AccessRow, principalID string) *bool {
 }
 
 // SetAccess sets p's row for account acct to canRead (nil: delete it,
-// so the default applies), given the rows as read, and records
+// so the default applies), given acct and its rows as read, and records
 // account.access. widens says whether it let p read what it could not
-// (AccessWidens), which asks for re-verification and an alert.
+// (AccessWidens), which asks for re-verification and an alert. It is
+// written only while the account's default and p's row are still as
+// read (store.ErrStale otherwise), so widens holds for what was written.
 func SetAccess(ctx context.Context, st AccessStore, acct store.Account, rows []store.AccessRow, p store.Principal,
 	canRead *bool, act Act,
 ) (widens bool, err error) {
@@ -410,17 +412,18 @@ func SetAccess(ctx context.Context, st AccessStore, acct store.Account, rows []s
 		"account_id": acct.ID, "name": acct.Name, "principal_id": p.ID, "principal": p.Kind + ":" + p.Name,
 		"can_read": accessArg(canRead), "was": accessArg(was), "default_read": acct.DefaultRead, "widens": widens,
 	}
-	return widens, st.SetAccountAccess(ctx, acct.Name, p.ID, canRead, act("account.access", args))
+	return widens, st.SetAccountAccess(ctx, acct.Name, p.ID, acct.DefaultRead, was, canRead, act("account.access", args))
 }
 
 // SetDefaultRead sets whether principals without a row may read acct,
-// and records account.access. widens: see DefaultReadWidens.
+// and records account.access, while its default is still as read
+// (store.ErrStale otherwise). widens: see DefaultReadWidens.
 func SetDefaultRead(ctx context.Context, st AccessStore, acct store.Account, to bool, act Act) (widens bool, err error) {
 	widens = DefaultReadWidens(acct.DefaultRead, to)
 	args := map[string]any{
 		"account_id": acct.ID, "name": acct.Name, "default_read": to, "was": acct.DefaultRead, "widens": widens,
 	}
-	return widens, st.SetAccountDefaultRead(ctx, acct.Name, to, act("account.access", args))
+	return widens, st.SetAccountDefaultRead(ctx, acct.Name, acct.DefaultRead, to, act("account.access", args))
 }
 
 func accessArg(row *bool) any {

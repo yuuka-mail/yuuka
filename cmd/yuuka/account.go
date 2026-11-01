@@ -798,6 +798,9 @@ func (h *host) accountAccess(ctx context.Context, name, principal string, read, 
 			return fmt.Errorf("--default-read %q: want yes or no", defaultRead)
 		}
 		widens, err := manage.SetDefaultRead(ctx, h.db, acct, to, h.action)
+		if errors.Is(err, store.ErrStale) {
+			return accessChanged(name)
+		}
 		if err != nil {
 			return err
 		}
@@ -836,6 +839,9 @@ func (h *host) accountAccess(ctx context.Context, name, principal string, read, 
 		return err
 	}
 	widens, err := manage.SetAccess(ctx, h.db, acct, rows, p, canRead, h.action)
+	if errors.Is(err, store.ErrStale) {
+		return accessChanged(name)
+	}
 	if err != nil {
 		return err
 	}
@@ -851,6 +857,13 @@ func (h *host) accountAccess(ctx context.Context, name, principal string, read, 
 		return h.say("%s may read account %s", principal, name)
 	}
 	return h.say("%s may not read account %s, whatever its default", principal, name)
+}
+
+// accessChanged: who reads the account changed between reading it and
+// writing, so whether the write widens may no longer hold.
+func accessChanged(name string) error {
+	return fmt.Errorf("who may read account %s changed while this command ran, and nothing was written; "+
+		"look at `yuuka account access %s` and run it again", name, name)
 }
 
 // accessList lists the account's default and its rows. The system

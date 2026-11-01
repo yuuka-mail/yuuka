@@ -157,9 +157,29 @@ func TestDefaultReadUpgrade(t *testing.T) {
 	// A row hides a readable-by-default account; removing it restores
 	// the default.
 	no, yes := false, true
+	// current is the account's default and v's row, as a writer reads
+	// them before deciding whether its change widens.
+	current := func(account string, v *auth.Viewer) (bool, *bool) {
+		t.Helper()
+		a, err := db.AccountByName(ctx, account)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows, err := db.AccountAccess(ctx, account)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range rows {
+			if r.PrincipalID == v.PrincipalID {
+				return a.DefaultRead, &r.CanRead
+			}
+		}
+		return a.DefaultRead, nil
+	}
 	set := func(account string, v *auth.Viewer, canRead *bool) {
 		t.Helper()
-		if err := db.SetAccountAccess(ctx, account, v.PrincipalID, canRead, e.action("account.access")); err != nil {
+		def, was := current(account, v)
+		if err := db.SetAccountAccess(ctx, account, v.PrincipalID, def, was, canRead, e.action("account.access")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -184,7 +204,24 @@ func TestDefaultReadUpgrade(t *testing.T) {
 	if got := list(other); !slices.Equal(got, withPulled) {
 		t.Errorf("given gmail, %s sees %v", other.PrincipalName, got)
 	}
-	if err := db.SetAccountDefaultRead(ctx, "gmail", true, e.action("account.access")); err != nil {
+	// Decided against what was read: a default or a row that changed
+	// since is stale, and nothing is written.
+	if err := db.SetAccountDefaultRead(ctx, "gmail", true, true, e.action("account.access")); !errors.Is(err, store.ErrStale) {
+		t.Errorf("default read as true while false: %v", err)
+	}
+	if err := db.SetAccountAccess(ctx, "gmail", service.PrincipalID, true, nil, &yes, e.action("account.access")); !errors.Is(err, store.ErrStale) {
+		t.Errorf("access with the default read as true while false: %v", err)
+	}
+	if err := db.SetAccountAccess(ctx, "gmail", other.PrincipalID, false, nil, &no, e.action("account.access")); !errors.Is(err, store.ErrStale) {
+		t.Errorf("access with no row read while there is one: %v", err)
+	}
+	if err := db.SetAccountAccess(ctx, "gmail", other.PrincipalID, false, &no, nil, e.action("account.access")); !errors.Is(err, store.ErrStale) {
+		t.Errorf("access with a row read as false while true: %v", err)
+	}
+	if got := list(other); !slices.Equal(got, withPulled) {
+		t.Errorf("a stale write changed what %s sees: %v", other.PrincipalName, got)
+	}
+	if err := db.SetAccountDefaultRead(ctx, "gmail", false, true, e.action("account.access")); err != nil {
 		t.Fatal(err)
 	}
 	set("gmail", service, &no)
@@ -197,7 +234,7 @@ func TestDefaultReadUpgrade(t *testing.T) {
 	if err != nil || len(rows) != 3 {
 		t.Errorf("gmail rows %+v %v", rows, err)
 	}
-	if err := db.SetAccountAccess(ctx, "nope", agent.PrincipalID, &yes, e.action("account.access")); !errors.Is(err, store.ErrNotFound) {
+	if err := db.SetAccountAccess(ctx, "nope", agent.PrincipalID, false, nil, &yes, e.action("account.access")); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("no such account: %v", err)
 	}
 }
