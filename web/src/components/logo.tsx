@@ -1,16 +1,17 @@
+import horizontal from "@/brand/horizontal-color.svg";
+import horizontalReverse from "@/brand/horizontal-reverse.svg";
 import { cn } from "@/lib/utils";
 
-/** The wordmark; the mark uses the system colour because yuuka is the system's voice. */
+/**
+ * The horizontal lockup, scaled whole (§14.5). The picture picks the variant
+ * so it follows the same OS preference as the colour tokens: the navy outline
+ * of the colour version disappears on a dark background.
+ */
 export function Logo({ className }: { className?: string }) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 text-body font-semibold tracking-tight",
-        className,
-      )}
-    >
-      <span aria-hidden className="size-3 rounded-[3px] bg-system" />
-      yuuka
-    </span>
+    <picture className={cn("inline-flex h-9 shrink-0 items-center", className)}>
+      <source media="(prefers-color-scheme: dark)" srcSet={horizontalReverse} />
+      <img src={horizontal} alt="yuuka" className="h-full w-auto max-w-none" />
+    </picture>
   );
 }

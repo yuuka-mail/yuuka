@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="384" height="280" viewBox="0 0 384 280" role="img"><title>Yuuka mono envelope mark</title><defs><mask id="cutouts" maskUnits="userSpaceOnUse" x="0" y="0" width="384" height="280" style="mask-type:luminance"><path xmlns="http://www.w3.org/2000/svg" id="envelope" fill="white" d="M56 0H320C354 0 384 43 384 99Q384 110 374 110V224C374 255 352 280 320 280H56C25 280 0 255 0 224V56C0 25 25 0 56 0Z" />
+  <path xmlns="http://www.w3.org/2000/svg" id="face" fill="black" d="M46 37C40 34 37 40 42 44L86 71Q91 75 84 79L52 96Q36 104 36 122V204C36 224 50 240 70 240H302C323 240 338 224 338 204V123Q338 110 330 103L254 70Q250 68 246 70L194 94Q186 98 178 94Z" />
+  <path xmlns="http://www.w3.org/2000/svg" id="fold" fill="black" d="M278 54L326 23Q332 19 337 26C352 45 363 68 369 89Q373 100 362 96L277 64Q267 60 278 54Z" />
+  <g xmlns="http://www.w3.org/2000/svg" id="expression" fill="white">
+    <ellipse id="eye-left" cx="108" cy="160" rx="16" ry="24" />
+    <ellipse id="eye-right" cx="264" cy="160" rx="16" ry="24" />
+    <rect id="mouth" x="157" y="174" width="56" height="16" rx="8" />
+  </g>
+</mask></defs><rect width="384" height="280" fill="#213145" mask="url(#cutouts)"/></svg>

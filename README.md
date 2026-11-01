@@ -1,4 +1,9 @@
-# yuuka
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="web/src/brand/horizontal-reverse.svg">
+    <img src="web/src/brand/horizontal-color.svg" alt="yuuka" width="240">
+  </picture>
+</h1>
 
 A self-hosted mail system for catch-all domains. Cloudflare at the edges, Go in the middle,
 your own machine in the center.
@@ -76,4 +81,4 @@ not decoration — it keeps an agent's *guesses* from being read as the system's
 
 ## License
 
-[MIT](LICENSE)
+Code: [MIT](LICENSE). Logo and wordmark ([`web/src/brand/`](web/src/brand/)): [CC BY 4.0](web/src/brand/LICENSE), by Aerix.
