@@ -53,7 +53,7 @@ type Store interface {
 	// shown only to a viewer of every delivery (LatestScore).
 	LatestScore(ctx context.Context, v *auth.Viewer, id string, p score.Profile) (*store.ScoreRead, error)
 	TopAnswers(ctx context.Context, v *auth.Viewer, p score.Profile, ids []string) (map[string]map[string]string, error)
-	ScoreCounts(ctx context.Context, v *auth.Viewer, p score.Profile, since time.Time) (store.ScoreCounts, error)
+	ScoreCounts(ctx context.Context, v *auth.Viewer, p score.Profile, accounts []string, since time.Time) (store.ScoreCounts, error)
 	// RecordAction appends to the audit log (attachment downloads).
 	RecordAction(ctx context.Context, a store.Action) error
 
@@ -195,6 +195,9 @@ type API struct {
 	// triage is the active scorer profile (§15), nil when no scorer is
 	// configured: then no score is shown, filtered by or reported.
 	triage *score.Profile
+	// triageAccounts are the accounts it scores (nil: the default), for
+	// the report's count of what is still to score.
+	triageAccounts []string
 	// secrets seals and uses third-party secrets (§17); zero is locked.
 	secrets Secrets
 	log     *slog.Logger
@@ -217,9 +220,10 @@ func (a *API) WithSubmitter(s Submitter) *API {
 }
 
 // WithTriage makes a show the scores of profile p (§15): the profile
-// of the configured scorer, whose scores are the current ones.
-func (a *API) WithTriage(p score.Profile) *API {
-	a.triage = &p
+// of the configured scorer, whose scores are the current ones, and which
+// scores the mail of accounts (triage.Config.Accounts).
+func (a *API) WithTriage(p score.Profile, accounts []string) *API {
+	a.triage, a.triageAccounts = &p, accounts
 	return a
 }
 

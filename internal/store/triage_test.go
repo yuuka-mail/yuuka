@@ -120,14 +120,14 @@ func TestTriageScores(t *testing.T) {
 	hidden := e.deliver("zz", letter("x@example.org", "zz@example.com", "Hello", "", "spam")).MessageID
 	since := e.now.Add(-time.Hour)
 
-	targets, err := e.db.ScoreTargets(ctx, laya, since, 10)
+	targets, err := e.db.ScoreTargets(ctx, laya, nil, since, 10)
 	if err != nil || !slices.Equal(targets, []string{claimed}) {
 		t.Fatalf("ScoreTargets %q, %v, want only the claimed one", targets, err)
 	}
-	if got, err := e.db.ScoreTargets(ctx, laya, e.now.Add(time.Minute), 10); err != nil || len(got) != 0 {
+	if got, err := e.db.ScoreTargets(ctx, laya, nil, e.now.Add(time.Minute), 10); err != nil || len(got) != 0 {
 		t.Errorf("ScoreTargets after the lookback: %q, %v", got, err)
 	}
-	if _, err := e.db.ScoreTargets(ctx, score.Profile{Scorer: "Laya!", Questions: 1}, since, 10); !errors.Is(err, store.ErrInvalidScore) {
+	if _, err := e.db.ScoreTargets(ctx, score.Profile{Scorer: "Laya!", Questions: 1}, nil, since, 10); !errors.Is(err, store.ErrInvalidScore) {
 		t.Errorf("ScoreTargets with a bad scorer name: %v", err)
 	}
 
@@ -140,10 +140,10 @@ func TestTriageScores(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Once scored, it is no target of that profile, still one of another.
-	if got, err := e.db.ScoreTargets(ctx, laya, since, 10); err != nil || len(got) != 0 {
+	if got, err := e.db.ScoreTargets(ctx, laya, nil, since, 10); err != nil || len(got) != 0 {
 		t.Errorf("ScoreTargets after scoring: %q, %v", got, err)
 	}
-	if got, err := e.db.ScoreTargets(ctx, score.Profile{Scorer: "laya-ml-1", Questions: 2}, since, 10); err != nil || !slices.Equal(got, []string{claimed}) {
+	if got, err := e.db.ScoreTargets(ctx, score.Profile{Scorer: "laya-ml-1", Questions: 2}, nil, since, 10); err != nil || !slices.Equal(got, []string{claimed}) {
 		t.Errorf("ScoreTargets of a new question set: %q, %v", got, err)
 	}
 	cs, _ := drain(t, e.db, person, start.Cursor, store.ChangeQuery{Kinds: []string{"triage"}})

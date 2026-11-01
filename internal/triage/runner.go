@@ -22,12 +22,13 @@ type Scorer interface {
 // written.
 type Store interface {
 	Messages
-	// ScoreTargets lists up to limit messages received since then that
-	// p has not scored, newest first; a failed one stays a target.
-	ScoreTargets(ctx context.Context, p score.Profile, since time.Time, limit int) ([]string, error)
-	// RescoreTargets pages through every target since then, scored or
-	// not, in id order.
-	RescoreTargets(ctx context.Context, since time.Time, after string, limit int) ([]string, error)
+	// ScoreTargets lists up to limit messages of accounts received since
+	// then that p has not scored, newest first; a failed one stays a
+	// target.
+	ScoreTargets(ctx context.Context, p score.Profile, accounts []string, since time.Time, limit int) ([]string, error)
+	// RescoreTargets pages through every target of accounts since then,
+	// scored or not, in id order.
+	RescoreTargets(ctx context.Context, accounts []string, since time.Time, after string, limit int) ([]string, error)
 	// InsertScore appends one score; scores are never changed.
 	InsertScore(ctx context.Context, s score.Score) error
 }
@@ -52,6 +53,9 @@ type RunnerConfig struct {
 	Sweep time.Duration
 	// Lookback bounds the sweep (DefaultLookback).
 	Lookback time.Duration
+	// Accounts are the accounts whose mail may be scored, by name
+	// (Config.Accounts); nil is the default, the Cloudflare accounts.
+	Accounts []string
 	Log      *slog.Logger
 	// Now is the clock; nil means time.Now.
 	Now func() time.Time
@@ -189,7 +193,7 @@ func (r *Runner) sweep(ctx context.Context) error {
 		r.mu.Lock()
 		limit := targetsPage + len(r.backoff) + len(r.pending)
 		r.mu.Unlock()
-		ids, err := r.cfg.Store.ScoreTargets(ctx, r.cfg.Profile, r.cfg.Now().Add(-r.cfg.Lookback), limit)
+		ids, err := r.cfg.Store.ScoreTargets(ctx, r.cfg.Profile, r.cfg.Accounts, r.cfg.Now().Add(-r.cfg.Lookback), limit)
 		if err != nil {
 			return err
 		}
@@ -266,7 +270,7 @@ func (r *Runner) handle(ctx context.Context, id string) error {
 // scoreOne builds, scores and records message id, asking the breaker
 // right before the call and telling it how the call went.
 func (r *Runner) scoreOne(ctx context.Context, id string) error {
-	b, err := Build(ctx, r.cfg.Store, r.cfg.Raw, id, r.cfg.MaxChars)
+	b, err := Build(ctx, r.cfg.Store, r.cfg.Raw, id, r.cfg.MaxChars, r.cfg.Accounts)
 	if err != nil {
 		return err
 	}
@@ -332,7 +336,7 @@ func (r *Runner) Rescore(ctx context.Context, since time.Time) (RescoreStats, er
 	err := func() error {
 		defer close(ids)
 		for after := ""; ; {
-			page, err := r.cfg.Store.RescoreTargets(ctx, since, after, targetsPage)
+			page, err := r.cfg.Store.RescoreTargets(ctx, r.cfg.Accounts, since, after, targetsPage)
 			if err != nil {
 				return err
 			}

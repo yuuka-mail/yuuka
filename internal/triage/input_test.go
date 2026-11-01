@@ -103,23 +103,6 @@ func TestStateTruncates(t *testing.T) {
 	}
 }
 
-// Mail that arrived only where §4.3 downgrades it is not scored: it is
-// hidden already, and scoring it would send it somewhere for nothing.
-func TestEscapes(t *testing.T) {
-	m := detail()
-	if !escapes(m.Deliveries) {
-		t.Error("claimed and dmarc=pass does not escape")
-	}
-	m.Deliveries[0].Auth.DMARC = "fail"
-	if escapes(m.Deliveries) {
-		t.Error("dmarc=fail escapes")
-	}
-	m.Deliveries[0].Auth, m.Deliveries[0].PrefixState = nil, store.PrefixDiscovered
-	if escapes(m.Deliveries) || escapes(nil) {
-		t.Error("an unclaimed prefix escapes")
-	}
-}
-
 // rawMap reads raws by id.
 type rawMap map[string][]byte
 
@@ -192,7 +175,7 @@ func TestBuildLeavesDecisionsOut(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b, err := Build(ctx, db, raws, id, DefaultMaxChars)
+	b, err := Build(ctx, db, raws, id, DefaultMaxChars, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +194,7 @@ func TestBuildLeavesDecisionsOut(t *testing.T) {
 	if _, err := pool.Exec(ctx, `UPDATE prefixes SET state = 2 WHERE prefix = 'github'`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Build(ctx, db, raws, id, DefaultMaxChars); !errors.Is(err, ErrNotTarget) {
+	if _, err := Build(ctx, db, raws, id, DefaultMaxChars, nil); !errors.Is(err, ErrNotTarget) {
 		t.Errorf("downgraded message: %v", err)
 	}
 }
@@ -245,7 +228,7 @@ func TestScoreIntoStore(t *testing.T) {
 		s.Input.Endpoint != score.EndpointLocal || !s.Input.Facts.HasCode || s.Input.Facts.Class != "machine" {
 		t.Errorf("stored %+v", s.Score)
 	}
-	if got, err := db.ScoreTargets(ctx, p, time.Now().Add(-24*time.Hour), 10); err != nil || len(got) != 0 {
+	if got, err := db.ScoreTargets(ctx, p, nil, time.Now().Add(-24*time.Hour), 10); err != nil || len(got) != 0 {
 		t.Errorf("still a target: %v, %v", got, err)
 	}
 }

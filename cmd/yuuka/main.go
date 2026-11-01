@@ -153,6 +153,8 @@
 //	YUUKA_TRIAGE_MODEL                  model to ask the backend for (default: its choice)
 //	YUUKA_TRIAGE_TOKEN_FILE             file holding the scorer's bearer token (optional)
 //	YUUKA_TRIAGE_LOOKBACK               how far back serve scores unscored mail (default 30d)
+//	YUUKA_TRIAGE_ACCOUNTS               comma-separated names of the accounts whose mail is scored
+//	                                    (default: the Cloudflare accounts; pulled mailboxes only when named)
 //	                                    See internal/triage.
 //
 // `yuuka migrate`, `yuuka prefix`, `yuuka token`, `yuuka outbox`,
@@ -500,7 +502,7 @@ func (a *app) rest(log *slog.Logger) *api.API {
 	})
 	// The scores shown are the configured scorer's; without one, none.
 	if a.cfg.Triage.On() {
-		r.WithTriage(a.cfg.Triage.Profile())
+		r.WithTriage(a.cfg.Triage.Profile(), a.cfg.Triage.Accounts)
 	}
 	return r
 }
@@ -720,7 +722,7 @@ func (a *app) startTriage(ctx context.Context, log *slog.Logger, done chan struc
 	}
 	a.triage = triage.NewRunner(triage.RunnerConfig{
 		Profile: tc.Profile(), Endpoint: tc.EndpointKind(), Scorer: tc.Client(),
-		Store: a.db, Raw: a.in, Lookback: tc.Lookback, Log: log,
+		Store: a.db, Raw: a.in, Lookback: tc.Lookback, Accounts: tc.Accounts, Log: log,
 	})
 	log.Info("triage: scoring mail", "scorer", tc.Name, "endpoint", tc.EndpointKind())
 	go func() {

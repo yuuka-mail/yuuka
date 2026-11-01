@@ -79,7 +79,7 @@ func TestKnownSender(t *testing.T) {
 	}
 	var all []string
 	for after := ""; ; {
-		page, err := db.RescoreTargets(ctx, time.Time{}, after, 2)
+		page, err := db.RescoreTargets(ctx, nil, time.Time{}, after, 2)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -98,7 +98,7 @@ func TestKnownSender(t *testing.T) {
 		everyone:   {Scored: 1, Unscored: 2},
 		restricted: {Scored: 1, Unscored: 1},
 	} {
-		got, err := db.ScoreCounts(ctx, v, laya, time.Time{})
+		got, err := db.ScoreCounts(ctx, v, laya, nil, time.Time{})
 		if err != nil || got.Scored != want.Scored || got.Unscored != want.Unscored {
 			t.Errorf("%s: ScoreCounts %+v, %v; want %+v", v.PrincipalName, got, err, want)
 		}
@@ -125,7 +125,7 @@ func TestScoreCounts(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, err := db.ScoreCounts(ctx, everyone, laya, time.Time{})
+	got, err := db.ScoreCounts(ctx, everyone, laya, nil, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -137,10 +137,10 @@ func TestScoreCounts(t *testing.T) {
 	if got.Scored != 2 || !maps.EqualFunc(got.Answers, want, maps.Equal) {
 		t.Errorf("%+v, want answers %v", got, want)
 	}
-	if got, err := db.ScoreCounts(ctx, everyone, laya, at.Add(30*time.Second)); err != nil || got.Scored != 1 {
+	if got, err := db.ScoreCounts(ctx, everyone, laya, nil, at.Add(30*time.Second)); err != nil || got.Scored != 1 {
 		t.Errorf("since: %+v, %v", got, err)
 	}
-	if _, err := db.ScoreCounts(ctx, nil, laya, time.Time{}); err == nil {
+	if _, err := db.ScoreCounts(ctx, nil, laya, nil, time.Time{}); err == nil {
 		t.Error("nil viewer accepted")
 	}
 

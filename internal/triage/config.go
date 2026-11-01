@@ -28,6 +28,11 @@ type Config struct {
 	Lookback time.Duration
 	Hosted   bool
 	Token    string
+	// Accounts are the accounts whose mail is scored, by name
+	// (YUUKA_TRIAGE_ACCOUNTS); nil is the default, the Cloudflare
+	// accounts. Scoring sends the content to the scorer, so a pull
+	// account's mail is scored only when the host names it (§10.1.4).
+	Accounts []string
 }
 
 // DefaultLookback bounds the sweep: on first start, a month of mail is
@@ -35,6 +40,9 @@ type Config struct {
 const DefaultLookback = 30 * 24 * time.Hour
 
 var scorerName = regexp.MustCompile(`^[a-z0-9][a-z0-9.-]{0,31}$`)
+
+// accountName is store.ValidName's shape: an accounts.name.
+var accountName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 
 // LoadConfig reads the YUUKA_TRIAGE_* variables; readFile reads the
 // token file. Without YUUKA_TRIAGE_URL scoring is off, and any other of
@@ -45,7 +53,7 @@ func LoadConfig(getenv func(string) string, readFile func(string) ([]byte, error
 	c := Config{Lookback: DefaultLookback}
 	raw := getenv("YUUKA_TRIAGE_URL")
 	if raw == "" {
-		for _, name := range []string{"NAME", "MODEL", "LOOKBACK", "HOSTED", "TOKEN_FILE"} {
+		for _, name := range []string{"NAME", "MODEL", "LOOKBACK", "HOSTED", "TOKEN_FILE", "ACCOUNTS"} {
 			if getenv("YUUKA_TRIAGE_"+name) != "" {
 				errs = append(errs, fmt.Errorf("YUUKA_TRIAGE_%s needs YUUKA_TRIAGE_URL", name))
 			}
@@ -95,6 +103,17 @@ func LoadConfig(getenv func(string) string, readFile func(string) ([]byte, error
 	}
 	if c.Hosted && path == "" {
 		errs = append(errs, errors.New("YUUKA_TRIAGE_HOSTED=1 needs YUUKA_TRIAGE_TOKEN_FILE"))
+	}
+	if v := getenv("YUUKA_TRIAGE_ACCOUNTS"); v != "" {
+		c.Accounts = []string{}
+		for n := range strings.SplitSeq(v, ",") {
+			n = strings.TrimSpace(n)
+			if !accountName.MatchString(n) {
+				errs = append(errs, fmt.Errorf("YUUKA_TRIAGE_ACCOUNTS: %q: want comma-separated account names", n))
+				continue
+			}
+			c.Accounts = append(c.Accounts, n)
+		}
 	}
 	return c, errors.Join(errs...)
 }

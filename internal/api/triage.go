@@ -192,7 +192,7 @@ func (a *API) triageReport(ctx context.Context, v *auth.Viewer, p TriageReportPa
 	if p.Since != nil {
 		since = *p.Since
 	}
-	c, err := a.db.ScoreCounts(ctx, v, *a.triage, since)
+	c, err := a.db.ScoreCounts(ctx, v, *a.triage, a.triageAccounts, since)
 	if err != nil {
 		return TriageReport{}, err
 	}

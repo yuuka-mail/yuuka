@@ -435,8 +435,10 @@ func (db *DB) MessageByID(ctx context.Context, v *auth.Viewer, id string) (Messa
 			var isJudged bool
 			var expected []string
 			raw := &f.Raw
-			err := r.Scan(append([]any{&f.ID, &f.Zone, &f.Prefix, &f.PrefixState, &f.EnvelopeFrom, &f.EnvelopeTo, &f.ReceivedAt, &f.Auth,
-				&isJudged, &expected}, rawRefTargets(raw)...)...)
+			err := r.Scan(append([]any{
+				&f.ID, &f.Zone, &f.Prefix, &f.PrefixState, &f.EnvelopeFrom, &f.EnvelopeTo, &f.ReceivedAt, &f.Auth,
+				&isJudged, &expected,
+			}, rawRefTargets(raw)...)...)
 			if isJudged {
 				f.Leak = leak.Judge(expected, leak.SenderOf(f.Auth, d.FromAddr))
 			}

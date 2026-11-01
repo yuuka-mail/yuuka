@@ -730,7 +730,7 @@ func TestVisibility(t *testing.T) {
 
 			// The report counts the scores of what v sees, and the
 			// mail of known senders only where v sees it.
-			if c, err := db.ScoreCounts(ctx, v, laya, time.Time{}); err != nil || c.Scored != len(want) {
+			if c, err := db.ScoreCounts(ctx, v, laya, nil, time.Time{}); err != nil || c.Scored != len(want) {
 				t.Errorf("ScoreCounts %+v, %v; want %d scored", c, err, len(want))
 			}
 			for n, id := range msgs {

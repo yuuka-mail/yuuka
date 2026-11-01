@@ -133,24 +133,42 @@ func (db *DB) InsertScore(ctx context.Context, s score.Score) error {
 	return nil
 }
 
+// scoreTarget is "message m is one a scorer may be given" (§15.6,
+// §10.1.4): a delivery of it escapes the §4.3 downgrade (what §4.3
+// hides already, and mail we only sent, are not worth asking a model
+// about) in an account the host lets be scored. accounts is the SQL of
+// a text[] of account names, YUUKA_TRIAGE_ACCOUNTS; NULL is its
+// default, the Cloudflare accounts. Scoring hands the content to the
+// scorer, which may be a third party's, so whose mail that may be is
+// the host's decision (§17.1): a parameter, never a row a session could
+// write. and narrows the deliveries further (a viewer's), "" for none.
+func scoreTarget(m, accounts, and string) string {
+	if and != "" {
+		and = " AND " + and
+	}
+	return `EXISTS (SELECT 1 FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
+		JOIN accounts sa ON sa.id = d.account_id
+		WHERE d.message_id = ` + m + `.id AND ` + notDowngraded + and + `
+			AND CASE WHEN ` + accounts + `::text[] IS NULL THEN sa.kind = '` + AccountCloudflare + `'
+				ELSE sa.name = ANY (` + accounts + `::text[]) END)`
+}
+
 // ScoreTargets returns up to limit messages received since then that p
-// has not scored, newest first. Only mail with a delivery that escapes
-// the §4.3 downgrade is a target: what §4.3 hides already, and mail we
-// only sent, are not worth asking a model about. The scorer works for
-// the system, so every account counts. A message whose scoring fails
+// has not scored, newest first: those scoreTarget admits for accounts
+// (nil: the default). The scorer works for the system, so visibility
+// does not narrow it; the accounts do. A message whose scoring fails
 // stays a target; backing off is the caller's.
-func (db *DB) ScoreTargets(ctx context.Context, p score.Profile, since time.Time, limit int) ([]string, error) {
+func (db *DB) ScoreTargets(ctx context.Context, p score.Profile, accounts []string, since time.Time, limit int) ([]string, error) {
 	if err := validProfile(p); err != nil {
 		return nil, fmt.Errorf("score targets: %w", err)
 	}
 	rows, err := db.pool.Query(ctx, `
 		SELECT m.id FROM messages m
 		WHERE m.received_at >= $1
-			AND EXISTS (SELECT 1 FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
-				WHERE d.message_id = m.id AND `+notDowngraded+`)
+			AND `+scoreTarget("m", "$5", "")+`
 			AND NOT EXISTS (SELECT 1 FROM triage_scores ts WHERE ts.message_id = m.id AND ts.scorer = $2 AND ts.questions = $3)
 		ORDER BY m.received_at DESC, m.id DESC
-		LIMIT $4`, since, p.Scorer, p.Questions, limit)
+		LIMIT $4`, since, p.Scorer, p.Questions, limit, accounts)
 	if err != nil {
 		return nil, fmt.Errorf("score targets: %w", err)
 	}
@@ -159,6 +177,19 @@ func (db *DB) ScoreTargets(ctx context.Context, p score.Profile, since time.Time
 		return nil, fmt.Errorf("score targets: %w", err)
 	}
 	return ids, nil
+}
+
+// IsScoreTarget reports whether message id is one scoreTarget admits for
+// accounts: what the scorer checks of each message right before it
+// builds its input, however the message was queued.
+func (db *DB) IsScoreTarget(ctx context.Context, id string, accounts []string) (bool, error) {
+	var ok bool
+	err := db.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM messages m WHERE m.id = $1 AND `+scoreTarget("m", "$2", "")+`)`,
+		id, accounts).Scan(&ok)
+	if err != nil {
+		return false, fmt.Errorf("score target %s: %w", id, err)
+	}
+	return ok, nil
 }
 
 // ScoreRead is a score as one viewer reads it.

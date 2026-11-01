@@ -106,9 +106,9 @@ func (s *spy) TopAnswers(ctx context.Context, v *auth.Viewer, p score.Profile, i
 	return s.DB.TopAnswers(ctx, v, p, ids)
 }
 
-func (s *spy) ScoreCounts(ctx context.Context, v *auth.Viewer, p score.Profile, since time.Time) (store.ScoreCounts, error) {
+func (s *spy) ScoreCounts(ctx context.Context, v *auth.Viewer, p score.Profile, accounts []string, since time.Time) (store.ScoreCounts, error) {
 	s.saw("ScoreCounts", v)
-	return s.DB.ScoreCounts(ctx, v, p, since)
+	return s.DB.ScoreCounts(ctx, v, p, accounts, since)
 }
 
 func (s *spy) DraftByID(ctx context.Context, v *auth.Viewer, id string) (store.Draft, error) {
@@ -550,7 +550,7 @@ func newHarness(t *testing.T) *harness {
 	return &harness{
 		t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, human: human, sub: sub, suspended: sus, local: local, alerts: alerts,
 		sealer: sealer, tg: tg, probes: probes,
-		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).WithSuspendNotifier(sus).WithTriage(laya).
+		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).WithSuspendNotifier(sus).WithTriage(laya, nil).
 			WithAlerter(alerts).WithSecrets(Secrets{Sealer: sealer, GetMe: tg.GetMe, Probe: probes.Probe, Channels: tg}).Handler(svc),
 	}
 }

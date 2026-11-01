@@ -306,7 +306,7 @@ func TestReadsRefuseNilViewer(t *testing.T) {
 		"PrefixStats":  func() error { _, err := db.PrefixStats(t.Context(), nil, store.PrefixQuery{}); return err },
 		"KnownSender":  func() error { _, err := db.KnownSender(t.Context(), nil, id); return err },
 		"ScoreCounts": func() error {
-			_, err := db.ScoreCounts(t.Context(), nil, score.Profile{Scorer: "laya-ml-1", Questions: 1}, time.Time{})
+			_, err := db.ScoreCounts(t.Context(), nil, score.Profile{Scorer: "laya-ml-1", Questions: 1}, nil, time.Time{})
 			return err
 		},
 		"PrefixByAddress": func() error {

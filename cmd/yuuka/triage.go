@@ -82,7 +82,7 @@ func (h *host) triageStatus(ctx context.Context, tc triage.Config) error {
 		_ = h.say("model asked %s", tc.Model)
 	}
 	since := h.now().Add(-tc.Lookback)
-	c, err := h.db.ScoreCounts(ctx, h.viewer(auth.MessageRead), p, since)
+	c, err := h.db.ScoreCounts(ctx, h.viewer(auth.MessageRead), p, tc.Accounts, since)
 	if err != nil {
 		return err
 	}
@@ -97,7 +97,7 @@ func (h *host) triageStatus(ctx context.Context, tc triage.Config) error {
 }
 
 func (h *host) triageReport(ctx context.Context, tc triage.Config, since time.Time) error {
-	c, err := h.db.ScoreCounts(ctx, h.viewer(auth.MessageRead), tc.Profile(), since)
+	c, err := h.db.ScoreCounts(ctx, h.viewer(auth.MessageRead), tc.Profile(), tc.Accounts, since)
 	if err != nil {
 		return err
 	}
@@ -118,7 +118,7 @@ func rescore(ctx context.Context, log *slog.Logger, tc triage.Config, since time
 	}
 	r := triage.NewRunner(triage.RunnerConfig{
 		Profile: tc.Profile(), Endpoint: tc.EndpointKind(), Scorer: tc.Client(),
-		Store: a.db, Raw: a.in, Log: log,
+		Store: a.db, Raw: a.in, Accounts: tc.Accounts, Log: log,
 	})
 	st, err := r.Rescore(ctx, since)
 	log.Info("triage rescore", "scored", st.Scored, "skipped", st.Skipped, "failed", st.Failed)

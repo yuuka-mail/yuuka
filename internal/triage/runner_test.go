@@ -42,11 +42,15 @@ func (f *fakeStore) MessageByID(_ context.Context, v *auth.Viewer, id string) (s
 	return m, nil
 }
 
+func (f *fakeStore) IsScoreTarget(context.Context, string, []string) (bool, error) {
+	return true, nil
+}
+
 func (f *fakeStore) KnownSender(context.Context, *auth.Viewer, string) (bool, error) {
 	return false, nil
 }
 
-func (f *fakeStore) ScoreTargets(_ context.Context, p score.Profile, _ time.Time, limit int) ([]string, error) {
+func (f *fakeStore) ScoreTargets(_ context.Context, p score.Profile, _ []string, _ time.Time, limit int) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []string
@@ -62,7 +66,7 @@ func (f *fakeStore) ScoreTargets(_ context.Context, p score.Profile, _ time.Time
 	return out, nil
 }
 
-func (f *fakeStore) RescoreTargets(_ context.Context, _ time.Time, after string, limit int) ([]string, error) {
+func (f *fakeStore) RescoreTargets(_ context.Context, _ []string, _ time.Time, after string, limit int) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []string

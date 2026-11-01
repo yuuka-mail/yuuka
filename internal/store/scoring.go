@@ -58,15 +58,14 @@ func (db *DB) KnownSender(ctx context.Context, v *auth.Viewer, id string) (bool,
 // RescoreTargets returns up to limit messages received since then that
 // a scorer may score, scored already or not, with ids after after, in
 // id order: what `yuuka triage rescore` pages through. The targets are
-// ScoreTargets', every account.
-func (db *DB) RescoreTargets(ctx context.Context, since time.Time, after string, limit int) ([]string, error) {
+// ScoreTargets', for the same accounts.
+func (db *DB) RescoreTargets(ctx context.Context, accounts []string, since time.Time, after string, limit int) ([]string, error) {
 	rows, err := db.pool.Query(ctx, `
 		SELECT m.id FROM messages m
 		WHERE m.received_at >= $1 AND m.id > $2
-			AND EXISTS (SELECT 1 FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
-				WHERE d.message_id = m.id AND `+notDowngraded+`)
+			AND `+scoreTarget("m", "$4", "")+`
 		ORDER BY m.id
-		LIMIT $3`, since, after, limit)
+		LIMIT $3`, since, after, limit, accounts)
 	if err != nil {
 		return nil, fmt.Errorf("rescore targets: %w", err)
 	}
@@ -91,9 +90,10 @@ type ScoreCounts struct {
 
 // ScoreCounts counts the latest scores of profile p on the messages v
 // sees that were received since then: the report of `yuuka triage
-// report`. Counts only, never a message or its content; a hidden
-// message counts nowhere.
-func (db *DB) ScoreCounts(ctx context.Context, v *auth.Viewer, p score.Profile, since time.Time) (ScoreCounts, error) {
+// report`. Unscored counts the targets of accounts (ScoreTargets) whose
+// qualifying delivery v sees. Counts only, never a message or its
+// content; a hidden message counts nowhere.
+func (db *DB) ScoreCounts(ctx context.Context, v *auth.Viewer, p score.Profile, accounts []string, since time.Time) (ScoreCounts, error) {
 	if err := needViewer(v, "score counts"); err != nil {
 		return ScoreCounts{}, err
 	}
@@ -111,11 +111,10 @@ func (db *DB) ScoreCounts(ctx context.Context, v *auth.Viewer, p score.Profile, 
 			SELECT (SELECT count(*) FROM (`+latest+`) l),
 			       (SELECT count(*) FROM messages m
 			        WHERE m.received_at >= $3
-			          AND EXISTS (SELECT 1 FROM deliveries d JOIN prefixes p ON p.zone = d.zone AND p.prefix = d.prefix
-			                      WHERE d.message_id = m.id AND `+db.visibleDelivery(v, "d")+` AND `+notDowngraded+`)
+			          AND `+scoreTarget("m", "$4", db.visibleDelivery(v, "d"))+`
 			          AND NOT EXISTS (SELECT 1 FROM triage_scores ts
 			                          WHERE ts.message_id = m.id AND ts.scorer = $1 AND ts.questions = $2))`,
-			p.Scorer, p.Questions, since).Scan(&out.Scored, &out.Unscored)
+			p.Scorer, p.Questions, since, accounts).Scan(&out.Scored, &out.Unscored)
 		if err != nil {
 			return err
 		}

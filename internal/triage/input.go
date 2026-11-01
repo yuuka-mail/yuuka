@@ -30,12 +30,13 @@ var viewer = &auth.Viewer{
 	Scopes: []auth.Scope{auth.MessageRead, auth.DeliveryRead},
 }
 
-// Messages is what the input builder reads from the store: the message
-// and whether its sender is known. Nothing else: notes, labels,
-// annotations, proposals, drafts and the rest of the thread are
-// decisions or other mail, which agents can write and senders can
-// steer; the scorer never sees them (§8.10).
+// Messages is what the input builder reads from the store: whether the
+// message may be scored, the message, and whether its sender is known.
+// Nothing else: notes, labels, annotations, proposals, drafts and the
+// rest of the thread are decisions or other mail, which agents can write
+// and senders can steer; the scorer never sees them (§8.10).
 type Messages interface {
+	IsScoreTarget(ctx context.Context, id string, accounts []string) (bool, error)
 	MessageByID(ctx context.Context, v *auth.Viewer, id string) (store.MessageDetail, error)
 	KnownSender(ctx context.Context, v *auth.Viewer, id string) (bool, error)
 }
@@ -45,8 +46,9 @@ type RawReader interface {
 	ReadRaw(ctx context.Context, ref store.RawRef) ([]byte, error)
 }
 
-// ErrNotTarget: the message is not one to score: it arrived nowhere,
-// or every delivery is downgraded by §4.3, which already hides it.
+// ErrNotTarget: the message is not one to score: it arrived nowhere, or
+// every delivery is downgraded by §4.3, which already hides it, or is in
+// an account the host does not let be scored (§10.1.4).
 var ErrNotTarget = errors.New("triage: not a message to score")
 
 // Built is the state of one message and the record of what it held.
@@ -56,13 +58,19 @@ type Built struct {
 	Input     score.Input
 }
 
-// Build reads message id and builds its state.
-func Build(ctx context.Context, ms Messages, raws RawReader, id string, maxChars int) (Built, error) {
+// Build reads message id and builds its state, if it is a target for
+// accounts (store.ScoreTargets; nil: the default). The check is made
+// here, before anything is read for the scorer, whoever queued the
+// message: a kick after ingest is as bound by it as the sweep.
+func Build(ctx context.Context, ms Messages, raws RawReader, id string, maxChars int, accounts []string) (Built, error) {
 	m, err := ms.MessageByID(ctx, viewer, id)
 	if err != nil {
 		return Built{}, err
 	}
-	if !escapes(m.Deliveries) {
+	// The survivor's id: a message merged away is no target itself.
+	if ok, err := ms.IsScoreTarget(ctx, m.ID, accounts); err != nil {
+		return Built{}, err
+	} else if !ok {
 		return Built{}, ErrNotTarget
 	}
 	raw, err := raws.ReadRaw(ctx, m.Raw)
@@ -75,18 +83,6 @@ func Build(ctx context.Context, ms Messages, raws RawReader, id string, maxChars
 	}
 	state, in := State(m, raw, known, maxChars)
 	return Built{MessageID: m.ID, State: state, Input: in}, nil
-}
-
-// escapes: some delivery escapes the §4.3 downgrade, as notDowngraded
-// says in the store. Not MessageDetail.Downgraded, which a model
-// downgrade will join: scoring must not depend on its own result.
-func escapes(ds []store.DeliveryFact) bool {
-	for _, d := range ds {
-		if d.PrefixState == store.PrefixClaimed && (d.Auth == nil || d.Auth.DMARC != "fail") {
-			return true
-		}
-	}
-	return false
 }
 
 // State renders what the scorer reads about message m, with raw the

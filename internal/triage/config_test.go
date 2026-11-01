@@ -18,7 +18,7 @@ func TestLoadConfigOff(t *testing.T) {
 	if err != nil || c.On() {
 		t.Fatalf("%+v, %v", c, err)
 	}
-	for _, k := range []string{"YUUKA_TRIAGE_NAME", "YUUKA_TRIAGE_HOSTED", "YUUKA_TRIAGE_TOKEN_FILE", "YUUKA_TRIAGE_LOOKBACK", "YUUKA_TRIAGE_MODEL"} {
+	for _, k := range []string{"YUUKA_TRIAGE_NAME", "YUUKA_TRIAGE_HOSTED", "YUUKA_TRIAGE_TOKEN_FILE", "YUUKA_TRIAGE_LOOKBACK", "YUUKA_TRIAGE_MODEL", "YUUKA_TRIAGE_ACCOUNTS"} {
 		if _, err := LoadConfig(envOf(map[string]string{k: "x"}), noFile); err == nil {
 			t.Errorf("%s without a URL accepted", k)
 		}
@@ -49,8 +49,15 @@ func TestLoadConfig(t *testing.T) {
 		t.Errorf("profile %+v", p)
 	}
 	d, _ := LoadConfig(envOf(map[string]string{"YUUKA_TRIAGE_URL": "http://localhost:31490", "YUUKA_TRIAGE_NAME": "kev-1"}), noFile)
-	if d.Lookback != DefaultLookback || d.Token != "" {
+	if d.Lookback != DefaultLookback || d.Token != "" || d.Accounts != nil {
 		t.Errorf("defaults %+v", d)
+	}
+	a, err := LoadConfig(envOf(map[string]string{
+		"YUUKA_TRIAGE_URL": "http://localhost:31490", "YUUKA_TRIAGE_NAME": "kev-1",
+		"YUUKA_TRIAGE_ACCOUNTS": "cloudflare, gmail",
+	}), noFile)
+	if err != nil || strings.Join(a.Accounts, ",") != "cloudflare,gmail" {
+		t.Errorf("accounts %q, %v", a.Accounts, err)
 	}
 }
 
@@ -73,6 +80,7 @@ func TestLoadConfigRejects(t *testing.T) {
 		"token in URL":       {map[string]string{"YUUKA_TRIAGE_URL": "http://user:pass@127.0.0.1:31490"}, "credentials"},
 		"query":              {map[string]string{"YUUKA_TRIAGE_URL": "http://127.0.0.1:31490/?key=x"}, "query"},
 		"ftp":                {map[string]string{"YUUKA_TRIAGE_URL": "ftp://127.0.0.1"}, "http or https"},
+		"bad account":        {map[string]string{"YUUKA_TRIAGE_ACCOUNTS": "cloudflare,,gmail"}, "YUUKA_TRIAGE_ACCOUNTS"},
 	} {
 		env := map[string]string{}
 		for k, v := range base {
