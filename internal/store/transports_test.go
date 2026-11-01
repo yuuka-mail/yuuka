@@ -401,6 +401,13 @@ func TestIdentityChain(t *testing.T) {
 	if err := e.db.SetIdentityTransports(ctx, i.ID, []string{"t3"}, e.action("identity.route")); !errors.Is(err, store.ErrNoTransport) {
 		t.Errorf("disabled member: %v", err)
 	}
+	// Replacing from a chain read earlier: only while it still is.
+	if err := e.db.ReplaceIdentityTransports(ctx, i.ID, []string{"t5"}, []string{"t2"}, e.action("identity.route")); !errors.Is(err, store.ErrStale) {
+		t.Errorf("replace from a stale chain: %v", err)
+	}
+	if err := e.db.ReplaceIdentityTransports(ctx, i.ID, []string{"t5", "t2"}, []string{"t2"}, e.action("identity.route")); err != nil {
+		t.Errorf("replace from the chain: %v", err)
+	}
 	if err := e.db.DisableIdentity(ctx, i.ID, e.action("identity.disable")); err != nil {
 		t.Fatal(err)
 	}

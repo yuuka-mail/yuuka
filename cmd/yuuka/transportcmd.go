@@ -7,19 +7,17 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"net"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/manage"
 	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/transport"
-	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
 const transportUsage = "usage: yuuka transport add NAME --host H [--port 465] [--auth plain|none] [--username U] " +
@@ -167,34 +165,36 @@ func (h *host) transportWrite(ctx context.Context, add bool, name string, f tran
 		c.Caps = capNames(caps)
 	}
 
-	moved := !configured || cur.Host != c.Host || cur.Port != c.Port || cur.Auth != c.Auth || cur.Username != c.Username
-	switch {
-	case c.Auth != store.TransportAuthPlain && f.passwordFile != "":
+	var curp *store.Transport
+	if exists {
+		curp = &cur
+	}
+	// Checked as the store will, so the move below is decided on what is
+	// stored.
+	if c, err = manage.CheckTransportConfig(c); err != nil {
+		return err
+	}
+	switch err := manage.CheckPassword(curp, c, f.passwordFile != ""); {
+	case errors.Is(err, manage.ErrPasswordUnused):
 		return errors.New("--password-file needs auth plain and a --username")
-	case c.Auth == store.TransportAuthPlain && f.passwordFile == "" && (moved || cur.SecretID == ""):
-		if configured && cur.SecretID != "" {
+	case err != nil:
+		if pn, ok := errors.AsType[*manage.PasswordNeededError](err); ok && pn.Moved {
 			return fmt.Errorf("this moves transport %s to %s: a password is only ever sent where it was set for, "+
 				"so give it again with --password-file PATH or -", name, destination(c))
 		}
 		return errors.New("auth plain needs the password: --password-file PATH, or - to read it from standard input")
 	}
 
-	var sealed *secret.Record
+	var pw []byte
+	var sealer *secret.Sealer
 	if f.passwordFile != "" {
-		s, err := h.sealer()
-		if err != nil {
+		if sealer, err = h.sealer(); err != nil {
 			return err
 		}
-		if s == nil {
+		if sealer == nil {
 			return errors.New("YUUKA_KEK_FILE is not set, so the password cannot be sealed; see docs/operate/secrets.md")
 		}
-		pw, err := h.readSecret(f.passwordFile)
-		if err != nil {
-			return err
-		}
-		sealed, err = sealSMTPPassword(ctx, s, c, pw, h.now())
-		clear(pw)
-		if err != nil {
+		if pw, err = h.readSecret(f.passwordFile); err != nil {
 			return err
 		}
 	}
@@ -203,19 +203,8 @@ func (h *host) transportWrite(ctx context.Context, add bool, name string, f tran
 	if add {
 		tool = "transport.add"
 	}
-	args := transportAuditArgs(c, sealed)
-	if exists {
-		args["transport_id"] = cur.ID
-		args["revision"] = cur.Revision
-	}
-	if configured {
-		args["was"] = map[string]any{"host": cur.Host, "port": cur.Port, "auth": cur.Auth, "username": cur.Username, "caps": cur.Caps}
-	}
-	var rev int64
-	if exists {
-		rev = cur.Revision
-	}
-	t, err := h.db.ConfigureTransport(ctx, c, rev, sealed, h.action(tool, args))
+	t, sealed, err := manage.ConfigureTransport(ctx, h.db, sealer, curp, manage.TransportWrite{Config: c, Password: pw, Tool: tool}, h.action, h.now())
+	clear(pw)
 	switch {
 	case errors.Is(err, store.ErrStale), errors.Is(err, store.ErrDuplicate):
 		return fmt.Errorf("transport %s changed while this command ran, and nothing was written; "+
@@ -242,44 +231,9 @@ func (h *host) transportWrite(ctx context.Context, add bool, name string, f tran
 	return h.say("%s transport %s (%s): %s, caps %s", verb, t.Name, t.ID, destination(c), capsText(t.Caps))
 }
 
-// destination describes where a transport connects, as the audience
-// would, without the scheme.
-func destination(c store.TransportConfig) string {
-	d := net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
-	if c.Username != "" {
-		d = c.Username + "@" + d
-	}
-	return shown(d)
-}
-
-// transportAuditArgs are what an action that widens a transport records
-// (§17.6): where it goes and which sealed secret, never the secret, its
-// hash or anything else derived from the plaintext.
-func transportAuditArgs(c store.TransportConfig, sealed *secret.Record) map[string]any {
-	a := map[string]any{"name": c.Name, "host": c.Host, "port": c.Port, "auth": c.Auth, "username": c.Username, "caps": c.Caps}
-	if sealed != nil {
-		a["secret_id"] = sealed.ID
-		a["kind"] = sealed.Kind
-		a["audience"] = sealed.Audience
-		a["wrapper"] = sealed.Wrapper
-		a["key_ref"] = sealed.KeyRef
-	}
-	return a
-}
-
-// sealSMTPPassword seals pw for c's destination under a fresh id. It does
-// not keep pw; the caller clears it.
-func sealSMTPPassword(ctx context.Context, s *secret.Sealer, c store.TransportConfig, pw []byte, now time.Time) (*secret.Record, error) {
-	aud, err := secret.SMTPS(c.Username, c.Host, c.Port)
-	if err != nil {
-		return nil, fmt.Errorf("transport %s: %w", c.Name, err)
-	}
-	r, err := s.Seal(ctx, ulid.New(now), store.SecretSMTPPassword, aud, pw)
-	if err != nil {
-		return nil, fmt.Errorf("transport %s: seal the password: %w", c.Name, err)
-	}
-	return &r, nil
-}
+// destination describes where a transport connects, made safe for a
+// terminal.
+func destination(c store.TransportConfig) string { return shown(manage.Destination(c)) }
 
 // capNames spells caps the way transports.caps stores them.
 func capNames(c transport.Caps) []string {
@@ -418,14 +372,7 @@ func (h *host) transportRemove(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	args := map[string]any{
-		"transport_id": cur.ID, "name": cur.Name, "host": cur.Host, "port": cur.Port,
-		"username": cur.Username, "revision": cur.Revision,
-	}
-	if cur.SecretID != "" {
-		args["secret_id"] = cur.SecretID
-	}
-	err = h.db.DisableTransport(ctx, name, cur.Revision, h.action("transport.rm", args))
+	err = manage.DisableTransport(ctx, h.db, cur, h.action)
 	if errors.Is(err, store.ErrStale) || errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("transport %s changed while this command ran, and nothing was written; run it again", name)
 	}
@@ -436,11 +383,9 @@ func (h *host) transportRemove(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	for _, i := range ids {
-		if slices.Contains(i.Transports, name) {
-			h.note("%s still names it in its chain %s; `yuuka identity set` changes that.",
-				shown(i.Address()), strings.Join(i.Transports, ","))
-		}
+	for _, i := range manage.NamedBy(ids, name) {
+		h.note("%s still names it in its chain %s; `yuuka identity set` changes that.",
+			shown(i.Address()), strings.Join(i.Transports, ","))
 	}
 	return h.say("removed transport %s (%s); its secret is erased, its name stays in the sending history", name, cur.ID)
 }
@@ -450,39 +395,30 @@ func (h *host) transportRemove(ctx context.Context, name string) error {
 // without sending mail.
 func (h *host) transportTest(ctx context.Context, name string) error {
 	cur, err := h.db.TransportByName(ctx, name)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
+	if errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("no transport %s", name)
-	case err != nil:
-		return err
-	case cur.DisabledAt != nil:
-		return fmt.Errorf("transport %s is removed", name)
-	case cur.ConfiguredAt == nil:
-		return fmt.Errorf("transport %s is a placeholder; configure it with `yuuka transport add`", name)
 	}
-	cfg := transport.Config{Name: cur.Name, Host: cur.Host, Port: cur.Port, Username: cur.Username}
-	if cur.Auth == store.TransportAuthPlain {
-		if cur.SecretID == "" {
-			return fmt.Errorf("transport %s has no password; set it with `yuuka transport set %s --password-file PATH`", name, name)
-		}
-		s, err := h.sealer()
-		if err != nil {
+	if err != nil {
+		return err
+	}
+	var s *secret.Sealer
+	if cur.Auth == store.TransportAuthPlain && cur.SecretID != "" {
+		if s, err = h.sealer(); err != nil {
 			return err
 		}
-		st, err := h.db.Secret(ctx, cur.SecretID)
-		if err != nil {
-			return err
-		}
-		aud, err := secret.SMTPS(cur.Username, cur.Host, cur.Port)
-		if err != nil {
-			return err
-		}
-		v, err := s.Open(ctx, st.Record, aud)
-		if err != nil {
-			return fmt.Errorf("transport %s: %s", name, openFailure(err))
-		}
-		defer v.Close()
-		cfg.Password = string(v.Reveal())
+	}
+	cfg, err := manage.ProbeConfig(ctx, h.db, s, cur)
+	switch {
+	case errors.Is(err, manage.ErrRemoved):
+		return fmt.Errorf("transport %s is removed", name)
+	case errors.Is(err, manage.ErrPlaceholder):
+		return fmt.Errorf("transport %s is a placeholder; configure it with `yuuka transport add`", name)
+	case errors.Is(err, manage.ErrNoPassword):
+		return fmt.Errorf("transport %s has no password; set it with `yuuka transport set %s --password-file PATH`", name, name)
+	case errors.Is(err, manage.ErrLocked):
+		return fmt.Errorf("transport %s: %s", name, manage.OpenFailure(secret.ErrLocked))
+	case err != nil:
+		return fmt.Errorf("transport %s: %w", name, err)
 	}
 	smtp, err := transport.NewSMTP(cfg)
 	if err != nil {
@@ -496,19 +432,4 @@ func (h *host) transportTest(ctx context.Context, name string) error {
 		return h.say("ok: %s answered EHLO and accepted AUTH PLAIN for %s", name, shown(cur.Username))
 	}
 	return h.say("ok: %s answered EHLO", name)
-}
-
-// openFailure explains why a secret did not open, in the terms of §17.3.
-func openFailure(err error) string {
-	switch {
-	case errors.Is(err, secret.ErrLocked):
-		return "locked: " + err.Error() + " (YUUKA_KEK_FILE, YUUKA_KEK_PREVIOUS_FILES)"
-	case errors.Is(err, secret.ErrAudienceMismatch):
-		return "audience mismatch: the destination changed after the password was sealed; set the password again"
-	case errors.Is(err, secret.ErrTampered):
-		return "tampered: the sealed value does not authenticate (altered, corrupted or moved from another row)"
-	case errors.Is(err, secret.ErrUnsupportedVersion):
-		return "sealed by a newer yuuka: " + err.Error()
-	}
-	return err.Error()
 }

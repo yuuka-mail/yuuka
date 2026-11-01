@@ -8,8 +8,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/manage"
 	"github.com/yuuka-mail/yuuka/internal/notify"
-	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
 )
 
@@ -40,60 +40,12 @@ func (h *host) secretCmd(ctx context.Context, args []string) error {
 	return errors.New(secretUsage)
 }
 
-// secretOwner is the row that uses a secret: what `secret ls` names, and
-// what `secret check` recomputes the audience from. A secret is never
-// opened for the audience stored beside it, which is exactly what a
-// database writer controls (§17.2).
-type secretOwner struct {
-	what string // "transport cloudflare"
-	kind string // the secrets.kind it must have
-	// audience is recomputed from the owning row.
-	audience func() (string, error)
-}
-
-// secretOwners maps secret ids to their owners. Every table that
-// references secrets contributes its rows here, and only here: a new
-// owner kind (channels, M3.5's account sources) is one more block below,
-// and ls, check and rewrap follow.
-func (h *host) secretOwners(ctx context.Context) (map[string]secretOwner, error) {
-	out := map[string]secretOwner{}
-	trs, err := h.db.Transports(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-	for _, t := range trs {
-		if t.SecretID == "" {
-			continue
-		}
-		out[t.SecretID] = secretOwner{
-			what:     "transport " + t.Name,
-			kind:     store.SecretSMTPPassword,
-			audience: func() (string, error) { return secret.SMTPS(t.Username, t.Host, t.Port) },
-		}
-	}
-	chs, err := h.db.Channels(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-	for _, c := range chs {
-		if c.SecretID == "" {
-			continue
-		}
-		out[c.SecretID] = secretOwner{
-			what:     "channel " + c.Name,
-			kind:     store.SecretTelegramBotToken,
-			audience: c.Audience, // telegram:bot<id>, from the row
-		}
-	}
-	return out, nil
-}
-
 func (h *host) secretList(ctx context.Context) error {
 	secs, err := h.db.Secrets(ctx)
 	if err != nil {
 		return err
 	}
-	owners, err := h.secretOwners(ctx)
+	owners, err := manage.Owners(ctx, h.db)
 	if err != nil {
 		return err
 	}
@@ -102,7 +54,7 @@ func (h *host) secretList(ctx context.Context) error {
 	for _, s := range secs {
 		owner := "- (no owner)"
 		if o, ok := owners[s.ID]; ok {
-			owner = o.what
+			owner = o.What
 		}
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", s.ID, s.Kind, shown(owner), shown(s.Audience),
 			s.Wrapper, s.KeyRef, s.SealedAt.UTC().Format(time.RFC3339))
@@ -126,7 +78,7 @@ func (h *host) secretCheck(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	owners, err := h.secretOwners(ctx)
+	owners, err := manage.Owners(ctx, h.db)
 	if err != nil {
 		return err
 	}
@@ -139,17 +91,15 @@ func (h *host) secretCheck(ctx context.Context) error {
 		switch {
 		case !ok:
 			res = "no owner: nothing uses it, so there is no destination to check it against"
-		case sec.Kind != o.kind:
-			res = fmt.Sprintf("wrong kind: %s, but its owner needs %s", sec.Kind, o.kind)
 		default:
-			res = checkOpen(ctx, s, sec.Record, o.audience)
+			res = manage.CheckOpen(ctx, s, sec.Record, o)
 		}
 		if res != "ok" {
 			bad++
 		}
 		owner := "-"
 		if ok {
-			owner = o.what
+			owner = o.What
 		}
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", sec.ID, sec.Kind, shown(owner), sec.Wrapper+":"+sec.KeyRef, res)
 	}
@@ -160,21 +110,6 @@ func (h *host) secretCheck(ctx context.Context) error {
 		return fmt.Errorf("%d of %d secrets are not ok", bad, len(secs))
 	}
 	return nil
-}
-
-// checkOpen opens r for the audience its owner gives and says how that
-// went. The plaintext is wiped at once and never leaves this function.
-func checkOpen(ctx context.Context, s *secret.Sealer, r secret.Record, audience func() (string, error)) string {
-	aud, err := audience()
-	if err != nil {
-		return "audience mismatch: its owner names no valid destination (" + err.Error() + ")"
-	}
-	v, err := s.Open(ctx, r, aud)
-	if err != nil {
-		return openFailure(err)
-	}
-	v.Close()
-	return "ok"
 }
 
 // secretRewrap moves every secret's data key to the current wrapper and
@@ -193,7 +128,7 @@ func (h *host) secretRewrap(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	owners, err := h.secretOwners(ctx)
+	owners, err := manage.Owners(ctx, h.db)
 	if err != nil {
 		return err
 	}
@@ -206,7 +141,7 @@ func (h *host) secretRewrap(ctx context.Context) error {
 		out, err := s.Rewrap(ctx, sec.Record)
 		if err != nil {
 			failed++
-			h.note("%s: %s", sec.ID, openFailure(err))
+			h.note("%s: %s", sec.ID, manage.OpenFailure(err))
 			continue
 		}
 		key = out.Wrapper + ":" + out.KeyRef
@@ -220,7 +155,7 @@ func (h *host) secretRewrap(ctx context.Context) error {
 			"revision": sec.Revision,
 		}
 		if o, ok := owners[sec.ID]; ok {
-			args["owner"] = o.what
+			args["owner"] = o.What
 		}
 		_, err = h.db.UpdateSecret(ctx, out, sec.Revision, h.action("secret.rewrap", args))
 		if errors.Is(err, store.ErrStale) || errors.Is(err, store.ErrNotFound) {

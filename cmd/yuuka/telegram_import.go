@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"regexp"
 	"strconv"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/manage"
 	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
@@ -31,25 +31,11 @@ import (
 // importedChannel is the name the import gives the environment's bot.
 const importedChannel = "telegram"
 
-// botToken is the shape of a Bot API token: the bot's id, a colon, the
-// secret part.
-var botToken = regexp.MustCompile(`^([1-9][0-9]{0,18}):[A-Za-z0-9_-]{20,}$`)
-
-// tokenBotID is the bot id a token starts with, 0 if it is not a token.
-func tokenBotID(token string) int64 {
-	m := botToken.FindStringSubmatch(token)
-	if m == nil {
-		return 0
-	}
-	n, _ := strconv.ParseInt(m[1], 10, 64)
-	return n
-}
-
 // envBotIsChannel reports whether the environment's bot is an enabled
 // channel in the database, imported or added by hand: then the database
 // is where notifications come from.
 func (a *app) envBotIsChannel(ctx context.Context) (bool, error) {
-	id := tokenBotID(a.cfg.TelegramToken)
+	id := manage.TokenBotID(a.cfg.TelegramToken)
 	cs, err := a.db.Channels(ctx, false)
 	if err != nil {
 		return false, err
@@ -80,7 +66,7 @@ func (a *app) importEnvTelegram(ctx context.Context, log *slog.Logger, sealer *s
 // why; only a failed write is an error.
 func (a *app) importTelegram(ctx context.Context, log *slog.Logger, sealer *secret.Sealer) error {
 	c := a.cfg
-	botID := tokenBotID(c.TelegramToken)
+	botID := manage.TokenBotID(c.TelegramToken)
 	if botID == 0 {
 		log.Warn("telegram: YUUKA_TELEGRAM_BOT_TOKEN does not look like <bot id>:<secret>; not imported")
 		return nil

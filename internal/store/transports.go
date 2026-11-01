@@ -182,7 +182,7 @@ func (db *DB) TransportByName(ctx context.Context, name string) (Transport, erro
 // ErrDuplicate if revision is 0 and the name exists; ErrNotFound if
 // revision is not 0 and it does not; ErrStale if its revision moved on.
 func (db *DB) ConfigureTransport(ctx context.Context, c TransportConfig, revision int64, sealed *secret.Record, a Action) (Transport, error) {
-	c, err := checkTransportConfig(c)
+	c, err := CheckTransportConfig(c)
 	if err != nil {
 		return Transport{}, err
 	}
@@ -287,7 +287,11 @@ func (db *DB) DisableTransport(ctx context.Context, name string, revision int64,
 	return nil
 }
 
-func checkTransportConfig(c TransportConfig) (TransportConfig, error) {
+// CheckTransportConfig checks c as ConfigureTransport does and returns it
+// with its host canonical and its caps without repeats, so a caller can
+// decide what the write means (a move to another destination, §17.4)
+// against the row before writing it.
+func CheckTransportConfig(c TransportConfig) (TransportConfig, error) {
 	if !ValidName(c.Name) {
 		return c, fmt.Errorf("transport name %q: want [A-Za-z0-9][A-Za-z0-9._-]*, at most 64", c.Name)
 	}
@@ -446,6 +450,21 @@ func (db *DB) UpdateSecret(ctx context.Context, r secret.Record, revision int64,
 // MaxTransportChain and each once. ErrNotFound if the identity is not
 // enabled.
 func (db *DB) SetIdentityTransports(ctx context.Context, id string, names []string, a Action) error {
+	return db.setIdentityTransports(ctx, id, nil, names, a)
+}
+
+// ReplaceIdentityTransports is SetIdentityTransports from the chain was,
+// as the caller read it: ErrStale if the chain is another by now. Whether
+// a change widens where mail goes (§17.6) is decided against was, so it
+// must still be the chain that is replaced.
+func (db *DB) ReplaceIdentityTransports(ctx context.Context, id string, was, names []string, a Action) error {
+	if was == nil {
+		was = []string{}
+	}
+	return db.setIdentityTransports(ctx, id, was, names, a)
+}
+
+func (db *DB) setIdentityTransports(ctx context.Context, id string, was, names []string, a Action) error {
 	err := pgx.BeginFunc(ctx, db.pool, func(tx pgx.Tx) error {
 		var one int
 		err := tx.QueryRow(ctx, `SELECT 1 FROM identities WHERE id = $1 AND disabled_at IS NULL FOR UPDATE`, id).Scan(&one)
@@ -454,6 +473,17 @@ func (db *DB) SetIdentityTransports(ctx context.Context, id string, names []stri
 		}
 		if err != nil {
 			return err
+		}
+		if was != nil {
+			var cur []string
+			err := tx.QueryRow(ctx, `SELECT coalesce(array_agg(t.name ORDER BY it.position), '{}')
+				FROM identity_transports it JOIN transports t ON t.id = it.transport_id WHERE it.identity_id = $1`, id).Scan(&cur)
+			if err != nil {
+				return err
+			}
+			if !slices.Equal(cur, was) {
+				return fmt.Errorf("chain %v, read %v: %w", cur, was, ErrStale)
+			}
 		}
 		if err := setChain(ctx, tx, id, names); err != nil {
 			return err

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/manage"
 	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
@@ -114,13 +115,13 @@ func writeImport(ctx context.Context, db *store.DB, s *secret.Sealer, t transpor
 		}
 		// As openTransports reads it: one trailing newline dropped.
 		pw = bytes.TrimSuffix(bytes.TrimSuffix(pw, []byte("\n")), []byte("\r"))
-		sealed, err = sealSMTPPassword(ctx, s, c, pw, now)
+		sealed, err = manage.SealSMTPPassword(ctx, s, c, pw, now)
 		clear(pw)
 		if err != nil {
 			return err
 		}
 	}
-	args := transportAuditArgs(c, sealed)
+	args := manage.TransportAuditArgs(c, sealed)
 	args["via"] = "env"
 	if rev != 0 {
 		args["revision"] = rev

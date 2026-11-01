@@ -3,25 +3,21 @@ package main
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
-	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/yuuka-mail/yuuka/internal/manage"
 	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
-	"github.com/yuuka-mail/yuuka/internal/ulid"
 )
 
 const channelUsage = "usage: yuuka channel add NAME --token-file PATH|- | yuuka channel ls [--all] | yuuka channel rm NAME | " +
@@ -197,18 +193,6 @@ func (h *host) channelAdd(ctx context.Context, name, tokenFile string) error {
 	if err != nil {
 		return err
 	}
-	botID := tokenBotID(token)
-	if botID == 0 {
-		return errors.New("the token does not look like a Bot API token, <bot id>:<secret>")
-	}
-	// Telegram, not the token's text, says which bot this is.
-	bot, err := (&notify.Telegram{Token: token, BaseURL: telegramAPI, Client: &http.Client{Timeout: 15 * time.Second}}).GetMe(ctx)
-	if err != nil {
-		return fmt.Errorf("asking Telegram who the token belongs to: %w", err)
-	}
-	if bot.ID != botID {
-		return fmt.Errorf("telegram says the token belongs to bot %d, not %d", bot.ID, botID)
-	}
 	revision := int64(0)
 	cur, err := h.db.ChannelByName(ctx, name)
 	switch {
@@ -217,22 +201,7 @@ func (h *host) channelAdd(ctx context.Context, name, tokenFile string) error {
 	case !errors.Is(err, store.ErrNotFound):
 		return err
 	}
-	aud, err := secret.TelegramBot(bot.ID)
-	if err != nil {
-		return err
-	}
-	now := h.now()
-	sealed, err := sealer.Seal(ctx, ulid.New(now), store.SecretTelegramBotToken, aud, []byte(token))
-	if err != nil {
-		return err
-	}
-	c, err := h.db.ConfigureChannel(ctx, store.ChannelConfig{
-		Name: name, Kind: store.ChannelTelegram, ExternalID: strconv.FormatInt(bot.ID, 10),
-		Settings: map[string]string{"username": bot.Username},
-	}, revision, &sealed, h.action("channel.add", map[string]any{
-		"name": name, "kind": store.ChannelTelegram, "external_id": strconv.FormatInt(bot.ID, 10), "username": bot.Username,
-		"audience": aud, "secret_id": sealed.ID, "wrapper": sealed.Wrapper, "key_ref": sealed.KeyRef,
-	}))
+	c, bot, err := manage.AddChannel(ctx, h.db, sealer, getMe, name, token, revision, h.action, h.now())
 	if err != nil {
 		return err
 	}
@@ -244,6 +213,12 @@ func (h *host) channelAdd(ctx context.Context, name, tokenFile string) error {
 		"If this was not you, remove it with `yuuka channel rm %s`.", name, bot.Username, what, h.by(), name)})
 	h.note("serve polls it within 15 s; bind a chat with `yuuka channel bind %s`", name)
 	return h.say("channel %s: bot @%s (id %d), revision %d", c.Name, bot.Username, bot.ID, c.Revision)
+}
+
+// getMe asks the Bot API who token belongs to: how a channel learns its
+// bot, here and in the WebUI.
+func getMe(ctx context.Context, token string) (notify.Bot, error) {
+	return (&notify.Telegram{Token: token, BaseURL: telegramAPI, Client: &http.Client{Timeout: 15 * time.Second}}).GetMe(ctx)
 }
 
 // readBotToken reads a bot token from path, or from standard input for "-",
@@ -313,7 +288,7 @@ func (h *host) channelRemove(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	if err := h.db.DisableChannel(ctx, name, c.Revision, h.action("channel.rm", map[string]any{"name": name, "id": c.ID})); err != nil {
+	if err := manage.DisableChannel(ctx, h.db, c, h.action); err != nil {
 		return err
 	}
 	return h.say("removed channel %s: its token is erased and its bindings revoked", name)
@@ -372,14 +347,11 @@ func (h *host) channelBind(ctx context.Context, name, principal string, events [
 	if err != nil {
 		return err
 	}
-	raw := make([]byte, 16)
-	if _, err := rand.Read(raw); err != nil {
+	code, err := manage.NewBindCode()
+	if err != nil {
 		return err
 	}
-	code := base64.RawURLEncoding.EncodeToString(raw)
-	bc, err := h.db.NewBindCode(ctx, c.ID, p.ID, "", code, h.action("channel.bind.begin", map[string]any{
-		"channel": name, "principal": p.Kind + ":" + p.Name,
-	}))
+	bc, err := h.db.NewBindCode(ctx, c.ID, p.ID, "", code, h.action("channel.bind.begin", manage.BindBeginArgs(name, p)))
 	if err != nil {
 		return err
 	}
@@ -392,9 +364,9 @@ func (h *host) channelBind(ctx context.Context, name, principal string, events [
 		}
 	}()
 
-	if u := c.Settings["username"]; u != "" {
-		h.note("Open this link in the Telegram account that should get the notifications:\n\n  https://t.me/%s?start=%s\n", u, url.QueryEscape(code))
-		h.note("For a group: https://t.me/%s?startgroup=%s", u, url.QueryEscape(code))
+	if private, group := manage.BindLinks(c.Settings["username"], code); private != "" {
+		h.note("Open this link in the Telegram account that should get the notifications:\n\n  %s\n", private)
+		h.note("For a group: %s", group)
 	} else {
 		h.note("Send this to the bot from the Telegram account that should get the notifications:\n\n  /start %s\n", code)
 	}
@@ -426,10 +398,7 @@ func (h *host) channelBind(ctx context.Context, name, principal string, events [
 	if a := strings.ToLower(strings.TrimSpace(answer)); a != "y" && a != "yes" {
 		return h.say("not bound; the code is void")
 	}
-	b, err := h.db.ConfirmBindCode(ctx, bc.ID, label, events, h.action("channel.bind.confirm", map[string]any{
-		"channel": name, "principal": p.Kind + ":" + p.Name, "chat": bc.SeenAddress, "button_user": bc.SeenActorID,
-		"chat_kind": bc.SeenChatKind, "events": events, "code_id": bc.ID,
-	}))
+	b, err := h.db.ConfirmBindCode(ctx, bc.ID, label, events, h.action("channel.bind.confirm", manage.BindConfirmArgs(name, p, bc, events)))
 	if err != nil {
 		return err
 	}

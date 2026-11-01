@@ -5,10 +5,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"slices"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/yuuka-mail/yuuka/internal/manage"
 	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/ulid"
@@ -213,22 +213,21 @@ func (h *host) identitySetTransports(ctx context.Context, addr string, names []s
 	if err != nil {
 		return err
 	}
-	err = h.db.SetIdentityTransports(ctx, i.ID, names, h.action("identity.route", map[string]any{
+	err = h.db.ReplaceIdentityTransports(ctx, i.ID, i.Transports, names, h.action("identity.route", map[string]any{
 		"identity_id": i.ID, "address": i.Address(), "transports": names, "was": i.Transports,
 	}))
 	if errors.Is(err, store.ErrNoTransport) {
 		return fmt.Errorf("--transports: %w; `yuuka transport ls` lists them", err)
+	}
+	if errors.Is(err, store.ErrStale) {
+		return fmt.Errorf("the chain of %s changed while this command ran, and nothing was written; run it again", shown(addr))
 	}
 	if err != nil {
 		return err
 	}
 	// Taking a fallback away or reordering behind the same primary only
 	// narrows where mail goes; anything else is a widening (§17.6).
-	widened := len(i.Transports) == 0 || names[0] != i.Transports[0]
-	for _, n := range names {
-		widened = widened || !slices.Contains(i.Transports, n)
-	}
-	if widened {
+	if manage.ChainWidens(i.Transports, names) {
 		a := notify.Alert{Text: fmt.Sprintf("yuuka: %s now sends through %s (was %s), changed %s.",
 			shown(i.Address()), strings.Join(names, ", then "), strings.Join(i.Transports, ", then "), h.by())}
 		if i.OwnerKind == "human" {
