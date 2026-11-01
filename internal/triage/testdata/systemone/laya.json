@@ -1,17 +1,46 @@
 {
-  "model": "multilingual",
+  "model": "laya-rl-agent",
   "answers": {
     "kind": {
       "type": "choice",
       "choice": "spam",
+      "probabilities": {"conversation": 0.02, "marketing": 0.13, "notification": 0.05, "spam": 0.8},
       "confidence": 0.62,
-      "x_jev_confidence": 0.7,
-      "probabilities": {"notification": 0.05, "conversation": 0.02, "marketing": 0.13, "spam": 0.8},
-      "answer_confidence": 0.8
+      "answer_confidence": 0.8,
+      "action": {"act_probability": 1.0},
+      "x_jev_confidence": 0.7
     },
-    "phishing": {"type": "noul", "noul": 0.93, "confidence": 0.86},
-    "needs_reply": {"type": "noul", "noul": 0.3, "confidence": 0.4, "abstention": "abstained", "abstention_threshold": 0.5, "low_confidence": true}
+    "needs_reply": {
+      "type": "noul",
+      "noul": 0.3,
+      "confidence": 0.4,
+      "answer_confidence": 0.7,
+      "action": {"act_probability": 1.0},
+      "abstention": "abstained",
+      "abstention_threshold": 0.5,
+      "low_confidence": true
+    },
+    "phishing": {
+      "type": "noul",
+      "noul": 0.93,
+      "confidence": 0.86,
+      "answer_confidence": 0.93,
+      "action": {"act_probability": 1.0}
+    }
   },
-  "usage": {"input_tokens": 380, "output_tokens": 0},
-  "routing": {"model": "multilingual", "repo": "example/laya-multilingual", "reason": "language", "detection": "zh", "workflow": null}
+  "usage": {
+    "input_tokens": 474,
+    "output_tokens": 0,
+    "state_tokens": 89,
+    "state_tokens_dropped": 0,
+    "truncated": false,
+    "truncated_questions": []
+  },
+  "routing": {
+    "model": "multilingual",
+    "repo": "convaiinnovations/laya/multilingual",
+    "reason": "explicit model='multilingual'",
+    "detection": null,
+    "workflow": null
+  }
 }

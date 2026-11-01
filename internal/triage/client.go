@@ -33,7 +33,7 @@ import (
 //
 // Fields a backend adds (Laya's routing, confidence on noul, its
 // abstention when asked for a min_confidence) are ignored but for the
-// two that say a backend abstained.
+// checkpoint routing names and the two that say a backend abstained.
 
 // Path is the endpoint under the configured base URL.
 const Path = "/v1/systemone"
@@ -64,7 +64,9 @@ type wireAnswer struct {
 type wireResponse struct {
 	Model   string                `json:"model"`
 	Answers map[string]wireAnswer `json:"answers"`
-	// Laya outside its strict mode names the checkpoint here too.
+	// Laya's top-level model is always "laya-rl-agent", whichever
+	// checkpoint answered; outside its strict mode the checkpoint is
+	// named here, and that is the model a score has to record.
 	Routing struct {
 		Model string `json:"model"`
 	} `json:"routing"`
@@ -168,9 +170,9 @@ const sumTolerance = 0.01
 // validate checks that every question got an answer of its type with
 // probabilities that are probabilities, and converts them.
 func validate(wr wireResponse) (Result, error) {
-	model := wr.Model
+	model := wr.Routing.Model
 	if model == "" {
-		model = wr.Routing.Model
+		model = wr.Model
 	}
 	res := Result{Model: modelName(model), Answers: map[string]score.Answer{}}
 	for _, q := range Questions {

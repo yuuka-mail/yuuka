@@ -19,9 +19,9 @@ import (
 var update = flag.Bool("update", false, "rewrite the golden request")
 
 // The fixtures under testdata/systemone are the response shapes the
-// backends document: kev.json follows Kev's README example, laya.json
-// Laya's serve.py outside its strict mode, with the abstention fields
-// it adds when asked for a min_confidence. request.json is what this
+// backends give: kev.json follows Kev's README example, laya.json a
+// running laya-serve 0.4.20 outside its strict mode, with the abstention
+// fields serve.py adds when asked for a min_confidence. request.json is what this
 // client sends; it changes only with Questions, and then
 // QuestionsVersion changes with it.
 
@@ -158,16 +158,20 @@ func TestClientRejectsInvalidAnswers(t *testing.T) {
 	}
 }
 
-// A model name only under routing is Laya outside strict mode with an
-// older server; none at all is recorded as unreported.
+// Laya names the checkpoint only under routing; its top-level model is
+// the same for every checkpoint, so routing wins. Strict mode drops
+// routing and leaves only that; none at all is recorded as unreported.
 func TestClientModelName(t *testing.T) {
 	var m map[string]any
 	_ = json.Unmarshal(fixture(t, "laya.json"), &m)
-	delete(m, "model")
 	routed, _ := json.Marshal(m)
 	delete(m, "routing")
+	strict, _ := json.Marshal(m)
+	delete(m, "model")
 	none, _ := json.Marshal(m)
-	for body, want := range map[string]string{string(routed): "multilingual", string(none): "unreported"} {
+	for body, want := range map[string]string{
+		string(routed): "multilingual", string(strict): "laya-rl-agent", string(none): "unreported",
+	} {
 		srv, _, _ := backend(t, 200, []byte(body))
 		res, err := client(srv).Score(t.Context(), Input{State: "s"})
 		if err != nil || res.Model != want {
