@@ -99,8 +99,12 @@ const (
 	TroubleBudget
 	// TroubleLimit: the server's usage limit stopped pulling until tomorrow.
 	TroubleLimit
-	// TroubleLocked: the account's password cannot be opened.
+	// TroubleLocked: the account's password cannot be opened with the keys
+	// loaded here.
 	TroubleLocked
+	// TroubleAltered: the password is not what was sealed for this
+	// account: the database was altered or corrupted.
+	TroubleAltered
 )
 
 // TroubleCard is a pull account in trouble. It holds numbers and words of
@@ -184,6 +188,11 @@ func SuspendedText(c SuspendedCard) string {
 		"`yuuka grant set --resume`.", clean(c.Principal), clean(c.Identity), c.Recalls, c.Withdrawn)
 }
 
+// checkFirst goes wherever a card suggests setting a password again. A
+// password refused because the row names another server would be sealed
+// for that server by doing so (§17.3), undoing the check that refused it.
+const checkFirst = "Before setting it again, check the server in `yuuka account ls`: a new password is sealed for whatever the row names."
+
 // TroubleText renders c.
 func TroubleText(c TroubleCard) string {
 	a := clean(c.Account)
@@ -209,8 +218,11 @@ func TroubleText(c TroubleCard) string {
 		what = fmt.Sprintf("the server's usage limit was reached, so nothing is pulled until tomorrow (UTC). "+
 			"A lower `yuuka account set %s --daily-budget` stays under it.", a)
 	case TroubleLocked:
-		what = fmt.Sprintf("its password cannot be opened, so nothing is pulled. "+
-			"Set it again with `yuuka account set %s --password-file`.", a)
+		what = "its password cannot be opened with the keys loaded here, so nothing is pulled. Load the key it was " +
+			"sealed under (`yuuka secret ls` names it). " + checkFirst
+	case TroubleAltered:
+		what = "its password is not what was sealed for it: the database was altered or corrupted. Nothing is pulled, " +
+			"and the password goes nowhere. " + checkFirst
 	}
 	return fmt.Sprintf("yuuka · account trouble\n%s: %s", a, what)
 }

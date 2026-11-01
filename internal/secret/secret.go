@@ -138,7 +138,7 @@ var (
 	// ErrAudienceMismatch means the destination recomputed from the owning
 	// row is not the one the secret was sealed for. Nothing was decrypted;
 	// the secret has to be set again for the new destination.
-	ErrAudienceMismatch = errors.New("secret: destination changed since the secret was sealed; set it again")
+	ErrAudienceMismatch = errors.New("secret: destination changed since the secret was sealed")
 	// ErrUnsupportedVersion means the payload starts with a format byte
 	// this build does not know, e.g. written by a newer yuuka.
 	ErrUnsupportedVersion = errors.New("secret: unsupported sealed format version")

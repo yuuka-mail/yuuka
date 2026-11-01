@@ -262,12 +262,12 @@ func TestSecretOpensOnlyForItsDestination(t *testing.T) {
 	}{
 		{
 			"host moved", `UPDATE transports SET host = 'evil.example.net', revision = revision + 1 WHERE name = 'db'`,
-			"locked: its password was sealed for another destination; set it again",
+			"locked: its password was sealed for another destination; check its host, then set it again",
 		},
 		{
 			"audience moved with it", `UPDATE secrets SET audience = 'smtps://user@evil.example.net:465', revision = revision + 1
 			WHERE id = (SELECT secret_id FROM transports WHERE name = 'db')`,
-			"locked: its password failed authentication; set it again",
+			"locked: its password failed authentication; check its host, then set it again",
 		},
 	} {
 		if _, err := re.pool.Exec(ctx, c.sql); err != nil {

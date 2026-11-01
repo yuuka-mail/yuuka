@@ -136,6 +136,12 @@ refresh token 本身没泄露，他却会收到一个一小时有效、scope 是
 
 包装器不可用时渠道本身也上了锁（bot token 是机密），所以这种情况只能靠日志和 WebUI 横幅被发现。
 
+**重新设置之前要先核对去向。** 能写库的人把一行的主机改掉，audience 让这条机密解不开，密码没有交出去。但重新输入密码时，
+存储层按这一行**现在**的主机封装：主机没再变，不算搬家，也就没有任何拦截；下一次登录，密码就到了对方手里。audience 拦下的攻击被人亲手放行。
+所以凡是建议重新设置的地方（告警、卡片、日志、`outbox.error`、界面）都先让人核对去向。没有做成拦截：解不开时存储层分不清「主机是被人改的」和「人刚改了主机」，
+能跑 CLI 的人本来也有权决定密码发给谁；这一步靠人看，而让人看到的这句话不能省。
+这也包括「钥匙没加载」：同时改了主机、`secrets.audience` 和 `key_ref`，走到的就是这一条，它的提示不能只当运维问题。
+
 出口这一侧的落地在 [`internal/outbox/route.go`](../../internal/outbox/route.go)：上锁的出口在 `outbox.error` 里只写原因
 （「没有 KEK」「钥匙没加载」「解不开，重新设置」），不写机密 id、包装器和钥匙引用——`outbox.error` 有比运维者更宽的读者；
 这些细节只进日志。告警经 `outbox.SecurityAlerter` 交出去，由渠道一侧（P5）接上，每个（出口 revision，机密 revision）只报一次。
@@ -318,7 +324,10 @@ WebUI（P6）落地时定下的几处：
 - **Gmail 的 app password 存两份**：IMAP 来源一份、SMTP 出口一份，同一个值两个 audience。这是「一条机密一个 audience」的直接后果，
   不为它破例：一条机密能交给两处，「这个密码可以交给谁」就不再是一个值，audience 也就不再能从一行重算
 - 拥有机密的表（[`manage.Owners`](../../internal/manage/secrets.go)）加来源一段，`secret ls` / `check` / `rewrap` 自动覆盖
-- 上锁时拉取 worker 不启动，Cloudflare 收信不受影响（§17.3、§10.1.3）。拉取本身不推安全告警，只有配置改动推，和出口一样；账户停了走可订阅的 `account.trouble`（§10.1.3）
+- 上锁时拉取 worker 不启动，Cloudflare 收信不受影响（§17.3、§10.1.3）。拉取本身不推安全告警，只有配置改动推；账户停了走可订阅的 `account.trouble`（§10.1.3）。
+  和出口的一处差别是有意的：出口的密码被篡改推 `security`，来源的走 `account.trouble`，卡片同样说明库被改过或损坏。
+  密码已经被 audience 拦下，告警保护不了它，只是报个信；单人部署里这条事件默认订阅，收件人就是那个人。
+  代价是退订了就收不到，有了不读这个账户的管理员时他也收不到，到那时再改
 - **每个拉取账户的 `trusted_authserv_id` 在库里**（`account_sources`），改它算放宽（§13.10）：它决定哪一条 `Authentication-Results` 被当成事实（§10.1.1）。
   Cloudflare 账户的那一个仍是 `YUUKA_TRUSTED_AUTHSERV_ID`，和收信快路径一起留在主机
 - `accounts.kind` 只加 `imap`；`smtp_only` 有用户时再加（§9.5）

@@ -21,7 +21,10 @@ func TestTroubleText(t *testing.T) {
 		{TroubleCard{Kind: TroubleStalled, For: 7 * time.Hour}, "7 hours (see serve's log)"},
 		{TroubleCard{Kind: TroubleBudget}, "--daily-budget"},
 		{TroubleCard{Kind: TroubleLimit}, "tomorrow (UTC)"},
-		{TroubleCard{Kind: TroubleLocked}, "--password-file"},
+		{TroubleCard{Kind: TroubleLocked}, "`yuuka secret ls`"},
+		{TroubleCard{Kind: TroubleLocked}, "check the server in `yuuka account ls`"},
+		{TroubleCard{Kind: TroubleAltered}, "altered or corrupted"},
+		{TroubleCard{Kind: TroubleAltered}, "check the server in `yuuka account ls`"},
 	} {
 		tc.card.Account = "gmail"
 		got := TroubleText(tc.card)

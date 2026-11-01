@@ -259,7 +259,7 @@ func OpenFailure(err error) string {
 	case errors.Is(err, secret.ErrLocked):
 		return "locked: " + err.Error() + " (YUUKA_KEK_FILE, YUUKA_KEK_PREVIOUS_FILES)"
 	case errors.Is(err, secret.ErrAudienceMismatch):
-		return "audience mismatch: the destination changed after the password was sealed; set the password again"
+		return "audience mismatch: the destination changed after the password was sealed; check it, then set the password again, which seals it for the destination as it is now"
 	case errors.Is(err, secret.ErrTampered):
 		return "tampered: the sealed value does not authenticate (altered, corrupted or moved from another row)"
 	case errors.Is(err, secret.ErrUnsupportedVersion):

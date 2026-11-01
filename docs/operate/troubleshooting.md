@@ -93,7 +93,7 @@ yuuka outbox ls
   - `locked: the key its password was sealed under is not loaded`：密码是用另一把 KEK 加密的，
     比如换 KEK 之后过早去掉了 `YUUKA_KEK_PREVIOUS_FILES`。日志里的 `transports locked` 写着它要哪把钥匙（`key`，和 `secret ls` 的 KEY 列对得上）
   - `locked: its password failed authentication` 或 `was sealed for another destination`：库里的密文或出口的主机被绕过 yuuka 改过，
-    日志里是 `transport locked: its secret is not what was sealed for it`。先查清是谁改了库，再 `transport set` 重新输入密码
+    日志里是 `transport locked: its secret is not what was sealed for it`。先查清是谁改了库，用 `transport ls` 核对主机，再 `transport set` 重新输入密码：新密码按那一行现在写的主机加密，主机要是被改过，重设就等于把密码交出去
 - **一直 `queued`，错误说 `no usable transport of the chain allows the header fields`**：信入队之后，链上出口的 caps 收紧了，
   或者换上了更严的出口，存下的这份信头没有出口肯收。每 10 分钟再看一次；把能收的出口放回链上，或者放宽 caps
 - **`failed`**：出口回了临时错误，按 5 分钟、15 分钟、45 分钟……退避重试，最长间隔 6 小时，大约一天半后放弃

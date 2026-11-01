@@ -94,8 +94,11 @@ yuuka account access gmail --principal agent:arisu --read
 | 连续 6 小时没有一轮成功 | 每段故障一条，有一轮成功后才可能再发；重启 `serve` 后重新计时 | 看 `serve` 的日志和 `yuuka account test <名字>` |
 | 日字节预算用完，新信等到明天 | 每次撞上发一条，一天至多一条 | 调 `--daily-budget` |
 | 撞上服务器的限额，明天再拉 | 每次撞上发一条，一天至多一条 | 把 `--daily-budget` 调到限额以下 |
-| 密码解不开 | 每次启动 worker 发一条 | `yuuka account set <名字> --password-file` |
+| 密码解不开：加密它的钥匙没加载 | 每次启动 worker 发一条 | 把钥匙挂回去（`yuuka secret ls` 能看到要哪一把）；要重设的话见下 |
+| 密码解不开：库被改过或损坏 | 每次启动 worker 发一条 | 先查是谁改的库；要重设的话见下 |
 
+- **重设密码之前先用 `yuuka account ls` 核对服务器**：新密码按那一行现在写的服务器加密。要是有人改了库里的主机，照着重设就等于把密码交给他
+  （[为什么](../design/secrets.md#173-包装器缺失错误轮换备份)）
 - 问题解决后不会再来一条「恢复了」，看 `account ls`
 - 你自己 `pause` 的账户不发；回填用完它那份预算也不发，新信照样进来
 - 没有 `YUUKA_KEK_FILE` 时不发：bot token 同样解不开。还在用 `YUUKA_TELEGRAM_*` 那一个 chat 时也不发，它不对应任何一个人，算不出谁读得到这个账户

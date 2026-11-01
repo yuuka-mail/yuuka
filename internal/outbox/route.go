@@ -179,12 +179,12 @@ func (s *Service) unopened(ctx context.Context, t store.SendingTransport, r reso
 		return r, false
 	case errors.Is(err, secret.ErrTampered), errors.Is(err, secret.ErrAudienceMismatch):
 		if errors.Is(err, secret.ErrTampered) {
-			r.why = "locked: its password failed authentication; set it again"
+			r.why = "locked: its password failed authentication; check its host, then set it again"
 		} else {
-			r.why = "locked: its password was sealed for another destination; set it again"
+			r.why = "locked: its password was sealed for another destination; check its host, then set it again"
 		}
-		s.log.Error("transport locked: its secret is not what was sealed for it; set it again and find out who "+
-			"wrote the database", "transport", t.Name, "detail", r.detail)
+		s.log.Error("transport locked: its secret is not what was sealed for it; find out who wrote the database, and check "+
+			"the host before setting it again: a new password is sealed for whatever the row names", "transport", t.Name, "detail", r.detail)
 		if s.cfg.Alerter != nil {
 			s.cfg.Alerter.TransportSecretAlert(ctx, t.Name, err)
 		}

@@ -786,7 +786,7 @@
   "search_values": "{op} 的取值",
   "secret_locked_key_missing": "已锁定：加密所用的密钥未加载",
   "secret_locked_no_key": "已锁定：服务器未加载密钥（YUUKA_KEK_FILE）",
-  "secret_locked_set_again": "已锁定：无法解密，请重新设置",
+  "secret_locked_set_again": "已锁定：无法解密，数据库可能被改过。请先核对它的去向，再重新设置",
   "secret_ok": "可用",
   "secret_once": "仅显示这一次。请立即复制：关闭后无法再查看，只能吊销后重新签发。",
   "secret_saved": "已保存，关闭",

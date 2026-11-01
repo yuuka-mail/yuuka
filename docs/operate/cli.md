@@ -108,7 +108,7 @@ yuuka secret rewrap
   包装器、钥匙引用（KEY）、加密时间。不需要 KEK
 - `check` 逐条按「属于谁」重算目的地再解密，只报结果，不打印任何机密。RESULT 是 `ok`、
   `locked`（解不开它的钥匙没配：没设 `YUUKA_KEK_FILE`，或者旧 KEK 文件拿掉得太早）、
-  `audience mismatch`（出口或外部邮箱的去向在加密之后被改过，没经过 `transport set` 或 `account set`：重新 `set` 一次密码）、
+  `audience mismatch`（出口或外部邮箱的去向在加密之后被改过，没经过 `transport set` 或 `account set`：先核对去向对不对，当作安全事件查；确认无误再重新 `set` 一次密码，新密码按那一行现在的去向加密）、
   `tampered`（密文对不上：被改过或损坏，当作安全事件查），以及少见的 `wrong kind`、`no owner`（库被绕过 yuuka 改过）。有任何一条不是 `ok` 时命令以非零退出
 - `rewrap` 把每条机密的数据钥匙改用当前的 KEK 重新包装，密文本身不动；已经在当前 KEK 下的跳过。
   每改一条记一条审计（`secret.rewrap`，带新旧钥匙引用），改了任何一条就给管理员推一条安全告警。换 KEK 的步骤见[第三方机密](secrets.md#换-kek)

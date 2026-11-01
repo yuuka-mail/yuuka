@@ -298,7 +298,8 @@ func (d *Dispatcher) Notify(ctx context.Context, text string) error {
 // from a worker and must not wait on Telegram.
 func (d *Dispatcher) TransportSecretAlert(ctx context.Context, transport string, err error) {
 	text := fmt.Sprintf("yuuka: the password of transport %s does not open as it was sealed (%v): the database "+
-		"was altered or corrupted. The transport is locked; set its password again with `yuuka transport set`.", transport, err)
+		"was altered or corrupted. The transport is locked. Before `yuuka transport set --password-file`, check its host in "+
+		"`yuuka transport ls`: a new password is sealed for whatever the row names.", transport, err)
 	go func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()

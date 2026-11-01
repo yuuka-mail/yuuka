@@ -308,7 +308,7 @@ func TestTroubleLimits(t *testing.T) {
 	wantKinds(t, n, notify.TroubleBudget, notify.TroubleLimit)
 }
 
-// A password that cannot be opened idles the worker, told once.
+// A key that is not loaded idles the worker, told once.
 func TestTroubleLocked(t *testing.T) {
 	t.Parallel()
 	srv, _ := gmailServer(t)
@@ -320,4 +320,34 @@ func TestTroubleLocked(t *testing.T) {
 	defer cancel()
 	New(e.cfg).Run(ctx)
 	wantKinds(t, n, notify.TroubleLocked)
+}
+
+// A password the row no longer matches says so, and goes nowhere: the
+// server named by a row someone rewrote never hears a login. The card
+// must not read as a mere chore, or a person seals the password for that
+// server by following it (§17.3).
+func TestTroubleAltered(t *testing.T) {
+	t.Parallel()
+	for name, alter := range map[string]string{
+		"another server":       `UPDATE account_sources SET username = 'someone-else'`,
+		"another sealed value": `UPDATE secrets SET payload = set_byte(payload, 1, get_byte(payload, 1) # 1)`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			srv, _ := gmailServer(t)
+			e, n := troubleEnv(t, srv)
+			e.add("gmail", store.PresetGmail, nil)
+			if _, err := e.pool.Exec(t.Context(), alter); err != nil {
+				t.Fatal(err)
+			}
+			e.cfg.Raw = e.raw
+			ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+			defer cancel()
+			New(e.cfg).Run(ctx)
+			wantKinds(t, n, notify.TroubleAltered)
+			if logins := srv.count(func() int { return srv.logins }); logins != 0 {
+				t.Errorf("%d logins with a password that did not open", logins)
+			}
+		})
+	}
 }

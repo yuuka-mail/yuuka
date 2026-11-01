@@ -101,9 +101,17 @@ func (w *worker) open(ctx context.Context) bool {
 		}
 		backoff = min(2*backoff, w.cfg.BackoffMax)
 	}
-	w.log.Error("pull: account locked, its password cannot be opened; set it again with `yuuka account set --password-file`",
+	card := notify.TroubleCard{AccountID: w.src.AccountID, Account: w.src.AccountName, Kind: notify.TroubleAltered}
+	why := "its password is not what was sealed for it: the database was altered or corrupted"
+	if errors.Is(err, secret.ErrLocked) || errors.Is(err, secret.ErrUnsupportedVersion) {
+		card.Kind = notify.TroubleLocked
+		why = "its password cannot be opened with the keys loaded here"
+	}
+	// Setting it again seals it for whatever the row names now, which is
+	// what the refusal here protects from (§17.3).
+	w.log.Error("pull: account locked: "+why+". Before `yuuka account set --password-file`, check the server in `yuuka account ls`",
 		"wrapper", w.src.Secret.Wrapper, "key_ref", w.src.Secret.KeyRef, "err", err)
-	w.cfg.tell(ctx, notify.TroubleCard{AccountID: w.src.AccountID, Account: w.src.AccountName, Kind: notify.TroubleLocked})
+	w.cfg.tell(ctx, card)
 	<-ctx.Done()
 	return false
 }
