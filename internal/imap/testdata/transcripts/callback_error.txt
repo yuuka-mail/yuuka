@@ -1,0 +1,8 @@
+# The caller's callback fails on the first message: the client stops
+# reading and closes the connection.
+S: * OK [CAPABILITY IMAP4rev1] ready
+C: A1 UID FETCH 1:2 (UID)
+S: * 1 FETCH (UID 1)
+S: * 2 FETCH (UID 2)
+S: A1 OK done
+C: <closed>

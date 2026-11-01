@@ -1,0 +1,45 @@
+# A Dovecot-shaped round with OBJECTID: LOGIN with characters that need
+# escaping, capabilities fetched again after login, LIST without
+# LIST-STATUS, STATUS, EXAMINE, EMAILID, a header-only fetch, NOOP, and
+# no UNSELECT capability (Unselect sends nothing).
+S: * OK [CAPABILITY IMAP4rev1 SASL-IR LOGIN-REFERRALS ID ENABLE IDLE LITERAL+ AUTH=PLAIN] Dovecot ready.
+C: A1 LOGIN "user@example.com" "pa\"ss\\word"
+S: A1 OK Logged in
+C: A2 CAPABILITY
+S: * CAPABILITY IMAP4rev1 SASL-IR LOGIN-REFERRALS ID ENABLE IDLE SORT UIDPLUS LIST-EXTENDED SPECIAL-USE OBJECTID CONDSTORE
+S: A2 OK Capability completed.
+C: A3 LIST "" "*" RETURN (SPECIAL-USE)
+S: * LIST (\HasNoChildren) "." INBOX
+S: * LIST (\HasNoChildren \Junk) "." Junk
+S: * LIST (\HasNoChildren) "." "Work \"old\""
+S: * LIST (\Noselect \HasChildren) NIL Shared
+S: A3 OK List completed (0.001 + 0.000 secs).
+C: A4 STATUS "INBOX" (MESSAGES UIDNEXT UIDVALIDITY HIGHESTMODSEQ)
+S: * STATUS INBOX (MESSAGES 2 UIDNEXT 3 UIDVALIDITY 1700000000 HIGHESTMODSEQ 9)
+S: A4 OK Status completed (0.001 + 0.000 secs).
+C: A5 EXAMINE "INBOX"
+S: * FLAGS (\Answered \Flagged \Deleted \Seen \Draft)
+S: * OK [PERMANENTFLAGS ()] Read-only mailbox.
+S: * 2 EXISTS
+S: * 0 RECENT
+S: * OK [UIDVALIDITY 1700000000] UIDs valid
+S: * OK [UIDNEXT 3] Predicted next UID
+S: * OK [HIGHESTMODSEQ 9] Highest
+S: A5 OK [READ-ONLY] Examine completed (0.001 + 0.000 secs).
+C: A6 UID FETCH 1:2 (UID RFC822.SIZE EMAILID)
+S: * 1 FETCH (UID 1 RFC822.SIZE 84 EMAILID (M6d99ac3275bb4e))
+S: * 2 FETCH (UID 2 RFC822.SIZE 50000000 EMAILID (Mbd2d0a3b1c2e5f))
+S: A6 OK Fetch completed (0.001 + 0.000 secs).
+C: A7 UID FETCH 2 (BODY.PEEK[HEADER])
+S: * 2 FETCH (UID 2 BODY[HEADER] {56}
+S: From: Bob <bob@example.com>
+S: Subject: Big attachment
+S:
+S: )
+S: A7 OK Fetch completed (0.001 + 0.000 secs).
+C: A8 NOOP
+S: * 3 EXISTS
+S: A8 OK NOOP completed (0.001 + 0.000 secs).
+C: A9 LOGOUT
+S: * BYE Logging out
+S: A9 OK Logout completed.

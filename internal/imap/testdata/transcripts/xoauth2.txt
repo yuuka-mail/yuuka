@@ -1,0 +1,7 @@
+# A rejected XOAUTH2 token: the server sends its error as a challenge,
+# the client answers with an empty line and gets the final NO.
+S: * OK [CAPABILITY IMAP4rev1 SASL-IR AUTH=XOAUTH2 AUTH=PLAIN] ready
+C: A1 AUTHENTICATE XOAUTH2 dXNlcj11c2VyQGV4YW1wbGUuY29tAWF1dGg9QmVhcmVyIHlhMjkudGVzdC10b2tlbgEB
+S: + eyJzdGF0dXMiOiI0MDAiLCJzY2hlbWVzIjoiQmVhcmVyIiwic2NvcGUiOiJodHRwczovL21haWwuZ29vZ2xlLmNvbS8ifQ==
+C:
+S: A1 NO [AUTHENTICATIONFAILED] Invalid credentials (Failure)

@@ -1,0 +1,5 @@
+# A completion for a command the client never sent.
+S: * OK ready
+C: A1 NOOP
+S: A7 OK done
+C: <closed>

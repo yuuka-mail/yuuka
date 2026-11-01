@@ -1,0 +1,6 @@
+# A literal over the limit: the client closes the connection as soon as
+# it sees the size, without reading the 100 MiB.
+S: * OK [CAPABILITY IMAP4rev1] ready
+C: A1 UID FETCH 1 (BODY.PEEK[])
+S: * 1 FETCH (UID 1 RFC822.SIZE 104857600 BODY[] {104857600}
+C: <closed>

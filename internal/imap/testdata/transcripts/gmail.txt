@@ -1,0 +1,62 @@
+# A Gmail-shaped sync round: CAPABILITY, ID, AUTHENTICATE PLAIN with
+# SASL-IR, LIST with special-use and status, EXAMINE of \All, a metadata
+# fetch with Gmail's ids, a body fetch, SEARCH, UNSELECT, LOGOUT.
+# Synthetic data; the capability lists follow Gmail's published shape.
+S: * OK Gimap ready for requests
+C: A1 CAPABILITY
+S: * CAPABILITY IMAP4rev1 UNSELECT IDLE NAMESPACE QUOTA ID XLIST CHILDREN X-GM-EXT-1 XYZZY SASL-IR AUTH=XOAUTH2 AUTH=PLAIN AUTH=PLAIN-CLIENTTOKEN AUTH=OAUTHBEARER
+S: A1 OK Thats all she wrote!
+C: A2 ID ("name" "yuuka" "version" "test")
+S: * ID ("name" "GImap" "vendor" "Google, Inc." "support-url" NIL)
+S: A2 OK Success
+C: A3 AUTHENTICATE PLAIN AHVzZXJAZXhhbXBsZS5jb20AYXBwLXBhc3N3b3Jk
+S: A3 OK [CAPABILITY IMAP4rev1 UNSELECT IDLE NAMESPACE QUOTA ID XLIST CHILDREN X-GM-EXT-1 UIDPLUS COMPRESS=DEFLATE ENABLE MOVE CONDSTORE ESEARCH UTF8=ACCEPT LIST-EXTENDED LIST-STATUS LITERAL- SPECIAL-USE APPENDLIMIT=35651584] user@example.com authenticated (Success)
+C: A4 LIST "" "*" RETURN (SPECIAL-USE STATUS (MESSAGES UIDNEXT UIDVALIDITY))
+S: * LIST (\HasNoChildren) "/" "INBOX"
+S: * STATUS "INBOX" (MESSAGES 2 UIDNEXT 120 UIDVALIDITY 1)
+S: * LIST (\HasChildren \Noselect) "/" "[Gmail]"
+S: * LIST (\All \HasNoChildren) "/" "[Gmail]/All Mail"
+S: * STATUS "[Gmail]/All Mail" (MESSAGES 3 UIDNEXT 300 UIDVALIDITY 11)
+S: * LIST (\HasNoChildren \Junk) "/" "[Gmail]/Spam"
+S: * STATUS "[Gmail]/Spam" (MESSAGES 0 UIDNEXT 1 UIDVALIDITY 17)
+# A name sent as a literal: 日本語 in modified UTF-7.
+S: * LIST (\HasNoChildren) "/" {10}
+S: &ZeVnLIqe-
+S: * STATUS {10}
+S: &ZeVnLIqe- (MESSAGES 1 UIDNEXT 5 UIDVALIDITY 23)
+S: A4 OK Success
+C: A5 EXAMINE "[Gmail]/All Mail"
+S: * FLAGS (\Answered \Flagged \Draft \Deleted \Seen $NotPhishing $Phishing)
+S: * OK [PERMANENTFLAGS ()] Flags permitted.
+S: * OK [UIDVALIDITY 11] UIDs valid.
+S: * 3 EXISTS
+S: * 0 RECENT
+S: * OK [UIDNEXT 300] Predicted next UID.
+S: * OK [HIGHESTMODSEQ 4242]
+S: A5 OK [READ-ONLY] [Gmail]/All Mail selected. (Success)
+C: A6 UID FETCH 1:299 (UID RFC822.SIZE INTERNALDATE FLAGS X-GM-MSGID X-GM-LABELS)
+S: * 1 FETCH (X-GM-THRID 1278455344230334865 X-GM-MSGID 1278455344230334865 X-GM-LABELS ("\\Inbox" "\\Important" Receipts) UID 101 RFC822.SIZE 2048 INTERNALDATE " 7-Jul-2026 02:44:25 +0000" FLAGS (\Seen))
+S: * 2 FETCH (X-GM-THRID 1278455344230334865 X-GM-MSGID 1278455344230334866 X-GM-LABELS ("\\Sent" "&ZeVnLIqe-") UID 205 RFC822.SIZE 900 INTERNALDATE "17-Jul-2026 10:00:00 -0700" FLAGS (\Seen $Forwarded))
+# Unsolicited: no UID, so UIDFetch skips it.
+S: * 2 FETCH (FLAGS (\Seen))
+S: * 4 EXISTS
+# Items the client did not ask for, or does not know, ride along in Attrs.
+S: * 3 FETCH (X-GM-THRID 1 X-GM-MSGID 1278455344230334867 X-GM-LABELS () UID 299 RFC822.SIZE 104857600 INTERNALDATE "01-Aug-2026 00:00:00 +0900" FLAGS () X-FUTURE (1 "two" NIL))
+S: A6 OK Success
+C: A7 UID FETCH 101 (BODY.PEEK[])
+S: * 1 FETCH (UID 101 BODY[] {84}
+S: From: Alice <alice@example.com>
+S: To: user@example.com
+S: Subject: Hello
+S:
+S: Hi there.
+S: )
+S: A7 OK Success
+C: A8 UID SEARCH ALL
+S: * SEARCH 101 205 299
+S: A8 OK SEARCH completed (Success)
+C: A9 UNSELECT
+S: A9 OK Returned to authenticated state. (Success)
+C: A10 LOGOUT
+S: * BYE LOGOUT Requested
+S: A10 OK 73 good day (Success)

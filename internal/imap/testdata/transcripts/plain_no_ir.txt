@@ -1,0 +1,10 @@
+# AUTHENTICATE PLAIN without SASL-IR: the response goes after the
+# server's empty challenge. The tagged OK carries the new capabilities.
+S: * OK [CAPABILITY IMAP4rev1 AUTH=PLAIN] ready
+C: A1 AUTHENTICATE PLAIN
+S: +
+C: AHVzZXJAZXhhbXBsZS5jb20AYXBwLXBhc3N3b3Jk
+S: A1 OK [CAPABILITY IMAP4rev1 UNSELECT] done
+C: A2 LOGOUT
+S: * BYE
+S: A2 OK

@@ -1,0 +1,4 @@
+# The server goes silent after a command.
+S: * OK ready
+C: A1 NOOP
+S: <hang>

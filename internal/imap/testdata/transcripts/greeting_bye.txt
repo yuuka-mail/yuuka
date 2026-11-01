@@ -1,0 +1,2 @@
+# The server refuses the connection in its greeting.
+S: * BYE [ALERT] Too many simultaneous connections. (Failure)

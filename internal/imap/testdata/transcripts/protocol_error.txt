@@ -1,0 +1,5 @@
+# Not IMAP: a list cut off by the end of the line.
+S: * OK ready
+C: A1 NOOP
+S: * 1 FETCH (UID 1
+C: <closed>
