@@ -200,6 +200,71 @@ func TestRunnerKick(t *testing.T) {
 	eventually(t, "the kicked message scored", func() bool { return st.scored()[ids(1)[0]] == 1 })
 }
 
+// staleTargets lists targets, then runs listed before answering: what
+// happens between the query and the sweep reaching its ids.
+type staleTargets struct {
+	*fakeStore
+	listed func()
+}
+
+func (s staleTargets) ScoreTargets(ctx context.Context, p score.Profile, a []string, since time.Time, limit int) ([]string, error) {
+	out, err := s.fakeStore.ScoreTargets(ctx, p, a, since, limit)
+	s.listed()
+	return out, err
+}
+
+// gatedScorer answers once gate is closed.
+type gatedScorer struct {
+	fakeScorer
+	started chan struct{}
+	gate    chan struct{}
+}
+
+func (s *gatedScorer) Score(ctx context.Context, in Input) (Result, error) {
+	select {
+	case s.started <- struct{}{}:
+	default:
+	}
+	<-s.gate
+	return s.fakeScorer.Score(ctx, in)
+}
+
+// A message being scored when the sweep lists it, and finished before the
+// sweep gets to it, is not scored again from the stale list.
+func TestRunnerSweepAfterScored(t *testing.T) {
+	id := ids(1)[0]
+	sc := &gatedScorer{started: make(chan struct{}, 1), gate: make(chan struct{})}
+	var r *Runner
+	st := staleTargets{fakeStore: newFakeStore(id)}
+	st.listed = func() {
+		close(sc.gate)
+		eventually(t, "the kicked scoring done", func() bool {
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			return !r.pending[id]
+		})
+	}
+	r = newTestRunner(st, sc)
+	ctx, cancel := context.WithCancel(t.Context())
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	defer cancel()
+	wg.Go(func() { r.work(ctx) })
+	r.Kick(id)
+	<-sc.started
+	if err := r.sweep(ctx); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "nothing pending", func() bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return len(r.pending) == 0
+	})
+	if n := st.scored()[id]; n != 1 {
+		t.Errorf("scored %d times, want 1", n)
+	}
+}
+
 // failing cannot read the messages in bad.
 type failing struct {
 	*fakeStore

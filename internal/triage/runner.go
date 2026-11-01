@@ -80,6 +80,12 @@ type Runner struct {
 	mu      sync.Mutex
 	pending map[string]bool // queued or being scored
 	backoff map[string]retry
+	// handled numbers the scorings that ended, and finished is when each
+	// message's last one did: a sweep's targets are a snapshot, so one
+	// whose scoring ended after the snapshot is still listed, and must
+	// not be taken for unscored.
+	handled  uint64
+	finished map[string]uint64
 }
 
 type retry struct {
@@ -118,11 +124,12 @@ func NewRunner(cfg RunnerConfig) *Runner {
 		cfg.Now = time.Now
 	}
 	return &Runner{
-		cfg:     cfg,
-		hot:     make(chan string, hotQueue),
-		cold:    make(chan string),
-		pending: map[string]bool{},
-		backoff: map[string]retry{},
+		cfg:      cfg,
+		hot:      make(chan string, hotQueue),
+		cold:     make(chan string),
+		pending:  map[string]bool{},
+		backoff:  map[string]retry{},
+		finished: map[string]uint64{},
 	}
 }
 
@@ -177,7 +184,7 @@ func (r *Runner) work(ctx context.Context) {
 			}
 		}
 		_ = r.handle(ctx, id)
-		r.done(id)
+		r.finish(id)
 	}
 }
 
@@ -192,6 +199,13 @@ func (r *Runner) sweep(ctx context.Context) error {
 		}
 		r.mu.Lock()
 		limit := targetsPage + len(r.backoff) + len(r.pending)
+		listed := r.handled
+		// What ended before this query is in its answer already.
+		for id, n := range r.finished {
+			if n <= listed {
+				delete(r.finished, id)
+			}
+		}
 		r.mu.Unlock()
 		ids, err := r.cfg.Store.ScoreTargets(ctx, r.cfg.Profile, r.cfg.Accounts, r.cfg.Now().Add(-r.cfg.Lookback), limit)
 		if err != nil {
@@ -202,7 +216,7 @@ func (r *Runner) sweep(ctx context.Context) error {
 			if r.br.isOpen(r.cfg.Now()) {
 				return nil
 			}
-			if !r.claim(id) {
+			if !r.claimListed(id, listed) {
 				continue
 			}
 			select {
@@ -223,6 +237,21 @@ func (r *Runner) sweep(ctx context.Context) error {
 func (r *Runner) claim(id string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.claimLocked(id)
+}
+
+// claimListed claims id from targets listed when handled was listed,
+// unless a scoring of it ended since.
+func (r *Runner) claimListed(id string, listed uint64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.finished[id] > listed {
+		return false
+	}
+	return r.claimLocked(id)
+}
+
+func (r *Runner) claimLocked(id string) bool {
 	if r.pending[id] || r.cfg.Now().Before(r.backoff[id].until) {
 		return false
 	}
@@ -230,9 +259,19 @@ func (r *Runner) claim(id string) bool {
 	return true
 }
 
+// done releases id unhandled.
 func (r *Runner) done(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	delete(r.pending, id)
+}
+
+// finish releases id after a scoring of it ended, however it went.
+func (r *Runner) finish(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.handled++
+	r.finished[id] = r.handled
 	delete(r.pending, id)
 }
 
