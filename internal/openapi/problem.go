@@ -57,7 +57,11 @@ const (
 	// last few minutes (/auth/passkey/elevate/begin and finish); then
 	// retry (§13.10).
 	CodeElevationRequired Code = "elevation_required"
-	CodeInternal          Code = "internal"
+	// CodeSecretsLocked: the change seals or uses a third-party secret,
+	// and the server has no key to do it with (§17.3). Reads, receiving
+	// and everything else still work.
+	CodeSecretsLocked Code = "secrets_locked"
+	CodeInternal      Code = "internal"
 )
 
 // Enum lists every code: the schema says which codes exist.
@@ -66,7 +70,7 @@ func (Code) Enum() []string {
 		"invalid_param", "invalid_body", "unsupported_type", "body_too_large", "not_found",
 		"unauthenticated", "scope_required", "forbidden", "conflict", "not_verified", "ceremony_expired", "rate_limited",
 		"undecodable", "unavailable", "no_identity", "submission_rejected", "invalid_rule", "cursor_expired",
-		"widening_requires_cli", "unsupported_filter", "elevation_required", "internal",
+		"widening_requires_cli", "unsupported_filter", "elevation_required", "secrets_locked", "internal",
 	}
 }
 

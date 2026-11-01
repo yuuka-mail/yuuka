@@ -75,7 +75,7 @@ func (a *app) openNotify(ctx context.Context, log *slog.Logger, sealer *secret.S
 				log.Warn("YUUKA_TELEGRAM_* are ignored: their bot is a channel in the database now. " +
 					"Remove them; they are deprecated (see `yuuka channel ls`)")
 			}
-			a.mail, a.alerter, a.cards = d, d, d
+			a.mail, a.alerter, a.cards, a.channels = d, d, d, d
 			return nil
 		}
 		if sealer == nil {

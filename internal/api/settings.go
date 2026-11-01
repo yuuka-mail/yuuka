@@ -137,15 +137,7 @@ func (a *API) grantee(ctx context.Context, v *auth.Viewer, s string) (store.Prin
 // new passkey is told: the alert is what makes a stolen elevated session
 // visible. Failing to tell is logged and changes nothing.
 func (a *API) widened(ctx context.Context, v *auth.Viewer, what string) {
-	if a.alert == nil {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
-	defer cancel()
-	text := fmt.Sprintf("yuuka: %s %s in the WebUI (session %s). If this was not you, someone holds that session and one of your passkeys: undo it in the settings.", v, what, v.CredentialID)
-	if err := a.alert.Notify(ctx, text); err != nil {
-		a.log.Error("api: alert failed", "err", err)
-	}
+	a.alertAbout(ctx, v, v.PrincipalID, "", what)
 }
 
 func (a *API) credentials(ctx context.Context, _ *auth.Viewer, _ struct{}) (CredentialList, error) {

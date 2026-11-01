@@ -336,6 +336,139 @@
         ],
         "additionalProperties": false
       },
+      "BindCodeState": {
+        "type": "string",
+        "enum": [
+          "waiting",
+          "redeemed",
+          "confirmed",
+          "expired"
+        ]
+      },
+      "BindCodeView": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "bot_username": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/BindCodeState"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "seen": {
+            "$ref": "#/components/schemas/SeenIdentity"
+          },
+          "binding_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "channel",
+          "state",
+          "expires_at"
+        ],
+        "additionalProperties": false
+      },
+      "BindConfirmBody": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "BindStart": {
+        "type": "object",
+        "properties": {
+          "bind_code": {
+            "$ref": "#/components/schemas/BindCodeView"
+          },
+          "code": {
+            "type": "string"
+          },
+          "link": {
+            "type": "string"
+          },
+          "group_link": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "bind_code",
+          "code"
+        ],
+        "additionalProperties": false
+      },
+      "BindStartBody": {
+        "type": "object",
+        "properties": {
+          "channel": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "channel"
+        ],
+        "additionalProperties": false
+      },
+      "BindableChannel": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "bot_username": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "additionalProperties": false
+      },
+      "BindingList": {
+        "type": "object",
+        "properties": {
+          "bindings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MyBinding"
+            }
+          },
+          "channels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/BindableChannel"
+            }
+          },
+          "locked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "bindings",
+          "channels",
+          "locked"
+        ],
+        "additionalProperties": false
+      },
       "Block": {
         "type": "object",
         "properties": {
@@ -361,6 +494,21 @@
         "required": [
           "anchor",
           "kind"
+        ],
+        "additionalProperties": false
+      },
+      "ChainBody": {
+        "type": "object",
+        "properties": {
+          "transports": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "transports"
         ],
         "additionalProperties": false
       },
@@ -427,6 +575,57 @@
         ],
         "additionalProperties": false
       },
+      "ChannelBody": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "revision",
+          "token"
+        ],
+        "additionalProperties": false
+      },
+      "ChannelList": {
+        "type": "object",
+        "properties": {
+          "channels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedChannel"
+            }
+          },
+          "locked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "channels",
+          "locked"
+        ],
+        "additionalProperties": false
+      },
+      "ChannelTestResult": {
+        "type": "object",
+        "properties": {
+          "sent": {
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sent"
+        ],
+        "additionalProperties": false
+      },
       "CheckName": {
         "type": "string",
         "enum": [
@@ -486,6 +685,7 @@
           "widening_requires_cli",
           "unsupported_filter",
           "elevation_required",
+          "secrets_locked",
           "internal"
         ]
       },
@@ -898,6 +1098,30 @@
         },
         "required": [
           "elevated_until"
+        ],
+        "additionalProperties": false
+      },
+      "Event": {
+        "type": "string",
+        "enum": [
+          "mail.new",
+          "send.held",
+          "send.escalated",
+          "grant.suspended"
+        ]
+      },
+      "EventsBody": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            }
+          }
+        },
+        "required": [
+          "events"
         ],
         "additionalProperties": false
       },
@@ -1387,6 +1611,14 @@
         },
         "additionalProperties": false
       },
+      "LockReason": {
+        "type": "string",
+        "enum": [
+          "no_key",
+          "key_missing",
+          "set_again"
+        ]
+      },
       "LoginResult": {
         "type": "object",
         "properties": {
@@ -1401,6 +1633,53 @@
         "required": [
           "principal",
           "expires_at"
+        ],
+        "additionalProperties": false
+      },
+      "ManagedChannel": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "bot_id": {
+            "type": "string"
+          },
+          "bot_username": {
+            "type": "string"
+          },
+          "secret": {
+            "$ref": "#/components/schemas/SecretStatus"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "disabled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "bindings": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "bot_id",
+          "revision",
+          "created_at",
+          "bindings"
         ],
         "additionalProperties": false
       },
@@ -1552,6 +1831,93 @@
           "transports",
           "created_at",
           "host"
+        ],
+        "additionalProperties": false
+      },
+      "ManagedSecret": {
+        "type": "object",
+        "properties": {
+          "owner": {
+            "$ref": "#/components/schemas/SecretOwner"
+          },
+          "sealed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SecretState"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/LockReason"
+          }
+        },
+        "required": [
+          "owner",
+          "sealed_at",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "ManagedTransport": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "$ref": "#/components/schemas/TransportState"
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer"
+          },
+          "username": {
+            "type": "string"
+          },
+          "caps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TransportCap"
+            }
+          },
+          "secret": {
+            "$ref": "#/components/schemas/SecretStatus"
+          },
+          "revision": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "configured_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "disabled_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "used_by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "state",
+          "caps",
+          "revision",
+          "created_at",
+          "used_by"
         ],
         "additionalProperties": false
       },
@@ -1835,6 +2201,52 @@
           "recipients",
           "labels",
           "archived"
+        ],
+        "additionalProperties": false
+      },
+      "MyBinding": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "string"
+          },
+          "bot_username": {
+            "type": "string"
+          },
+          "chat": {
+            "type": "string"
+          },
+          "button_user": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_used_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "channel",
+          "chat",
+          "label",
+          "events",
+          "created_at"
         ],
         "additionalProperties": false
       },
@@ -3033,6 +3445,19 @@
         ],
         "additionalProperties": false
       },
+      "RevisionBody": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "revision"
+        ],
+        "additionalProperties": false
+      },
       "Rule": {
         "type": "object",
         "properties": {
@@ -3469,6 +3894,72 @@
         ],
         "additionalProperties": false
       },
+      "SecretOwner": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "destination": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "destination"
+        ],
+        "additionalProperties": false
+      },
+      "SecretState": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "locked"
+        ]
+      },
+      "SecretStatus": {
+        "type": "object",
+        "properties": {
+          "sealed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SecretState"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/LockReason"
+          }
+        },
+        "required": [
+          "sealed_at",
+          "state"
+        ],
+        "additionalProperties": false
+      },
+      "SecretsStatus": {
+        "type": "object",
+        "properties": {
+          "locked": {
+            "type": "boolean"
+          },
+          "secrets": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedSecret"
+            }
+          }
+        },
+        "required": [
+          "locked",
+          "secrets"
+        ],
+        "additionalProperties": false
+      },
       "Section": {
         "type": "object",
         "properties": {
@@ -3493,6 +3984,35 @@
           "title",
           "blocks",
           "chars"
+        ],
+        "additionalProperties": false
+      },
+      "SeenIdentity": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          },
+          "chat_id": {
+            "type": "string"
+          },
+          "chat_kind": {
+            "type": "string"
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "label",
+          "user_id",
+          "chat_id",
+          "chat_kind",
+          "at"
         ],
         "additionalProperties": false
       },
@@ -3859,6 +4379,108 @@
           }
         },
         "additionalProperties": false
+      },
+      "TransportBody": {
+        "type": "object",
+        "properties": {
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "host": {
+            "type": "string"
+          },
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "username": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "caps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TransportCap"
+            }
+          }
+        },
+        "required": [
+          "revision",
+          "host",
+          "port",
+          "caps"
+        ],
+        "additionalProperties": false
+      },
+      "TransportCap": {
+        "type": "string",
+        "enum": [
+          "message-id",
+          "return-path",
+          "dkim",
+          "status-query"
+        ]
+      },
+      "TransportList": {
+        "type": "object",
+        "properties": {
+          "transports": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManagedTransport"
+            }
+          },
+          "locked": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "transports",
+          "locked"
+        ],
+        "additionalProperties": false
+      },
+      "TransportProbe": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "additionalProperties": false
+      },
+      "TransportRemoved": {
+        "type": "object",
+        "properties": {
+          "still_named_by": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "still_named_by"
+        ],
+        "additionalProperties": false
+      },
+      "TransportState": {
+        "type": "string",
+        "enum": [
+          "configured",
+          "placeholder",
+          "removed"
+        ]
       },
       "Triage": {
         "type": "object",
@@ -4265,6 +4887,188 @@
         }
       }
     },
+    "/api/v1/admin/channels": {
+      "get": {
+        "summary": "List notification channels, removed ones included, with their token's state; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/channels/{name}": {
+      "put": {
+        "summary": "Add a notification channel, enable it again or give it a new token, at the revision read; an elevated session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedChannel"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/channels/{name}/disable": {
+      "post": {
+        "summary": "Remove a notification channel: its token erased and its bindings revoked; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/channels/{name}/test": {
+      "post": {
+        "summary": "Send a test message to every binding of a channel; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelTestResult"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/admin/credentials": {
       "get": {
         "summary": "List tokens and SMTP passwords, never their secrets; a person's session only",
@@ -4644,6 +5448,587 @@
     "/api/v1/admin/identities/{id}/disable": {
       "post": {
         "summary": "Disable an identity; where the zone's pattern would take its address over, an elevated session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/identities/{id}/transports": {
+      "put": {
+        "summary": "Replace an identity's transport chain; where mail could go anywhere new, an elevated session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChainBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedIdentity"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/secrets": {
+      "get": {
+        "summary": "Say whether the server can seal and open third-party secrets, and whether each one in use opens; never a secret; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretsStatus"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/transports": {
+      "get": {
+        "summary": "List transports, removed ones and placeholders included, with their password's state; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransportList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/transports/{name}": {
+      "put": {
+        "summary": "Configure a transport at the revision read, sealing a new password if one is given; an elevated session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TransportBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManagedTransport"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/transports/{name}/disable": {
+      "post": {
+        "summary": "Remove a transport: disabled, its password erased, its name kept in the sending history; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevisionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransportRemoved"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/admin/transports/{name}/test": {
+      "post": {
+        "summary": "Connect to a transport, EHLO and AUTH, without sending mail; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransportProbe"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bind-codes": {
+      "post": {
+        "summary": "Start binding a chat of yours: a code, shown once, to send to the bot (§13.7); an elevated session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindStartBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindStart"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bind-codes/{id}": {
+      "get": {
+        "summary": "Get whether your bind code reached the bot, and who Telegram says sent it; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindCodeView"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bind-codes/{id}/confirm": {
+      "post": {
+        "summary": "Bind the chat that sent your code, as Telegram reported it; an elevated session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BindConfirmBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyBinding"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bind-codes/{id}/decline": {
+      "post": {
+        "summary": "Drop your bind code without binding anything; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bindings": {
+      "get": {
+        "summary": "List your own bindings and the channels a chat can be bound on; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingList"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bindings/{id}/events": {
+      "put": {
+        "summary": "Replace what one of your bindings receives; a person's session only",
+        "security": [
+          {
+            "session": [
+              "admin"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EventsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MyBinding"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "A problem",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/bindings/{id}/revoke": {
+      "post": {
+        "summary": "Revoke one of your bindings; a person's session only",
         "security": [
           {
             "session": [

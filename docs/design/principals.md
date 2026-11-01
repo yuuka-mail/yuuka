@@ -383,7 +383,7 @@ WebUI 的页面壳（静态资源）同样不需要会话，但它不含数据�
 M3 的按钮只有撤回（§8.4）：最坏的后果是信发不出去，所以记作配置里的人、不发凭据就够了，
 和 CLI 一样不冒充登录；将来出现「确认发送」按钮时它就是 `submission:send` 的入口之一，那时再给它一种可吊销的 `session` 类凭据。
 
-**渠道进库之后（§17，已实现；CLI 一侧是 `yuuka channel bind`，WebUI 一侧随 P6），「谁按的按钮算数」由绑定决定，而绑定只能经 `/start` 码加双向确认建立，不手敲 id。**
+**渠道进库之后（§17，已实现；CLI 一侧是 `yuuka channel bind`，WebUI 一侧是设置页的「我的通知」），「谁按的按钮算数」由绑定决定，而绑定只能经 `/start` 码加双向确认建立，不手敲 id。**
 手敲的 chat id 和用户 id 没人核对：打错一位，撤回按钮就交给了一个陌生人。流程：
 
 1. CLI 或带再验证的 WebUI 会话生成一个绑定码（16 个随机字节、10 分钟有效、库里只存哈希），
@@ -688,7 +688,9 @@ CLI 只能记 `system` 加 `host_user`（§13.7）。信任根之外的动作值
 
 #### 出口、渠道与机密的权限
 
-> 状态：已定（§17）。主机上的命令已实现（`transport`、`secret`、`channel`），REST 与 WebUI 随 P6。WebUI 上的放宽依赖上文「当场再做一次 passkey 断言」（0015）；在它合入之前，放宽只在主机上。
+> 状态：已实现（§17）。主机上的命令（`transport`、`secret`、`channel`）和 REST / WebUI（P6）都已落地：路由在
+> [`internal/api/api.go`](../../internal/api/api.go) 的 `routes`，处理在 [`thirdparty.go`](../../internal/api/thirdparty.go)，
+> 和 CLI 共用的部分在 [`internal/manage`](../../internal/manage/manage.go)；落地时定下的几处见 §17.6。
 
 出口、身份的出口链、通知渠道和绑定进库之后（§17），它们也是「改变谁能做什么」的配置：
 改了出口的主机，信和密码就交给了另一台服务器；多一条绑定，摘要和撤回按钮就多了一个去处。

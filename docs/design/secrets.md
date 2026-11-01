@@ -13,6 +13,10 @@
 > [`internal/notify`](../../internal/notify/dispatch.go)，`yuuka channel` 和 Telegram 的导入在 [`cmd/yuuka`](../../cmd/yuuka/channel.go)。
 > P4 已合入：主机上的 `transport`、`identity set`、`secret` 命令和环境变量里出口的导入在 [`cmd/yuuka`](../../cmd/yuuka/transportcmd.go)，
 > 用法在[运维文档](../operate/cli.md#出口与第三方机密)。
+> P6 已合入：REST 端点在 [`internal/api/api.go`](../../internal/api/api.go) 的 `routes`，处理在
+> [`internal/api/thirdparty.go`](../../internal/api/thirdparty.go)；和 CLI 共用的检查、封装、审计参数、「算不算放宽」在
+> [`internal/manage`](../../internal/manage/manage.go)。WebUI 在 [`web/src/settings/`](../../web/src/settings/)（出口、通知渠道、我的通知），
+> 上锁横幅在 [`secret-state.tsx`](../../web/src/settings/secret-state.tsx)。用法在[运维文档](../operate/cli.md#在-webui-里)。
 > P3 已合入：发信从库里解析出口（[`internal/outbox/route.go`](../../internal/outbox/route.go)），
 > 环境变量里的出口只在弃用期内顶替同名的占位（§17.7）。没有 KEK、或环境变量里的 bot 还没导入时，Telegram 仍按 §8.4 原来的样子从环境变量读。
 
@@ -215,7 +219,7 @@ KEK 丢了（或 Vault 里的钥匙被删）要重新输入所有第三方机密
 - **agent 排除在外**：没有 MCP 工具；REST 要人的会话，agent 进不来，`TestACL` 断言持有全部 scope 的 token 在每条新路由上都是 403。
   agent 只在提交结果里看到出口的**名字**（§8.9）
 - **审计**：每次放宽写一条 `actions`（`transport.add`、`identity.route`、`channel.bind.confirm`、`secret.rewrap`、`config.import`……），
-  参数含 id、名字、主机、端口、用户名、caps、audience、包装器和钥匙引用（出口的见 [`transportAuditArgs`](../../cmd/yuuka/transportcmd.go)），
+  参数含 id、名字、主机、端口、用户名、caps、audience、包装器和钥匙引用（出口的见 [`manage.TransportAuditArgs`](../../internal/manage/transports.go)），
   **从不含明文，也不含明文的哈希或指纹**：
   人选的密码，哈希能被暴力破解。同时推一条 `security` 告警，发给管理员和当事人（§8.4、§13.10）。CLI 照旧记 `system` 加 `host_user`（§13.7），告警怎么从主机发出见 §17.5 的实现说明
 - **WebUI**：密码框只写不读，留空等于不改，从不回显；机密的状态只显示「已设 / 加密时间 / 正常 / 上锁」
@@ -241,7 +245,29 @@ KEK 丢了（或 Vault 里的钥匙被删）要重新输入所有第三方机密
 - `transport rm` 是收紧，也记一条 `transport.rm`；`transport test` 只把密码交给它本来就该去的地方，不记审计
 - `secret rewrap` 判断「已经在当前钥匙下」的办法是包装一遍再比较包装器和钥匙引用，而不是问包装器当前是哪把钥匙：
   Vault / KMS 的钥匙版本只有包装之后才知道，这样不必给 `Wrapper` 加接口
-- `secret check` 有任何一条不是 `ok` 就以非零退出，能放进定时任务；拥有机密的表在一处列出（`secretOwners`），渠道和 M3.5 的来源各加一段
+- `secret check` 有任何一条不是 `ok` 就以非零退出，能放进定时任务；拥有机密的表在一处列出（[`manage.Owners`](../../internal/manage/secrets.go)），渠道和 M3.5 的来源各加一段
+
+WebUI（P6）落地时定下的几处：
+
+- **CLI 和 REST 共用 [`internal/manage`](../../internal/manage/transports.go)**：配置出口（换去向必须带密码、封装、审计参数）、
+  删出口、加渠道（`getMe` 核对、封装）、出口链算不算放宽（`ChainWidens`）、绑定码和审计参数都只有一份。
+  两边只在「谁在做」（`system` 加 `host_user`，或人加会话）和怎么说话上不同
+- **版本是 CAS，交给调用方带**：出口和渠道的写入、删除都带页面读到的 `revision`，对不上回 `409`。
+  CLI 是读完马上写，界面中间隔着人，所以把版本放进请求体，而不是在服务端读一遍就写。
+  出口链没有版本列，改用「替换前的链」比对（[`ReplaceIdentityTransports`](../../internal/store/transports.go)）：
+  放宽与否是按这条链算的，它必须还是被替换的那条
+- **路由的形状**：出口、渠道的写入都是 `PUT …/{name}` 整体写，`revision` 为 0 表示新名字；占位、删掉过的、已配置的同一条路由，
+  CAS 挡住「以为是新的、其实已有」的覆盖。出口链的路由按 §13.10「可能放宽也可能收紧」处理：标 `authority()`，
+  放宽时在处理函数里再要 `Viewer.Elevated`，否则回 `elevation_required` 并给出主机命令
+- **绑定只给自己**：`/api/v1/bindings` 和 `/api/v1/bind-codes` 只看、只改会话那个人的；别人的一律 404，和不存在一样。
+  确认只要求同一个人、在再验证窗口内，不要求是发起码的同一个会话：偷到会话又能再验 passkey 的人，自己发起一个码也一样
+- **上锁时**：读照常；要封装或打开机密的写（设密码、加渠道、测试、发起绑定）回 `503 secrets_locked`。
+  发起绑定也算在内：收 `/start` 的轮询者没有钥匙不运行，码永远到不了。机密的状态只有 `ok` 和 `locked`，
+  原因三选一（`no_key`、`key_missing`、`set_again`），每次读列表时按行重算 audience 现解一次，不缓存：本地包装器解一次只是内存里的 AES
+- **告警发给管理员和当事人**：界面上的放宽经分发器的 `Security`，`Subject` 是做这件事的人（出口链是身份的 human owner），
+  确认绑定时 `Except` 是刚建的那个绑定（§13.7）。没有库里的渠道、只有环境变量的 bot 时退回只发给运维者
+- **自己的绑定用 `admin` scope**：会话今天都带全部 scope，所以这只是保守；等 human 的会话按主体限定 scope 时，
+  再决定「只能读信的人」能不能绑定自己的 chat（`mail.new` 本来就按他的可见性过滤）
 
 ### 17.7 从环境变量升级：一次导入，一个版本的弃用期
 

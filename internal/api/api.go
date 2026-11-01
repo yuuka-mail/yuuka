@@ -30,6 +30,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/rules"
 	"github.com/yuuka-mail/yuuka/internal/search"
+	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/sendpolicy"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/submit"
@@ -140,6 +141,28 @@ type Store interface {
 	Grants(ctx context.Context, identityID, principalID string) ([]store.Grant, error)
 	TightenGrant(ctx context.Context, identityID, principalID string, t store.GrantTightening, a store.Action) (store.Grant, error)
 	RemoveGrantIfTighter(ctx context.Context, identityID, principalID string, a store.Action) (sendpolicy.Grant, error)
+
+	// Transports, channels, bindings and their sealed secrets (§17.6):
+	// configuration like the above, through the functions the host CLI
+	// calls (internal/manage).
+	TransportByName(ctx context.Context, name string) (store.Transport, error)
+	ConfigureTransport(ctx context.Context, c store.TransportConfig, revision int64, sealed *secret.Record, a store.Action) (store.Transport, error)
+	DisableTransport(ctx context.Context, name string, revision int64, a store.Action) error
+	ReplaceIdentityTransports(ctx context.Context, id string, was, names []string, a store.Action) error
+	Secret(ctx context.Context, id string) (store.StoredSecret, error)
+	Secrets(ctx context.Context) ([]store.StoredSecret, error)
+	Channels(ctx context.Context, all bool) ([]store.Channel, error)
+	ChannelByName(ctx context.Context, name string) (store.Channel, error)
+	ConfigureChannel(ctx context.Context, c store.ChannelConfig, revision int64, sealed *secret.Record, a store.Action) (store.Channel, error)
+	DisableChannel(ctx context.Context, name string, revision int64, a store.Action) error
+	Bindings(ctx context.Context, all bool) ([]store.Binding, error)
+	BindingByID(ctx context.Context, id string) (store.Binding, error)
+	RevokeBinding(ctx context.Context, id string, a store.Action) error
+	Subscribe(ctx context.Context, id string, events []string, on bool, a store.Action) error
+	NewBindCode(ctx context.Context, channel, principal, createdWith, code string, a store.Action) (store.BindCode, error)
+	BindCodeByID(ctx context.Context, id string) (store.BindCode, error)
+	ConfirmBindCode(ctx context.Context, id, label string, events []string, a store.Action) (store.Binding, error)
+	DropBindCode(ctx context.Context, id string) error
 }
 
 // RawReader loads the raw message of a delivery (ingest.Ingester).
@@ -170,7 +193,9 @@ type API struct {
 	// triage is the active scorer profile (§15), nil when no scorer is
 	// configured: then no score is shown, filtered by or reported.
 	triage *score.Profile
-	log    *slog.Logger
+	// secrets seals and uses third-party secrets (§17); zero is locked.
+	secrets Secrets
+	log     *slog.Logger
 }
 
 // New returns the API over db, reading raw messages for the structured
@@ -353,6 +378,55 @@ var routes = []route{
 	jsonRoute(http.MethodDelete, "/api/v1/admin/grants/{identity}/{principal}",
 		"Remove a grant; where its default lets more through, an elevated session only",
 		admin, (*API).removeGrant).authority(),
+
+	// Transports, channels and bindings (§17.6): a person's session; a
+	// secret written or a destination added or moved, an elevated one.
+	jsonRoute(http.MethodGet, "/api/v1/admin/secrets",
+		"Say whether the server can seal and open third-party secrets, and whether each one in use opens; never a secret; a person's session only",
+		admin, (*API).secretsStatus).authority(),
+	jsonRoute(http.MethodGet, "/api/v1/admin/transports",
+		"List transports, removed ones and placeholders included, with their password's state; a person's session only",
+		admin, (*API).adminTransports).authority(),
+	jsonRoute(http.MethodPut, "/api/v1/admin/transports/{name}",
+		"Configure a transport at the revision read, sealing a new password if one is given; an elevated session only",
+		admin, (*API).configureTransport).widening(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/transports/{name}/disable",
+		"Remove a transport: disabled, its password erased, its name kept in the sending history; a person's session only",
+		admin, (*API).disableTransport).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/transports/{name}/test",
+		"Connect to a transport, EHLO and AUTH, without sending mail; a person's session only",
+		admin, (*API).testTransport).authority(),
+	jsonRoute(http.MethodPut, "/api/v1/admin/identities/{id}/transports",
+		"Replace an identity's transport chain; where mail could go anywhere new, an elevated session only",
+		admin, (*API).setChain).authority(),
+	jsonRoute(http.MethodGet, "/api/v1/admin/channels",
+		"List notification channels, removed ones included, with their token's state; a person's session only",
+		admin, (*API).adminChannels).authority(),
+	jsonRoute(http.MethodPut, "/api/v1/admin/channels/{name}",
+		"Add a notification channel, enable it again or give it a new token, at the revision read; an elevated session only",
+		admin, (*API).setChannel).widening(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/channels/{name}/disable",
+		"Remove a notification channel: its token erased and its bindings revoked; a person's session only",
+		admin, (*API).disableChannel).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/admin/channels/{name}/test",
+		"Send a test message to every binding of a channel; a person's session only",
+		admin, (*API).testChannel).authority(),
+	jsonRoute(http.MethodGet, "/api/v1/bindings", "List your own bindings and the channels a chat can be bound on; a person's session only",
+		admin, (*API).bindings).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/bindings/{id}/revoke", "Revoke one of your bindings; a person's session only",
+		admin, (*API).revokeBinding).authority(),
+	jsonRoute(http.MethodPut, "/api/v1/bindings/{id}/events", "Replace what one of your bindings receives; a person's session only",
+		admin, (*API).setEvents).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/bind-codes",
+		"Start binding a chat of yours: a code, shown once, to send to the bot (§13.7); an elevated session only",
+		admin, (*API).startBinding).widening().withStatus(http.StatusCreated),
+	jsonRoute(http.MethodGet, "/api/v1/bind-codes/{id}", "Get whether your bind code reached the bot, and who Telegram says sent it; a person's session only",
+		admin, (*API).bindCode).authority(),
+	jsonRoute(http.MethodPost, "/api/v1/bind-codes/{id}/confirm",
+		"Bind the chat that sent your code, as Telegram reported it; an elevated session only",
+		admin, (*API).confirmBinding).widening(),
+	jsonRoute(http.MethodPost, "/api/v1/bind-codes/{id}/decline", "Drop your bind code without binding anything; a person's session only",
+		admin, (*API).declineBinding).authority(),
 	{Op: openapi.Op{
 		Method: http.MethodGet, Path: "/api/v1/openapi.json", Summary: "This document",
 		Access: openapi.Public, Media: "application/json",
@@ -483,6 +557,7 @@ func (a *API) fail(w http.ResponseWriter, r *http.Request, err error) {
 		{store.ErrInvalidNote, http.StatusBadRequest, openapi.CodeInvalidBody, ""},
 		{store.ErrTooManyProposals, http.StatusTooManyRequests, openapi.CodeRateLimited, "too many pending proposals; withdraw some or wait for a decision"},
 		{store.ErrRuleChanged, http.StatusConflict, openapi.CodeConflict, ""},
+		{store.ErrStale, http.StatusConflict, openapi.CodeConflict, "it changed since it was read, and nothing was written; reload it and try again"},
 		{store.ErrCursorExpired, http.StatusGone, openapi.CodeCursorExpired, "the cursor cannot be continued; start again without since and reread what you hold"},
 	} {
 		if errors.Is(err, m.err) {

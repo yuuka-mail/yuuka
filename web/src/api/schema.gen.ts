@@ -51,6 +51,198 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/channels": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List notification channels, removed ones included, with their token's state; a person's session only */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChannelList"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/channels/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Add a notification channel, enable it again or give it a new token, at the revision read; an elevated session only */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ChannelBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ManagedChannel"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/channels/{name}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove a notification channel: its token erased and its bindings revoked; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RevisionBody"];
+                };
+            };
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/channels/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Send a test message to every binding of a channel; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ChannelTestResult"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/admin/credentials": {
         parameters: {
             query?: never;
@@ -442,6 +634,629 @@ export interface paths {
         get?: never;
         put?: never;
         /** Disable an identity; where the zone's pattern would take its address over, an elevated session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/identities/{id}/transports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace an identity's transport chain; where mail could go anywhere new, an elevated session only */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ChainBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ManagedIdentity"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/secrets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Say whether the server can seal and open third-party secrets, and whether each one in use opens; never a secret; a person's session only */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SecretsStatus"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/transports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List transports, removed ones and placeholders included, with their password's state; a person's session only */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TransportList"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/transports/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Configure a transport at the revision read, sealing a new password if one is given; an elevated session only */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["TransportBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ManagedTransport"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/transports/{name}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Remove a transport: disabled, its password erased, its name kept in the sending history; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["RevisionBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TransportRemoved"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/transports/{name}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Connect to a transport, EHLO and AUTH, without sending mail; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    name: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TransportProbe"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bind-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start binding a chat of yours: a code, shown once, to send to the bot (§13.7); an elevated session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BindStartBody"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BindStart"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bind-codes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get whether your bind code reached the bot, and who Telegram says sent it; a person's session only */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BindCodeView"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bind-codes/{id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bind the chat that sent your code, as Telegram reported it; an elevated session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["BindConfirmBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MyBinding"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bind-codes/{id}/decline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Drop your bind code without binding anything; a person's session only */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List your own bindings and the channels a chat can be bound on; a person's session only */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["BindingList"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bindings/{id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Replace what one of your bindings receives; a person's session only */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["EventsBody"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MyBinding"];
+                    };
+                };
+                /** @description A problem */
+                default: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/problem+json": components["schemas"]["Problem"];
+                    };
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/bindings/{id}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Revoke one of your bindings; a person's session only */
         post: {
             parameters: {
                 query?: never;
@@ -3170,12 +3985,49 @@ export interface components {
             reason?: string;
             line: string;
         };
+        /** @enum {string} */
+        BindCodeState: "waiting" | "redeemed" | "confirmed" | "expired";
+        BindCodeView: {
+            id: string;
+            channel: string;
+            bot_username?: string;
+            state: components["schemas"]["BindCodeState"];
+            /** Format: date-time */
+            expires_at: string;
+            seen?: components["schemas"]["SeenIdentity"];
+            binding_id?: string;
+        };
+        BindConfirmBody: {
+            label?: string;
+            events?: components["schemas"]["Event"][];
+        };
+        BindStart: {
+            bind_code: components["schemas"]["BindCodeView"];
+            code: string;
+            link?: string;
+            group_link?: string;
+        };
+        BindStartBody: {
+            channel: string;
+        };
+        BindableChannel: {
+            name: string;
+            bot_username?: string;
+        };
+        BindingList: {
+            bindings: components["schemas"]["MyBinding"][];
+            channels: components["schemas"]["BindableChannel"][];
+            locked: boolean;
+        };
         Block: {
             anchor: string;
             kind: components["schemas"]["Kind"];
             level?: number;
             spans?: components["schemas"]["Span"][];
             lines?: number;
+        };
+        ChainBody: {
+            transports: string[];
         };
         Change: {
             kind: components["schemas"]["ChangeKind"];
@@ -3191,6 +4043,18 @@ export interface components {
             cursor: string;
             more: boolean;
         };
+        ChannelBody: {
+            revision: number;
+            token: string;
+        };
+        ChannelList: {
+            channels: components["schemas"]["ManagedChannel"][];
+            locked: boolean;
+        };
+        ChannelTestResult: {
+            sent: number;
+            error?: string;
+        };
         /** @enum {string} */
         CheckName: "first_contact" | "extracted_values" | "cross_thread" | "link_domains" | "readable";
         Cite: {
@@ -3202,7 +4066,7 @@ export interface components {
         /** @enum {string} */
         Class: "unknown" | "machine" | "human";
         /** @enum {string} */
-        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "invalid_rule" | "cursor_expired" | "widening_requires_cli" | "unsupported_filter" | "elevation_required" | "internal";
+        Code: "invalid_param" | "invalid_body" | "unsupported_type" | "body_too_large" | "not_found" | "unauthenticated" | "scope_required" | "forbidden" | "conflict" | "not_verified" | "ceremony_expired" | "rate_limited" | "undecodable" | "unavailable" | "no_identity" | "submission_rejected" | "invalid_rule" | "cursor_expired" | "widening_requires_cli" | "unsupported_filter" | "elevation_required" | "secrets_locked" | "internal";
         Content: {
             notice: string;
             from: components["schemas"]["Address"];
@@ -3312,6 +4176,11 @@ export interface components {
         ElevateResult: {
             /** Format: date-time */
             elevated_until: string;
+        };
+        /** @enum {string} */
+        Event: "mail.new" | "send.held" | "send.escalated" | "grant.suspended";
+        EventsBody: {
+            events: components["schemas"]["Event"][];
         };
         ExpectBody: {
             domains: string[];
@@ -3430,10 +4299,26 @@ export interface components {
             max_per_day?: number;
             max_new_recipients_per_day?: number;
         };
+        /** @enum {string} */
+        LockReason: "no_key" | "key_missing" | "set_again";
         LoginResult: {
             principal: string;
             /** Format: date-time */
             expires_at: string;
+        };
+        ManagedChannel: {
+            id: string;
+            name: string;
+            kind: string;
+            bot_id: string;
+            bot_username?: string;
+            secret?: components["schemas"]["SecretStatus"];
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            disabled_at?: string;
+            bindings: number;
         };
         ManagedCredential: {
             id: string;
@@ -3476,6 +4361,31 @@ export interface components {
             disabled_at?: string;
             taken_over_by?: string;
             host: string;
+        };
+        ManagedSecret: {
+            owner: components["schemas"]["SecretOwner"];
+            /** Format: date-time */
+            sealed_at: string;
+            state: components["schemas"]["SecretState"];
+            reason?: components["schemas"]["LockReason"];
+        };
+        ManagedTransport: {
+            id: string;
+            name: string;
+            state: components["schemas"]["TransportState"];
+            host?: string;
+            port?: number;
+            username?: string;
+            caps: components["schemas"]["TransportCap"][];
+            secret?: components["schemas"]["SecretStatus"];
+            revision: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            configured_at?: string;
+            /** Format: date-time */
+            disabled_at?: string;
+            used_by: string[];
         };
         Message: {
             id: string;
@@ -3545,6 +4455,19 @@ export interface components {
             triage?: {
                 [key: string]: string;
             };
+        };
+        MyBinding: {
+            id: string;
+            channel: string;
+            bot_username?: string;
+            chat: string;
+            button_user?: string;
+            label: string;
+            events: components["schemas"]["Event"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_used_at?: string;
         };
         Note: {
             id: string;
@@ -3871,6 +4794,9 @@ export interface components {
             message_id?: string;
             subject?: string;
         };
+        RevisionBody: {
+            revision: number;
+        };
         Rule: {
             id: string;
             name: string;
@@ -3995,12 +4921,37 @@ export interface components {
             hits: components["schemas"]["MessageSummary"][];
             next_cursor?: string;
         };
+        SecretOwner: {
+            kind: string;
+            name: string;
+            destination: string;
+        };
+        /** @enum {string} */
+        SecretState: "ok" | "locked";
+        SecretStatus: {
+            /** Format: date-time */
+            sealed_at: string;
+            state: components["schemas"]["SecretState"];
+            reason?: components["schemas"]["LockReason"];
+        };
+        SecretsStatus: {
+            locked: boolean;
+            secrets: components["schemas"]["ManagedSecret"][];
+        };
         Section: {
             anchor: string;
             title: string;
             level?: number;
             blocks: number;
             chars: number;
+        };
+        SeenIdentity: {
+            label: string;
+            user_id: string;
+            chat_id: string;
+            chat_kind: string;
+            /** Format: date-time */
+            at: string;
         };
         /** @enum {string} */
         SendOutcome: "sends" | "held_after_review" | "draft_only" | "none";
@@ -4097,6 +5048,29 @@ export interface components {
             hold_seconds?: number;
             suspended?: boolean;
         };
+        TransportBody: {
+            revision: number;
+            host: string;
+            port: number;
+            username?: string;
+            password?: string;
+            caps: components["schemas"]["TransportCap"][];
+        };
+        /** @enum {string} */
+        TransportCap: "message-id" | "return-path" | "dkim" | "status-query";
+        TransportList: {
+            transports: components["schemas"]["ManagedTransport"][];
+            locked: boolean;
+        };
+        TransportProbe: {
+            ok: boolean;
+            error?: string;
+        };
+        TransportRemoved: {
+            still_named_by: string[];
+        };
+        /** @enum {string} */
+        TransportState: "configured" | "placeholder" | "removed";
         Triage: {
             notice: string;
             scorer: string;

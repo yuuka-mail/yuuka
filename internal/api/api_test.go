@@ -25,10 +25,12 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/devseed"
 	"github.com/yuuka-mail/yuuka/internal/ingest"
 	"github.com/yuuka-mail/yuuka/internal/localraw"
+	"github.com/yuuka-mail/yuuka/internal/notify"
 	"github.com/yuuka-mail/yuuka/internal/openapi"
 	"github.com/yuuka-mail/yuuka/internal/outbox"
 	"github.com/yuuka-mail/yuuka/internal/r2/r2fake"
 	"github.com/yuuka-mail/yuuka/internal/rules"
+	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/sendpolicy"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/store/storetest"
@@ -428,12 +430,20 @@ type harness struct {
 	local localraw.Dir
 	// alerts are what the operator was told of widenings (§13.10).
 	alerts *alertSpy
+	// sealer seals third-party secrets (§17); tg and probes stand in for
+	// Telegram and SMTP servers.
+	sealer *secret.Sealer
+	tg     *telegramFake
+	probes *probeSpy
 	h      http.Handler
 }
 
+// alertSpy is the dispatcher as far as alerts go: it records the text
+// of each, and whom a security alert was about.
 type alertSpy struct {
 	mu   sync.Mutex
 	sent []string
+	full []notify.Alert
 }
 
 func (s *alertSpy) Notify(_ context.Context, text string) error {
@@ -443,12 +453,29 @@ func (s *alertSpy) Notify(_ context.Context, text string) error {
 	return nil
 }
 
+func (s *alertSpy) Security(_ context.Context, a notify.Alert) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sent = append(s.sent, a.Text)
+	s.full = append(s.full, a)
+	return nil
+}
+
 // take returns and forgets the alerts sent so far.
 func (s *alertSpy) take() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := s.sent
-	s.sent = nil
+	s.sent, s.full = nil, nil
+	return out
+}
+
+// takeFull returns and forgets the security alerts sent so far.
+func (s *alertSpy) takeFull() []notify.Alert {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := s.full
+	s.sent, s.full = nil, nil
 	return out
 }
 
@@ -519,10 +546,12 @@ func newHarness(t *testing.T) *harness {
 	sub := submit.New(submit.Config{DB: db, Outbox: out, Log: quiet})
 	sp := &spy{DB: db, calls: map[string][]*auth.Viewer{}}
 	sus, alerts := &suspendedSpy{}, &alertSpy{}
+	sealer, tg, probes := testSealer(t), &telegramFake{}, &probeSpy{}
 	return &harness{
 		t: t, db: db, pool: pool, spy: sp, svc: svc, agent: agent, human: human, sub: sub, suspended: sus, local: local, alerts: alerts,
+		sealer: sealer, tg: tg, probes: probes,
 		h: New(sp, localRaw{local}, quiet).WithSubmitter(sub).WithSuspendNotifier(sus).WithTriage(laya).
-			WithAlerter(alerts).Handler(svc),
+			WithAlerter(alerts).WithSecrets(Secrets{Sealer: sealer, GetMe: tg.GetMe, Probe: probes.Probe, Channels: tg}).Handler(svc),
 	}
 }
 
@@ -741,6 +770,19 @@ func TestACL(t *testing.T) {
 	h.grant(store.Grant{IdentityID: arisuID, PrincipalID: h.agent.ID, Policy: sendpolicy.Auto, RecipientScope: sendpolicy.ScopeAny})
 	h.grant(store.Grant{IdentityID: star, PrincipalID: h.agent.ID, Policy: sendpolicy.Draft, RecipientScope: sendpolicy.ScopeThread})
 	noted := h.note(h.agent, msg.ID, store.ScopeThread, "arisu's thread note")
+	// Transports, channels and the operator's own bindings (§17.6): a
+	// transport to remove and one to test, an identity with a fallback
+	// to take away, a channel to remove and one to bind on, a binding to
+	// revoke and one to change, codes to read, confirm and decline.
+	trGone := h.transport("acl-gone", "smtp.example.net")
+	h.transport("acl-probe", "smtp.example.net")
+	chained := h.identity("chain@example.org", other)
+	if err := h.db.SetIdentityTransports(t.Context(), chained.ID, []string{"cf", "acl-probe"}, h.act("identity.route")); err != nil {
+		t.Fatal(err)
+	}
+	chGone, chBind := h.channel("acl-gone", 9001), h.channel("acl-bind", 9002)
+	revocable2, subscribed := h.binding(h.human, chBind, "1001"), h.binding(h.human, chBind, "1002")
+	waiting, confirmable, declinable := h.bindCode(h.human, chBind, ""), h.bindCode(h.human, chBind, "1003"), h.bindCode(h.human, chBind, "")
 	// Scores (§15) on the mail the list below filters by them.
 	for _, m := range decode[MessagePage](t, h.get("/api/v1/messages?prefix=github@example.com", h.token(auth.MessageRead))).Messages {
 		h.score(m.ID, 0.1)
@@ -930,6 +972,75 @@ func TestACL(t *testing.T) {
 		"DELETE /api/v1/admin/grants/{identity}/{principal}": {
 			method: http.MethodDelete, path: "/api/v1/admin/grants/" + star + "/" + h.agent.ID,
 			as: h.human, reads: []string{"RemoveGrantIfTighter"}, people: true, authority: true,
+		},
+
+		// Transports, channels and bindings (§17.6).
+		"GET /api/v1/admin/secrets": {
+			path: "/api/v1/admin/secrets", as: h.human, reads: []string{"Secrets", "Transports", "Channels"}, people: true, authority: true,
+		},
+		"GET /api/v1/admin/transports": {
+			path: "/api/v1/admin/transports", as: h.human, reads: []string{"Transports", "Identities", "Secrets", "Channels"},
+			people: true, authority: true,
+		},
+		"PUT /api/v1/admin/transports/{name}": {
+			method: http.MethodPut, path: "/api/v1/admin/transports/acl-new",
+			body: `{"revision":0,"host":"smtp.example.net","port":465,"username":"u","password":"pw","caps":[]}`,
+			as:   h.human, reads: []string{"TransportByName", "ConfigureTransport", "Transports", "Identities", "Secrets", "Channels"},
+			people: true, authority: true, widening: true,
+		},
+		"POST /api/v1/admin/transports/{name}/disable": {
+			method: http.MethodPost, path: "/api/v1/admin/transports/acl-gone/disable", body: fmt.Sprintf(`{"revision":%d}`, trGone.Revision),
+			as: h.human, reads: []string{"TransportByName", "DisableTransport", "Identities"}, people: true, authority: true,
+		},
+		"POST /api/v1/admin/transports/{name}/test": {
+			method: http.MethodPost, path: "/api/v1/admin/transports/acl-probe/test",
+			as: h.human, reads: []string{"TransportByName"}, people: true, authority: true,
+		},
+		"PUT /api/v1/admin/identities/{id}/transports": {
+			method: http.MethodPut, path: "/api/v1/admin/identities/" + chained.ID + "/transports", body: `{"transports":["cf"]}`,
+			as: h.human, reads: []string{"IdentityByID", "ReplaceIdentityTransports", "Identities", "Accounts", "Transports"},
+			people: true, authority: true,
+		},
+		"GET /api/v1/admin/channels": {
+			path: "/api/v1/admin/channels", as: h.human, reads: []string{"Channels", "Bindings", "Secrets", "Transports"},
+			people: true, authority: true,
+		},
+		"PUT /api/v1/admin/channels/{name}": {
+			method: http.MethodPut, path: "/api/v1/admin/channels/acl-new", body: `{"revision":0,"token":"9003:AAAAAAAAAAAAAAAAAAAAAAAA"}`,
+			as: h.human, reads: []string{"ChannelByName", "ConfigureChannel", "Channels", "Bindings", "Secrets", "Transports"},
+			people: true, authority: true, widening: true,
+		},
+		"POST /api/v1/admin/channels/{name}/disable": {
+			method: http.MethodPost, path: "/api/v1/admin/channels/acl-gone/disable", body: fmt.Sprintf(`{"revision":%d}`, chGone.Revision),
+			as: h.human, reads: []string{"ChannelByName", "DisableChannel"}, people: true, authority: true,
+		},
+		"POST /api/v1/admin/channels/{name}/test": {
+			method: http.MethodPost, path: "/api/v1/admin/channels/acl-bind/test",
+			as: h.human, reads: []string{"ChannelByName"}, people: true, authority: true,
+		},
+		"GET /api/v1/bindings": {path: "/api/v1/bindings", as: h.human, reads: []string{"Bindings", "Channels"}, people: true, authority: true},
+		"POST /api/v1/bindings/{id}/revoke": {
+			method: http.MethodPost, path: "/api/v1/bindings/" + revocable2.ID + "/revoke",
+			as: h.human, reads: []string{"BindingByID", "RevokeBinding"}, people: true, authority: true,
+		},
+		"PUT /api/v1/bindings/{id}/events": {
+			method: http.MethodPut, path: "/api/v1/bindings/" + subscribed.ID + "/events", body: `{"events":["mail.new"]}`,
+			as: h.human, reads: []string{"BindingByID", "Subscribe", "Channels"}, people: true, authority: true,
+		},
+		"POST /api/v1/bind-codes": {
+			method: http.MethodPost, path: "/api/v1/bind-codes", body: `{"channel":"acl-bind"}`,
+			as: h.human, reads: []string{"ChannelByName", "Principal", "NewBindCode"}, people: true, authority: true, widening: true,
+		},
+		"GET /api/v1/bind-codes/{id}": {
+			path: "/api/v1/bind-codes/" + waiting.ID, as: h.human, reads: []string{"BindCodeByID", "Channels"}, people: true, authority: true,
+		},
+		"POST /api/v1/bind-codes/{id}/confirm": {
+			method: http.MethodPost, path: "/api/v1/bind-codes/" + confirmable.ID + "/confirm", body: `{}`,
+			as: h.human, reads: []string{"BindCodeByID", "Channels", "Principal", "ConfirmBindCode"}, people: true, authority: true, widening: true,
+		},
+		"POST /api/v1/bind-codes/{id}/decline": {
+			method: http.MethodPost, path: "/api/v1/bind-codes/" + declinable.ID + "/decline",
+			as: h.human, reads: []string{"BindCodeByID", "Channels", "DropBindCode"}, people: true, authority: true,
 		},
 	}
 	for _, rt := range routes {

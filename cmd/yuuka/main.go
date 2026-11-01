@@ -204,6 +204,7 @@ import (
 	"github.com/yuuka-mail/yuuka/internal/secret"
 	"github.com/yuuka-mail/yuuka/internal/store"
 	"github.com/yuuka-mail/yuuka/internal/submit"
+	"github.com/yuuka-mail/yuuka/internal/transport"
 	"github.com/yuuka-mail/yuuka/internal/triage"
 	"github.com/yuuka-mail/yuuka/web"
 )
@@ -368,6 +369,12 @@ type app struct {
 	// triage scores new mail (§15); serve only, nil without a scorer.
 	// Set before anything ingests.
 	triage *triage.Runner
+	// sealer seals and opens third-party secrets (§17); serve only, nil
+	// without a KEK: the locked state.
+	sealer *secret.Sealer
+	// channels sends test messages through the channels in the
+	// database; serve only, nil while they do not run.
+	channels api.ChannelTester
 }
 
 // newMessage queues a message the content step created for scoring.
@@ -475,6 +482,20 @@ func (a *app) rest(log *slog.Logger) *api.API {
 	if a.alerter != nil {
 		r.WithAlerter(a.alerter)
 	}
+	// What the settings need to seal and use third-party secrets
+	// (§17.6); without a KEK they answer that they are locked.
+	r.WithSecrets(api.Secrets{
+		Sealer: a.sealer,
+		GetMe:  getMe,
+		Probe: func(ctx context.Context, cfg transport.Config) error {
+			smtp, err := transport.NewSMTP(cfg)
+			if err != nil {
+				return err
+			}
+			return smtp.Probe(ctx)
+		},
+		Channels: a.channels,
+	})
 	// The scores shown are the configured scorer's; without one, none.
 	if a.cfg.Triage.On() {
 		r.WithTriage(a.cfg.Triage.Profile())
@@ -588,6 +609,7 @@ func serve(ctx context.Context, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	a.sealer = sealer
 	importEnvTransports(ctx, log, a.db, a.cfg.Outbox.Transports, sealer, os.ReadFile)
 	a.importEnvTelegram(ctx, log, sealer)
 	// Before the outbox, which hands it the review cards and the
