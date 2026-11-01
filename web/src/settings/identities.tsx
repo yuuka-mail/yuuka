@@ -300,11 +300,16 @@ function ChainEditor({
     <>
       <ol className="flex flex-col gap-1">
         {chain.map((t, k) => (
-          <li key={t} className="flex flex-wrap items-center gap-2">
-            <span className="w-16 text-meta text-muted-foreground">
+          <li
+            key={t}
+            className="grid grid-cols-[4rem_minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[4rem_minmax(0,12rem)_auto]"
+          >
+            <span className="text-meta text-muted-foreground">
               {k === 0 ? m.chain_primary() : m.chain_fallback({ n: k })}
             </span>
-            <span className="font-mono">{t}</span>
+            <span className="truncate font-mono" title={t}>
+              {t}
+            </span>
             <span className="flex items-center gap-1">
               <Button
                 type="button"
