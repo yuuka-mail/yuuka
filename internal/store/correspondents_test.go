@@ -174,10 +174,7 @@ func TestMigrateLeavesRecipientsUnread(t *testing.T) {
 		t.Fatalf("migrate to 6: %d, %v", to, err)
 	}
 	// A delivery and its message as the M2 schema has them.
-	acct, err := db.EnsureCloudflareAccount(ctx, "cloudflare")
-	if err != nil {
-		t.Fatal(err)
-	}
+	acct := oldAccount(t, pool, "cloudflare")
 	in := record(acct, 1, sha256.Sum256([]byte("m2 content")), "a@example.com")
 	if _, err := db.CommitIngest(ctx, in); err != nil {
 		t.Fatal(err)

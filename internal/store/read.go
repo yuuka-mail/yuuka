@@ -46,7 +46,11 @@ func needViewer(v *auth.Viewer, op string) error {
 // rule and every read path built on it are checked against restricted
 // viewers before M3.5 switches it on.
 
-// readableAccount is the condition "v may read the account in col".
+// readableAccount is the condition "v may read the account in col": v's
+// account_access row says so, or v has no row and the account is
+// readable by default (accounts.default_read). A row overrides the
+// default in both directions: it hides a Cloudflare account from an
+// agent, and opens a pull account to the person who added it.
 func (db *DB) readableAccount(v *auth.Viewer, col string) string {
 	if !db.enforceAccountAccess {
 		return "true"
@@ -56,8 +60,9 @@ func (db *DB) readableAccount(v *auth.Viewer, col string) string {
 	if !ulid.Valid(v.PrincipalID) {
 		return "false"
 	}
-	return `EXISTS (SELECT 1 FROM account_access aa WHERE aa.account_id = ` + col +
-		` AND aa.principal_id = '` + v.PrincipalID + `' AND aa.can_read)`
+	return `EXISTS (SELECT 1 FROM accounts ra
+		LEFT JOIN account_access aa ON aa.account_id = ra.id AND aa.principal_id = '` + v.PrincipalID + `'
+		WHERE ra.id = ` + col + ` AND coalesce(aa.can_read, ra.default_read))`
 }
 
 // readsEveryAccount is the condition "v may read every account". It
@@ -328,11 +333,13 @@ func (db *DB) ListMessages(ctx context.Context, v *auth.Viewer, q MessageQuery) 
 
 // DeliveryFact is one visible delivery of a message.
 type DeliveryFact struct {
-	ID           string
-	Zone         string
-	Prefix       string
-	PrefixState  int // PrefixClaimed or PrefixDiscovered
-	EnvelopeFrom string
+	ID          string
+	Zone        string
+	Prefix      string
+	PrefixState int // PrefixClaimed or PrefixDiscovered
+	// EnvelopeFrom is nil for pulled mail, which has no envelope (§9.3);
+	// "" is the null sender of a bounce.
+	EnvelopeFrom *string
 	EnvelopeTo   string
 	ReceivedAt   time.Time
 	// Auth is nil when it was never extracted (M0 deliveries).

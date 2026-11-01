@@ -308,7 +308,8 @@ WebUI（P6）落地时定下的几处：
 
 ### 17.8 M3.5 的形状
 
-> 状态：已定，未实现。表在 §4 的设计块里，迁移随 M3.5 的存储一步。
+> 状态：已定。机密类型 `imap_password` 和来源的封装规则随 M3.5 的存储一步落地（[0019](../../internal/store/migrations/0019_pull_accounts.sql)、
+> [`store.ConfigureSource`](../../internal/store/pull.go)）；`manage.Owners` 加来源一段随命令（M3.5 的 P5）。
 
 **M3.5 只有密码**：
 

@@ -96,7 +96,7 @@ func (db *DB) CommitIngest(ctx context.Context, in Ingest) (Outcome, error) {
 			return fmt.Errorf("insert raw_objects: %w", err)
 		}
 		if tag.RowsAffected() == 0 {
-			return alreadyIngested(ctx, tx, in, &out)
+			return alreadyIngested(ctx, tx, in.RawID, in.R2Key, in.SHA256, &out)
 		}
 
 		sourceKey := PushSourceKey(in.ContentHash, in.EnvelopeTo)
@@ -137,17 +137,17 @@ func (db *DB) CommitIngest(ctx context.Context, in Ingest) (Outcome, error) {
 // alreadyIngested confirms that a raw insert that did nothing collided
 // with the same object, and not with different bytes under the same id or
 // key, which would mean the immutable raw store was violated.
-func alreadyIngested(ctx context.Context, tx pgx.Tx, in Ingest, out *Outcome) error {
+func alreadyIngested(ctx context.Context, tx pgx.Tx, rawID, key string, sum [32]byte, out *Outcome) error {
 	var id string
 	err := tx.QueryRow(ctx, `
 		SELECT id FROM raw_objects
 		WHERE id = $1 AND r2_key = $2 AND sha256 = $3`,
-		in.RawID, in.R2Key, in.SHA256[:]).Scan(&id)
+		rawID, key, sum[:]).Scan(&id)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("raw %s or key %s already recorded with different content", in.RawID, in.R2Key)
+		return fmt.Errorf("raw %s or key %s already recorded with different content", rawID, key)
 	}
 	if err != nil {
-		return fmt.Errorf("look up raw %s: %w", in.RawID, err)
+		return fmt.Errorf("look up raw %s: %w", rawID, err)
 	}
 	*out = AlreadyIngested
 	return nil

@@ -231,13 +231,15 @@ type DeliveryAuth struct {
 
 // Delivery is one arrival of a message at prefix@zone.
 type Delivery struct {
-	ID            string    `json:"id"`
-	Zone          string    `json:"zone"`
-	Prefix        string    `json:"prefix"`
-	PrefixClaimed bool      `json:"prefix_claimed"`
-	EnvelopeFrom  string    `json:"envelope_from"`
-	EnvelopeTo    string    `json:"envelope_to"`
-	ReceivedAt    time.Time `json:"received_at"`
+	ID            string `json:"id"`
+	Zone          string `json:"zone"`
+	Prefix        string `json:"prefix"`
+	PrefixClaimed bool   `json:"prefix_claimed"`
+	// EnvelopeFrom is absent for mail pulled from a mailbox, which has
+	// no envelope; "" is the null sender of a bounce.
+	EnvelopeFrom *string   `json:"envelope_from,omitempty"`
+	EnvelopeTo   string    `json:"envelope_to"`
+	ReceivedAt   time.Time `json:"received_at"`
 	// Auth is absent for deliveries ingested before auth was extracted.
 	Auth *DeliveryAuth `json:"auth,omitempty"`
 	// Leak is the leak check of this delivery (§3 principle 3), judged

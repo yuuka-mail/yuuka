@@ -103,3 +103,41 @@ func TestHeldLockOrder(t *testing.T) {
 		t.Error(f)
 	}
 }
+
+// The sync worker's session lock (§10.1.3, key (0x79706c,
+// hashtext(account id))): one worker per account across serve
+// processes, independent per account. It is only ever tried, never
+// waited for, and lives on a connection of its own, so it is in no
+// lock order: a second worker gives up at once instead of queueing
+// behind the first.
+func TestPullLock(t *testing.T) {
+	t.Parallel()
+	e := newPullEnv(t)
+	ctx := t.Context()
+	a, b := e.add("one", "one@example.com").AccountID, e.add("two", "two@example.com").AccountID
+	first, ok, err := e.db.LockPullAccount(ctx, a)
+	if err != nil || !ok {
+		t.Fatal(ok, err)
+	}
+	if err := first.Check(ctx); err != nil {
+		t.Error(err)
+	}
+	start := time.Now()
+	if _, ok, err := e.db.LockPullAccount(ctx, a); err != nil || ok {
+		t.Errorf("taken twice: %v %v", ok, err)
+	}
+	if waited := time.Since(start); waited > 5*time.Second {
+		t.Errorf("the second worker waited %v", waited)
+	}
+	other, ok, err := e.db.LockPullAccount(ctx, b)
+	if err != nil || !ok {
+		t.Fatalf("another account: %v %v", ok, err)
+	}
+	other.Release()
+	first.Release()
+	again, ok, err := e.db.LockPullAccount(ctx, a)
+	if err != nil || !ok {
+		t.Fatalf("after release: %v %v", ok, err)
+	}
+	again.Release()
+}

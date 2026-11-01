@@ -842,7 +842,6 @@
           "zone",
           "prefix",
           "prefix_claimed",
-          "envelope_from",
           "envelope_to",
           "received_at"
         ],

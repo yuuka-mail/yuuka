@@ -35,6 +35,18 @@ func m1(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// oldAccount inserts a Cloudflare account as EnsureCloudflareAccount did
+// before 0019 gave accounts default_read, for tests that set up data on
+// an older schema (0005 to 0018).
+func oldAccount(t *testing.T, pool *pgxpool.Pool, name string) string {
+	t.Helper()
+	id := ulid.New(time.Now())
+	if _, err := pool.Exec(t.Context(), `INSERT INTO accounts (id, name, kind) VALUES ($1, $2, 'cf_catchall')`, id, name); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
 // m1Delivery writes a raw object and its delivery as M1's CommitIngest
 // did, keyed by account_key.
 func m1Delivery(t *testing.T, pool *pgxpool.Pool, n int, accountKey string, contentHash [32]byte, to string) string {

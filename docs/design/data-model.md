@@ -13,8 +13,11 @@
 | 表 | 类别（§4.2） | 做什么 | 迁移 |
 |---|---|---|---|
 | `raw_objects` | 投递事实 | 原件存储里的每个对象一行，带 `sha256` 和 `content_hash`（§4.1）；发件方重投的那份照样落盘，用 `duplicate_of` 指向第一份，不再生成 delivery。yuuka 为外发组装或规范化的字节（Sent 副本，`sent/` 前缀）也是这里的行，发没发出看 outbox（§4.6） | [0001](../../internal/store/migrations/0001_ingest.sql)、[0006](../../internal/store/migrations/0006_sent_copies.sql) |
-| `accounts` | 配置与授权 | 账户（§9.2）。M2 只有 `cf_catchall` 一种，就是 `YUUKA_ACCOUNT` 命名的那个 | [0005](../../internal/store/migrations/0005_sending.sql) |
-| `deliveries` | 投递事实；只有 `message_id`、`auth` 两列是派生 | 每次投递一行：账户、信封、`(zone, prefix)`、这一路自己的原件（Received / ARC / DKIM 每一路都不同）和认证结果。投递是 ingest 记下的事实，不是从 MIME 派生的：信封、远端定位、卸载状态都不在原件里。`(account_id, source_key)` 是幂等键（§10.1） | [0001](../../internal/store/migrations/0001_ingest.sql)、[0005](../../internal/store/migrations/0005_sending.sql) |
+| `accounts` | 配置与授权 | 账户（§9.2）：Cloudflare 的 `cf_catchall`（`YUUKA_ACCOUNT` 命名的那个）和拉取的 `imap`。`default_read` 是没有 `account_access` 行的主体能不能读它（§13.8）；同步、回写、卸载三个策略列先建好，只允许今天有读者的值 | [0005](../../internal/store/migrations/0005_sending.sql)、[0019](../../internal/store/migrations/0019_pull_accounts.sql) |
+| `account_sources` | 配置与授权 | 拉取账户的来源，一个账户一个（§9.5）：邮箱地址、IMAP 主机和登录、机密、可信接收方、文件夹、大小上限、回填、日预算、轮询间隔、暂停。改动带 `revision`，和出口同一个写法（§17.4）。另有两样不是配置的：`account sync` 留给 `serve` 的请求，和当天已下载的字节数 | [0019](../../internal/store/migrations/0019_pull_accounts.sql) |
+| `source_mailboxes` | 投递事实 | 每个远端文件夹读到了哪里：键类型、UIDVALIDITY、追新和回填两个游标、上一轮看到的 STATUS、待对完的重扫、跳过的草稿数（§10.1.2、§10.1.3） | [0019](../../internal/store/migrations/0019_pull_accounts.sql) |
+| `pull_failures` | 投递事实 | 反复取不下来、游标越过了的信（§10.1.3）。游标只在这里有一行之后才越过它 | [0019](../../internal/store/migrations/0019_pull_accounts.sql) |
+| `deliveries` | 投递事实；只有 `message_id`、`auth` 两列是派生 | 每次投递一行：账户、信封、`(zone, prefix)`、这一路自己的原件（Received / ARC / DKIM 每一路都不同）和认证结果。投递是 ingest 记下的事实，不是从 MIME 派生的：信封、远端定位、远端状态、拉取时的标签、只有头部的原因都不在原件里。`(account_id, source_key)` 是幂等键（§10.1） | [0001](../../internal/store/migrations/0001_ingest.sql)、[0005](../../internal/store/migrations/0005_sending.sql)、[0019](../../internal/store/migrations/0019_pull_accounts.sql) |
 | `messages` | 派生（id 除外，id 跨 reparse 稳定） | 内容，按 `content_hash` 折叠；`list_id` 是 List-Id 的标识部分，供规则的 `list.id` 匹配（未经验证的头）；隔离状态 `parse_error` 也在这一层（§4.2）。To / Cc / Reply-To 存折叠后的地址，供线程通信方（§8.9）匹配；To / Cc 另存去重的显示名（`to_names`、`cc_names`），只给检索用（§16.3），和地址不对应。阅读区要的「谁叫什么名字」在取信时从原件现解析（`mimeparse.ParseRecipients`）。`extract_version` 记下哪一版提取器处理过它（§4.2） | [0002](../../internal/store/migrations/0002_content.sql)、[0007](../../internal/store/migrations/0007_message_recipients.sql)、[0008](../../internal/store/migrations/0008_extractions.sql)、[0010](../../internal/store/migrations/0010_message_list_id.sql)、[0016](../../internal/store/migrations/0016_search_names.sql) |
 | `extractions` | 派生 | 提取器（[`internal/extract`](../../internal/extract/extract.go)）从一封信里找到的验证码、登录 / 验证链接、有效期（§3 原则 4）：通知区一眼看到码（§12.9），`review` 档的外泄检查拿它比对外发正文（§8.9）。值是发件人写的，只当数据；链接从不被打开或抓取。「码用过了」「收起」这类人的决定不放这里 | [0008](../../internal/store/migrations/0008_extractions.sql) |
 | `threads` | 派生 | 消息图的连通分量（§4.1）。reparse 整体重建，旧 id 能沿用就沿用，但不像 message id 那样承诺稳定 | [0002](../../internal/store/migrations/0002_content.sql) |
@@ -31,7 +34,7 @@
 | `annotation_log` | 决定 | 对 class / archived / 每个标签的每次改动：谁、什么等级、前后值。来源追溯、撤销和优先级都靠它（§8.5） | [0009](../../internal/store/migrations/0009_rules.sql) |
 | `triage_scores` | 观测事实 | 决策模型对一封信的评分，一次评分一行，只追加（§15.2）。只显示、不驱动任何东西（§15.4） | [0013](../../internal/store/migrations/0013_triage.sql) |
 | `identities` | 配置与授权 | 能用来发信的地址（精确地址或 `*@zone`）、所属账户、归属主体（§9.3、§8.9）；走哪些出口在 `identity_transports` | [0005](../../internal/store/migrations/0005_sending.sql)、[0017](../../internal/store/migrations/0017_transports.sql) |
-| `secrets` | 配置与授权 | yuuka 拿去向第三方证明身份的机密（出口密码，以后是 bot token、IMAP 密码），信封加密存放（§17.2）；各表一对一引用它 | [0017](../../internal/store/migrations/0017_transports.sql) |
+| `secrets` | 配置与授权 | yuuka 拿去向第三方证明身份的机密（出口密码、bot token、IMAP 密码），信封加密存放（§17.2）；各表一对一引用它 | [0017](../../internal/store/migrations/0017_transports.sql)、[0019](../../internal/store/migrations/0019_pull_accounts.sql) |
 | `transports` | 配置与授权 | 出口（§10.2）：主机、端口、认证方式、用户名、caps、机密。名字永不改；删除 = 停用并抹掉机密，行留着（§17.4） | [0017](../../internal/store/migrations/0017_transports.sql) |
 | `identity_transports` | 配置与授权 | 每个身份的出口链，位置 0 是主出口，最多 8 个（§9.3、§10.2.2） | [0017](../../internal/store/migrations/0017_transports.sql) |
 | `drafts` | 决定 | 写好了、没发出的信；提交超出授权时停在这里，`hold_reason` 说明原因（§8.9）。收件人的显示名和地址列并排存，只用于显示（§8.9） | [0005](../../internal/store/migrations/0005_sending.sql)、[0014](../../internal/store/migrations/0014_draft_recipient_names.sql) |
@@ -39,7 +42,7 @@
 | `send_attempts` `outbox_recipients` | 发送事实 | 每次发送尝试的执行归属、提交点和结果；逐收件人的结果、退信与投诉（§4.5） | [0005](../../internal/store/migrations/0005_sending.sql)、[0006](../../internal/store/migrations/0006_sent_copies.sql) |
 
 `deliveries.auth` 的结构由 [`internal/authres`](../../internal/authres/authres.go) 的 `Auth` 定义，只来自可信接收方（§10.1.1）。
-迁移里与本节设计不同的地方都以 `M0:` / `M1:` / `M2:` 注明，主要是这几类：
+迁移里与本节设计不同的地方都以 `M0:` / `M1:` / `M2:` / `M3.5:` 注明，主要是这几类：
 
 - 有几列已建、暂不写：`messages.spam_score`（§4.3 的降级现算）、`messages.body_html_key`、
   `deliveries.spf_recheck`（二次 SPF 判定还没接）、`prefixes.observed_domains` 和 `prefixes.leak_suspect`
@@ -57,8 +60,33 @@
   环境变量里的出口只在弃用期内顶替同名的占位（§17.7）。仍是部署事实、仍留在主机的是信任根（§17.1）
 - **没有 `zones` 表**。它的列（所属账户、是否 catch-all、是否已开通发信）在 M2 没有读者：
   identity 自带 zone 和账户，「这个域开没开通发信」是出口配置的属性。等有东西需要单独问一个域的时候再建
-- `accounts` 只有 M2 读的列，kind 只有 `cf_catchall`：M2 的所有 identity 都属于这个 Cloudflare 账户。
-  拉取账户要加的列和表在下面的设计块里，形状已定，迁移随 M3.5 的存储一步（§6）
+- **拉取账户**（M3.5，[0019](../../internal/store/migrations/0019_pull_accounts.sql)，读写在 [`internal/store/pull.go`](../../internal/store/pull.go)）。
+  几处取舍：
+  - 策略列只放今天有读者的值：`sync_policy` 只有 `full`（`metadata` 随 M3.5 的最后一步和 `FetchBody` 一起进约束，`notify` 随它的 `notifications` 表），
+    `writeback_policy` 只有 `off`，`offload_policy` 只能为空，`deliveries.remote_state` 只有 1（present）。列先建好，
+    以后放宽是换约束，而不是改一个缺列意味着什么；没有读者的值写进 CHECK 只是一句许诺
+  - `default_read` 迁移时给已有的行 `true`（它们都是 Cloudflare 账户），然后去掉默认值，新账户必须说明自己的：
+    `EnsureCloudflareAccount` 写 `true`，`AddPullAccount` 写 `false` 并给加账户的人一行可读（§13.8）
+  - 原草图里 `accounts.auth_ref` 不要了：怎么登录属于来源，不属于账户；`active` 由 `disabled_at` 代替。
+    删掉的拉取账户留着行和全部投递，名字不再复用（和出口同理，§17.4）
+  - `deliveries.envelope_from` 改为可空，约束是只有带远端定位的投递可以为空：拉取没有信封发件人，
+    而 `''` 在 0001 里是退信的 null sender，写空串会误导读者。`envelope_to` 仍非空，拉取投递写来源的地址，意思是「投到了这个邮箱」。
+    远端定位三列和 `remote_state` 同时为空或同时非空，`remote_labels`、`remote_omitted` 只出现在拉取投递上，都是约束
+  - 原草图里的 `deliveries.delivered_to`、`remote_flags` 不建：没有读者。Gmail 的别名靠 `Delivered-To` 区分、标志的同步都是以后的事
+  - 设计块之外多了几列，都是 §10.1 要求记下、又没有别处可放的：`source_mailboxes.drafts_skipped`（带 `\Draft` 的信只计数，§10.1），
+    和游标同一条语句加，所以每封只计一次；`account_sources.sync_requested_at` / `retry_requested_at`（`account sync` 只是请 `serve` 跑一轮，§10.1.3）；
+    `budget_day` / `budget_used`（日预算跨 `serve` 重启仍然算数）。后三列是请求和计数，不是配置，改它们不动 `revision`
+  - 游标的语义写在迁移里：`[coalesce(low_uid, high_uid + 1), high_uid]` 里的每个 UID 都已提交或记在 `pull_failures`。
+    首次见到一个文件夹时 `high_uid` 取本轮开头的 `UIDNEXT - 1`、`low_uid` 为空，已有的信全归回填，从新到旧（§10.1.2）。
+    两个游标都只按 CAS 推进（`AdvanceHigh`、`AdvanceLow`：UIDVALIDITY 仍是读到的那个，且只往前），提交在前、游标在后，
+    所以 §10.1.3 的崩溃表在存储层就成立：事务之后、游标之前崩溃，留下的投递被下一轮按 `source_key` 筛掉（`KnownSourceKeys`）
+  - `source_key` 的三种写法（`GmailSourceKey`、`ObjectIDSourceKey`、`LocationSourceKey`）在存储层，`CommitPull` 按文件夹的 `key_kind` 查键的形状，
+    定位键要和定位逐字对上：写错的键进了库就是单向门的另一边（§10.1）。`CommitPull` 只接受已经登记、UIDVALIDITY 仍是这一封的文件夹
+  - UIDVALIDITY 重映射只有 `Relocate` 一条路径改投递的定位和 `source_key`，带着读到的旧值做 CAS；稳定键（`gm:`、`oid:`）只改定位，
+    定位键连键一起改成新定位的。一个定位键的文件夹在重扫没对完之前又换了 UIDVALIDITY，只记最近的一次：
+    更早那一代的投递留在旧定位上，键仍唯一、信仍在，只是定位过期
+  - worker 的会话级 advisory lock 键是 `(0x79706c, hashtext(account_id))`（`LockPullAccount`），和发信授权的两键锁、单键的迁移锁和内容锁互不相交。
+    两个账户的 id 哈希撞上时只是轮流拉，延迟一个，不丢信
 
 **`YUUKA_ACCOUNT` 与 `accounts`**：0005 把 M0 / M1 的 `deliveries.account_key` 换成了 `account_id`，
 每个出现过的 key（以及 `account_access` 里只出现过的 key）变成一个 `cf_catchall` 账户，`name` 就是原来的 key。
@@ -90,75 +118,9 @@ app 只有表上的增删改查和序列的 `USAGE`（经 `ALTER DEFAULT PRIVILE
 测试夹具按部署的形状给每个测试建 schema（[`storetest`](../../internal/store/storetest/storetest.go)），
 所以整个测试集都在 app 角色下跑过一遍。
 
-尚未实现的表和列（设计）。拉取账户这一块**已定，未实现**：迁移随 M3.5 的存储一步落地，那时这里换成指向迁移的链接，只留理由：
+尚未实现的表和列（设计）：
 
 ```sql
--- accounts 上加的列（M3.5）
-accounts(
-  kind              -- 加 imap。gmail_api、smtp_only 等有读者时再进 CHECK：kind 是封闭列表
-  sync_policy       -- full | metadata。metadata 随 M3.5 的最后一步（§6）；notify 和它的 notifications 表一起加
-  writeback_policy  -- 只允许 off：回写不做（§9.2），列先建好，免得以后为它改约束的语义
-  offload_policy    -- jsonb，M3.5 只允许 NULL（= off）。形状 M3.6 定，那时换约束；只能在 sync_policy=full 上开（§9.6）
-  default_read      -- 没有 account_access 行的主体能不能读这个账户（§13.8）。迁移给已有的行 true（今天的行为），
-                    --   然后去掉默认值：新账户必须说明自己的
-  disabled_at       -- 删掉的拉取账户留着行和全部投递，名字不再复用（和出口同理，§17.4）
-)
-  -- 原草图里的 auth_ref 不要了：怎么登录属于来源（account_sources），不属于账户；active 由 disabled_at 代替
-
--- 拉取账户的来源（§9.5、§10.1.3）。一个账户一个
-account_sources(
-  account_id pk → accounts, kind (imap),
-  address,              -- 邮箱自己的地址。拉取投递的 zone / prefix 取它（§9.3），启用中的来源里唯一（大小写不敏感）
-  host, port,           -- 只做隐式 TLS，和出口一样
-  auth (plain),         -- M3.5b 加 xoauth2 和 oauth client
-  username,
-  secret_id → secrets,  -- imap_password，audience 是 imaps://<username>@<host>:<port>（§17.2）
-  preset (gmail | NULL),-- 写死在代码里的服务器差异：只同步 \All、要求 X-GM-EXT-1、日预算默认值
-  mailboxes text[],     -- NULL：默认（gmail 是 \All；其他是所有可选文件夹，去掉 \Junk、\Trash、\Drafts）
-  trusted_authserv_id,  -- §10.1.1。NULL：不采信任何一条 = 全部「未验证」
-  max_message_bytes,    -- 超过的只落头部（§4.4、§10.1.2），上限是单个对象能有多大
-  backfill_since,       -- NULL：全部（§10.1.4）
-  daily_byte_budget,    -- NULL：不限
-  poll_seconds,
-  paused_at, pause_reason (operator | auth_failed),
-  disabled_at,          -- 删来源 = 停用并抹掉机密，行留着
-  revision, created_at
-)
-
--- 每个远端文件夹读到了哪里（§10.1.2、§10.1.3）。属于投递事实：远端当时说了什么、我们读到了哪
-source_mailboxes(
-  (account_id, name) pk,  -- name 解码成 UTF-8
-  special_use,
-  key_kind,               -- 1 定位 | 2 EMAILID | 3 X-GM-MSGID，首次同步时定下，之后不自动换（§10.1）
-  uidvalidity, high_uid, low_uid,      -- low_uid 为 NULL：回填还没开始；1：已到底
-  uidnext_seen, messages_seen,          -- 上一轮看到的，用来跳过没变的文件夹
-  rescan_uidvalidity,     -- 定位键的文件夹 UIDVALIDITY 变了、旧投递还没对完时记下旧值（§10.1.3）
-  last_round_at
-)
-
--- 反复取不下来的信（§10.1.3）。游标只有在这里记下一行之后才越过它：从不静默
-pull_failures(
-  (account_id, mailbox, uidvalidity, uid) pk,
-  size, detail,           -- 服务器给的文字是不可信输入：当数据显示，不原样进告警和日志
-  attempts, first_at, last_at, resolved_at
-)
-
--- deliveries 上加的列（M3.5 建；卸载的两列 M3.6 才写）
-deliveries(
-  envelope_from     -- 改为可空：拉取没有信封发件人。不写空串，因为 0001 里 '' 是 null sender（退信），
-                    --   会误导读者。约束：只有带远端定位的投递可以为 NULL
-  -- envelope_to 仍非空：拉取投递写来源的 address，意思是「投到了这个邮箱」
-  remote_state      -- 1 present | 2 gone | 3 offloaded。M3.5 只写 1；和远端定位三列同时为空或同时非空
-  offloaded_at      -- 只在 remote_state=3 时有值（§9.6）
-  remote_labels text[],  -- 拉取时 Gmail 的标签快照，投递事实，不随远端变（回写不做）
-  remote_omitted    -- 为什么只有头部：1 超过 max_message_bytes，2 正文取不下来
-)
-  -- 远端定位上加一个部分索引，供 UIDVALIDITY 重映射和每周对账用
-  -- 原草图里的 delivered_to、remote_flags 不建：没有读者。Gmail 的别名靠 Delivered-To 区分、标志的同步都是以后的事
-  -- message_id 可空的另一个原因：notify 策略只留幂等桩，不建 message（§4.4、§10.1）
-
--- secrets.kind 加 imap_password。oauth_refresh_token、oauth_client_secret 和 oauth_clients 一起随 M3.5b（§17.8）
-
 -- drafts 上还没加的列
 drafts(attachments jsonb,            -- 要先有上传存储
        proposal_id)                  -- 提案（M3）
@@ -169,8 +131,9 @@ notifications(id, message_id, channel, state, sent_at)
   -- 这不是「每次推送的投递记录」，那个不做（§17.10）
 ```
 
-`raw_objects` 不改：`pull/` 的 key 放进现有的 `r2_key` / `local_path`，只有头部的原件（`completeness` 为 header_only）0001 就允许；
-`received_at` 取远端的 `INTERNALDATE`。
+拉取的原件不改 `raw_objects`：`pull/` 的 key 放进现有的 `r2_key` / `local_path`，只有头部的原件（`completeness` 为 header_only）0001 就允许；
+`received_at` 取远端的 `INTERNALDATE`（[`store.CommitPull`](../../internal/store/pull.go)）。
+`deliveries.message_id` 可空的另一个原因是 `notify` 策略只留幂等桩、不建 message（§4.4、§10.1），那个策略还没做。
 
 通知渠道、绑定、绑定码和订阅（§17）在 [0018](../../internal/store/migrations/0018_channels.sql)，
 读写在 [`internal/store/channels.go`](../../internal/store/channels.go)；为什么这样分表见 §17.4。
@@ -272,11 +235,11 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
 | | 表 | reparse |
 |---|---|---|
 | **派生** | `messages`（除 id 外的列）、`threads`、`attachments`、`extractions`、`deliveries.message_id`、`deliveries.auth` | 从 `deliveries.raw_id → raw_objects`、`outbox.raw_id → raw_objects`（Sent 副本，§4.6）、`send_attempts` 记下的 id（线程）和账户配置重算 |
-| **投递事实** | `raw_objects`（含 `content_hash`、`duplicate_of`）；`deliveries` 的其余列（`source_key`、信封、远端定位、`remote_state`、`offloaded_at`、`remote_labels`、`remote_omitted`、`spf_recheck`）；设计中的 `source_mailboxes`、`pull_failures`（远端当时说了什么、我们读到了哪里，§4） | 不碰。它们来自 ingest 当时的 `InboundRef` 和当时的外部状态 |
+| **投递事实** | `raw_objects`（含 `content_hash`、`duplicate_of`）；`deliveries` 的其余列（`source_key`、信封、远端定位、`remote_state`、`offloaded_at`、`remote_labels`、`remote_omitted`、`spf_recheck`）；`source_mailboxes`、`pull_failures`（远端当时说了什么、我们读到了哪里，§4） | 不碰。它们来自 ingest 当时的 `InboundRef` 和当时的外部状态 |
 | **发送事实** | `send_attempts`、`outbox_recipients`：远端当时怎么回答、什么时候；Sent 副本本身是 `raw_objects` 里的投递事实 | 不碰 |
 | **观测事实** | `triage_scores`：某个评分器在某个时刻对一封信的回答（§15.2）。和 `spf_recheck` 同理不是派生：换个模型、过一阵重评，答案就变；也不是谁的决定 | 不碰；只追加，重评写新行 |
 | **决定** | `message_state`、`message_aliases`、`prefixes`（label / note / expected_domains / state）、`rules`、`proposals`、`annotation_log`、`actions`、`drafts`、`notes`、`outbox`、`notifications` | 不碰；也不重跑规则，规则的效果是到达时做的决定（§8.5） |
-| **配置与授权** | `principals` / `credentials` / `identity_grants` / `account_access`（§13）、`accounts` / `identities` / `secrets` / `transports` / `identity_transports`（§17）；通知渠道的四张表；设计中的 `account_sources` | 不碰 |
+| **配置与授权** | `principals` / `credentials` / `identity_grants` / `account_access`（§13）、`accounts` / `identities` / `secrets` / `transports` / `identity_transports`（§17）；通知渠道的四张表；`account_sources` | 不碰 |
 
 派生以外的各类都**无法从原件重建**，备份要按正经数据库来（§7）。CF 来源的投递事实能从 R2 对象的
 metadata 恢复（§2.1）；拉取的原件同样自描述（`pull/` 对象的 `yuuka-pull`，§2.2），能恢复「从哪个账户、哪个文件夹、哪个定位拉来的」，

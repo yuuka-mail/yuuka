@@ -354,6 +354,12 @@ func TestVisibility(t *testing.T) {
 		open, closed, agent.ID); err != nil {
 		t.Fatal(err)
 	}
+	// Neither account is readable by default, as a pull account is
+	// not (§13.8): what each viewer reads comes from its rows alone, and
+	// nobody, with none, reads nothing. TestDefaultRead has the defaults.
+	if _, err := pool.Exec(ctx, `UPDATE accounts SET default_read = false`); err != nil {
+		t.Fatal(err)
+	}
 	restricted := &auth.Viewer{PrincipalID: agent.ID, PrincipalKind: "agent", PrincipalName: "arisu"}
 	nobody := &auth.Viewer{PrincipalID: ulid.New(time.Now()), PrincipalKind: "agent", PrincipalName: "nobody"}
 	everyone := &auth.Viewer{PrincipalID: systemID, PrincipalKind: "human", PrincipalName: "operator"}
@@ -574,6 +580,16 @@ func TestVisibility(t *testing.T) {
 			}
 			if got := names(ids); !slices.Equal(got, want) {
 				t.Errorf("ListMessages %q, want %q", got, want)
+			}
+			// The account list (§9.4) names only what v reads.
+			accts, err := db.VisibleAccounts(ctx, v)
+			var acctNames []string
+			for _, a := range accts {
+				acctNames = append(acctNames, a.Name)
+			}
+			if wantAccts := map[*auth.Viewer][]string{everyone: {"cf", "closed"}, restricted: {"cf"}}[v]; err != nil ||
+				!slices.Equal(acctNames, wantAccts) {
+				t.Errorf("VisibleAccounts %q %v, want %q", acctNames, err, wantAccts)
 			}
 
 			// The label filter, the label list, the annotation history

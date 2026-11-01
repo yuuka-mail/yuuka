@@ -4100,7 +4100,7 @@ export interface components {
             zone: string;
             prefix: string;
             prefix_claimed: boolean;
-            envelope_from: string;
+            envelope_from?: string;
             envelope_to: string;
             /** Format: date-time */
             received_at: string;

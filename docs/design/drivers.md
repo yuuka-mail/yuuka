@@ -19,7 +19,8 @@ driver **一律不解析 MIME**——这是契约里最重要的一条。
 它直接实现在 [`internal/ingest`](../../internal/ingest/ingest.go)（§2.1 的 Go 侧），
 写库入口是 [`store.CommitIngest`](../../internal/store/store.go)，`source_key` 由 `store.PushSourceKey` 算出。
 接口和 `InboundRef` 仍是设计，等第二种来源（IMAP，M3.5）接入时再从现有代码里抽出来。
-IMAP 拉取的形状已定、未实现（§10.1.3）：写库入口是和 `CommitIngest` 并列的 `store.CommitPull`，不复用 `PushSourceKey`；
+IMAP 拉取的形状已定（§10.1.3），存储一步已落地：写库入口是和 `CommitIngest` 并列的 [`store.CommitPull`](../../internal/store/pull.go)，不复用 `PushSourceKey`，
+三种拉取键的写法也在那里；同步引擎还没有；
 IMAP 协议由自己写的只读客户端 `internal/imap` 说（§5）。下面的接口是目标形状，抽的时候以两个实现的实际需要为准。
 
 ```go
@@ -250,7 +251,8 @@ M3.5 还没有落地，下面是落地时的要求；一轮拉取的具体步骤
 
 #### 10.1.3 IMAP 拉取的一轮、提交顺序与不丢信
 
-> 状态：M3.5，已定，未实现。表的形状见 §4 的设计块。
+> 状态：M3.5，已定。存储一步已落地：表在 [0019](../../internal/store/migrations/0019_pull_accounts.sql)，
+> 提交、游标的 CAS、失败表、重映射和 worker 的锁在 [`internal/store/pull.go`](../../internal/store/pull.go)（取舍见 §4）；同步引擎未实现。
 
 **谁在拉**：`serve` 里一个管理协程按 `account_sources.revision` 和机密的 revision 启停每个来源的 worker，
 和渠道的管理协程（§17.5）同一个形状，定期读表，不做重载信号。一个启用、未暂停的来源一个 worker，每个账户同一时刻一条连接。

@@ -55,29 +55,6 @@ func (i Identity) Address() string {
 	return i.Prefix + "@" + i.Zone
 }
 
-// Account is a row of accounts.
-type Account struct {
-	ID   string
-	Name string
-	Kind string
-}
-
-// Accounts lists every account by name.
-func (db *DB) Accounts(ctx context.Context) ([]Account, error) {
-	rows, err := db.pool.Query(ctx, `SELECT id, name, kind FROM accounts ORDER BY name`)
-	if err != nil {
-		return nil, fmt.Errorf("list accounts: %w", err)
-	}
-	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (Account, error) {
-		var a Account
-		return a, r.Scan(&a.ID, &a.Name, &a.Kind)
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list accounts: %w", err)
-	}
-	return out, nil
-}
-
 // SplitIdentityAddress reads local@zone or *@zone the way identities
 // store it: both parts lowercased like ingest folds prefixes, so an
 // identity matches the deliveries of the same address. prefix "" is the

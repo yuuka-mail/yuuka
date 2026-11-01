@@ -136,10 +136,7 @@ func TestMigrateLeavesExtractionsPending(t *testing.T) {
 	if _, to, err := db.MigrateTo(ctx, 7); err != nil || to != 7 {
 		t.Fatalf("migrate to 7: %d, %v", to, err)
 	}
-	acct, err := db.EnsureCloudflareAccount(ctx, "cloudflare")
-	if err != nil {
-		t.Fatal(err)
-	}
+	acct := oldAccount(t, pool, "cloudflare")
 	in := record(acct, 1, sha256.Sum256([]byte("m2 content")), "a@example.com")
 	if _, err := db.CommitIngest(ctx, in); err != nil {
 		t.Fatal(err)
