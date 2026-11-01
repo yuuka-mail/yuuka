@@ -58,8 +58,7 @@
 - **没有 `zones` 表**。它的列（所属账户、是否 catch-all、是否已开通发信）在 M2 没有读者：
   identity 自带 zone 和账户，「这个域开没开通发信」是出口配置的属性。等有东西需要单独问一个域的时候再建
 - `accounts` 只有 M2 读的列，kind 只有 `cf_catchall`：M2 的所有 identity 都属于这个 Cloudflare 账户。
-  只发不收的账户（`smtp_only`）、IMAP 等拉取账户，连同 `sync_policy`、`writeback_policy`、`offload_policy`、`auth_ref`
-  这些列，随 M3.5 一起加
+  拉取账户要加的列和表在下面的设计块里，形状已定，迁移随 M3.5 的存储一步（§6）
 
 **`YUUKA_ACCOUNT` 与 `accounts`**：0005 把 M0 / M1 的 `deliveries.account_key` 换成了 `account_id`，
 每个出现过的 key（以及 `account_access` 里只出现过的 key）变成一个 `cf_catchall` 账户，`name` 就是原来的 key。
@@ -91,23 +90,74 @@ app 只有表上的增删改查和序列的 `USAGE`（经 `ALTER DEFAULT PRIVILE
 测试夹具按部署的形状给每个测试建 schema（[`storetest`](../../internal/store/storetest/storetest.go)），
 所以整个测试集都在 app 角色下跑过一遍。
 
-尚未实现的表和列（设计）：
+尚未实现的表和列（设计）。拉取账户这一块**已定，未实现**：迁移随 M3.5 的存储一步落地，那时这里换成指向迁移的链接，只留理由：
 
 ```sql
--- accounts 上还没加的列：拉取账户（M3.5）和归档卸载（§9.6）用
-accounts(auth_ref, sync_policy, writeback_policy, offload_policy, active)
-  -- kind 增加 imap | gmail_api | smtp_only
-  -- sync_policy: full(存原件) | metadata(只索引,正文按需) | notify(只通知)
-  -- offload_policy: off | after(...)，归档卸载（§9.6），仅 sync_policy=full 可开
-
--- deliveries 上还没加的列：拉取与卸载的事实（§9.6、§10.1）
-deliveries(
-  delivered_to text[],
-  remote_labels text[], remote_flags bitmask,
-  remote_state smallint,             -- present | offloaded（远端已按 §9.6 删除，本地是唯一副本）
-  offloaded_at timestamptz
+-- accounts 上加的列（M3.5）
+accounts(
+  kind              -- 加 imap。gmail_api、smtp_only 等有读者时再进 CHECK：kind 是封闭列表
+  sync_policy       -- full | metadata。metadata 随 M3.5 的最后一步（§6）；notify 和它的 notifications 表一起加
+  writeback_policy  -- 只允许 off：回写不做（§9.2），列先建好，免得以后为它改约束的语义
+  offload_policy    -- jsonb，M3.5 只允许 NULL（= off）。形状 M3.6 定，那时换约束；只能在 sync_policy=full 上开（§9.6）
+  default_read      -- 没有 account_access 行的主体能不能读这个账户（§13.8）。迁移给已有的行 true（今天的行为），
+                    --   然后去掉默认值：新账户必须说明自己的
+  disabled_at       -- 删掉的拉取账户留着行和全部投递，名字不再复用（和出口同理，§17.4）
 )
+  -- 原草图里的 auth_ref 不要了：怎么登录属于来源（account_sources），不属于账户；active 由 disabled_at 代替
+
+-- 拉取账户的来源（§9.5、§10.1.3）。一个账户一个
+account_sources(
+  account_id pk → accounts, kind (imap),
+  address,              -- 邮箱自己的地址。拉取投递的 zone / prefix 取它（§9.3），启用中的来源里唯一（大小写不敏感）
+  host, port,           -- 只做隐式 TLS，和出口一样
+  auth (plain),         -- M3.5b 加 xoauth2 和 oauth client
+  username,
+  secret_id → secrets,  -- imap_password，audience 是 imaps://<username>@<host>:<port>（§17.2）
+  preset (gmail | NULL),-- 写死在代码里的服务器差异：只同步 \All、要求 X-GM-EXT-1、日预算默认值
+  mailboxes text[],     -- NULL：默认（gmail 是 \All；其他是所有可选文件夹，去掉 \Junk、\Trash、\Drafts）
+  trusted_authserv_id,  -- §10.1.1。NULL：不采信任何一条 = 全部「未验证」
+  max_message_bytes,    -- 超过的只落头部（§4.4、§10.1.2），上限是单个对象能有多大
+  backfill_since,       -- NULL：全部（§10.1.4）
+  daily_byte_budget,    -- NULL：不限
+  poll_seconds,
+  paused_at, pause_reason (operator | auth_failed),
+  disabled_at,          -- 删来源 = 停用并抹掉机密，行留着
+  revision, created_at
+)
+
+-- 每个远端文件夹读到了哪里（§10.1.2、§10.1.3）。属于投递事实：远端当时说了什么、我们读到了哪
+source_mailboxes(
+  (account_id, name) pk,  -- name 解码成 UTF-8
+  special_use,
+  key_kind,               -- 1 定位 | 2 EMAILID | 3 X-GM-MSGID，首次同步时定下，之后不自动换（§10.1）
+  uidvalidity, high_uid, low_uid,      -- low_uid 为 NULL：回填还没开始；1：已到底
+  uidnext_seen, messages_seen,          -- 上一轮看到的，用来跳过没变的文件夹
+  rescan_uidvalidity,     -- 定位键的文件夹 UIDVALIDITY 变了、旧投递还没对完时记下旧值（§10.1.3）
+  last_round_at
+)
+
+-- 反复取不下来的信（§10.1.3）。游标只有在这里记下一行之后才越过它：从不静默
+pull_failures(
+  (account_id, mailbox, uidvalidity, uid) pk,
+  size, detail,           -- 服务器给的文字是不可信输入：当数据显示，不原样进告警和日志
+  attempts, first_at, last_at, resolved_at
+)
+
+-- deliveries 上加的列（M3.5 建；卸载的两列 M3.6 才写）
+deliveries(
+  envelope_from     -- 改为可空：拉取没有信封发件人。不写空串，因为 0001 里 '' 是 null sender（退信），
+                    --   会误导读者。约束：只有带远端定位的投递可以为 NULL
+  -- envelope_to 仍非空：拉取投递写来源的 address，意思是「投到了这个邮箱」
+  remote_state      -- 1 present | 2 gone | 3 offloaded。M3.5 只写 1；和远端定位三列同时为空或同时非空
+  offloaded_at      -- 只在 remote_state=3 时有值（§9.6）
+  remote_labels text[],  -- 拉取时 Gmail 的标签快照，投递事实，不随远端变（回写不做）
+  remote_omitted    -- 为什么只有头部：1 超过 max_message_bytes，2 正文取不下来
+)
+  -- 远端定位上加一个部分索引，供 UIDVALIDITY 重映射和每周对账用
+  -- 原草图里的 delivered_to、remote_flags 不建：没有读者。Gmail 的别名靠 Delivered-To 区分、标志的同步都是以后的事
   -- message_id 可空的另一个原因：notify 策略只留幂等桩，不建 message（§4.4、§10.1）
+
+-- secrets.kind 加 imap_password。oauth_refresh_token、oauth_client_secret 和 oauth_clients 一起随 M3.5b（§17.8）
 
 -- drafts 上还没加的列
 drafts(attachments jsonb,            -- 要先有上传存储
@@ -115,9 +165,12 @@ drafts(attachments jsonb,            -- 要先有上传存储
 
 attachments(id ulid pk, message_id, filename, mime, size, sha256, content_id, disposition, blob_key)
 notifications(id, message_id, channel, state, sent_at)
-  -- notify 策略账户（§9.2）的通知记录，随 M3.5 定；channel 届时指向 channel_bindings。
+  -- notify 策略账户（§9.2）的通知记录，随 notify 策略定；channel 届时指向 channel_bindings。
   -- 这不是「每次推送的投递记录」，那个不做（§17.10）
 ```
+
+`raw_objects` 不改：`pull/` 的 key 放进现有的 `r2_key` / `local_path`，只有头部的原件（`completeness` 为 header_only）0001 就允许；
+`received_at` 取远端的 `INTERNALDATE`。
 
 通知渠道、绑定、绑定码和订阅（§17）在 [0018](../../internal/store/migrations/0018_channels.sql)，
 读写在 [`internal/store/channels.go`](../../internal/store/channels.go)；为什么这样分表见 §17.4。
@@ -184,6 +237,15 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
   代价是同一封信被有意投递两次到同一地址时也会被合并，可以接受。
   pull 来源不这样做：远端的两份是两个对象（比如同一封信在两个文件夹里），
   各自要有自己的定位才能回写和卸载，所以各是一条 delivery，只在 `messages` 层折叠
+- **跨账户折叠的一处容差（M3.5，取决于实测）**：Cloudflare 入站在原件末尾多加一个 CRLF（§10.1.1），
+  同一封信同时投到 catch-all 地址和 Gmail，两份的 `content_hash` 必然不同——「一个收件箱里一封信就是一封信」（§9.1）
+  在最常见的跨账户场景下默认不成立。打算的做法：折叠时多试一个候选键，Cloudflare 来源的原件去掉末尾那个 CRLF 再算一次 v1，
+  拉取来源的加上它再算一次，命中任何一个就折叠；`raw_objects.content_hash` 仍存原件自己的 v1，reparse 用同一条规则，结果不变。
+  这和本节字面上的「字节不同就不合并」不一致，能接受的理由是差的只是正文末尾一个空行：
+  DKIM 的两种正文规范化都忽略它，检索文本不变，multipart 里它落在 epilogue，不会让两份不同的内容被当成一份。
+  **前提是 M3.5 第一步的字节比对证实「去掉被剔除的头之后，两份只差这一个 CRLF」**（§10.1.5）。
+  比对显示还有别的差异（Gmail 改写了别的头、换行或编码），就不做容差，退回本节的既有立场：同一封信显示两次，按 Message-ID 在同一条线程里。
+  不为它出 `contenthash` v2：v2 只对新原件生效，旧行不重算，解决不了已经入库的那一半
 - §1 沿用的 `subject + sender` 兜底线程匹配**只对 `class=human` 启用**：
   机器邮件里同一发件人的所有「Your verification code」会被它归成一条巨型线程。
   M1 只在新信是 human、自己没有 `In-Reply-To` / `References` 时才找，而且限一个时间窗口，
@@ -210,14 +272,19 @@ catch-all 意味着**任何人都能往任意前缀投递**，所以 Message-ID 
 | | 表 | reparse |
 |---|---|---|
 | **派生** | `messages`（除 id 外的列）、`threads`、`attachments`、`extractions`、`deliveries.message_id`、`deliveries.auth` | 从 `deliveries.raw_id → raw_objects`、`outbox.raw_id → raw_objects`（Sent 副本，§4.6）、`send_attempts` 记下的 id（线程）和账户配置重算 |
-| **投递事实** | `raw_objects`（含 `content_hash`、`duplicate_of`）；`deliveries` 的其余列（`source_key`、信封、远端定位、`remote_state`、`offloaded_at`、`spf_recheck`） | 不碰。它们来自 ingest 当时的 `InboundRef` 和当时的外部状态 |
+| **投递事实** | `raw_objects`（含 `content_hash`、`duplicate_of`）；`deliveries` 的其余列（`source_key`、信封、远端定位、`remote_state`、`offloaded_at`、`remote_labels`、`remote_omitted`、`spf_recheck`）；设计中的 `source_mailboxes`、`pull_failures`（远端当时说了什么、我们读到了哪里，§4） | 不碰。它们来自 ingest 当时的 `InboundRef` 和当时的外部状态 |
 | **发送事实** | `send_attempts`、`outbox_recipients`：远端当时怎么回答、什么时候；Sent 副本本身是 `raw_objects` 里的投递事实 | 不碰 |
 | **观测事实** | `triage_scores`：某个评分器在某个时刻对一封信的回答（§15.2）。和 `spf_recheck` 同理不是派生：换个模型、过一阵重评，答案就变；也不是谁的决定 | 不碰；只追加，重评写新行 |
 | **决定** | `message_state`、`message_aliases`、`prefixes`（label / note / expected_domains / state）、`rules`、`proposals`、`annotation_log`、`actions`、`drafts`、`notes`、`outbox`、`notifications` | 不碰；也不重跑规则，规则的效果是到达时做的决定（§8.5） |
-| **配置与授权** | `principals` / `credentials` / `identity_grants` / `account_access`（§13）、`accounts` / `identities` / `secrets` / `transports` / `identity_transports`（§17）；设计中的通知渠道的四张表 | 不碰 |
+| **配置与授权** | `principals` / `credentials` / `identity_grants` / `account_access`（§13）、`accounts` / `identities` / `secrets` / `transports` / `identity_transports`（§17）；通知渠道的四张表；设计中的 `account_sources` | 不碰 |
 
 派生以外的各类都**无法从原件重建**，备份要按正经数据库来（§7）。CF 来源的投递事实能从 R2 对象的
-metadata 恢复（§2.1），但外部账户的远端定位和卸载状态只在库里，同样要靠备份。
+metadata 恢复（§2.1）；拉取的原件同样自描述（`pull/` 对象的 `yuuka-pull`，§2.2），能恢复「从哪个账户、哪个文件夹、哪个定位拉来的」，
+但之后的定位改写（UIDVALIDITY 重映射）、远端消失和卸载状态只在库里，同样要靠备份。
+
+`deliveries.auth` 从原件和**这条投递所属账户**的可信接收方重算（§10.1.1）：Cloudflare 账户取主机配置，拉取账户取 `account_sources.trusted_authserv_id`。
+reparse 和 ingest 用同一条规则，不能用进程里的一个值去读所有账户的信——那会让 Gmail 的投递全变成「未验证」。
+可信接收方是配置，改了它只影响之后入库的信；已有投递要 `yuuka reparse` 才按新值重算，这正是 `auth` 归为派生的意思。
 
 判断一列是派生还是事实，标准是**同样的输入、任何时候重算都得到同样的结果**。
 只读原件和本地配置的计算是派生；查了外部状态的不是——二次 SPF 查的是当时的 DNS，
@@ -315,6 +382,10 @@ UI 上就是线程里并列的两条，其中一条标「正文未同步」。
 写一份新的 `raw_objects`（`completeness=full`），把 `deliveries.raw_id` 指过去，
 再对这条投递跑 reparse——新原件 ingest 时算出了 `content_hash`，这条投递可以正常折叠。
 旧的 header_only 原件保留（原件不可变），只是不再被引用。
+
+`full` 账户也会有只有头部的投递：拉取时大小超过来源的 `max_message_bytes` 的信只取头部（§10.1.2）。
+它们照上面的规则建消息，`deliveries.remote_omitted` 记下为什么只有头部，
+界面标「原件过大未取」。这一类以后可以按同一条「补全」路径重拉，不需要账户改策略。
 
 `notify` 策略的账户不走这里：它不建 `messages`，只有 `deliveries` 的幂等桩和 `notifications`。
 
@@ -507,8 +578,13 @@ Sent 副本**不是投递**：`deliveries` 记的是「一封信到了某个账�
 发出的信没有投递，账户只能从 identity 来；identity 必须属于一个账户（`identities.account_id` 非空）就是为了这条。
 规则只在 [`read.go`](../../internal/store/read.go) 的 `visibleMessage` 一处算。M2 不按 `account_access` 过滤（随 M3.5），
 所有主体都看得见全部；但测试已经打开过滤、用受限主体跑每条读路径（§13.8）。
-两件事随 M3.5 一起定、现在不定（§13.8）：草稿和 outbox 的变更事件按什么规则对谁可见；
-agent 没有某账户的 `account_access` 时，能不能看到它自己经该账户的身份发出的信。
+草稿和 outbox 的变更事件随 M3 的游标拉取定下了（§13.8）。agent 读不了某个账户时，
+也看不到它自己经该账户的身份发出的信：规则只按账户算、只有一处，为「自己发的」开一个例外，就多一条要进 ACL 表的读路径；
+agent 要看，就给它读那个账户（M3.5 定，§13.8）。
+
+拉取账户的「已发送」文件夹（Gmail 是带 `\Sent` 标签的信）照常入库为投递：经别的客户端发出的信只有这样才进得来。
+经 Gmail 的 SMTP 出口发出、又从 All Mail 拉回来的那份，多半和我们的 Sent 副本折叠成一条——Gmail 加的头大多在 v1 的剔除列表里，
+这一点待实测（§10.1.5）。这类投递从不推送（§10.1.4）。
 
 **建 message 的入口**是 [`ingest.IndexSent`](../../internal/ingest/content.go)：outbox 的入队方在建 outbox 行的事务提交之后调用它，
 解析 Sent 副本、按 `content_hash` 折叠、放进线程，和收信同一把锁、同一套写法，只是没有投递、前缀和认证结果——

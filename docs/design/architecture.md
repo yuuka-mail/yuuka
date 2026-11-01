@@ -180,6 +180,7 @@ sequenceDiagram
 |---|---|---|---|---|
 | raw | `raw/YYYY/MM/<id>.eml` | 收到的原始 MIME 字节，写一次永不改 | 写（只在不存在时写） | 读、列 |
 | raw | `sent/YYYY/MM/<id>.eml` | yuuka 为外发组装或规范化的原始 MIME 字节（Sent 副本，§3.6、§4.6），写一次永不改 | 不碰 | 读、列、写（只在不存在时写） |
+| raw | `pull/YYYY/MM/<id>.eml` | 从外部邮箱拉下来的原始 MIME 字节（§10.1.3），写一次永不改（M3.5） | 不碰 | 读、列、写（只在不存在时写） |
 | pending | `pending/<id>` | 投递标记 | 写 | 读、列、删 |
 
 `raw/` 的 `YYYY/MM` 取 `received_at` 的 UTC 年月。`sent/` 不属于 Worker 的契约，列在这里是因为它和 `raw/` 共用一个 bucket、
@@ -187,6 +188,9 @@ sequenceDiagram
 Worker 不读、不写、不列 `sent/`，它的行为和 `testdata/contract/v1/` 的向量都不因 `sent/` 改变。
 `sent/` 里的字节在越过发送的提交点之前就写下（§4.5），所以它收的是每一份为外发准备的字节，
 包括停在草稿的 SMTP 提交和最终撤回、作废、从未发出的信：**发没发出看 outbox 的状态，不看前缀**（§4.6）。
+`pull/` 同理不属于 Worker 的契约：`<id>` 也是 Go 生成的 ULID，`YYYY/MM` 取写入时刻的 UTC 年月，
+不取远端报来的 `INTERNALDATE`——那是远端说的，可以是任何值，拿它分目录会让一个 key 的位置由外部输入决定。
+key 函数是 [`r2.PullKey`](../../internal/r2/pull.go)。Worker、`testdata/contract/v1/` 的向量都不因它改变。
 
 分成两个 bucket，是因为 R2 令牌的权限粒度到 bucket 为止，前缀管不住。Go 要例行删除标记，
 pending 单独一个 bucket，删除就用一把碰不到原件的凭据，删错 key 也删不到原件。
@@ -196,12 +200,15 @@ key 仍保留 `raw/`、`pending/` 前缀，文档、日志里的引用不用改�
 少一把令牌，收发两类原件在同一处归档、用同一套保管方式。代价是 Go 侧的 raw 令牌必须是 Object Read & Write，
 「`raw/` 不可变」不再由权限保证，改由下面几条保证：
 
-- 读写 raw bucket 的类型 [`r2.RawBucket`](../../internal/r2/r2.go) 没有删除方法，唯一的写方法 `PutSent` 先用 `r2.CheckSentKey`
-  核对整个 key 的形状（`sent/` + 四位年 + 两位月 + ULID + `.eml`），不符就在发请求之前拒绝，`raw/` 下的 key 永远到不了 R2
+- 读写 raw bucket 的类型 [`r2.RawBucket`](../../internal/r2/r2.go) 没有删除方法，只有两个写方法：`PutSent` 和
+  [`PutPull`](../../internal/r2/pull.go)（拉取的原件，见下文）。它们先用 `r2.CheckSentKey` / `r2.CheckPullKey`
+  核对整个 key 的形状（前缀 + 四位年 + 两位月 + ULID + `.eml`），不符就在发请求之前拒绝。
+  两者最后都经 bucket 唯一的一次 PutObject（`RawBucket.create`），它再核对一遍 key 是 `sent/` 或 `pull/` 的形状：
+  以后再加一个写方法，忘了自己的检查也到不了 `raw/`。方法集由测试钉住
 - 每次写都带 `If-None-Match: *`。R2 的 S3 API 把条件头和写入放在同一步原子判定，并发写同一 key 至多一个成功，
   其余得到 `412 PreconditionFailed`（[R2 S3 API 兼容性：Conditional operations](https://developers.cloudflare.com/r2/api/s3/api/)）。
   所以哪怕代码拼错了 key、撞上一个已存在的对象，也只会失败，覆盖不了。412 映射为 `r2.ErrExists`：
-  一次重试的前一次可能已经写成，调用方读回已存对象、比对 sha256 和长度，相同即视为成功，不同就是程序错误
+  一次重试的前一次可能已经写成，调用方读回已存对象、比对 sha256 和长度，相同即视为成功，不同就是程序错误。`PutPull` 在自己里面做这一步，连 metadata 一起比：metadata 的编码是 `r2` 包自己的，调用方没有什么可补充的
 - 不先查再写：check-then-put 有竞争窗口，条件写是唯一的写法
 
 放弃的是对**凭据泄露**的防护：拿到这把令牌的人可以无条件覆盖或删除 `raw/` 下的原件，条件头只约束守规矩的客户端。
@@ -210,9 +217,28 @@ key 仍保留 `raw/`、`pending/` 前缀，文档、日志里的引用不用改�
 Object 级令牌不含这项权限（[Bucket locks](https://developers.cloudflare.com/r2/buckets/bucket-locks/)，未实测）。
 代价是锁住的对象在保留期内谁也删不掉，所以目前没有作为部署要求。
 
-**什么时候回头把 `sent/` 挪到自己的 bucket**：Go 进程跑在不那么可信的环境里、raw 令牌需要分发给更多进程，
-或者出现了任何一次 `sent/` 之外的写入——那就说明代码这道闸不够，应当回到「Go 对原件只读」由权限保证。
-迁移只是复制对象、加一组配置：`sent/` 前缀原样保留，key 不变。
+**什么时候回头把 `sent/`、`pull/` 挪到自己的 bucket**：Go 进程跑在不那么可信的环境里、raw 令牌需要分发给更多进程，
+或者出现了任何一次 `sent/`、`pull/` 之外的写入——那就说明代码这道闸不够，应当回到「Go 对原件只读」由权限保证。
+迁移只是复制对象、加一组配置：两个前缀原样保留，key 不变。
+
+#### 拉取的原件：`pull/`（M3.5）
+
+> 状态：key、条件写和 metadata 已实现（[`internal/r2/pull.go`](../../internal/r2/pull.go)）；拉取本身还没有调用它（§10.1.3）。
+
+从外部邮箱拉下来的原件放进 raw bucket 的 `pull/` 前缀，由 Go 写、条件写，和 `sent/` 一样。
+这放宽了原来的「Go 对 raw bucket 只写 `sent/`」，考虑过的另一种做法是给它单开一个 bucket 和一把令牌：
+
+- **选 raw bucket**：拉取的原件和收到的原件是同一类东西——别人写的信、yuuka 的权威存储——同一处保管、同一套备份和保留规则。
+  凭据泄露时能碰到的范围不变：Go 侧的 raw 令牌今天就已经能写整个 bucket，多守一个前缀只多一道代码闸
+- **放弃的**：单开 bucket 能让「拉取的代码写错 key」和「`raw/` 被覆盖」在权限上隔开，代价是主机上多一把凭据、
+  多一组部署配置；而条件写本来就让写错 key 只会失败、覆盖不了（上文）。回头条件见上一段
+
+每个 `pull/` 对象带一个 custom metadata `yuuka-pull`，描述这份原件的来历（账户、`source_key`、远端定位、远端的 `INTERNALDATE`），
+编码和 `yuuka-marker` 同一个办法、同一个理由（带版本的 JSON 再 base64url，纯 ASCII）。格式以 [`r2.PullMeta`](../../internal/r2/pull.go) 为准。
+它连同 key 限在 2 KiB 以内，这是 S3 的上限、远低于 R2 的 8 KiB，原件因此能搬到任何 S3 存储；超了就拒绝写，**从不截断**——
+截断的描述就是错的描述。拉取时编码失败算这一封的失败，按 §10.1.3 进失败表，不会写出一个说不清来历的对象。
+M3.5 自己用不上它：远端仍保有原件，库丢了可以重拉。它是为 M3.6 写的——卸载之后 R2 是唯一副本，
+那时库丢了，只能靠原件自描述恢复投递事实（§9.6、§4.2）。从第一封就写，免得卸载开启时还有一批说不清来历的对象。
 
 #### 投递标记
 
@@ -423,11 +449,11 @@ Worker 运行在 Workers Paid 上（Email Sending 本来就要求它，§7）：
 |---|---|---|
 | MIME 解析 | `github.com/emersion/go-message` (+ `mail`) | 编码/多部分/inline 处理成熟；`enmime` 作为宽容兜底备选 |
 | 发信 | 标准库组装（§10.2.1）+ `net/smtp` over TLS 465 | **MIME 自己组装，transport 只投递字节**；一个 smtp driver 覆盖 CF/Resend/SES/Gmail/工作邮箱，差别只是配置（§10.2）。不引第三方 SDK |
-| SMTP submission 口（服务端，§13.6） | `github.com/emersion/go-smtp` 的 server 侧（带进 `github.com/emersion/go-sasl`） | 和已在用的 `go-message`、以后的 `go-imap` 同一作者同一生态，维护多年，除 `go-sasl` 外没有依赖。自己写要处理 ESMTP 扩展、`DATA` 的点转义、`BDAT`、管线化和 SASL，全是协议细节而不是 yuuka 的逻辑。它不能关掉 `8BITMIME`、`CHUNKING` 的宣告，这对 yuuka 无害（§13.6）。只用协议部分：监听、TLS、PROXY protocol 由 `internal/mailnet` 做，认证、限速、审计在 yuuka 这边 |
+| SMTP submission 口（服务端，§13.6） | `github.com/emersion/go-smtp` 的 server 侧（带进 `github.com/emersion/go-sasl`） | 和已在用的 `go-message` 同一作者同一生态，维护多年，除 `go-sasl` 外没有依赖。自己写要处理 ESMTP 扩展、`DATA` 的点转义、`BDAT`、管线化和 SASL，全是协议细节而不是 yuuka 的逻辑。它不能关掉 `8BITMIME`、`CHUNKING` 的宣告，这对 yuuka 无害（§13.6）。只用协议部分：监听、TLS、PROXY protocol 由 `internal/mailnet` 做，认证、限速、审计在 yuuka 这边 |
 | PROXY protocol 解析（§13.6） | `github.com/pires/go-proxyproto` | 只依赖 `x/net`。起初自己写，换掉是因为它带着被广泛部署才学到的边角：客户端证书 TLV 的长度余量、LOCAL 下的非法 family、修过的远程 panic。只用 `Read` 解析一个头；监听、超时、只收 TCP 来源这些策略在 `internal/mailnet` |
 | Markdown 渲染（发信正文，§10.2.1） | `github.com/yuin/goldmark` | Go 生态的事实标准，CommonMark 合规，无传递依赖。用它的渲染钩子把样式内联进 HTML，不另引 CSS inliner |
-| **拉取**外部邮箱 | `go-imap/v2` client + IDLE，PLAIN 或 OAuth2(XOAUTH2) | M365 已关基础认证，必须 OAuth。Gmail 个人账户开两步验证后**仍可用 app password**，而 OAuth 同意屏在 Testing 模式下 refresh token 7 天过期、转正式又要应用审核——个人项目 Gmail 默认走 app password，OAuth 留给 M365。Gmail 以后可升级到 Gmail API（`history.list` 增量 + Pub/Sub push），增量比 IMAP 可靠 |
-| 以后要真 IMAP（服务端） | `github.com/emersion/go-imap/v2` 的 server 侧 | **因为后端常驻，IMAP 永远是可加的一层，不依赖 CF 的私测功能** |
+| **拉取**外部邮箱（M3.5，已定，未实现） | 自己写的只读最小 IMAP 客户端 `internal/imap`；`go-imap/v2` 的 `imapserver` 只在测试里当对手 | 起初选的是 `go-imap/v2` client。换掉，因为它拿不到我们必需的那部分：`FetchOptions` 是固定字段的结构体，没有发任意 fetch 项的口子，响应里出现不认识的项整条 `FETCH` 失败，所以 Gmail 的 `X-GM-MSGID` / `X-GM-LABELS` 和 OBJECTID 的 `EMAILID` 都取不到；上游明确把 Gmail 扩展划在范围外，加 `X-GM-LABELS` 的 PR 被关掉（2026-06）。没有稳定 id，Gmail 只能用定位做 `source_key`（单向门，§10.1），UIDVALIDITY 一变就要全量重下，M3.6 卸载也做不了按 id 核对。依赖三问里第三问本来分量最重，这次的事实是成熟实现拒绝了我们要的那一块；而要的是一个只读、不解析 MIME 的子集（词法、literal、`CAPABILITY` / `ID` / `LOGIN` / `AUTHENTICATE`、`LIST` / `STATUS` / `EXAMINE`、`UID SEARCH`、任意项的 `UID FETCH`、modified UTF-7），比当初选 go-smtp 的服务端协议面窄得多，估计一两千行加测试。补偿手撞怪癖的办法：词法器做 fuzz，`imapserver`（同一作者）作测试依赖进 `go.mod`、不进二进制，再加一份脱敏的真实服务器会话录音做 golden。`go-sasl` 没有 `XOAUTH2`，M3.5b 自己写，二十行。先轮询，IDLE 以后再加。认证：M3.5 只做密码（Gmail 个人账户开两步验证后用 app password；它是否仍对个人账户开放待实测，§10.1.5）；OAuth 同意屏在 Testing 模式下 refresh token 7 天过期、转正式又要应用审核，个人项目的 Gmail 默认走 app password，OAuth 和 M365 留给 M3.5b（§17.8）。Gmail 以后可升级到 Gmail API（`history.list` 增量 + Pub/Sub push），`source_key` 已按它对齐（§10.1） |
+| 以后要真 IMAP（服务端，M5） | `github.com/emersion/go-imap/v2` 的 server 侧（候选） | **因为后端常驻，IMAP 永远是可加的一层，不依赖 CF 的私测功能**。拉取不用它的 client 侧（上一行），不影响这个选择：网关是服务端，Gmail 扩展的问题不存在 |
 | JMAP | 自己实现子集 | 见下 |
 | HTTP | 标准库 `net/http` 的 `ServeMux` | Go 1.22 起自带方法与路径参数匹配，不需要路由库，也不需要框架 |
 | API 契约（§5.1） | OpenAPI 3.1，从 Go 类型生成；schema 推导用 `github.com/google/jsonschema-go` | MCP 的工具 schema 本来就由它从 Go struct 推出（官方 MCP SDK 的依赖，同由 Go 团队维护），REST 用同一个库、同一批类型，两边不会对不上 |

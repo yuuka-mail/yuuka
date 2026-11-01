@@ -19,6 +19,8 @@ driver **一律不解析 MIME**——这是契约里最重要的一条。
 它直接实现在 [`internal/ingest`](../../internal/ingest/ingest.go)（§2.1 的 Go 侧），
 写库入口是 [`store.CommitIngest`](../../internal/store/store.go)，`source_key` 由 `store.PushSourceKey` 算出。
 接口和 `InboundRef` 仍是设计，等第二种来源（IMAP，M3.5）接入时再从现有代码里抽出来。
+IMAP 拉取的形状已定、未实现（§10.1.3）：写库入口是和 `CommitIngest` 并列的 `store.CommitPull`，不复用 `PushSourceKey`；
+IMAP 协议由自己写的只读客户端 `internal/imap` 说（§5）。下面的接口是目标形状，抽的时候以两个实现的实际需要为准。
 
 ```go
 // 所有 driver 的唯一产出：原件引用 + 稳定标识 + 远端定位 + 来源
@@ -94,12 +96,22 @@ type Expunger interface {
 - **幂等**：`unique(account_id, source_key)` 在 `deliveries` 上（§4），driver 不需要自己记"处理过没有"。
   `SourceKey` 的取值按来源能给出的最稳定的东西：
 
-  | 来源 | `SourceKey` | 跨文件夹移动 | 跨 UIDVALIDITY 重置 |
+  | 来源（文件夹的键类型） | `SourceKey` | 跨文件夹移动 | 跨 UIDVALIDITY 重置 |
   |---|---|---|---|
-  | Gmail（IMAP 或 API） | `X-GM-MSGID`〔待核实：与 Gmail API 的 message id 是否为同一个 64 位数，是则统一存一种写法，换 driver 不用迁移〕 | 稳定 | 稳定 |
-  | 支持 OBJECTID（RFC 8474）的 IMAP | `EMAILID` | 稳定 | 稳定 |
-  | 其他 IMAP | 定位本身：`<mailbox>/<uidvalidity>/<uid>` | 变 | 变（见下） |
+  | Gmail（服务器宣告 `X-GM-EXT-1`，预设 `gmail`） | `gm:<X-GM-MSGID 的 16 位小写十六进制>` | 稳定 | 稳定 |
+  | 宣告 OBJECTID（RFC 8474）的 IMAP | `oid:<EMAILID>` | 稳定 | 稳定 |
+  | 其他 IMAP | `loc:<uidvalidity>:<uid>:<mailbox>` | 变 | 变（§10.1.3） |
   | push 来源（Worker 等） | `content_hash` + `envelope_to`（`store.PushSourceKey`），ingest 算完 `content_hash` 后填 | — | — |
+
+  拉取来源的三种格式 M3.5 已定，**是单向门**：`(account_id, source_key)` 是幂等键，一个账户入库之后键的写法就不能改，
+  改了整个账户会以新键重新入库一遍。几处取舍：
+  - 键带种类前缀，同一账户里不同来源、不同种类的键不会撞
+  - `loc:` 把 mailbox 放在最后：文件夹名里可以有任何分隔符，放最后就不必转义，前两段是数字，切分没有歧义
+  - **键类型按文件夹在首次同步时固定**（记在 `source_mailboxes.key_kind`，§4）。服务器哪天开了 OBJECTID，
+    不自动从 `loc:` 换成 `oid:`，否则整个文件夹会以新键再入库一遍：投递重复（内容层仍折叠），定位也乱了。
+    要换就走一次显式的重扫，以后再做
+  - Gmail 用十六进制而不是十进制，是因为 Gmail API 的 message id **据说**就是 `X-GM-MSGID` 的十六进制（待实测，§10.1.5）。
+    是的话，以后同一个账户换成 Gmail API driver 时键直接接上；不是也只是那时多一次映射，键的写法不受影响
 
   push 来源用内容而不是 Worker 的调用 id，是因为调用 id 每次重投都会变：用它做键，重投去重就只能先查后插。
   用收件地址加内容哈希做键，重投直接撞上唯一约束（§4.1）。调用 id 仍然是 `raw_objects.id`。
@@ -115,9 +127,15 @@ type Expunger interface {
 - **定位失效时**：有稳定 id 的来源按 id 找回当前 UID（Gmail 是 `UID SEARCH X-GM-MSGID <id>`，
   OBJECTID 是 `UID SEARCH EMAILID <id>`），只改写定位，`source_key` 不变。
   其他 IMAP 只能在 UIDVALIDITY 变化后全量重扫该文件夹，按 raw sha256 对上同一账户同一文件夹里已有的
-  delivery，**原地改写**它的定位和 `source_key`，而不是插入新行。
+  delivery，**原地改写**它的定位和 `source_key`，而不是插入新行（步骤见 §10.1.3）。
 - **Gmail 走 IMAP 时只同步 All Mail**：按 SPECIAL-USE 的 `\All`（RFC 6154）找，不写死 `[Gmail]/All Mail`——
-  文件夹名随界面语言变。label 用 `X-GM-LABELS` 取。否则同一封信在 INBOX 和 All Mail 里各算一次投递。
+  文件夹名随界面语言变。label 用 `X-GM-LABELS` 取，存进 `deliveries.remote_labels`（拉取时的快照）。否则同一封信在 INBOX 和 All Mail 里各算一次投递。
+  All Mail 不含 Spam 和 Trash、含不含草稿，都待实测（§10.1.5）。其他服务器默认同步所有可选的文件夹，去掉 `\Junk`、`\Trash`、`\Drafts`，可按来源配置
+- **Gmail 的 `\Sent` 照常入库、从不推送**。经 `smtp.gmail.com` 或别的客户端发出的信都会出现在 All Mail 里：它是这个邮箱里的事实，
+  在别的客户端里发的信也只有这样才进得来。经我们自己的出口发出的那份多半和 Sent 副本折叠（§4.6）。推送一律不发：那是自己写的信
+- **带 `\Draft` 标志的信不入库，只计数**，计数写进同步状态，`account ls` 和界面看得见。这是整个系统里**唯一看到了但不收的信**。
+  理由：草稿每保存一次，服务器上就是一封新信、一个新 UID，入库就是一串互相折叠不了的半成品版本，没有一份是发生过的通信；
+  真发出去的那份会带着 `\Sent` 回来。代价是 yuuka 里看不到在别的客户端里写了一半的信，那本来就不是收件箱该管的
 - **`metadata` / `notify` 策略不是"拉下来再丢"**：
   - `metadata`：driver 用 `BODY.PEEK[HEADER]` 只拉头部，`Completeness=HeaderOnly`，
     头部照常落 RawStore，解析器据此只建头部索引；点开时走 `FetchBody` 实时取（§4.4）
@@ -131,8 +149,15 @@ type Expunger interface {
 **发件人可以在信里预先写好任意一份**。catch-all 下这不是理论风险。所以认证事实不由 driver 上报，
 而由 Go 侧 ingest 按账户配置的可信接收方提取（实现见 [`internal/authres`](../../internal/authres/authres.go)）：
 
-- 每个账户配 `trusted_authserv_id`（Cloudflare Email Routing 的、`mx.google.com`、工作邮箱服务器的），
-  外部账户的取值是 M3.5 接入时的实测项
+- 每个账户配 `trusted_authserv_id`（Cloudflare Email Routing 的、Gmail 的、工作邮箱服务器的）。
+  Cloudflare 账户的那一个留在主机配置（§17.8）；拉取账户的在 `account_sources` 上，**默认为空，空就是不采信任何一条**，
+  所有信「未验证」。Gmail 预设建议填 `mx.google.com`，但它是不是 Gmail 交出来的原件里**最上面一条** `Authentication-Results`
+  的 authserv-id 待实测（§10.1.5），测了再写进预设；工作邮箱逐个实测，测不出来就留空。预设只是 `account add` 时填的默认值，
+  库里存的是值本身
+- **按投递所属的账户取**：内容步骤（折叠）和 reparse 都用这条投递的账户的值。今天它是一个进程级的值（`ingest.Config`），
+  拉取账户接入时改成按账户取，否则 reparse 会拿 Cloudflare 的 authserv-id 去读 Gmail 的信，结论全是「未验证」（§4.2）。
+  改它只对之后入库的信生效，已有投递要 reparse；改它算放宽（§13.10），包括清空——清空让所有信「未验证」，看似收紧，
+  却会让可信接收方报了 `dmarc=fail` 的信不再降级
 - 只采信**最上面一条**、且 authserv-id 匹配的 `Authentication-Results`；其余一律忽略
 - 可见 `From` 是不是真的，只看这条可信 `Authentication-Results` 里的 **dmarc**（§3.3）。
   spf、dkim 的结果作为辅助证据一并记下，但 SPF 验证的是信封 `MAIL FROM` 域或 HELO，不是信头 `From`
@@ -146,8 +171,8 @@ type Expunger interface {
 - `X-CF-SpamH-Score` 只从原件最顶上那一段接收方字段里取（`Received` 只算第一条，
   其余是 `ARC-*`、`Received-SPF`、`Authentication-Results`、它自己）；同名字段出现在更下面就是发件人写的，忽略。
   Cloudflare 没加而发件人恰好把它写在自己头部第一行时分辨不出，它只是信号、不单独决定任何事，可以接受
-- M1 还没有 `accounts` 表，`trusted_authserv_id` 暂时是进程配置（见 [`cmd/yuuka/config.go`](../../cmd/yuuka/config.go)，
-  默认是下文实测的 Cloudflare 取值），一个进程对应一个账户。`spf_recheck` 在 M1 恒为空，二次 SPF 判定还没接
+- Cloudflare 账户的 `trusted_authserv_id` 是进程配置（见 [`cmd/yuuka/config.go`](../../cmd/yuuka/config.go)，
+  默认是下文实测的 Cloudflare 取值），一个进程对应一个 Cloudflare 账户。`spf_recheck` 仍恒为空，二次 SPF 判定还没接
 
 这些都是头部解析，在 Go 侧做，不违反「driver 不解析 MIME」。
 
@@ -166,7 +191,7 @@ type Expunger interface {
 标记里的 `raw_size` 等于对象长度，说明 Worker 读到的 `message.raw` 里就已经有它，是 Cloudflare 入站一侧加的；
 Worker 原样写入，不去掉——`raw/` 的含义是「Cloudflare 交给 Worker 的字节」。它不影响 DKIM
 （两种正文规范化都忽略末尾空行）、检索文本和 multipart（落在 epilogue）；会让同一封信经不同路径进来时
-`content_hash` 不同，按 §4.1「宁可重复显示、不可误合」接受。
+`content_hash` 不同。M3.5 打算在折叠时容忍这一个 CRLF，前提是字节比对证实它是唯一的差异，否则按 §4.1「宁可重复显示、不可误合」接受（§4.1）。
 
 所以 Cloudflare 账户的配置是：`trusted_authserv_id = mx.cloudflare.net`，
 可信 `Received` 的 `by` 是 `cloudflare-email.net`（两者不是同一个名字）。
@@ -175,7 +200,7 @@ Worker 原样写入，不去掉——`raw/` 的含义是「Cloudflare 交给 Wor
 
 #### 10.1.2 IMAP 拉取：服务器说的话不能全信
 
-M3.5 还没有落地，下面是落地时的要求。来源是其他 IMAP 客户端在真实服务器上踩过的坑
+M3.5 还没有落地，下面是落地时的要求；一轮拉取的具体步骤和提交顺序见 §10.1.3。来源是其他 IMAP 客户端在真实服务器上踩过的坑
 （主要是 gofer 的同步引擎，§1.2），按本项目的不变量改过：gofer 是缓存，可以清掉重拉；
 我们是权威存储，远端的任何异常都只能改投递的定位和状态，不能删内容。
 
@@ -216,12 +241,135 @@ M3.5 还没有落地，下面是落地时的要求。来源是其他 IMAP 客户
 - 每批取几百封，下载下一批和写入上一批流水线重叠
 - `Retry-After` 秒数和 HTTP 日期两种写法都要解析，并设上限
 - Gmail 对 IMAP 有每账户的连接数和每日下载量上限，大邮箱的首次全量拉取会撞上。撞上就停，第二天从游标续跑，
-  而不是报错重试
+  而不是报错重试。具体数字（印象是 15 条连接、每天 2500 MB）和撞限时的回应形状都待实测（§10.1.5）
 - 落地前先写一个 10^5 封量级的大邮箱基准（首次同步和空轮询各一个），把轮次耗时和内存定下来
 
 **以后接 Gmail API driver 时**：每个邮箱一个令牌桶，目标留在官方配额的八成左右，给交互请求留余量，
 429 时速率减半再慢慢恢复；`history.list` 的 `historyId` 过期（404）时从当前 `historyId` 重新开始，
 并按标签补拉最近几页，补漏靠幂等键兜底。
+
+#### 10.1.3 IMAP 拉取的一轮、提交顺序与不丢信
+
+> 状态：M3.5，已定，未实现。表的形状见 §4 的设计块。
+
+**谁在拉**：`serve` 里一个管理协程按 `account_sources.revision` 和机密的 revision 启停每个来源的 worker，
+和渠道的管理协程（§17.5）同一个形状，定期读表，不做重载信号。一个启用、未暂停的来源一个 worker，每个账户同一时刻一条连接。
+跑多个 `serve` 时，worker 先拿这个账户的会话级 advisory lock（`pg_try_advisory_lock`，键由账户 id 派生，进锁顺序的测试），
+拿不到就这一轮不干。没有 KEK、来源的机密解不开时 worker 不启动，Cloudflare 收信不受影响（§17.3）：远端还保有信，这是延迟，不是丢信。
+
+**一轮**（单个账户）：
+
+1. 连接（只做隐式 TLS）、`CAPABILITY`、`ID`、登录。`ID` 是不是 Gmail 必需的待实测（§10.1.5），发了无害
+2. `LIST`：有 `LIST-STATUS` 就带上 `UIDVALIDITY UIDNEXT MESSAGES`，有 `SPECIAL-USE` 就带上它。要同步哪些文件夹见 §10.1
+3. 和上一轮看到的 `UIDVALIDITY / UIDNEXT / MESSAGES` 一样的文件夹跳过（§10.1.2 第一级）
+4. `EXAMINE`。UIDVALIDITY 变了走下文的重映射
+5. **追新**：`UID FETCH <high+1>:<本轮开头的 UIDNEXT - 1> (UID RFC822.SIZE INTERNALDATE FLAGS [X-GM-MSGID X-GM-LABELS | EMAILID])`。
+   先为每封算出 `source_key`，**一条查询筛掉库里已有的**，只对剩下的取 `BODY.PEEK[]`
+6. 大小超过 `max_message_bytes` 的改取 `BODY.PEEK[HEADER]`，按只有头部入库，标 `remote_omitted`（§4.4）。
+   literal 的长度在读之前检查，超了就断开，不读进内存：任何时刻内存里至多一封 `max_message_bytes` 的信
+7. 每封按下面的顺序落盘、提交。一批（默认 100 封或 20 MiB）都提交之后，在事务外用 CAS 推进游标：
+   只在 `uidvalidity` 仍是读的那个、且新值更大时写
+8. **回填**：`low` 往下，`UID FETCH <low-N>:<low-1>`，从新到旧；和追新交替，追新优先（§10.1.4）
+9. `LOGOUT`，按 `poll_seconds` 等下一轮。先轮询（默认 60 秒一次 `STATUS` 级别的检查，几乎不花钱），IDLE 等轮询跑稳再加：
+   它要每个邮箱常驻一条连接、处理服务器踢线，换来的是验证码早到不到一分钟
+
+**落盘与提交**，顺序和 Sent 副本（[`outbox.StoreSent`](../../internal/outbox/outbox.go)）相同，再多一个事务：
+
+1. `raw_id` 是新的 ULID，key 是 `pull/YYYY/MM/<raw_id>.eml`（§2.2）
+2. 先写本地副本（原子、不可覆盖），再写 R2（[`RawBucket.PutPull`](../../internal/r2/pull.go)）：条件写，412 时它自己读回比对字节和 metadata，
+   相同即成功；对象带 `yuuka-pull`（§2.2）。metadata 编码失败（字段非 UTF-8、超过上限）算这一封取不下来，按下文进 `pull_failures`
+3. 一个事务 `store.CommitPull`：`raw_objects`（`received_at` 取 `INTERNALDATE`）加 `deliveries`，
+   投递按 `(account_id, source_key)` 插入，撞了就和 push 一样只记 `duplicate_of`、不建第二条
+4. 提交之后跑内容步骤（解析、折叠、线程、规则），可信接收方取这个账户的（§10.1.1）；推送按 §10.1.4
+5. 游标按上面第 7 步推进
+
+**§3.5 对拉取的含义**：在卸载之前远端一直保有原件，所以「不丢」就是**游标永远不越过一封没提交的信**：
+
+| 崩溃在 | 结果 |
+|---|---|
+| 写本地或 R2 之前 | 游标没动，下一轮重拉 |
+| R2 写完、事务之前 | 留下一个没有行的 `pull/` 对象，无害；下一轮重拉，新 id、新对象 |
+| 事务之后、游标之前 | 下一轮追新时按 `source_key` 的筛选直接跳过它；并发时也只是撞唯一约束 |
+| 内容步骤失败 | 投递已提交，由现有的补跑（`ProcessBacklog`）收拾，和 push 相同 |
+
+**一直取不下来的信**（服务器对它回 `NO`、literal 截断、`yuuka-pull` 编码不出来）：同一封连续失败若干次（默认 5）后写一行 `pull_failures`，游标越过它；
+`account ls` 和界面显示失败计数，`account sync --retry-failed` 重试。不越过，整个文件夹永远卡在这一封；
+越过而不留记录，就是静默丢信。记下来越过，两害取其轻，而且看得见。
+
+**拉取这边的 reconcile**：
+
+- 每轮的追新加回填本身就是对账：缺口按游标补，幂等键兜底
+- 每周一次全量对账，和 Cloudflare 一侧的全量扫描（[`FullScan`](../../internal/ingest/reconcile.go)，§2.1 对账表的最后一行）同一个节奏：每个文件夹 `UID SEARCH ALL`
+  （结果数和 `EXISTS` 对不上就退回 `UID FETCH 1:* (UID)`，§10.1.2），`high` 以下、库里没有对应投递、也不在 `pull_failures` 里的 UID 重新拉。
+  防的是 `UIDNEXT` 报小、服务器瞬时少给这一类让游标越过了信的情况
+- `pull/` 下没有行的对象只计数报告，不删：`RawBucket` 没有删除方法，也不该有（§2.2）
+
+**UIDVALIDITY 变了**：
+
+- **Gmail、OBJECTID**：键不变。对整个文件夹取 `UID FETCH 1:* (UID X-GM-MSGID)`（或 `EMAILID`），按键原地改写已有投递的定位（§10.1「只改写定位」），
+  没见过的照常入库。不下载正文
+- **其他服务器**：只能全量重扫。逐封下载、算 sha256，对上「同一账户、同一文件夹、旧 UIDVALIDITY」下的投递，就**原地改写它的定位和 `source_key`**，
+  下载的字节丢掉，不存第二份原件；对不上的按新信入库。整个文件夹要重下一遍，按日预算慢慢跑；跑完之前追新照常，
+  新 UID 用新 UIDVALIDITY 的 `loc:` 键，`source_mailboxes.rescan_uidvalidity` 记着还有旧投递没对完。
+  这里假设服务器两次交出同样的字节，待实测：有的服务器会重新生成头部，对不上的结果是重复投递（内容层仍可能折叠），不是丢信
+- 改写定位和 `source_key` 是在改投递事实，所以只在这一条路径里做，在同一个事务里带着旧值做 CAS
+
+**限速与失败**：
+
+- 每个账户一条连接；同一个主机上的所有账户共用一个并发上限（默认 2）
+- 日字节预算：Gmail 预设默认 2 GiB / 天，低于 Gmail 的下载上限（数字待实测）；其他服务器默认不限。
+  撞到服务器的限额就停到第二天、从游标续跑，不报错重试（§10.1.2）
+- 连接、TLS、超时一类错误指数退避，最长 1 小时
+- **登录被拒**（`[AUTHENTICATIONFAILED]`）不重试：来源进暂停（`pause_reason = auth_failed`），`account ls` 和界面显示原因，
+  日志每天报一次 ERROR，直到人改了密码或 `resume`。反复用错的密码登录 Gmail 会被锁，重试只会让事情更糟。
+  显示的是原因，不是服务器的原话：那是不可信输入
+- 落地前写 §10.1.2 要求的 10^5 封基准（首次同步、空轮询），把轮次耗时和内存定下来
+
+**`yuuka account sync` 只是请 `serve` 跑一轮**：它在库里写一个请求时间，worker 看到就跑，CLI 进程自己从不拉信。
+CLI 没有 worker 的 advisory lock 和限速状态，在里面拉会和 `serve` 抢连接数和日预算。代价是没跑 `serve` 时它不起作用，命令要把这一点说清楚。
+
+#### 10.1.4 回填与拉取的副作用
+
+> 状态：M3.5，已定，未实现。
+
+**首次同步回填全部，从新到旧，按日预算走**（Gmail 默认 2 GiB / 天）。可以按来源改成不回填或只回填最近若干天。
+默认全部，是因为「一个收件箱看全部」（§9）打了折就不是统一视图，M3.6 的卸载也要求 yuuka 有全部原件。
+放弃的是另一种默认「只回填 90 天」：省下载和存储，代价是旧信要人自己记得去补。
+
+补跑、通知、评分原先都假设「新入库 = 新到达」。拉取打破了它：Gmail 首次同步十万封，不加区分就是十万条推送、十万次评分请求。所以：
+
+| | 追新（`high` 往上，且首次同步已经追平） | 回填（`low` 往下）、首次同步 |
+|---|---|---|
+| 规则 | 跑 | 跑：规则是「到达时的决定」（§8.5），回填的信对 yuuka 来说就是现在到达；规则只做可撤销的标注 |
+| 推送 | 照现有的降级判断（§4.3），另加三条：`INTERNALDATE` 在 24 小时内；Gmail 标签不含 `\Sent`；不是我们自己发出的信（有可见的 outbox 行） | **从不** |
+| 评分（§15） | 只在主机允许这个账户评分时（见下） | **从不**；评分器自己按回溯期补评另说 |
+| `changes` | 照写 | 照写：和 0007 的补跑一样会有一波事件，可以接受 |
+
+**拉取账户评不评分由主机决定**：新环境变量 `YUUKA_TRIAGE_ACCOUNTS`（随代码落地），默认只有 Cloudflare 账户。
+评分把信的内容交给评分器，可能是第三方，这是数据出境的决定，按 §17.1 属于主机，不属于一次可能被劫持的会话；
+把 Gmail 的全部历史默认交出去，不是接一个账户的人预期的事。
+
+**拉取投递的 zone / prefix 是邮箱自己的地址**，`account add` 顺带认领它（§9.3）。不认领，§4.3 的降级会把这个邮箱的每一封信都降掉：
+降级要求前缀已认领。另一种做法是让拉取账户的投递不看前缀状态，但那个条件拼在十来处 SQL 里，还要把内连改成外连；
+认领则让降级、泄漏检测、回复身份一行不改地成立，代价只是前缀列表里多一行外部地址。
+
+#### 10.1.5 M3.5 落地前的实测项
+
+下面这些在设计里用到了，但只是推测，落地前用真实账户测过再写死。测出来不一样时，受影响的设计写在括号里：
+
+- Gmail 交出来的原件里，最上面一条 `Authentication-Results` 的 authserv-id 是不是 `mx.google.com`；
+  Gmail 在它上面加的 `Delivered-To`、`Received`、`X-Received`、`ARC-*` 不影响「最上面一条」（预设的建议值，§10.1.1）
+- 同一封信经 Cloudflare 和 Gmail 两路进来，去掉 v1 剔除的头之后是否**只差末尾一个 CRLF**；
+  经 Gmail SMTP 发出、又从 All Mail 拉回的信能不能和 Sent 副本折叠（跨账户折叠的容差，§4.1、§4.6）
+- All Mail 含不含草稿；是否排除 Spam 和 Trash（`\Draft` 的处理、只同步 `\All`，§10.1）
+- Gmail IMAP 的限额：每账户并发连接数、每日下载量、撞限时的回应形状（如 `[OVERQUOTA]`、`BYE` 带带宽字样）（日预算和停到第二天，§10.1.3）
+- `X-GM-MSGID` 的十六进制是不是 Gmail API 的 message id（`gm:` 键的写法，§10.1）
+- Gmail 是否要求客户端发 `ID`（§10.1.3）
+- Gmail 个人账户的 app password 是否仍可用（要求两步验证，Workspace 管理员可以禁用）。Google 一直在收紧，被单方面关掉时只能走 OAuth（M3.5b）
+- UIDVALIDITY 重置后非 Gmail 服务器是否两次交出同样的字节（定位键的重扫，§10.1.3）
+- 10^5 封邮箱的首次同步耗时和内存（§10.1.2）
+
+M3.5b 的另有一组，见 §17.8。
 
 ### 10.2 发：SMTP 是通用货币，所以只需要两个 driver
 

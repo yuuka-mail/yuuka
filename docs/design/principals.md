@@ -465,6 +465,20 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 用**账户级**开关表达，不要下沉到单封信：`account_access` 每行是（账户, 主体, `can_read`）。
 表已建（[`0003_identity.sql`](../../internal/store/migrations/0003_identity.sql)），按它过滤读路径随多账户（M3.5）一起做。
 
+**默认语义（M3.5 定，未实现）**：每个账户有一个 `accounts.default_read`，没有行的主体按它；
+有行就按行，`can_read` 为真为假都覆盖默认。Cloudflare 账户默认可读，拉取账户默认不可读，加账户的那个人自动得一行可读。
+M3.5 打开过滤开关。
+
+- **为什么要默认值**：store 里的过滤已经写好、默认关着，打开后的语义是「有一行 `can_read` 才可读」。
+  照这个直接打开，现有的人和 agent 一封信都看不到，以后新签的 agent token 也看不到 Cloudflare 账户。
+  `default_read` 让已有的部署升级前后看到的一样：迁移给已有的账户 `true`，然后去掉列的默认值，新账户必须说明自己的
+- **为什么行能往两个方向覆盖**：「这个 agent 读不到 Cloudflare 账户」和「这个人读得到某个拉取账户」都是真实需求，
+  只能加权限的行表达不了前一个
+- **没有选「人隐式全可读、非人要行」**：更简单，但多 human 的部署里，其他人会读到某个人接进来的工作邮箱。
+  拉取账户默认不可读、加的人自己得一行，让「接进来一个邮箱」不顺带把它交给别人
+- 打开开关是 M3.5 里唯一会改变现有部署可见性的改动；默认值选错，agent 会突然看不到信，或者突然看到不该看的邮箱。
+  所以这一步单独一个提交，带「已有部署升级前后谁能读什么」的对照测试
+
 **单封信级别的 ACL 一律不做。** 一旦允许"这封信某主体看不到"，
 就得在每个查询、每个聚合、每次搜索上带 ACL 过滤，复杂度跳一个台阶，
 而且很容易出现"搜索结果数对不上"这类难查的 bug。账户级粒度足够表达真实需求，
@@ -506,6 +520,8 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 | 规则预览、草拟（`PreviewRule`、`FactsFor`、`CountMatches`） | 只在可见投递上求值和计数；只经 Sent 副本可见的信没有投递，不能拿来草拟 |
 | 审核结论里指向的信的主题（`Subjects`，草稿和 outbox 行的 `review`） | 结论只存 message id；主题只在那封信对读者可见时给，看不见的只剩 id |
 | 侧栏计数（`Counts`，REST `/counts`） | 每个数和它对应的列表同一个条件：outbox 行按发信身份的账户、提案按 `proposalVisible`、草稿按 `visibleDraft`；outbox 的数另要 `delivery:read` |
+| 账户列表（M3.5：MCP `list_accounts`、REST `GET /api/v1/accounts`） | 只列可读的账户，只给名字、种类、地址；来源的主机、用户名、同步状态只在人的管理端点上（§13.10） |
+| 按账户搜索（M3.5：`account:`，§16.3） | 只匹配可见的投递；对不可读的账户和不存在的账户结果一样是空 |
 | 推送通知 | 只发给 human，不经过受限主体。渠道进库之后（§17）绑定属于某个 human，`mail.new` 只在这次投递对**绑定的那个人**可见时才推（`DeliveryVisible`）；扣留卡片按 outbox 行、升级卡片按草稿、熔断卡片按身份所在账户的可见性（§8.4） |
 
 测试上用一个「含受限账户」的固定夹具，表驱动地把上表每条读路径跑一遍，断言没有泄漏。
@@ -536,10 +552,9 @@ human 看全部，其他主体只看自己写的。草稿是没发出去的字�
 和读这两样对象本身是同一个条件——草稿按 `visibleDraft`（作者和人），outbox 按发信身份所属账户。
 变更只是「去读一下」的提示，比对象本身收得更窄或更宽都会让两边对不上。
 
-**随 M3.5 再定的一件事**（M2 不过滤读路径，所以现在不必定）：
-
-- agent 没有某账户的 `account_access` 时，能不能看到它自己以该账户下的身份发出的信。
-  §4.6 的规则目前只按账户算，答案是不能
+**M3.5 定下的一件事**：agent 读不了某个账户时，也看不到它自己以该账户下的身份发出的信。
+§4.6 的规则只按账户算、只在一处；为「自己发的」开一个例外，就多一条要进上表的读路径，还要回答「自己发的」按草稿作者、outbox 的提交者还是身份 owner 算。
+agent 要看，就给它读那个账户。
 
 #### 存在性是有意披露的
 
@@ -566,7 +581,7 @@ human 看全部，其他主体只看自己写的。草稿是没发出去的字�
 | M1 | **`principals` / `credentials` / `identity_grants` / `account_access` / `actions` 建表**，WebUI 内置 passkey 登录、走 session 凭据（M1 只有 JSON 端点，页面在第二阶段）；只读 MCP 与 REST 的 bearer token，由 `yuuka token` 签发 |
 | M2 | SMTP submission 口（跟发信能力一起做）；`accounts` / `identities` 建表（§9.5），`identity_grants`、`account_access` 补外键（已落地：[0005](../../internal/store/migrations/0005_sending.sql)） |
 | M3 | 管理动作进 WebUI（§13.10）：跟着信走的决定、权限类配置的查看与收紧；放宽权限当场再验 passkey |
-| M3.5 | `account_access` 生效：读路径按 §13.8 过滤（跟多账户一起做） |
+| M3.5 | `account_access` 生效：`accounts.default_read` 加行覆盖，打开读路径的过滤（§13.8，跟多账户一起做） |
 
 `identity_grants` 和 `account_access` 在 M1 只建表、不读：外键指向的 `identities`、`accounts`
 当时还不存在，这两列是不带外键的文本。M2 的迁移建了这两张表并补上外键：`account_access` 里原有的账户名
@@ -706,14 +721,26 @@ CLI 只能记 `system` 加 `host_user`（§13.7）。信任根之外的动作值
 | 去掉备用、停用出口 | CLI 或 WebUI | 人的会话 |
 | 新增或启用渠道、轮换 bot token、发起或确认绑定 | CLI 或 WebUI | 再验证 |
 | 撤销绑定、停用渠道、订阅或退订自己绑定的事件 | CLI 或 WebUI | 人的会话 |
-| 新增或启用拉取账户的来源、连接 OAuth、轮换密码、改 `trusted_authserv_id`（M3.5） | CLI 或 WebUI | 再验证；OAuth 回调要会话加 state cookie |
-| 暂停拉取账户的来源（M3.5） | CLI 或 WebUI | 人的会话 |
+| 拉取账户：`account add`；`set` 改任何去向或给新密码；`resume`（M3.5） | CLI 或 WebUI | 再验证 |
+| 拉取账户：改 `trusted_authserv_id`，包括清空（M3.5） | CLI 或 WebUI | 再验证 |
+| 拉取账户：加文件夹、扩大回填、调高大小上限或日预算、缩短轮询间隔（M3.5） | CLI 或 WebUI | 再验证；只往小里改的是收紧，人的会话即可 |
+| 拉取账户：`access` 给一个主体可读、`default_read` 改成可读、`--default` 而默认是可读（M3.5） | CLI 或 WebUI | 再验证 |
+| 拉取账户：`access` 给一个主体不可读、默认改成不可读、`pause`、`rm`（M3.5） | CLI 或 WebUI | 人的会话 |
+| 拉取账户：`test`、`sync`（M3.5） | CLI 或 WebUI | 人的会话；不改配置 |
+| 连接 OAuth（M3.5b） | CLI 或 WebUI | 再验证；回调要会话加 state cookie 和 PKCE |
 
 - **订阅不算放宽**：目的地在绑定时已经确认过，`mail.new` 的摘要又按订阅者的可见性过滤（§13.8），
   订阅一类事件不会让任何人看到他原本看不到的东西
 - **改 caps 两个方向都是放宽**：放宽的 caps 让 yuuka 自己写 `Message-ID` 一类的头，收紧的会让已入队的字节在这个出口上发不出去（§10.2.2）。
   两者都改变发出去的东西，不是「更保守」
 - **去掉备用是收紧**：信只是少了一条路，最坏是等主出口恢复
+- **拉取账户的几处**（M3.5）：改来源的去向或密码，信从哪进来、密码交给谁就变了，所以是放宽；
+  改 `trusted_authserv_id` 决定哪条头被当成事实，进而决定泄漏、仿冒判定和降级，两个方向都算放宽——清空看似收紧，
+  却让可信接收方报了 `dmarc=fail` 的信不再降级（§10.1.1）。多拉进来的信对能读这个账户的所有人和 agent 可见，
+  所以加文件夹、扩大回填这类也是放宽，只往小里改的才是收紧。`test` 把密码交给它本来的去处，不记审计，和 `transport test` 一致。
+  每次放宽写 `actions`（`account.add`、`account.set`、`account.access`、`account.resume`），参数含名字、地址、主机、端口、用户名、
+  authserv-id、audience、包装器和钥匙引用，从不含密码或它的哈希。REST 和 CLI 共用 `internal/manage` 里的同一组检查
+- **拉取本身不推告警**：只有配置改动推 `security`，和出口一样；登录被拒在 `account ls` 和界面里显示，日志每天报一次（§10.1.3）
 - 每次放宽写 `actions`、推 `security` 告警（§8.4）；参数从不含明文，也不含明文的哈希（§17.6）
 
 **谁是管理员**（`security` 告警的收件人，§8.4）：**一个启用中（`disabled_at` 为空）的 human 主体，它用 passkey 登录得到的会话带 `admin`**。

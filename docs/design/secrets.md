@@ -42,8 +42,8 @@ Telegram 也是一组环境变量，一个 bot、一个 chat、一个人。当�
 - **出口**：类型、主机、端口、认证方式、用户名、caps、密码（Cloudflare Email Sending 的是 API token，当 SMTP 密码用）；
   每个身份的出口链（§9.3、§10.2.2）
 - **通知渠道**（现在只有 Telegram bot）、**渠道绑定**（哪个 chat 属于哪个 human、谁按的按钮算数）、**事件订阅**（§8.4）
-- M3.5：拉取账户的来源（IMAP 主机、用户名、密码或 OAuth refresh token、OAuth client secret）和每个拉取账户的
-  `trusted_authserv_id`（§17.8）
+- M3.5：拉取账户的来源（IMAP 主机、用户名、密码）和每个拉取账户的 `trusted_authserv_id`；
+  M3.5b：OAuth refresh token、OAuth client secret（§17.8）
 
 Cloudflare API token 只有 yuuka 真要调 Cloudflare API 时才需要，到那时加一种机密类型，不另建表。
 
@@ -53,7 +53,7 @@ Cloudflare API token 只有 yuuka 真要调 Cloudflare API 时才需要，到那
 |---|---|
 | 数据库连接串 | 连上库之前就要用 |
 | KEK 文件（新增 `YUUKA_KEK_FILE`），或配置了 Vault / KMS 时它的地址和访问凭据 | 密文的价值全在包装 DEK 的那把钥匙（§17.2）。和密文放在同一处，加密就只防得住「拿走了备份、没拿走主机」；Vault / KMS 的访问凭据也不能放进它保护的库里 |
-| R2 的两把令牌 | 收信必须在没有 KEK、包装器连不上、机密子系统整个坏掉时照常工作（§3.5 不丢信）。所有自有域共用同一对 bucket，加一个域不需要新的 R2 配置；两把令牌的权限划分本身在执行「Go 只写 `sent/`」（§2.2） |
+| R2 的两把令牌 | 收信必须在没有 KEK、包装器连不上、机密子系统整个坏掉时照常工作（§3.5 不丢信）。所有自有域共用同一对 bucket，加一个域不需要新的 R2 配置；两把令牌的权限划分本身在执行「Go 对原件只写 `sent/`、`pull/`」（§2.2） |
 | `YUUKA_WEBHOOK_SECRETS` | 理由同上：webhook 是收信的快路径，不能依赖包装器；轮换要和 Worker 的部署配合，本来就是主机上的事 |
 | `YUUKA_TRIAGE_*`（含 token 文件） | 决定邮件内容会不会离开部署（§15）。这是数据出境的决定，属于主机，不属于一次可能被劫持的会话 |
 | 提交口 TLS 文件、WebAuthn origin / RP ID、可信代理、`YUUKA_MCP_TOKEN` | 主机或客户端自己的事实，不是第三方凭据 |
@@ -103,6 +103,15 @@ yuuka 下一次发信就会在 `AUTH PLAIN` 里把 token 交过去。只把密�
 所以改主机、端口、用户名一律要重新输入并重新封装，而这要包装器，只有带再验证的会话或主机上的 CLI 走得到（§17.6）。
 同理，`secrets` 是一张通用表、各表一对一引用它：把一个出口的 `secret_id` 指到 bot token 那一行，
 类型和 audience 都对不上，解不出来。
+
+**audience 管不到的一处：OAuth 的 access token（M3.5b 的要求）。** refresh token 的 audience 是 token 端点加 client id，
+它只会交给那个端点，这一步 audience 守得住。但用它换来的 access token 要经 `XOAUTH2` 交给 IMAP、SMTP 主机，
+而那两个主机名在来源和出口的行上，不在 refresh token 的 audience 里。能改库的人把 `account_sources.host` 改成自己的服务器，
+refresh token 本身没泄露，他却会收到一个一小时有效、scope 是整个邮箱（Gmail 的 `https://mail.google.com/`）的 access token。
+所以 M3.5b 落地时：**OAuth provider 在代码里写死**（先是 `gmail`、`m365`），每个 provider 列出 access token 允许去的主机
+（Gmail 是 `imap.gmail.com`、`smtp.gmail.com`），用 access token 之前在 Go 里核对来源或出口的主机在名单上，不在就失败即关闭。
+和「audience 从行重算」同一个思路：检查发生在明文被使用的地方，名单不在库里，能改库的人改不了它。
+代价是接一家新的 OAuth 提供方要改代码，不能只改配置；提供方是个位数，换来的是 token 的去处不靠库里任何一列。
 
 **明文只在进程内存里。** 机密的值是一个专门的类型（`internal/secret.Value`），在日志、字符串化、JSON 序列化时都打码。
 任何接口都没有读回明文的路径，CLI 也不打印：只能设置、轮换、删除。搬主机就是库和包装器的钥匙一起搬。
@@ -299,15 +308,33 @@ WebUI（P6）落地时定下的几处：
 
 ### 17.8 M3.5 的形状
 
-现在画出来，是为了保证上面的表接得上；迁移随 IMAP driver 一起。
+> 状态：已定，未实现。表在 §4 的设计块里，迁移随 M3.5 的存储一步。
 
-- `accounts.kind` 扩为 `cf_catchall` / `imap` / `smtp_only`，加 sync / writeback / offload 策略（§9.2、§9.6）
-- `account_sources`：IMAP 主机、端口、用户名、认证方式、机密、OAuth client；`oauth_clients` 放 client id 和 client secret（机密）
-- 出口加认证方式 `xoauth2` 和 `account_id`：Gmail、工作邮箱的 SMTP 复用账户的 refresh token，不另存一份
-- Microsoft 的 refresh token 每次使用都可能换新：由 `system` 重新加密写回，不逐次写审计
-- 新的机密类型 `imap_password`、`oauth_refresh_token`、`oauth_client_secret` 随这次迁移加进 CHECK
-- **每个拉取账户的 `trusted_authserv_id` 在库里**，改它算放宽（要再验证）：它决定哪一条 `Authentication-Results` 被当成事实（§10.1.1）。
+**M3.5 只有密码**：
+
+- 机密类型加 `imap_password`，audience 是 `imaps://<用户名>@<主机>:<端口>`（[`secret.IMAPS`](../../internal/secret/audience.go) 已有）。
+  和出口一样，换主机、端口、认证方式或用户名必须带新密码、新 id，在存储层查（§17.4）
+- **Gmail 的 app password 存两份**：IMAP 来源一份、SMTP 出口一份，同一个值两个 audience。这是「一条机密一个 audience」的直接后果，
+  不为它破例：一条机密能交给两处，「这个密码可以交给谁」就不再是一个值，audience 也就不再能从一行重算
+- 拥有机密的表（[`manage.Owners`](../../internal/manage/secrets.go)）加来源一段，`secret ls` / `check` / `rewrap` 自动覆盖
+- 上锁时拉取 worker 不启动，Cloudflare 收信不受影响（§17.3、§10.1.3）。拉取本身不推告警，只有配置改动推，和出口一样
+- **每个拉取账户的 `trusted_authserv_id` 在库里**（`account_sources`），改它算放宽（§13.10）：它决定哪一条 `Authentication-Results` 被当成事实（§10.1.1）。
   Cloudflare 账户的那一个仍是 `YUUKA_TRUSTED_AUTHSERV_ID`，和收信快路径一起留在主机
+- `accounts.kind` 只加 `imap`；`smtp_only` 有用户时再加（§9.5）
+
+**M3.5b：OAuth 和 M365**。现在把形状定下来，免得以后返工：
+
+- `oauth_clients`：provider、client id、client secret（机密）、token URL、auth URL、scopes。机密类型 `oauth_client_secret`、`oauth_refresh_token`，
+  audience 是 `secret.OAuth(token 端点, client id)`（已有）。provider 写死在代码里，带 access token 的主机名单（§17.2）
+- 来源和出口加认证方式 `xoauth2`；出口加 `account_id`，Gmail、工作邮箱的 SMTP 复用账户的 refresh token，不另存一份
+- refresh 换出新的 refresh token 时（Microsoft 每次都可能换），由 `system` 按原 audience 重新封装、原地改写，不逐次写审计，只在日志里记 revision
+- 授权流程：WebUI 回调（会话加 state cookie 加 PKCE，§13.10）。CLI 打印授权 URL，人把跳回的 URL 粘回来；
+  M365 也可以用 device code，Gmail 的邮件 scope 据说不支持 device code（待实测）
+- 出口加 STARTTLS 和对应的 audience scheme：M365 的 SMTP 提交口据说只有 587 STARTTLS（待实测）
+- 依赖：倾向 `golang.org/x/oauth2` 的核心包（已是间接依赖），替我们处理 token 端点的错误格式、client 认证方式的差异、过期偏移、
+  refresh token 的接替和 PKCE；不用 `x/oauth2/google`（会拉进云平台的 metadata 包）。到 M3.5b 时按依赖三问再定
+- 待实测：M365 的 IMAP 基础认证是否已关、只能 OAuth；工作租户是否允许自建应用注册、是否要管理员同意；
+  Exchange Online 加的 `Authentication-Results` 的形状和 authserv-id 是否稳定
 
 ### 17.9 分期
 
@@ -322,7 +349,8 @@ WebUI（P6）落地时定下的几处：
 | P5 | 0018 与分发器、渠道管理协程、`/start` 绑定、`mail.new` 的可见性、Telegram 的导入、CLI `channel` | P1、E |
 | P6 | REST 与 WebUI 的设置（出口、通知）、绑定确认页、上锁横幅、`TestACL`、截图 | P3–P5、E |
 | P7 | 删掉环境变量里的出口和 Telegram（晚一个版本） | P4、P5 已发布 |
-| M3.5 | §17.8 的表、IMAP driver | P1、P2；P2 之后可以先做密码认证的 IMAP |
+| M3.5 | §17.8 的表、IMAP driver（密码认证） | P1、P2（都已合入） |
+| M3.5b | OAuth：`oauth_clients`、`xoauth2` 来源和出口、STARTTLS 出口、access token 的主机名单 | M3.5 |
 
 P3、P4、P5 可以并行，`cmd/yuuka` 的接线按顺序合。
 
