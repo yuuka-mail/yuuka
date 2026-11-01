@@ -539,8 +539,7 @@ Sent 副本**不是投递**：`deliveries` 记的是「一封信到了某个账�
 **可见性**（§13.8）：一封 message 对某个主体可见，当且仅当
 它有一条可见的投递，**或者**它是某条 outbox 的 Sent 副本、而这条 outbox 的 identity 所属账户对该主体可读。
 发出的信没有投递，账户只能从 identity 来；identity 必须属于一个账户（`identities.account_id` 非空）就是为了这条。
-规则只在 [`read.go`](../../internal/store/read.go) 的 `visibleMessage` 一处算。M2 不按 `account_access` 过滤（随 M3.5），
-所有主体都看得见全部；但测试已经打开过滤、用受限主体跑每条读路径（§13.8）。
+规则只在 [`read.go`](../../internal/store/read.go) 的 `visibleMessage` 一处算，账户可不可读按 `account_access` 加 `accounts.default_read`（M3.5 起，§13.8）。
 草稿和 outbox 的变更事件随 M3 的游标拉取定下了（§13.8）。agent 读不了某个账户时，
 也看不到它自己经该账户的身份发出的信：规则只按账户算、只有一处，为「自己发的」开一个例外，就多一条要进 ACL 表的读路径；
 agent 要看，就给它读那个账户（M3.5 定，§13.8）。

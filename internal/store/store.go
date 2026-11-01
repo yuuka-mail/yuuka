@@ -15,9 +15,6 @@ import (
 // DB wraps a connection pool.
 type DB struct {
 	pool *pgxpool.Pool
-	// enforceAccountAccess filters reads by account_access (§13.8). Off
-	// until M3.5; only the tests turn it on (see readableAccount).
-	enforceAccountAccess bool
 	// progs caches compiled rules for ingest (rules.go).
 	progs programCache
 }

@@ -40,11 +40,11 @@ func needViewer(v *auth.Viewer, op string) error {
 //   - a message when it has a visible delivery or is the sent copy of a
 //     visible outbox row.
 //
-// account_access is not enforced yet (M3.5): until then every account is
-// readable to every viewer, so the conditions reduce to "has a delivery
-// or a sent copy". The tests enforce it already (export_test.go), so the
-// rule and every read path built on it are checked against restricted
-// viewers before M3.5 switches it on.
+// Which accounts are readable is account_access over accounts.default_read
+// (M3.5). Before M3.5 every account was readable to every viewer; the
+// accounts that existed then are Cloudflare accounts, readable by
+// default, so a deployment without rows reads the same after the upgrade
+// (TestDefaultReadUpgrade).
 
 // readableAccount is the condition "v may read the account in col": v's
 // account_access row says so, or v has no row and the account is
@@ -52,13 +52,17 @@ func needViewer(v *auth.Viewer, op string) error {
 // default in both directions: it hides a Cloudflare account from an
 // agent, and opens a pull account to the person who added it.
 func (db *DB) readableAccount(v *auth.Viewer, col string) string {
-	if !db.enforceAccountAccess {
+	// The system principal is the host (the CLI, the scorer): it reads
+	// every account, as whoever runs the host can anyway (§13.10). No
+	// credential is ever issued to it.
+	if v.PrincipalID == SystemPrincipalID {
 		return "true"
 	}
 	// The id is inlined, so only a well-formed one is: it is a ULID
-	// (principals.id has that CHECK), and anything else reads nothing.
+	// (principals.id has that CHECK). Anything else names no principal,
+	// so it has no rows either, and reads what is readable by default.
 	if !ulid.Valid(v.PrincipalID) {
-		return "false"
+		return `EXISTS (SELECT 1 FROM accounts ra WHERE ra.id = ` + col + ` AND ra.default_read)`
 	}
 	return `EXISTS (SELECT 1 FROM accounts ra
 		LEFT JOIN account_access aa ON aa.account_id = ra.id AND aa.principal_id = '` + v.PrincipalID + `'

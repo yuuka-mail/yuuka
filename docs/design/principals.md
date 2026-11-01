@@ -463,11 +463,22 @@ M1 的落法（`internal/authn`），以及设计里没写死、实现时定下�
 
 如果某些内容不该让某个主体看到（例如受合规约束的账户不该进 agent 的上下文，§9.4），
 用**账户级**开关表达，不要下沉到单封信：`account_access` 每行是（账户, 主体, `can_read`）。
-表已建（[`0003_identity.sql`](../../internal/store/migrations/0003_identity.sql)），按它过滤读路径随多账户（M3.5）一起做。
+表在 [0003](../../internal/store/migrations/0003_identity.sql) 建、[0005](../../internal/store/migrations/0005_sending.sql) 补外键，
+M3.5 起每条读路径都按它过滤（条件只写在 [`read.go`](../../internal/store/read.go) 的 `readableAccount` 一处）。
 
-**默认语义（M3.5 定，未实现）**：每个账户有一个 `accounts.default_read`，没有行的主体按它；
-有行就按行，`can_read` 为真为假都覆盖默认。Cloudflare 账户默认可读，拉取账户默认不可读，加账户的那个人自动得一行可读。
-M3.5 打开过滤开关。
+**默认语义（M3.5，已实现）**：每个账户有一个 `accounts.default_read`（[0019](../../internal/store/migrations/0019_pull_accounts.sql)），没有行的主体按它；
+有行就按行，`can_read` 为真为假都覆盖默认。Cloudflare 账户默认可读，拉取账户默认不可读，加账户的那个人自动得一行可读
+（[`store.AddPullAccount`](../../internal/store/pull.go)；`SetAccountAccess`、`SetAccountDefaultRead` 是 `account access` 的存储一侧）。
+过滤已经打开，升级前后的对照是 [`TestDefaultReadUpgrade`](../../internal/store/access_test.go)：
+0018 的部署（一个 Cloudflare 账户、人、agent、服务、收到和发出的信、没有行）升级后每个主体看到的和以前一样；
+新加的拉取账户只有加它的人看得到；一行 `can_read=false` 藏住默认可读的账户，删掉这行回到默认。
+落地时定下的两处：
+
+- **系统主体读全部账户**。它是主机本身：主机上的 CLI 和评分器都以它的身份读（§13.10 的信任根，能跑 CLI 的人本来就能读库），
+  它从不持有凭据（token 只签给 agent 和 service，人只用 passkey）。不这样，主机上的命令和评分器会看不到拉取账户的信，
+  而评不评分该由 `YUUKA_TRIAGE_ACCOUNTS` 决定（§10.1.4），不该由一行可见性顺带决定
+- **不带合法主体 id 的 Viewer 只读默认可读的账户**。它不指向任何主体，也就不会有行，按「没有行就按默认」算；
+  拉取账户对它仍然关着。这样的 Viewer 只出现在测试里，过滤打开前它们读得到全部
 
 - **为什么要默认值**：store 里的过滤已经写好、默认关着，打开后的语义是「有一行 `can_read` 才可读」。
   照这个直接打开，现有的人和 agent 一封信都看不到，以后新签的 agent token 也看不到 Cloudflare 账户。
@@ -526,8 +537,8 @@ M3.5 打开过滤开关。
 
 测试上用一个「含受限账户」的固定夹具，表驱动地把上表每条读路径跑一遍，断言没有泄漏。
 新增读路径就是往这张表加一行。store 层的这张表是
-[`TestVisibility`](../../internal/store/sent_test.go)：过滤在 M2 默认关着，测试里打开，
-用可读、不可读两个账户下的收信和 Sent 副本跑列表、搜索、详情、线程和前缀视图；
+[`TestVisibility`](../../internal/store/sent_test.go)：两个账户都不默认可读，每个主体能读什么只来自它的行，
+用可读、不可读两个账户下的收信和 Sent 副本跑列表、搜索、详情、线程、前缀视图和账户列表（`VisibleAccounts`）；
 变更日志在同一个夹具上对每条变化断言「列出 ⟺ 目标对象自己的读路径可见」。
 REST 层的 [`TestACL`](../../internal/api/api_test.go) 管的是另一半：它遍历路由表（§5.1），每个端点要认证、要 scope、把认证出的主体交给 store；
 只有人能调的端点（决定提案、管理规则、`outbox.resolve`）另断言持有全部 scope 的 agent 得到 403，且请求到不了 store。
@@ -536,8 +547,10 @@ REST 层的 [`TestACL`](../../internal/api/api_test.go) 管的是另一半：它
 反过来，store 里不带 `Viewer` 的方法不少：ingest 和 outbox 执行器用的（`Unprocessed`、`ClaimOutbox`、`RecoverAttempts`……），
 还有上面那些只给人的配置读写。它们的安全目前靠两条：调用方是系统批处理，或者端点只放人的会话。
 这两条都还只是约定，代码里没有一份清单。gofer 用一份文档列出每个不受 ACL 约束的方法和它唯一可信的调用方（§1.2）。
-本项目更想让测试来管：M3.5 打开 `account_access` 过滤时，把这类方法列成一张表，测试断言 REST、MCP 的处理函数
+本项目更想让测试来管：把这类方法列成一张表，测试断言 REST、MCP 的处理函数
 只经过表里登记为「人可调」的那些，新增一个不带 `Viewer` 的方法就要在表里写明谁能调。
+原定随 M3.5 打开过滤一起做；过滤打开时（P1）还没有新的 REST、MCP 处理函数，这张表随拉取账户的 REST 和 MCP（P6）一起建，
+`internal/store/pull.go` 里来源、游标、失败表的方法都不带 `Viewer`，是它的第一批条目。
 
 发信授权读的事实也走同一个条件：回复的默认身份（`ReplyIdentities`）和线程参与者（`ReplyFacts`）
 只来自可见的投递、可见的消息和可见的 outbox 行，同在 `TestVisibility` 里。
@@ -581,7 +594,7 @@ agent 要看，就给它读那个账户。
 | M1 | **`principals` / `credentials` / `identity_grants` / `account_access` / `actions` 建表**，WebUI 内置 passkey 登录、走 session 凭据（M1 只有 JSON 端点，页面在第二阶段）；只读 MCP 与 REST 的 bearer token，由 `yuuka token` 签发 |
 | M2 | SMTP submission 口（跟发信能力一起做）；`accounts` / `identities` 建表（§9.5），`identity_grants`、`account_access` 补外键（已落地：[0005](../../internal/store/migrations/0005_sending.sql)） |
 | M3 | 管理动作进 WebUI（§13.10）：跟着信走的决定、权限类配置的查看与收紧；放宽权限当场再验 passkey |
-| M3.5 | `account_access` 生效：`accounts.default_read` 加行覆盖，打开读路径的过滤（§13.8，跟多账户一起做） |
+| M3.5 | `account_access` 生效：`accounts.default_read` 加行覆盖，打开读路径的过滤（§13.8，跟多账户一起做；已落地） |
 
 `identity_grants` 和 `account_access` 在 M1 只建表、不读：外键指向的 `identities`、`accounts`
 当时还不存在，这两列是不带外键的文本。M2 的迁移建了这两张表并补上外键：`account_access` 里原有的账户名

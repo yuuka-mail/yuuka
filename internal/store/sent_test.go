@@ -336,7 +336,6 @@ func TestRepliesThreadWithSentCopy(t *testing.T) {
 func TestVisibility(t *testing.T) {
 	t.Parallel()
 	db, pool := storetest.New(t)
-	db.EnforceAccountAccess()
 	ctx := t.Context()
 	open, closed := storetest.Account(t, db), func() string {
 		id, err := db.EnsureCloudflareAccount(ctx, "closed")
@@ -356,7 +355,7 @@ func TestVisibility(t *testing.T) {
 	}
 	// Neither account is readable by default, as a pull account is
 	// not (§13.8): what each viewer reads comes from its rows alone, and
-	// nobody, with none, reads nothing. TestDefaultRead has the defaults.
+	// nobody, with none, reads nothing. TestDefaultReadUpgrade has the defaults.
 	if _, err := pool.Exec(ctx, `UPDATE accounts SET default_read = false`); err != nil {
 		t.Fatal(err)
 	}

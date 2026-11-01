@@ -19,7 +19,6 @@ import (
 func TestKnownSender(t *testing.T) {
 	t.Parallel()
 	db, pool := storetest.New(t)
-	db.EnforceAccountAccess()
 	ctx := t.Context()
 	open := storetest.Account(t, db)
 	closed, err := db.EnsureCloudflareAccount(ctx, "closed")
