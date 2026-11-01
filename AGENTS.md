@@ -6,15 +6,10 @@
 你被当作一个有判断力的同事来用：可逆的事自己拿主意、做到底；
 不可逆的事（下文「单向门」）先停下来说清楚再动。
 
-## 现状
+## 从哪里读起
 
-M0–M3 已完成：Cloudflare 收信、入库与重投去重，MIME 解析、线程，passkey 登录（放宽权限前当场再验证），
-WebUI（中英双语），agent 结构化视图与 MCP；发信：outbox 状态机与崩溃恢复、按身份授权（`draft` / `review` / `auto` 档）、
-唯一的提交核心、SMTP submission 口、REST/MCP 的草稿与提交、WebUI 撰写；规则引擎与提案闭环、分区与验证码提取、
-前缀注册表与泄漏检测、`changes` 游标、决策模型分诊（只观测）；一条查询的搜索（JMAP 形状的过滤树）。
-M3.5 的前置 §17 也已完成：出口、身份的出口链、通知渠道与绑定进库，第三方机密做信封加密。
-下一步是 M3.5 的其余部分：IMAP 拉取外部邮箱、跨账户去重与线程归并、`account_access`。完整设计在 [`docs/design/`](docs/design/)
-（中文，节号 §1–§17 全局唯一，索引见 [`docs/design/README.md`](docs/design/README.md)），路线见 [`docs/design/roadmap.md`](docs/design/roadmap.md)。
+完整设计在 [`docs/design/`](docs/design/)（中文，节号全局唯一，索引见 [`docs/design/README.md`](docs/design/README.md)），
+路线见 [`docs/design/roadmap.md`](docs/design/roadmap.md)。做到哪一步了看代码和提交历史，这里不记。
 已实现的部分以代码为准，文档只讲为什么（见下文「文档」）。
 动手前按任务读对应章节，不必通读：
 
